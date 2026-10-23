@@ -180,30 +180,42 @@ per-attribute way to declare the omitted convention, and is what lets one mappin
 | Collections | `exists`, `all`, `lambda` | `$elemMatch` scoped to the element; over a literal list above the planner's unroll limit, folded to `$or`/`$and` |
 | Expressions | `add`, `sub`, `mult`, `div`, `mod`, `if`, `size`, `index`, `get-field`, `string`, `timestamp` | aggregation operators inside `$expr`, each with the guard that keeps out documents on which CEL raises |
 | Hierarchies | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | a literal prefix `$regex` and an ancestor `$in` |
+| Presence | `has` | `$exists`, or `$ne: null` for a `nullable` field and a `type: :one` relation; a negation also requires the to-one parent the selection reads through. A presence test over a `type: :many` relation is refused |
 
 Anything else raises `Cerbos::MongoDB::UnsupportedError`. Every error is a `Cerbos::MongoDB::Error`.
+
+From Cerbos 0.57.0 the planner keeps `has(R.attr.x)` in the plan (0.56.0 and earlier fold it to
+true on an attribute the plan request omits, so there write `R.attr.x != null` instead). Presence
+follows `x`'s null convention: a document has `x` when its path is stored, and, where `x` is
+`nullable` (a stored null is a missing attribute), when its value is not null. A `type: :one`
+relation is present when its subdocument is stored and not null. `has()` raises only when it
+selects through a missing to-one parent (`has(R.attr.parent.x)` on a parentless document), which
+denies under both polarities, so `!has(...)` requires the parent outside its `$nor`, and the
+three-valued evaluation answers that document with an error. The planner still drops a
+`has(R.attr.x)` that only guards an access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`,
+because that access already denies a document without `x`.
 
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real MongoDB
-queries over the corpus's 42 seed documents on MongoDB 7.0 and 8.0, once through the Ruby driver
+and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real MongoDB
+queries over the corpus's 43 seed documents on MongoDB 7.0 and 8.0, once through the Ruby driver
 and once through `Cerbos::MongoDB::Mongoid.criteria` on typed Mongoid models. Passed cases on the
-current PDP, 0.55.0, identical on both servers and through both, where the total is every golden
+current PDP, 0.57.0, identical on both servers and through both, where the total is every golden
 case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 93 / 97 |
-| adversarial | 325 / 338 |
+| core | 30 / 30 |
+| extended | 99 / 102 |
+| adversarial | 332 / 344 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.55.0 that is four extended cases and five adversarial cases.
-`null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
-omitted attribute unknown, so the planner folds `has()` to true, while `checkResource` receives the
-omission as absent and denies the document; use `R.attr.x != null` instead of `has(R.attr.x)`.
-`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner
+pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, the
+`null/has/*` cases but `guard-on-same-attribute` and `explicit-null-attribute`, both
+`relation/has/*` cases and `collection/exists/has-in-lambda` are skipped too: that
+planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0
+keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner
 drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
 and denies every row; write `1.0`. `type-mismatch/in/number-field-in-scalar-principal` and
 `type-mismatch/in/string-field-in-dyn-string`: the planner rewrites `in` over a scalar container to
@@ -215,7 +227,7 @@ erroring deny rule as not matching and allows the document
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
-The refused set is macros and `in` over a to-one relation, and a two-variable macro over a map (CEL
+The refused set is macros and `in` over a to-one relation, `has()` over a to-many relation, and a two-variable macro over a map (CEL
 iterates a map's keys), `string()`
 over a ternary of integral constants of 1e6 or more whose int or double type the plan does not
 carry, a bare comparison of a

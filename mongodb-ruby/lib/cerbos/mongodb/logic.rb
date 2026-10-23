@@ -4,6 +4,7 @@ require_relative "aggregation"
 require_relative "errors"
 require_relative "mapper"
 require_relative "operands"
+require_relative "presence"
 
 module Cerbos
   module MongoDB
@@ -41,6 +42,7 @@ module Cerbos
         when "not" then negate(truth(single(node), mapper, bound))
         when "exists", "all", "exists_one" then macro(node, mapper, bound)
         when "if" then ternary(node, mapper, bound)
+        when "has" then presence(node, mapper, bound)
         when *Aggregation::COMPARISONS.keys, "matches", "contains", "startsWith", "endsWith", "in",
           "ancestorOf", "descendentOf", "overlaps", "hasIntersection", "isSubset"
           leaf(node, mapper, bound)
@@ -132,6 +134,21 @@ module Cerbos
         end
 
         ok(node.operands.map { |child| evaluates(child, mapper, bound) } + (guard ? [guard["$expr"]] : []))
+      end
+
+      # has(x): whether the path is stored (and, where a stored null is a missing attribute, not
+      # null), or null, an error, where the selection reads through a missing to-one parent or a
+      # macro element that is not a document (see Presence).
+      def presence(node, mapper, bound)
+        operand = Presence.reference(node.operands)
+        subject = Presence.subject(operand.name, mapper)
+        absent = subject.not_null ? %w[missing null] : %w[missing]
+        present = {"$not" => [{"$in" => [{"$type" => Aggregation.build(operand, mapper)}, absent]}]}
+        receivers = []
+        element = bound.find { |variable| operand.name.start_with?("#{variable}.") }
+        receivers << {"$eq" => [{"$type" => "$$#{BINDING_PREFIX}#{element}"}, "object"]} if element
+        receivers << {"$eq" => [{"$type" => "$#{subject.receiver}"}, "object"]} if subject.receiver
+        receivers.empty? ? present : guarded(ok(receivers), present)
       end
 
       def ternary(node, mapper, bound)

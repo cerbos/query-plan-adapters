@@ -8,6 +8,7 @@ require_relative "logic"
 require_relative "mapper"
 require_relative "operands"
 require_relative "plan"
+require_relative "presence"
 require_relative "regex"
 require_relative "timestamp"
 
@@ -197,6 +198,7 @@ module Cerbos
           with_logic_fallback(expression, mapper, scope, true) { translate_comparison(operator, operands, mapper, scope) }
         when "in" then with_logic_fallback(expression, mapper, scope, true) { translate_in(operands, mapper, scope) }
         when "matches" then translate_matches(operands, mapper, scope)
+        when "has" then translate_has(operands, mapper, scope, negated: false)
         when "contains", "startsWith", "endsWith" then translate_string_predicate(expression, mapper, scope)
         when "hasIntersection"
           with_logic_fallback(expression, mapper, scope, true) { translate_has_intersection(operands, mapper, scope) }
@@ -276,6 +278,15 @@ module Cerbos
         # error as `false` from being flipped twice by nested $nors.
         if expression_with?(operand, "not")
           return build(operand_at(operand.operands, 0, "not operator requires at least one operand"), mapper, scope)
+        end
+        # has() is two-valued but for a missing to-one parent, which Presence keeps outside the
+        # $nor. Anywhere deeper (a ternary's condition, say) a nullable guard ANDed outside the
+        # $nor would deny a document has() answers false on, so CEL's three-valued logic decides.
+        return translate_has(operand.operands, mapper, scope, negated: true) if expression_with?(operand, "has")
+        if Presence.within?(operand)
+          return with_logic_fallback(operand, mapper, scope, false) {
+            raise UnsupportedError, "not over a has() nested in a value cannot preserve Cerbos error semantics"
+          }
         end
         # An ordering between a field and a constant negates to its complement, so it keeps the
         # positive leaf's semantics: MongoDB's $lt compares only values of the constant's own
@@ -368,6 +379,13 @@ module Cerbos
 
           operand.operands.any? { |child| always_reads?(child, name) }
         end
+      end
+
+      # has(x), or its negation, as a filter (see Presence).
+      def translate_has(operands, mapper, scope, negated:)
+        name = Presence.reference(operands).name
+        assert_scoped(name, scope)
+        Presence.filter(name, mapper, negated)
       end
 
       def translate_comparison(operator, operands, mapper, scope)
