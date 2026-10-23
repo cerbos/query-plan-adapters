@@ -12,6 +12,7 @@ import { buildComparisonFilter } from "./comparison";
 import { buildHierarchyFilter } from "./hierarchy";
 import { indexedMembership, resolveIndexedMembership } from "./indexed";
 import { buildHasIntersectionFilter } from "./intersection";
+import { buildHasFilter } from "./presence";
 import {
   buildColumnExpression,
   columnForOperand,
@@ -745,6 +746,8 @@ export const buildFilterFromExpression = (
       return buildCollectionOperatorFilter(operator, operands, mapper, negated, options);
     case "matches":
       return withPolarity(buildMatchesFilter(operands, mapper, options), negated);
+    case "has":
+      return buildHasFilter(operands, mapper, options, negated);
     case "hasIntersection":
       // Only the call-level option is passed on: an enclosing lambda's `skipRelations` is not.
       return withPolarity(
