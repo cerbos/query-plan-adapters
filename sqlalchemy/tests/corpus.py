@@ -793,6 +793,9 @@ ATTRIBUTE_NULL_REPRESENTATION = {
     "request.resource.attr.parent.inner.aOptionalString": "omitted",
     "tagName": "explicit",
     "t": "explicit",
+    # A nameless tag sends no `name` key (resources.json), so `has(t.name)` is a
+    # NULL test on the element column.
+    "t.name": "omitted",
     "request.resource.attr.owner": "explicit",
     "request.resource.attr.coOwner": "explicit",
 }
