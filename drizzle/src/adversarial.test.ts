@@ -561,23 +561,24 @@ function postgresStore(): AdversarialStore {
       // The same list three ways: jsonb (the shared mapper), plain json, and a native array
       // rebased to a ZERO lower bound, so a raw `[index + 1]` would read the wrong element and
       // only the positional JSON conversion the adapter emits reads the right one. A JSON null
-      // element becomes a SQL NULL element, which `to_jsonb` turns back into a JSON null.
+      // element becomes a SQL NULL element, which `to_jsonb` turns back into a JSON null. A NULL
+      // list stays NULL rather than becoming an empty array, so it keeps its null semantics (#549).
       await db.execute(sql`update adversarial_resources set
         tag_names_plain_json = tag_names_json::json,
         tag_names_array = case when jsonb_array_length(tag_names_json) > 0 then
           ('[0:' || (jsonb_array_length(tag_names_json) - 1) || ']=' ||
             array(select jsonb_array_elements_text(tag_names_json))::text)::text[]
-          else array[]::text[] end,
+          when tag_names_json is not null then array[]::text[] end,
         a_number_list_plain_json = a_number_list_json::json,
         a_number_list_array = case when jsonb_array_length(a_number_list_json) > 0 then
           ('[0:' || (jsonb_array_length(a_number_list_json) - 1) || ']=' ||
             array(select jsonb_array_elements_text(a_number_list_json))::text)::integer[]
-          else array[]::integer[] end,
+          when a_number_list_json is not null then array[]::integer[] end,
         a_bool_list_plain_json = a_bool_list_json::json,
         a_bool_list_array = case when jsonb_array_length(a_bool_list_json) > 0 then
           ('[0:' || (jsonb_array_length(a_bool_list_json) - 1) || ']=' ||
             array(select jsonb_array_elements_text(a_bool_list_json))::text)::boolean[]
-          else array[]::boolean[] end`);
+          when a_bool_list_json is not null then array[]::boolean[] end`);
       await db.insert(parents).values(rows.parents);
       await db.insert(inners).values(rows.inners);
       await db.insert(tags).values(rows.tags);
