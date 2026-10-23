@@ -184,6 +184,30 @@ cases:
   condition:
     match:
       expr: '!hasIntersection(R.attr.mainCategory.subNames, ["finance"])'
+- id: 'relation/has/parent'
+  tier: extended
+  intent: 'has(parent): presence of the to-one relation itself.'
+  trap: 'Rows with no parent hop must be denied; a translation that tests a parent column instead of the relation, or reads has() as always true, grants them.'
+  condition:
+    match:
+      expr: 'has(R.attr.parent)'
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    pdp:
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() calls omit parent on rows without a parent hop, so check() denies them. From 0.57.0 the plan carries the has().'
+- id: 'relation/has/parent-attribute'
+  tier: adversarial
+  intent: 'has(parent.aOptionalString): presence of a field one hop across the to-one relation.'
+  trap: 'Rows without a parent and rows whose parent lacks aOptionalString (a4, a7, c1) are both denied; testing only the relation grants the second group, testing only the column without the join mishandles the first.'
+  condition:
+    match:
+      expr: 'has(R.attr.parent.aOptionalString)'
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    pdp:
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() calls omit parent.aOptionalString where the hop or the field is missing, so check() denies those rows. From 0.57.0 the plan carries the has().'
 - id: 'relation/in/negated-to-one-chain'
   tier: adversarial
   intent: 'Negated membership !("finance" in mainCategory.subNames) where most rows have no mainCategory.'

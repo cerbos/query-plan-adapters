@@ -11,7 +11,7 @@ services:
     # conformance/scripts/validate-corpus.sh and demo/scripts/validate-demo.sh assert that BOTH
     # halves of this reference agree with it. The tag alone would leave the digest free to name
     # some other build entirely.
-    image: ghcr.io/cerbos/cerbos:0.56.0@sha256:540643bc67ba628011a150ad1d3370f285daa38995be5cd7a4be181da902bec1
+    image: ghcr.io/cerbos/cerbos:0.57.0@sha256:e5e3b150b3cb0090975605254f255164567d67e233634199fb20972e3eaff300
     # No `container_name`: the runner gives each adapter its own compose project, and a fixed
     # container name is global, so a container left behind by one adapter's interrupted run could
     # not be cleaned up by the next adapter's `compose down`.

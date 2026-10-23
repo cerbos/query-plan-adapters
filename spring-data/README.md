@@ -417,7 +417,7 @@ consulted.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.56.0 and 0.55.0, it translates the plan, runs the query against 43 seed rows on
+plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 seed rows on
 H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
 recorded. No PDP runs in the test. Results for the current PDP (0.56.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
@@ -425,18 +425,15 @@ total but not as passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 93 / 98 |
-| adversarial | 297 / 340 |
+| core | 30 / 30 |
+| extended | 97 / 102 |
+| adversarial | 302 / 344 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 38 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 39 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the plan reads an attribute the mapping does not declare) rather than emit a filter. Four
-extended cases and five adversarial cases are planner divergences the corpus skips: `null/has/missing-attribute` and
-`null/has/composed-with-comparison`, where the planner folds `has()` to true by design while
-`check()` receives the omitted attribute as absent (see
-[Gotchas](#has-does-not-filter-a-null-column--write--null-instead)),
+when the plan reads an attribute the mapping does not declare) rather than emit a filter. On 0.57.0,
+three extended cases and four adversarial cases are planner divergences the corpus skips:
 `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
 planner drops the int type of the literal in `R.attr.x + 1` while `check()` has no double + int
 overload and denies every row (write `1.0`),
@@ -444,7 +441,9 @@ overload and denies every row (write `1.0`),
 whose `in` over a scalar the plan and `check()` answer differently, and
 three `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's
 `not(...)` of it denies j2, while `check()` receives `aNumber` as absent and treats the erroring
-DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too:
+that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0
+keeps `has()` in the plan.
 
 Other guarantees:
 
@@ -564,17 +563,23 @@ A CEL evaluation error denies, and the adapter reproduces this with SQL three-va
 - A ternary with a NULL condition column is UNKNOWN, so `!(ternary)` can't include the row.
 - `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
 
-### `has(...)` does not filter a NULL column — write `!= null` instead
+### `has(...)` before PDP 0.57.0 does not filter a NULL column — write `!= null` instead
 
-An attribute the plan request omits is unknown to the planner, which assumes the data layer supplies
-it: for a mapped column, the column exists and only its value is open. So the planner reads
-`has(R.attr.aOptionalString)` as the guard for the access beside it and folds it to true by design.
-Alone it plans as `KIND_ALWAYS_ALLOWED`; composed, as in
+From Cerbos 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+the attribute's null convention: under `OMITTED` it is `x IS NOT NULL`, and under `EXPLICIT` it is
+true for every row, since a NULL column reaches `check()` as a present null. The planner still drops a
+`has(R.attr.x)` that only guards an access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because
+that access already denies a row without `x`.
+
+On 0.56.0 and earlier, an attribute the plan request omits is unknown to the planner, which assumes
+the data layer supplies it: for a mapped column, the column exists and only its value is open. So
+the planner reads `has(R.attr.aOptionalString)` as the guard for the access beside it and folds it to
+true by design. Alone it plans as `KIND_ALWAYS_ALLOWED`; composed, as in
 `has(R.attr.aOptionalString) && R.attr.aNumber > 0`, only `R.attr.aNumber > 0` reaches the adapter,
 so a row whose column is NULL is not excluded. The corpus's per-row `check()` calls send the same
 omission as absent, where `has()` is false, so the two calls answer different questions: the corpus
 declares both forms, `null/has/missing-attribute` and `null/has/composed-with-comparison`, as
-planner divergences, and the conformance suite skips them for the PDP versions they name.
+planner divergences on 0.56.0.
 
 **Workaround (PDP-verified):**
 

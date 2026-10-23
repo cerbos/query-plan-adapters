@@ -233,6 +233,45 @@ function compileVariable(name: string, ctx: Context): Compiled {
 }
 
 /**
+ * `has(name)`, the presence test the planner emits from Cerbos 0.57.0: whether the attribute
+ * carries the key. A record stores a present attribute under its key and a missing one nowhere,
+ * since Chroma metadata has no null; a value the post-filter does not read (a list, a sparse
+ * vector) is an error rather than an answer, as `readMetadata` treats it, so neither polarity
+ * selects the record. Selecting through a missing or non-map lambda element is an error, as in CEL.
+ */
+function compilePresence(name: string, ctx: Context): Compiled {
+  const dot = name.indexOf(".");
+  const root = dot === -1 ? name : name.substring(0, dot);
+  if (dot !== -1 && ctx.bindings.has(root)) {
+    const path = name.substring(dot + 1).split(".");
+    const key = path.pop()!;
+    return {
+      type: "other",
+      run: ({ bindings }) => {
+        const parent =
+          path.length === 0 ? bindings[root] : getNestedValue(bindings[root], path.join("."));
+        if (!isRecord(parent)) return EVALUATION_ERROR;
+        return Object.prototype.hasOwnProperty.call(parent, key) && parent[key] !== undefined;
+      },
+    };
+  }
+  if (!ctx.fields.isMapped(name)) {
+    throw new UnsupportedOperatorError(
+      "has",
+      `${name} has no fieldNameMapper entry, so the post-filter cannot tell whether a record carries it`,
+    );
+  }
+  const key = ctx.fields.metadataKey(name);
+  return {
+    type: "other",
+    run: ({ metadata }) => {
+      if (!Object.prototype.hasOwnProperty.call(metadata, key)) return false;
+      return isEvaluationError(readMetadata(metadata, key)) ? EVALUATION_ERROR : true;
+    },
+  };
+}
+
+/**
  * A metadata key as CEL reads the attribute. An absent key is the missing-attribute error. A value
  * that is not a string, finite number or boolean — a list or sparse vector the caller stored — is
  * read as missing too: the post-filter reads scalar metadata only, so such a record is denied
@@ -888,6 +927,14 @@ const OPERATORS: Record<string, Compiler> = {
           : EVALUATION_ERROR;
       },
     };
+  },
+
+  has: (operands, ctx) => {
+    const [operand] = exactly(operands, 1, "has") as [PlanExpressionOperand];
+    if (!isVariable(operand)) {
+      throw new UnsupportedOperatorError("has", "has requires an attribute reference");
+    }
+    return compilePresence(operand.name, ctx);
   },
 
   hasIntersection: strict(2, "other", ([left, right]) =>

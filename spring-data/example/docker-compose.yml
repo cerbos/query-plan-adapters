@@ -9,7 +9,7 @@ services:
   cerbos:
     # Must match `current` in conformance/pdp-versions.json (tag and digest); validate-corpus.sh
     # checks both.
-    image: ghcr.io/cerbos/cerbos:0.56.0@sha256:540643bc67ba628011a150ad1d3370f285daa38995be5cd7a4be181da902bec1
+    image: ghcr.io/cerbos/cerbos:0.57.0@sha256:e5e3b150b3cb0090975605254f255164567d67e233634199fb20972e3eaff300
     container_name: cerbos-photos-example
     command:
       - "server"

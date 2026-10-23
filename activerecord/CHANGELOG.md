@@ -2,6 +2,8 @@
 
 ### Added
 
+- `has()`, which Cerbos 0.57.0 keeps in the plan as a `has` operator. It translates from the attribute's null convention: `IS NOT NULL` under `omitted`, true under `explicit`, and the related row's existence for a `relation`. A presence test over a collection relation raises a `Cerbos::ActiveRecord::Error`.
+
 - `Cerbos::ActiveRecord.query_plan_to_relation` to translate a Cerbos `PlanResources` response into an `ActiveRecord::Relation`, with `Cerbos::ActiveRecord.field` and `Cerbos::ActiveRecord.relation` to map plan attributes onto the model ([#370](https://github.com/cerbos/query-plan-adapters/pull/370))
 
   Shapes the adapter cannot express faithfully raise a `Cerbos::ActiveRecord::Error` instead of emitting a filter.

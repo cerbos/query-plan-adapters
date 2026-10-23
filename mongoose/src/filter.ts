@@ -20,6 +20,7 @@ import {
   withEvaluationGuards,
   withNullableGuards,
 } from "./guards";
+import { translateHas } from "./presence";
 import { buildHierarchyFilter } from "./hierarchy";
 import type { HierarchyOperator } from "./hierarchy";
 import type { Mapper, MongooseFilter } from "./index";
@@ -152,6 +153,7 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
   contains: translateStringPredicate,
   startsWith: translateStringPredicate,
   endsWith: translateStringPredicate,
+  has: ({ operands }, ctx) => translateHas(operands, ctx, false),
   hasIntersection: ({ operands }, ctx) =>
     translateHasIntersection(operands, ctx),
   exists: quantifier("exists"),
@@ -399,6 +401,9 @@ const translateNot = (
   }
   // `!!x` is `x`, errors included, and eliminating the pair keeps a leaf that answers an error
   // as `false` from being flipped twice by nested `$nor`s.
+  if (isExpression(operand) && operand.operator === "has") {
+    return translateHas(operand.operands, ctx, true);
+  }
   if (isExpression(operand) && operand.operator === "not") {
     return buildFilter(
       getOperandAt(operand.operands, 0, "not operator requires at least one operand"),

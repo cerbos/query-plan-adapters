@@ -1,0 +1,73 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b4",
+    "b6",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/has-in-lambda",
+  "intent": "tags.exists(t, has(t.name)): a presence test on a field of each element.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": true
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "has() over an omitted attribute: unknown to the planner, absent to check()",
+    "pdp": [
+      "0.56.0"
+    ],
+    "reason": "Before 0.57.0 the planner folds has(t.name) to true, so the plan is exists(tags, true) and grants b5 and e1, whose only tags have no name. check() denies them. From 0.57.0 the plan carries the has()."
+  },
+  "request": {
+    "action": "collection/exists/has-in-lambda",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tags.exists(t, has(t.name))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "b5, b6 and e1 carry a tag with no name; has() over the lambda variable must test each tag, not the tags relation, and a store that cannot test a related row's field must refuse."
+}

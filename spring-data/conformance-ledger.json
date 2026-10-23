@@ -153,6 +153,10 @@
       "status": "unsupported",
       "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; the unbounded run `.{8,}` is lowered only as `.*` or `.+` between finite parts, so it is refused (register an OperatorFunction for matches to use a database regex)."
     },
+    "relation/has/parent": {
+      "status": "unsupported",
+      "reason": "The to-one parent is reached only through its dotted field paths (parent.aBool, ...); the mapping has no entry for the parent itself, so has(parent) is refused as an unmapped attribute rather than guessed from one of its columns."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"
