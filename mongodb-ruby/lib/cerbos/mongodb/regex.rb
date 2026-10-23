@@ -272,17 +272,18 @@ module Cerbos
         end
 
         # [min, max or nil for open, length] for a `{n}`, `{n,}` or `{n,m}` at +index+, else nil.
-        # RE2 reads any other brace as a literal.
+        # RE2 reads any other brace as a literal, and reads no count with a leading zero: `a{01}`
+        # is `a` then the text "{01}".
         def repeat_at(index)
           rest = @chars[index..].join
-          match = /\A\{(\d+)(,(\d*))?\}/.match(rest)
+          match = /\A\{(0|[1-9]\d*)(,(0|[1-9]\d*)?)?\}/.match(rest)
           return nil if match.nil?
 
           minimum = match[1].to_i
           maximum = if match[2].nil?
             minimum
           else
-            match[3].empty? ? nil : match[3].to_i
+            match[3]&.to_i
           end
           [minimum, maximum, match[0].length]
         end
