@@ -298,13 +298,15 @@ membership UNKNOWN, since CEL fails to build the list. A needle and a member col
 ([#574](https://github.com/cerbos/query-plan-adapters/issues/574)).
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
-> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
-> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
-> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
-> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
-> with `check()` whether `x` is missing, null or present.
+> **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
+> attribute the plan request omits is unknown to those planners, which assume the data layer
+> supplies it, so they fold `has(R.attr.x)` to true: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`, which never excludes a row missing `x`.
+> From 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+> `x`'s null convention or refuses it: under `omitted` a row has `x` when its value is not null, and
+> under `explicit` every row has it. The planner still drops a `has(R.attr.x)` that only guards an
+> access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because that access already denies a row
+> without `x`.
 
 ## The collation is part of the contract
 
@@ -395,23 +397,20 @@ rows and compares the ids with the ones `check()` allowed. It needs no PDP. Each
 adapter through the Cerbos Ruby SDK: `Cerbos::Client#plan_resources` calls an in-process gRPC
 stub (`spec/support/stub_pdp.rb`) that answers with the recorded plan, so the adapter receives
 the SDK's output types (a Symbol kind, and every number as a Float), not the JSON on disk. It
-runs on SQLite, PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.56.0),
+runs on SQLite, PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.57.0),
 cases that return exactly the allowed rows, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 86 / 98 |
-| adversarial | 302 / 340 |
+| core | 30 / 30 |
+| extended | 91 / 102 |
+| adversarial | 307 / 344 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
 gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
-skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.56.0 those are
-four extended cases and five adversarial cases. In `null/has/missing-attribute` and
-`null/has/composed-with-comparison` the plan request leaves an omitted attribute unknown, so the
-planner folds `has()` to true by design, while `check()` receives the omission as absent and denies
-the row. Use `R.attr.x != null` instead of `has(R.attr.x)`. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the
+skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.57.0 those are
+three extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the
 planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In `type-mismatch/in/number-field-in-scalar-principal` and
 `type-mismatch/in/string-field-in-dyn-string` the planner rewrites `in` over a scalar container to
 `==`, which `check()` refuses as a type error

@@ -23,6 +23,7 @@ require_relative "translator/hierarchies"
 require_relative "translator/lists"
 require_relative "translator/membership"
 require_relative "translator/null_conventions"
+require_relative "translator/presence"
 require_relative "translator/strings"
 
 module Cerbos
@@ -45,9 +46,9 @@ module Cerbos
     #
     # @see Cerbos::ActiveRecord.query_plan_to_relation
     class Translator
-      # Operators whose operands must not be resolved first: they bind an iterator variable or
-      # must carry UNKNOWN through a branch.
-      STRUCTURAL_OPERATORS = %w[and or not if lambda exists all exists_one filter map].freeze
+      # Operators whose operands must not be resolved first: they bind an iterator variable, must
+      # carry UNKNOWN through a branch, or test an attribute's presence rather than its value.
+      STRUCTURAL_OPERATORS = %w[and or not if lambda exists all exists_one filter map has].freeze
 
       # The comparison operators.
       COMPARISONS = %w[eq ne lt gt le ge].freeze
@@ -66,7 +67,7 @@ module Cerbos
       # `"true"`/`"false"` rather than whatever the database renders a predicate as. `if` is
       # boolean only when an arm is: see {#ternary}.
       BOOLEAN_OPERATORS = (
-        %w[and or not exists all exists_one in hasIntersection isSubset ancestorOf descendentOf overlaps] +
+        %w[and or not exists all exists_one has in hasIntersection isSubset ancestorOf descendentOf overlaps] +
         COMPARISONS + STRING_MATCHES.keys + %w[matches]
       ).freeze
 
@@ -100,6 +101,7 @@ module Cerbos
       include Lists
       include Membership
       include NullConventions
+      include Presence
       include Strings
 
       # An operator whose operands are resolved first, so an override can replace it.
@@ -358,6 +360,7 @@ module Cerbos
         when "if" then ternary(operands, environment)
         when "exists", "all", "exists_one", "filter", "map" then macro(operator, operands, environment)
         when "index" then index_access(operands, environment)
+        when "has" then presence(operands, environment)
         when "lambda"
           raise InvalidPlanError, "lambda outside a collection macro"
         else
