@@ -50,23 +50,22 @@ rows and compares the ids with the ones `check()` allowed. It needs no PDP. Each
 adapter through the Cerbos Ruby SDK: `Cerbos::Client#plan_resources` calls an in-process gRPC
 stub (`spec/support/stub_pdp.rb`) that answers with the recorded plan, so the adapter receives
 the SDK's output types (a Symbol kind, and every number as a Float), not the JSON on disk. It runs
-on SQLite, PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.55.0),
+on SQLite, PostgreSQL and MySQL, and every store gives the same results. On the current PDP (Cerbos 0.57.0),
 cases that return exactly the allowed rows, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 85 / 97 |
-| adversarial | 300 / 338 |
+| core | 30 / 30 |
+| extended | 91 / 102 |
+| adversarial | 307 / 344 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
 wrong result. A case whose golden file records a `plannerDivergence` for the PDP is skipped,
-because the plan and `check()` disagree and no adapter can pass it: on 0.55.0 those are four
-extended cases and five adversarial cases. In `null/has/missing-attribute` and
-`null/has/composed-with-comparison` the planner folds `has()` to true by design, while `check()`
-denies the row whose attribute is absent: write `R.attr.x != null` instead of `has(R.attr.x)`.
-In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the plan
+because the plan and `check()` disagree and no adapter can pass it: on 0.57.0 those are three
+extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and
+`null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted
+attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the plan
 drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
 and denies every row: write `1.0`. In `type-mismatch/in/number-field-in-scalar-principal` and
 `type-mismatch/in/string-field-in-dyn-string` the planner rewrites `in` over a scalar container
@@ -138,6 +137,7 @@ The refusals fall into a few mechanisms:
 | A two-variable comprehension (`exists(i, v, ...)`) | It binds each element's position, or each map key. An association's rows have no position, and SQL cannot list a row's columns as keys. |
 | `int()`, `double()` or `timestamp()` over a text column; `int()` over a decimal column | CEL reads the WHOLE string or makes an error, but SQL reads the digits at the front. A decimal's attribute is the double nearest it, which can truncate to a different whole number. |
 | `string()` over a ternary of whole constants, or a double compared with `"0"`/`"-0"` | The plan carries `1000000` and `1000000.0` as the same number, which CEL spells differently; SQL cannot tell `-0.0` from `0.0`. |
+| `has()` over a collection association, or over a chain through one | CEL always holds a list, empty or not, but nothing says the caller sends one for every row, so a presence test over it has no SQL form. |
 | A whole collection compared with `==` | A correlated subquery has no ordered list to compare element by element. |
 | A list difference compared as a whole or over an association of unknown member type, a map attribute's keys, a map literal holding a column | None has a scalar SQL form. |
 | Two raw temporal columns | CEL compares RFC-3339 spellings without `timestamp()`. |
@@ -225,6 +225,19 @@ ne(e, o)  ->  CASE WHEN o IS NULL THEN NULL ELSE NOT (e IS NOT NULL AND e = o) E
 ```
 Refer to [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+
+> [!WARNING]
+> **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
+> attribute the plan request omits is unknown to those planners, which assume the data layer
+> supplies it, so they fold `has(R.attr.x)` to true: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`, which never excludes a row missing `x`.
+> From 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+> `x`'s null convention or refuses it: under `:omitted` a row has `x` when its value is not null,
+> under `:explicit` every row has it, and a to-one association mapped with
+> `Cerbos::Sequel.association` is present when its row exists. Through a to-one path such as
+> `parent.x`, a row with no parent is UNKNOWN, as CEL's missing-path error is. The planner still
+> drops a `has(R.attr.x)` that only guards an access to `x`, as in
+> `has(R.attr.x) && R.attr.x == "a"`, because that access already denies a row without `x`.
 
 ### The collation is part of the contract
 
