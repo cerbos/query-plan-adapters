@@ -79,6 +79,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 class AdversarialConformanceTest {
 
     private static final Map<String, LedgerEntry> LEDGER = Corpus.ledger();
+    /** The seeds this store cannot hold: each requires a capability the ledger lacks. */
+    private static final Set<String> UNHELD = unheldSeeds();
 
     private static EntityManagerFactory emf;
     /** Non-null only when {@code adapter.test.db} selects a real database. */
@@ -122,7 +124,9 @@ class AdversarialConformanceTest {
             Assumptions.abort("planner divergence: " + divergence.get("reason"));
         }
         List<String> allowed = new ArrayList<>();
-        golden.get("allowed").forEach(node -> allowed.add(node.asText()));
+        golden.get("allowed").forEach(node -> {
+            if (!UNHELD.contains(node.asText())) allowed.add(node.asText());
+        });
         allowed.sort(null);
 
         LedgerEntry entry = LEDGER.get(id);
@@ -260,7 +264,8 @@ class AdversarialConformanceTest {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record Seed(String id, Boolean aBool, String aString, Integer aNumber,
                         String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
-                        List<Tag> tags, List<String> subCategoryNames, String parentSeedId) {}
+                        List<Tag> tags, List<String> subCategoryNames, String parentSeedId,
+                        List<String> requires) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record SeedsFile(List<Seed> seeds) {}
@@ -273,9 +278,20 @@ class AdversarialConformanceTest {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record DerivedFile(Map<String, Derived> derived) {}
 
+    private static List<Seed> allSeeds() {
+        return Corpus.readJson(Corpus.conformanceDir().resolve("seeds.json"), SeedsFile.class).seeds();
+    }
+
+    private static Set<String> unheldSeeds() {
+        Set<String> lacks = Corpus.lacks();
+        return allSeeds().stream()
+                .filter(s -> s.requires() != null && s.requires().stream().anyMatch(lacks::contains))
+                .map(Seed::id)
+                .collect(Collectors.toSet());
+    }
+
     private static void seed() {
-        List<Seed> seeds = Corpus.readJson(
-                Corpus.conformanceDir().resolve("seeds.json"), SeedsFile.class).seeds();
+        List<Seed> seeds = allSeeds().stream().filter(s -> !UNHELD.contains(s.id())).toList();
         Map<String, Derived> derived = Corpus.readJson(
                 Corpus.conformanceDir().resolve("derived-fields.json"), DerivedFile.class).derived();
         Map<String, Seed> byId = seeds.stream().collect(Collectors.toMap(Seed::id, Function.identity()));

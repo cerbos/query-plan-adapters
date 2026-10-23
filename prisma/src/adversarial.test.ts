@@ -55,6 +55,8 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  /** The store capabilities the row needs (conformance/README.md, "The harness contract"). */
+  requires?: string[];
 }
 
 interface DerivedEntry {
@@ -66,7 +68,27 @@ interface DerivedEntry {
   labels: (string | null)[];
 }
 
-const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+// A seed requiring a capability the ledger's `lacks` names is a resource this store cannot hold:
+// it is not loaded, and its id is struck from every allowed set.
+const LACKS = Object.keys(
+  (
+    JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "conformance-ledger.json"), "utf8")
+    ) as { lacks?: Record<string, string> }
+  ).lacks ?? {}
+);
+const UNHELD = new Set(
+  (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds
+    .filter((seed) => seed.requires?.some((capability) => LACKS.includes(capability)))
+    .map((seed) => seed.id)
+);
+const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds.filter(
+  (seed) => !UNHELD.has(seed.id)
+);
+
+function held(allowed: string[]): string[] {
+  return allowed.filter((id) => !UNHELD.has(id));
+}
 const DERIVED = (
   readCorpusJson("derived-fields.json") as { derived: Record<string, DerivedEntry> }
 ).derived;
@@ -373,7 +395,7 @@ describe(`conformance (${STORE_NAME})`, () => {
         }
         // Both sides sorted the same way, so a divergent entry cannot pass on ordering alone.
         const ids = await selectAllowed(queryPlan);
-        const allowed = [...golden.allowed].sort();
+        const allowed = held(golden.allowed).sort();
         if (entry?.status === "divergent") {
           expect(ids).not.toEqual(allowed);
           return;
@@ -397,7 +419,7 @@ describe(`conformance (${STORE_NAME})`, () => {
 // recorded check() decision from a golden file, never a hand-computed row list.
 
 describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
-  const allowedFor = (id: string) => readGolden(TAGS[0]!, id).allowed;
+  const allowedFor = (id: string) => held(readGolden(TAGS[0]!, id).allowed);
 
   async function synthetic(condition: PlanExpressionOperand): Promise<string[]> {
     const queryPlan: PlanResourcesResponse = {

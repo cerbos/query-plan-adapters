@@ -597,6 +597,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts"
     },
+    "membership/in/negated-literal-in-null-resource-list": {
+      "status": "unsupported",
+      "reason": "A bool must_not over the collection would also match j4, whose aNumberList is null: Elasticsearch indexes no value for a null field or an empty array, so it cannot tell that document from one holding [], and negated membership in a document collection is refused."
+    },
     "membership/in/negated-literal-in-resource-list": {
       "status": "unsupported",
       "reason": "Negated membership in a document collection: bool.must_not of a term on tagNames matches a document whose tagNames is missing (CEL error), and Elasticsearch does not index an empty array, so the two cannot be told apart"

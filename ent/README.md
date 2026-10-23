@@ -263,7 +263,7 @@ adversarial cases.
 | --- | --- |
 | core | 30 / 30 |
 | extended | 79 / 102 |
-| adversarial | 261 / 344 |
+| adversarial | 262 / 345 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger

@@ -1422,6 +1422,28 @@
       "attr": {
         "aBool": true,
         "aBoolList": [],
+        "aDouble": 38.3,
+        "aNumber": 38,
+        "aNumberList": null,
+        "aOptionalString": "set",
+        "aString": "nulllist",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "nulllist"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "j4"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
         "aDouble": 36.3,
         "aNumber": 36,
         "aNumberList": [],

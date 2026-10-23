@@ -438,7 +438,7 @@ its declaration, stays a plain `Error`. The shapes this adapter refuses are list
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real Drizzle
-queries over the corpus's 43 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
+queries over the corpus's 44 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
 Passed cases on the current PDP, 0.57.0, identical on all three stores. The total is every golden
 case in the tier; planner-divergence cases are skipped, not run, and count as not passed:
 
@@ -446,7 +446,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 30 / 30 |
 | extended | 96 / 102 |
-| adversarial | 314 / 344 |
+| adversarial | 315 / 345 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its

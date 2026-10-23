@@ -10,7 +10,13 @@ module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
   LEDGER_FILE = File.expand_path("../../conformance-ledger.json", __dir__)
 
-  SEEDS = JSON.parse(File.read(File.join(DIR, "seeds.json"))).fetch("seeds").freeze
+  # A seed requiring a store capability the ledger lacks is a resource this store cannot hold: it
+  # is not loaded, and its id is struck from every golden's allowed set.
+  LACKS = JSON.parse(File.read(LEDGER_FILE)).fetch("lacks", {}).keys.freeze
+  ALL_SEEDS = JSON.parse(File.read(File.join(DIR, "seeds.json"))).fetch("seeds")
+  UNHELD = ALL_SEEDS.select { |seed| seed.fetch("requires", []).intersect?(LACKS) }
+    .map { |seed| seed.fetch("id") }.freeze
+  SEEDS = ALL_SEEDS.reject { |seed| UNHELD.include?(seed.fetch("id")) }.freeze
   SEEDS_BY_ID = SEEDS.to_h { |seed| [seed.fetch("id"), seed] }.freeze
   DERIVED = JSON.parse(File.read(File.join(DIR, "derived-fields.json"))).fetch("derived").freeze
 
@@ -48,7 +54,8 @@ module ConformanceCorpus
     raise "no golden files for PDP #{tag} under #{File.join(DIR, "golden", tag)}" if paths.empty?
 
     paths.map { |path|
-      JSON.parse(File.read(path).gsub(NOW_PLACEHOLDER, NOW_MINUS_24H))
+      golden = JSON.parse(File.read(path).gsub(NOW_PLACEHOLDER, NOW_MINUS_24H))
+      golden.merge("allowed" => golden.fetch("allowed") - UNHELD)
     }
   end
 

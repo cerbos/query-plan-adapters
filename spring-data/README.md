@@ -417,9 +417,9 @@ consulted.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 seed rows on
-H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
-recorded. No PDP runs in the test. Results for the current PDP (0.56.0), where the total is every
+plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 of the
+corpus's 44 seed rows on H2, PostgreSQL and MySQL, and compares the returned ids with the `check()`
+decisions the PDP recorded. The ledger lacks `null-list`, so j4 is not loaded. No PDP runs in the test. Results for the current PDP (0.56.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
 total but not as passed:
 
@@ -427,7 +427,7 @@ total but not as passed:
 | --- | --- |
 | core | 30 / 30 |
 | extended | 97 / 102 |
-| adversarial | 302 / 344 |
+| adversarial | 303 / 345 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 39 are `unsupported`, where the adapter

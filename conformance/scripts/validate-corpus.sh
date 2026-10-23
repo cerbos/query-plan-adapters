@@ -4,7 +4,8 @@
 # everything it writes — the policy, resources.json, the goldens and their degeneracy rules — so
 # this checks only what sits outside it:
 #
-#   1. each <adapter>/conformance-ledger.json against conformance/README.md, "The ledger";
+#   1. each <adapter>/conformance-ledger.json against conformance/README.md, "The ledger", its lacks
+#      mapping only store capabilities some seed in seeds.json requires to a reason;
 #   2. the PDP pin: pdp-versions.json is well-formed, and every restatement of it agrees;
 #   3. service image pinning (repo:tag@sha256, one digest per tag);
 #   4. the ent and pgx vendored translator trees are byte-identical;
@@ -35,6 +36,8 @@ fi
 current_tag="$(jq -r .current.tag pdp-versions.json)"
 current_digest="$(jq -r .current.digest pdp-versions.json)"
 pdp_tags="$(jq -c '[.current.tag, .previous.tag]' pdp-versions.json)"
+# The store capabilities some seed requires: the only names a ledger's lacks may give.
+capabilities="$(jq -c '[.seeds[].requires // empty | .[]] | unique' seeds.json)"
 [[ -d "golden/${current_tag}" ]] || { echo "golden/${current_tag}/ is missing: run the generator" >&2; exit 1; }
 find "golden/${current_tag}" -name '*.json' | sed "s|^golden/${current_tag}/||; s|\.json$||" \
   | sort >"${TMP}/case-ids"
@@ -50,11 +53,14 @@ while IFS= read -r ledger; do
   fi
   while IFS= read -r problem; do
     fail "${adapter}/conformance-ledger.json: ${problem}"
-  done < <(jq -r --arg adapter "${adapter}" --argjson tags "${pdp_tags}" '
+  done < <(jq -r --arg adapter "${adapter}" --argjson tags "${pdp_tags}" --argjson capabilities "${capabilities}" '
     def text: type == "string" and length > 0;
-    if keys != ["adapter", "cases"] then "top-level keys must be exactly adapter and cases"
+    if (keys - ["lacks"]) != ["adapter", "cases"] then "top-level keys must be adapter, cases and an optional lacks"
     elif .adapter != $adapter then "adapter is \(.adapter | tojson), expected \($adapter | tojson)"
     elif (.cases | type) != "object" then "cases must be an object"
+    elif has("lacks") and ((.lacks | type) != "object" or (.lacks | length) == 0
+        or ((.lacks | keys) - $capabilities) != [] or ([.lacks[] | text] | all | not))
+      then "lacks must map capabilities some seed requires (\($capabilities)) to a non-empty reason"
     else
       (if ([.cases | keys_unsorted[]] != [.cases | keys[]]) then "case ids must be sorted" else empty end),
       (.cases | to_entries[] | .key as $id | .value

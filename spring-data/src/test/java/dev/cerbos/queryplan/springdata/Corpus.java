@@ -24,6 +24,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -142,15 +143,29 @@ final class Corpus {
         }
     }
 
-    private record Ledger(String adapter, Map<String, LedgerEntry> cases) {}
+    /** {@code lacks} maps each store capability this store lacks to the reason. */
+    private record Ledger(String adapter, Map<String, String> lacks, Map<String, LedgerEntry> cases) {}
 
-    static Map<String, LedgerEntry> ledger() {
+    private static Ledger readLedger() {
         Path file = Path.of(System.getProperty("user.dir"), "conformance-ledger.json");
         Ledger ledger = readJson(file, Ledger.class);
         if (!"spring-data".equals(ledger.adapter()) || ledger.cases() == null) {
             throw new IllegalStateException(file + " is not the spring-data ledger");
         }
-        return ledger.cases();
+        return ledger;
+    }
+
+    static Map<String, LedgerEntry> ledger() {
+        return readLedger().cases();
+    }
+
+    /**
+     * The store capabilities this store lacks. A seed requiring one is a resource the store cannot
+     * hold: it is not loaded, and its id is struck from every allowed set.
+     */
+    static Set<String> lacks() {
+        Map<String, String> lacks = readLedger().lacks();
+        return lacks == null ? Set.of() : lacks.keySet();
     }
 
     // -- the corpus mapped onto the JPA model ---------------------------------------------------
