@@ -19,6 +19,7 @@ internal class Translation(val options: Options) {
     val ternary = TernaryTranslator(this)
     val hierarchy = HierarchyTranslator(this)
     val regex = RegexTranslator(this)
+    val presence = PresenceTranslator(this)
 
     // The relation side: everything that needs a correlated subquery.
     val subqueries = Subqueries(this)

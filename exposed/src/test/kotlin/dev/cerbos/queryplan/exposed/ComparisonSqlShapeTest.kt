@@ -27,7 +27,7 @@ import org.junit.jupiter.api.assertThrows
 class ComparisonSqlShapeTest {
 
     @Test
-    fun `IS NOT NULL has exactly two sources, and no corpus action reaches a third`() {
+    fun `IS NOT NULL has exactly three sources, and no corpus action reaches a fourth`() {
         // A presence test is the over-grant direction: emitted where the plan did not ask for one,
         // it readmits exactly the rows an omitted-convention comparison has to drop. It has two
         // legitimate origins and no third —
@@ -35,14 +35,16 @@ class ComparisonSqlShapeTest {
         //  - the asymmetric expansion an attribute DECLARED explicit-null earns, which is what
         //    makes its equality definite (`null-ne`, `vf-null-ne`, `null-value-*`);
         //  - `x != null` itself, whose whole meaning is a presence test, and which the pre-walk
-        //    scan has already admitted under the call-level convention (`rel-ne-null-hop`).
+        //    scan has already admitted under the call-level convention (`rel-ne-null-hop`);
+        //  - `has(x)`, the presence test itself, which the plan asks for by name.
         //
         // Stated WITHOUT a list of actions, which is what let the old sweep go stale: a new action
         // cannot fall out of a property quantified over the corpus.
         val reached = sweepFor("IS NOT NULL") { action, plan ->
             assertTrue(
-                declaresExplicitNull(plan) || carriesBareNullOperand(plan.condition),
-                "$action emits IS NOT NULL with neither a declared explicit-null attribute nor a null literal",
+                declaresExplicitNull(plan) || carriesBareNullOperand(plan.condition) ||
+                    "has" in operatorsOf(plan.condition),
+                "$action emits IS NOT NULL with neither a declared explicit-null attribute, a null literal nor has()",
             )
         }
         assertAntiVacuous("IS NOT NULL", reached, PRESENCE_TEST_FLOOR)
@@ -53,7 +55,7 @@ class ComparisonSqlShapeTest {
         // The mirror property, and the one `3989257` retired with the stale list it was written
         // against. It is the same hazard read the other way: an `IS NULL` the plan never asked for
         // is an assumption about a column, and under a negation it hands back exactly the rows a
-        // missing attribute makes check() deny. Six legitimate origins, and no seventh —
+        // missing attribute makes check() deny. Seven legitimate origins, and no eighth —
         //
         //  - a NULL OPERAND in the plan: the null-constant leaf, or a null list element;
         //  - an attribute DECLARED explicit-null, whose equality expands to a definite one and
@@ -70,7 +72,10 @@ class ComparisonSqlShapeTest {
         //    (`not-concat-unsolvable`);
         //  - an equality between values CEL knows to be of different types, answered FALSE from
         //    the types alone and carrying the missing-attribute witness of its column
-        //    (`type-mismatch/equals/*`).
+        //    (`type-mismatch/equals/*`);
+        //  - `has(x)` over a column that declares no null convention, whose NULL row is UNKNOWN
+        //    because nothing says which convention the caller uses
+        //    (`collection/exists/has-in-lambda`).
         //
         // Every disjunct names an operator or a declaration IN THE PLAN, never an action, so an
         // action added tomorrow is covered and one that reaches a seventh source fails here.
@@ -82,9 +87,10 @@ class ComparisonSqlShapeTest {
                     operatorsOf(plan.condition).any { it in SELF_GUARDING_OPERATORS } ||
                     hasAttributeInAttribute(plan.condition) ||
                     hasStringConcatenation(plan.condition) ||
-                    hasTypeMismatchedEquality(plan.condition),
+                    hasTypeMismatchedEquality(plan.condition) ||
+                    "has" in operatorsOf(plan.condition),
                 "$action emits IS NULL with no null operand, no declared explicit-null attribute, " +
-                    "no column LIKE needle and none of $SELF_GUARDING_OPERATORS",
+                    "no column LIKE needle, no has() and none of $SELF_GUARDING_OPERATORS",
             )
         }
         assertAntiVacuous("IS NULL", reached, NULL_TEST_FLOOR)

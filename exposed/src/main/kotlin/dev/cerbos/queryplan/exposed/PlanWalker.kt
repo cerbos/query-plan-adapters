@@ -62,6 +62,7 @@ internal class PlanWalker(private val translation: Translation) {
             "isSubset" -> PlanRewrites.subsetAsMembership(operands, scope)?.let { traverse(it, scope) }
                 ?: translation.comparisons.translate(operator, operands, scope)
             "if" -> translation.ternary.translateBare(operands, scope)
+            "has" -> translation.presence.translate(operands, scope)
             "overlaps", "ancestorOf", "descendentOf" -> translation.hierarchy.translate(operator, operands, scope)
             "matches" -> matches(operands, scope)
             else -> matchesComparedWithBoolean(operator, operands, scope)
@@ -300,7 +301,7 @@ internal class PlanWalker(private val translation: Translation) {
         private val BOOLEAN_OPERATORS = setOf(
             "eq", "ne", "lt", "le", "gt", "ge", "and", "or", "not", "in", "hasIntersection",
             "has_intersection", "contains", "startsWith", "endsWith", "matches", "exists", "all",
-            "exists_one", "overlaps", "ancestorOf", "descendentOf", "isSubset",
+            "exists_one", "overlaps", "ancestorOf", "descendentOf", "isSubset", "has",
         )
     }
 }

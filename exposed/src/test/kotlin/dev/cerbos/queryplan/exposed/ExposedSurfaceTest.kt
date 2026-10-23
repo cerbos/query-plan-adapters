@@ -246,9 +246,11 @@ class ExposedSurfaceTest {
 
     @Test
     fun `an always-allowed plan filters nothing and an always-denied one filters everything`() {
-        assertEquals(QueryPlanFilter.AlwaysAllowed, filter("null/has/missing-attribute"))
+        // `all()` over a principal's empty list is true on every row, so the planner folds it to
+        // KIND_ALWAYS_ALLOWED and no attribute of this table is read.
+        assertEquals(QueryPlanFilter.AlwaysAllowed, filter("principal/all/empty-list"))
         assertEquals(QueryPlanFilter.AlwaysDenied, filter("membership/in/empty-list"))
-        assertEquals(5L, read { SurfaceDocs.selectAll().where { filter("null/has/missing-attribute").toOp() }.count() })
+        assertEquals(5L, read { SurfaceDocs.selectAll().where { filter("principal/all/empty-list").toOp() }.count() })
         assertEquals(0L, read { SurfaceDocs.selectAll().where { filter("membership/in/empty-list").toOp() }.count() })
         // …and they still compose, which is the whole point of `toOp()` existing beside the sealed
         // result: a caller who always runs the query writes one expression either way.
@@ -256,7 +258,7 @@ class ExposedSurfaceTest {
             4L,
             read {
                 SurfaceDocs.selectAll()
-                    .where { TriLogic.and(filter("null/has/missing-attribute").toOp(), EqOp(SurfaceDocs.region, stringParam("emea"))) }
+                    .where { TriLogic.and(filter("principal/all/empty-list").toOp(), EqOp(SurfaceDocs.region, stringParam("emea"))) }
                     .count()
             },
         )

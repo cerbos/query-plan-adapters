@@ -432,6 +432,28 @@ to-one relation, where an absent related row is also a missing attribute. A list
 null (`x in [null, "a"]`) is still refused, since SQL drops a NULL inside an `IN` list, and an
 undeclared attribute under a call-level `OMITTED` is still refused as above.
 
+### `has()` reads the same declaration
+
+From Cerbos 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and whether the key is present is
+a question about the convention, not the column:
+
+| `x` declared | `has(x)` |
+| --- | --- |
+| `nulls = EXPLICIT` | TRUE on every row: a NULL column reaches `check()` as a present null |
+| `nulls = OMITTED` | `x IS NOT NULL` |
+| undeclared | TRUE where `x` is not NULL, UNKNOWN where it is: the column renders as if NOT NULL, and a NULL in it says nothing about which convention the caller uses |
+
+`has()` never errors on a missing value, so `!has(x)` is the exact complement for a declared
+attribute. A to-one relation, `has(R.attr.parent)`, is present when its row exists. A field one hop
+across one, `has(R.attr.parent.x)`, is present when the row exists and the field is present by its
+own declaration; on a row with no parent, CEL raises selecting through the missing hop, so that row
+is UNKNOWN and denied under both polarities. A field of a lambda element, `tags.exists(t, has(t.name))`,
+is tested on each element. `has()` over a to-many relation is refused: CEL holds a list there, empty
+or not, wherever the caller sends one, and no row of the related table says whether it does.
+
+The planner still drops a `has(x)` that only guards an access to `x`, as in
+`has(R.attr.x) && R.attr.x == "a"`: that access already denies a row without `x`.
+
 ## Handling refusals
 
 A shape the adapter cannot translate raises rather than emitting a best-effort filter, and the raise
@@ -529,17 +551,17 @@ and hierarchy descendant checks. Treat collation as part of your policy contract
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 41 seed rows on
+plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 seed rows on
 H2, SQLite, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
-recorded. No PDP runs in the test. Results for the current PDP (0.55.0), where the total is every
+recorded. No PDP runs in the test. Results for the current PDP (0.57.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
 total but not as passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 85 / 97 |
-| adversarial | 285 / 338 |
+| core | 30 / 30 |
+| extended | 91 / 102 |
+| adversarial | 292 / 344 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
@@ -612,10 +634,11 @@ These translate, each by rewriting into a shape above rather than by a new lower
 over the `EXPLICIT` side, made UNKNOWN when the other side's column is NULL.
 
 The cases the corpus declares a planner divergence (`plannerDivergence`: the plan and `check()`
-disagree, so no adapter can pass them) are skipped. Among them is `null/has/missing-attribute`: the
-planner folds `has()` to always-allowed while `check()` denies the missing-attribute rows. Until the
-planner is fixed, write `R.attr.x != null` rather than `has(R.attr.x)` for database-backed
-attributes, with the attribute declared `OMITTED`.
+disagree, so no adapter can pass them) are skipped. On 0.56.0 these include the `null/has/*` cases
+whose `has()` is not a guard: that planner folds `has()` on an omitted attribute to true while
+`check()` denies the row. 0.57.0 keeps `has()` in the plan, and the adapter translates it (see
+[`has()` reads the same declaration](#has-reads-the-same-declaration)). On 0.56.0, write
+`R.attr.x != null` rather than `has(R.attr.x)` for a database-backed attribute declared `OMITTED`.
 
 Other guarantees:
 

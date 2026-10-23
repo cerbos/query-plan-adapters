@@ -141,8 +141,11 @@ internal class Subqueries(private val translation: Translation) {
     fun leadingHopsExist(collection: Resolution.Collection): Op<Boolean>? {
         val leading = collection.leadingHops
         if (leading.isEmpty()) return null
-        return existsOver(chain(collection.owner, leading))
+        return hopsExist(collection.owner, leading)
     }
+
+    /** "Every hop of [hops] has a row for [owner]'s row": a two-valued `EXISTS` over the chain. */
+    fun hopsExist(owner: Scope, hops: List<AttributeMapping.Relation>): Op<Boolean> = existsOver(chain(owner, hops))
 
     /** [value], made SQL NULL unless every leading hop exists. */
     fun <T> requireLeadingHops(

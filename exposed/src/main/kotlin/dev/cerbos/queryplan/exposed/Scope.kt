@@ -8,8 +8,10 @@ import org.jetbrains.exposed.v1.core.Table
 /**
  * Where a plan variable is looked up: the root resource, or the element of an enclosing lambda.
  *
- * [resolve] is TOTAL: every variable lands in one of [Resolution]'s two arms or throws naming why.
- * There is no null return and no second classifier.
+ * [path] is the one classifier: it places a variable on storage (the scope owning it, the relation
+ * hops it passes through, the column it ends at) or throws naming why. [resolve] reads that place
+ * as a value and is TOTAL: every variable lands in one of [Resolution]'s two arms. There is no null
+ * return and no second classifier.
  *
  * Three rules live here and only here:
  *  - **longest-prefix chain walking** — a dotted variable is matched against the longest MAPPED
@@ -21,6 +23,13 @@ import org.jetbrains.exposed.v1.core.Table
  */
 internal sealed interface Scope {
     fun resolve(variable: String): Resolution
+
+    /**
+     * Where [variable] lands on storage, before it is read as a value. `has()` asks this rather
+     * than [resolve], because a presence test over a to-one relation needs the relation itself, not
+     * the element column a value reading of it would denote.
+     */
+    fun path(variable: String): AttributePath
 
     /**
      * A column of THIS scope's own table, as SQL reads it here: bare at the root, through the
@@ -103,13 +112,13 @@ internal class RootScope(private val translation: Translation) : Scope {
 
     override fun read(column: Column<*>): Column<*> = column
 
-    override fun resolve(variable: String): Resolution = resolved.getOrPut(variable) { classify(variable) }
+    override fun resolve(variable: String): Resolution =
+        resolved.getOrPut(variable) { path(variable).resolve(translation, variable) }
 
-    private fun classify(variable: String): Resolution {
+    override fun path(variable: String): AttributePath {
         when (val direct = translation.options.mapping.resolve(variable)) {
-            is AttributeMapping.Field -> return Resolution.Scalar(variable, read(direct.column), direct.column, direct)
-            is AttributeMapping.Relation ->
-                return ChainWalk(listOf(direct), null).resolveAt(translation, this, variable)
+            is AttributeMapping.Field -> return AttributePath(this, emptyList(), direct)
+            is AttributeMapping.Relation -> return AttributePath(this, listOf(direct), null)
             null -> Unit
         }
         // Not mapped under its whole name, so it is a dotted suffix off a mapped relation. The
@@ -123,7 +132,7 @@ internal class RootScope(private val translation: Translation) : Scope {
             // The mapped prefix is itself the first hop: `from` walks the nested fields BEYOND the
             // relation it starts at, so dropping the head here would correlate the remainder
             // straight off the root and skip the intermediate table entirely.
-            return ChainWalk(listOf(head) + walked.hops, walked.leaf).resolveAt(translation, this, variable)
+            return AttributePath(this, listOf(head) + walked.hops, walked.leaf)
         }
         throw Refusals.unknownAttribute(variable)
     }
@@ -153,9 +162,17 @@ internal class LambdaScope(
         return alias[column]
     }
 
-    override fun resolve(variable: String): Resolution = resolved.getOrPut(variable) { classify(variable) }
+    override fun resolve(variable: String): Resolution = resolved.getOrPut(variable) {
+        if (owns(variable)) path(variable).resolve(translation, variable) else outer.resolve(variable)
+    }
 
-    private fun classify(variable: String): Resolution {
+    private fun owns(variable: String): Boolean =
+        variable == lambdaVariable || variable.startsWith("$lambdaVariable.")
+
+    override fun path(variable: String): AttributePath {
+        if (!owns(variable)) {
+            return outer.path(variable)
+        }
         if (variable == lambdaVariable) {
             val element = relation.element ?: throw RelationRefusals.noElementColumn(variable, relation)
             // The lambda variable IS a list element, and CEL has no missing element: a NULL element
@@ -164,19 +181,38 @@ internal class LambdaScope(
             // reading `null in tagNames` already takes. Reading it as a missing attribute instead
             // dropped exactly those rows from a negated body (`projection-exists-not-eq`).
             val asValue = AttributeMapping.Field(element.column, NullAttributeRepresentation.EXPLICIT)
-            return Resolution.Scalar(variable, read(element.column), element.column, asValue)
+            return AttributePath(this, emptyList(), asValue)
         }
-        val prefix = "$lambdaVariable."
-        if (!variable.startsWith(prefix)) {
-            return outer.resolve(variable)
-        }
-        val walked = ChainWalk.from(relation, variable.substring(prefix.length).split('.'))
+        val walked = ChainWalk.from(relation, variable.substring(lambdaVariable.length + 1).split('.'))
             ?: throw Refusals.unknownAttribute(variable)
-        if (walked.hops.isEmpty()) {
-            val leaf = walked.leaf ?: throw Refusals.internal("A member walk ended at neither a column nor a relation")
-            return Resolution.Scalar(variable, read(leaf.column), leaf.column, leaf)
+        if (walked.hops.isEmpty() && walked.leaf == null) {
+            throw Refusals.internal("A member walk ended at neither a column nor a relation")
         }
-        return walked.resolveAt(translation, this, variable)
+        return AttributePath(this, walked.hops, walked.leaf)
+    }
+}
+
+/**
+ * A variable placed on storage: the [owner] scope its first hop correlates against, the relation
+ * [hops] it passes through, and the [leaf] column it ends at, or `null` when it ends at the last
+ * hop's relation itself.
+ */
+internal class AttributePath(
+    val owner: Scope,
+    val hops: List<AttributeMapping.Relation>,
+    val leaf: AttributeMapping.Field?,
+) {
+    init {
+        require(leaf != null || hops.isNotEmpty()) { "a path ends at a column or a relation" }
+    }
+
+    /** This place read as a value: the column itself, or a walk through [hops] anchored at [owner]. */
+    fun resolve(translation: Translation, variable: String): Resolution {
+        if (hops.isEmpty()) {
+            val field = leaf ?: throw Refusals.internal("a path with no hop ends at a column")
+            return Resolution.Scalar(variable, owner.read(field.column), field.column, field)
+        }
+        return ChainWalk(hops, leaf).resolveAt(translation, owner, variable)
     }
 }
 
