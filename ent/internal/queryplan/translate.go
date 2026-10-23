@@ -189,6 +189,9 @@ func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 	}
 
 	switch n.operator {
+	case "has":
+		return b.presence(n, m, negated)
+
 	case "hasIntersection":
 		return b.hasIntersection(n, m, negated)
 
