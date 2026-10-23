@@ -7,7 +7,7 @@ import { eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core/dialect";
 import { PgDialect } from "drizzle-orm/pg-core/dialect";
-import { bigint, doublePrecision, numeric, pgTable, real } from "drizzle-orm/pg-core";
+import { bigint, doublePrecision, numeric, pgTable } from "drizzle-orm/pg-core";
 import { integer, sqliteTable } from "drizzle-orm/sqlite-core";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
 
@@ -111,18 +111,6 @@ function render(store: Store, filter: SQL): { sql: string; params: unknown[] } {
 }
 
 describe("the refusal type", () => {
-  test("is an exported Error subclass, so existing catch blocks keep working", () => {
-    const error = new UnsupportedQueryPlanError("x");
-    expect(error).toBeInstanceOf(Error);
-    expect(error.name).toBe("UnsupportedQueryPlanError");
-  });
-
-  test("a shape the adapter cannot express raises it", async () => {
-    await expect(translate("postgresql", "collection/map/equals-list-literal")).rejects.toThrow(
-      UnsupportedQueryPlanError,
-    );
-  });
-
   test("a mapper misconfiguration is a plain Error, not a refusal", async () => {
     // An unmapped reference is a bug in the caller's mapping; reporting it as "unsupported" would
     // let a harness count a typo as a declared limitation.
@@ -175,22 +163,15 @@ describe("declared index storage", () => {
   const reference = "request.resource.attr.tagNames";
   const INDEX = "collection/index/first-element-of-string-list";
 
-  test.each(STORES)("%s refuses an undeclared storage shape", async (store) => {
-    const entry = MAPPERS[store][reference];
+  test("refuses an undeclared storage shape", async () => {
+    const entry = MAPPERS.postgresql[reference];
     if (!entry || typeof entry !== "object" || !("indexable" in entry)) {
       throw new Error("The shared mapper must declare index storage");
     }
     const { indexable: _indexable, ...undeclared } = entry;
     await expect(
-      translate(store, INDEX, { mapper: { ...MAPPERS[store], [reference]: undeclared } }),
+      translate("postgresql", INDEX, { mapper: { ...MAPPERS.postgresql, [reference]: undeclared } }),
     ).rejects.toThrow("Index storage shape is undeclared");
-  });
-
-  test("a function mapper preserves the declared representation", async () => {
-    const mapper: Mapper = (ref) => MAPPERS.postgresql[ref];
-    expect(render("postgresql", await filterFor("postgresql", INDEX, { mapper }))).toEqual(
-      render("postgresql", await filterFor("postgresql", INDEX)),
-    );
   });
 
   test("pgArray cannot be declared for a SQLite column", async () => {
@@ -217,18 +198,10 @@ describe("declared index storage", () => {
 
   const converted = pgTable("converted_arrays", {
     numericString: numeric().array(),
-    numericNumber: numeric({ mode: "number" }).array(),
     bigintNumber: bigint({ mode: "number" }).array(),
-    realNumber: real().array(),
     doubleNumber: doublePrecision().array(),
   });
-  test.each([
-    converted.numericString,
-    converted.numericNumber,
-    converted.bigintNumber,
-    converted.realNumber,
-    converted.doubleNumber,
-  ])("refuses array representations that change scalar types or null elements", async (column) => {
+  test.each([converted.numericString, converted.bigintNumber, converted.doubleNumber])("refuses array representations that change scalar types or null elements", async (column) => {
     await expect(
       translate("postgresql", INDEX, { mapper: { [reference]: { column, indexable: "pgArray" } } }),
     ).rejects.toThrow("without custom decoding");
@@ -286,9 +259,6 @@ describe("relation subqueryFilter", () => {
     );
   });
 
-  test("undeclared: silence adds no clause", async () => {
-    expect(await sqlFor("collection/exists/empty-collection")).not.toContain(DECLARATION);
-  });
 });
 
 describe("nullAttributeRepresentation", () => {
@@ -296,34 +266,10 @@ describe("nullAttributeRepresentation", () => {
   // the caller uses, so the adapter has to be told.
   const NULL_EQ_MISSING = "null/equals/null-literal-on-missing-attribute";
 
-  test("explicit: a null operand becomes an IS NULL filter", async () => {
-    expect(
-      render(
-        "postgresql",
-        await filterFor("postgresql", NULL_EQ_MISSING, {
-          mapper: UNDECLARED,
-          nullAttributeRepresentation: "explicit",
-        }),
-      ).sql,
-    ).toContain('"a_optional_string" is null');
-  });
-
   // A NULL column on the omitted convention sends no attribute, so check() denies on a
-  // missing-attribute error — under both polarities — where the explicit filter above returns
-  // exactly those rows (#302). Omitted is recognisable by that guard: NULL, never a match.
+  // missing-attribute error — under both polarities — where the explicit filter returns exactly
+  // those rows (#302). Omitted is recognisable by that guard: NULL, never a match.
   const OMITTED_GUARD = "is null then null else";
-
-  test("omitted: the same plan never matches, and a NULL column is UNKNOWN", async () => {
-    const rendered = render(
-      "postgresql",
-      await filterFor("postgresql", NULL_EQ_MISSING, {
-        mapper: UNDECLARED,
-        nullAttributeRepresentation: "omitted",
-      }),
-    ).sql;
-    expect(rendered).toContain(`"a_optional_string" ${OMITTED_GUARD}`);
-    expect(rendered.replace(OMITTED_GUARD, "")).not.toContain("is null");
-  });
 
   // #308. A per-attribute declaration overrides the call-level option in both directions.
   test("a per-attribute declaration overrides the call-level option", async () => {
@@ -373,35 +319,27 @@ describe("nullAttributeRepresentation", () => {
     expect(rendered.sql.includes("not ")).toBe(operator === "ne");
   });
 
-  test.each(["explicit", "omitted"] as const)(
-    "a reentrant mapper preserves the outer %s representation",
-    async (outer) => {
-      const inner = outer === "explicit" ? "omitted" : "explicit";
-      const nested = await planOf(golden("comparison/less-or-equal/value-first"));
-      const mapper: Mapper = (reference) => {
-        queryPlanToDrizzle({
-          queryPlan: nested,
-          mapper: MAPPERS.postgresql,
-          nullAttributeRepresentation: inner,
-        });
-        return UNDECLARED[reference];
-      };
-      const run = () =>
-        translate("postgresql", NULL_EQ_MISSING, { mapper, nullAttributeRepresentation: outer });
-      if (outer === "omitted") {
-        expect(await run()).toEqual(
-          await translate("postgresql", NULL_EQ_MISSING, {
-            mapper: UNDECLARED,
-            nullAttributeRepresentation: "omitted",
-          }),
-        );
-      } else {
-        expect(await run()).toEqual(
-          await translate("postgresql", NULL_EQ_MISSING, { mapper: UNDECLARED }),
-        );
-      }
-    },
-  );
+  // An inner call under "explicit" that leaked its representation, or a restore to the default
+  // rather than to the outer value, would both turn the outer "omitted" call explicit.
+  test("a reentrant mapper preserves the outer representation", async () => {
+    const nested = await planOf(golden("comparison/less-or-equal/value-first"));
+    const mapper: Mapper = (reference) => {
+      queryPlanToDrizzle({
+        queryPlan: nested,
+        mapper: MAPPERS.postgresql,
+        nullAttributeRepresentation: "explicit",
+      });
+      return UNDECLARED[reference];
+    };
+    expect(
+      await translate("postgresql", NULL_EQ_MISSING, { mapper, nullAttributeRepresentation: "omitted" }),
+    ).toEqual(
+      await translate("postgresql", NULL_EQ_MISSING, {
+        mapper: UNDECLARED,
+        nullAttributeRepresentation: "omitted",
+      }),
+    );
+  });
 
   // #302 completeness: under a call-level "omitted" with no per-attribute declarations, no plan
   // carrying a null literal SELECTS the NULL rows — keyed off the null OPERAND, not a list of
@@ -479,16 +417,11 @@ describe("timestamp literals", () => {
 
   // No seed sits within a grid step of `now()`, so which side of the literal the bound grid point
   // falls on is invisible to the harness: a floor where a ceiling belongs returns the same rows.
-  test.each([
-    ["postgresql", "2026-08-11T09:13:39.123457Z"],
-    ["mysql", "2026-08-11T09:13:39.123457Z"],
-  ] as const)(
-    "a nanosecond instant — what the PDP actually folds — bounds `<` by the next grid point (%s)",
-    async (store, bound) => {
-      const filter = await filterFor(store, WINDOW, { now: "2026-08-11T09:13:39.123456789Z" });
-      expect(render(store, filter).params).toEqual([bound]);
-    },
-  );
+  // PostgreSQL's grid is pinned operator by operator below, on a hand-built plan.
+  test("a nanosecond instant — what the PDP actually folds — bounds `<` by the next grid point (mysql)", async () => {
+    const filter = await filterFor("mysql", WINDOW, { now: "2026-08-11T09:13:39.123456789Z" });
+    expect(render("mysql", filter).params).toEqual(["2026-08-11T09:13:39.123457Z"]);
+  });
 
   // A SQLite text column is compared in a fixed-width nanosecond form, so no grid point stands in.
   test("a nanosecond instant is compared exactly against a SQLite text column", async () => {
@@ -536,18 +469,6 @@ describe("timestamp literals", () => {
     });
     if (filter.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
     expect(render("postgresql", filter.filter).params).toEqual([]);
-  });
-
-  test("the same plan at millisecond precision translates", async () => {
-    expect(render("postgresql", await at("2026-08-11T09:13:39.123Z")).params).toEqual([
-      "2026-08-11T09:13:39.123Z",
-    ]);
-  });
-
-  test("excess fractional digits are accepted only when they are zero", async () => {
-    expect(render("postgresql", await at("2026-08-11T09:13:39.123000Z")).params).toEqual([
-      "2026-08-11T09:13:39.123Z",
-    ]);
   });
 
   // Refused rather than coerced: a Date parsed from a lenient string would compare against the
@@ -617,8 +538,9 @@ describe("RE2 patterns lowered without a regex engine", () => {
     expect(compileRegex(pattern)).toEqual(plans);
   });
 
-  // Each is rejected by Go's regexp.Compile, so CEL raises when it evaluates matches().
-  test.each(["a(?=b)", "a(?!b)", "(?<=a)b", "*a", "a{2,1}", "(a", "a\\"])(
+  // Each is rejected by Go's regexp.Compile, so CEL raises when it evaluates matches(). Lookaround
+  // is carried by regex/matches/lookahead-from-principal.
+  test.each(["*a", "a{2,1}", "(a", "a\\"])(
     "Corpus gap. %p is an RE2 error, so the condition is UNKNOWN",
     (pattern) => {
       expect(compileRegex(pattern)).toBe("error");

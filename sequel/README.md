@@ -442,5 +442,13 @@ The `tests` service mounts the repository root, because the suites read `../conf
 | `spec/conformance_spec.rb` | The conformance harness: every golden plan of both pinned PDPs, against the corpus rows, on the store `ADAPTER_TEST_DB` names. |
 | `spec/adapter_contract_spec.rb` | What a **caller** supplies and the corpus therefore cannot vary: the mapper forms, a `many_to_many`, operator overrides, the per-call NULL convention, the four transports a plan can arrive over, and the association shapes the adapter refuses to guess at. SQLite only. |
 
+The translator is the ActiveRecord one ported onto Sequel's expression constructors. The
+collection mapping is `Cerbos::Sequel.association` (Sequel's word), and a `many_to_many` is opened
+into its join table and its target in one correlated subquery, a model shape the corpus has no
+spelling for, so `spec/adapter_contract_spec.rb` proves it. Inside `module Cerbos`, `Sequel` is the
+adapter; the library is `::Sequel`. The MySQL driver is `trilogy`: set the collation with
+`collation_connection`, never `SET NAMES ... COLLATE`, which crashes that driver. CI runs the corpus
+on all three stores under Sequel 5.69 and the newest 5.x.
+
 The example application in [`example/`](example/) runs the shared demo domain. Start it with
 `../demo/scripts/run-example.sh sequel` — see [example/README.md](example/README.md).

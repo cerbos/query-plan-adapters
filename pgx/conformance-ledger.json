@@ -309,6 +309,10 @@
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
       "status": "unsupported"
     },
+    "regex/matches/leading-zero-count-is-literal": {
+      "status": "unsupported",
+      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics."
+    },
     "regex/matches/literal-brace": {
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
       "status": "unsupported"
@@ -324,6 +328,10 @@
     "regex/matches/negated-invalid-patterns-from-principal": {
       "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
       "status": "unsupported"
+    },
+    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
+      "status": "unsupported",
+      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics."
     },
     "regex/matches/posix-character-class": {
       "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
@@ -348,6 +356,10 @@
     "regex/matches/unanchored-quantifiers": {
       "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
       "status": "unsupported"
+    },
+    "regex/matches/unbounded-count": {
+      "status": "unsupported",
+      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics."
     },
     "regex/matches/whitespace-class": {
       "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",

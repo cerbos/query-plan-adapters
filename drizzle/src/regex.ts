@@ -20,7 +20,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 const MAX_LITERALS = 256;
 /** The most characters a set may hold for the every-character-in-a-set form. */
 const MAX_SET_SIZE = 64;
-/** RE2's own bound on a counted repetition. */
+/** RE2's bound on the copies a counted repetition, nested ones included, may make. */
 const MAX_REPEAT = 1000;
 
 export type RegexPlan =
@@ -179,16 +179,22 @@ class Parser {
       // A trailing `?` makes the repetition lazy, which changes WHERE it matches, not WHETHER.
       if (this.peek() === "?") this.position += 1;
       node = { kind: "repeat", node, min: bounds[0], max: bounds[1] };
+      // RE2 rejects a repetition whose nested copies exceed MAX_REPEAT: `(a{2}){600}`.
+      if (!repeatIsValid(node, MAX_REPEAT)) throw new InvalidPattern();
     }
   }
 
-  /** `{n}`, `{n,}` or `{n,m}`; anything else starting with `{` is a literal brace in RE2. */
+  /**
+   * `{n}`, `{n,}` or `{n,m}`; anything else starting with `{` is a literal brace in RE2, which
+   * reads a count as Go's `regexp/syntax` `parseInt` does, without a leading zero: `a{01}` is `a`
+   * then the text "{01}".
+   */
   private countedRepeat(): [number, number | undefined] | undefined {
     const rest = this.characters.slice(this.position).join("");
-    const match = /^\{(\d+)(,(\d*))?\}/.exec(rest);
+    const match = /^\{(0|[1-9]\d*)(,(0|[1-9]\d*)?)?\}/.exec(rest);
     if (!match) return undefined;
     const min = Number(match[1]);
-    const max = match[2] === undefined ? min : match[3] === "" ? undefined : Number(match[3]);
+    const max = match[2] === undefined ? min : match[3] === undefined ? undefined : Number(match[3]);
     if (min > MAX_REPEAT || (max !== undefined && (max > MAX_REPEAT || max < min))) {
       throw new InvalidPattern();
     }
@@ -337,6 +343,27 @@ class Parser {
     throw unsupported(this.pattern, `the escape \\${escaped} is not read`);
   }
 }
+
+/**
+ * Go's `repeatIsValid`: each repetition divides the budget by its count (its maximum, or its
+ * minimum when unbounded), and a count beyond what is left is invalid.
+ */
+const repeatIsValid = (node: Node, budget: number): boolean => {
+  switch (node.kind) {
+    case "repeat": {
+      if (node.max === 0) return true;
+      const count = node.max ?? node.min;
+      if (count > budget) return false;
+      return repeatIsValid(node.node, count === 0 ? budget : Math.floor(budget / count));
+    }
+    case "group":
+      return node.alternatives.every((sequence) =>
+        sequence.every((inner) => repeatIsValid(inner, budget)),
+      );
+    default:
+      return true;
+  }
+};
 
 /** Every string a node sequence matches, when that is a finite set of at most MAX_LITERALS. */
 const finiteSequence = (nodes: Node[]): string[] | undefined => {

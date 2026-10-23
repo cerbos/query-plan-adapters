@@ -1,0 +1,49 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/has/parent-attribute",
+  "intent": "has(parent.aOptionalString): presence of a field one hop across the to-one relation.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_ALLOWED"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "has() over an omitted attribute: unknown to the planner, absent to check()",
+    "pdp": [
+      "0.56.0"
+    ],
+    "reason": "Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() calls omit parent.aOptionalString where the hop or the field is missing, so check() denies those rows. From 0.57.0 the plan carries the has()."
+  },
+  "request": {
+    "action": "relation/has/parent-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "has(R.attr.parent.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Rows without a parent and rows whose parent lacks aOptionalString (a4, a7, c1) are both denied; testing only the relation grants the second group, testing only the column without the join mishandles the first."
+}

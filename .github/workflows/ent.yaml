@@ -47,7 +47,7 @@ jobs:
           cache-dependency-path: ent/go.sum
 
       - name: Lint
-        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           working-directory: ent
           args: --config=.golangci.yaml
@@ -120,7 +120,7 @@ jobs:
       # nothing there is linted by it. Held to the adapter's own configuration rather than a
       # weaker one of its own: an example a consumer reads is the code most likely to be copied.
       - name: Lint the example
-        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           working-directory: ent/example
           args: --config=../.golangci.yaml

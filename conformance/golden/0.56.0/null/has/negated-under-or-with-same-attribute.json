@@ -1,0 +1,54 @@
+{
+  "allowed": [
+    "a1",
+    "j1"
+  ],
+  "degenerateReason": null,
+  "id": "null/has/negated-under-or-with-same-attribute",
+  "intent": "!has(aString) || aString == \"one\": absence or a value, so the has() is not a guard and stays in the plan.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "one"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "has() over an omitted attribute: unknown to the planner, absent to check()",
+    "pdp": [
+      "0.56.0"
+    ],
+    "reason": "Before 0.57.0 the planner folds has() to true, so the plan is eq(aString, \"one\") alone. The per-row check() call sends j1's omitted aString as absent, so !has() is true and check() allows j1. From 0.57.0 the plan carries the has()."
+  },
+  "request": {
+    "action": "null/has/negated-under-or-with-same-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!has(R.attr.aString) || R.attr.aString == \"one\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "j1 lacks aString and is allowed by the !has(); dropping the has() as a guard, or folding it like an AND guard, denies j1."
+}

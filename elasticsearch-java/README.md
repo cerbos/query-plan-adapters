@@ -308,14 +308,15 @@ a document missing the field is never authorized by a `must_not` matching it —
 missing attribute as an evaluation error.
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
-> unknown to the planner, which assumes the data layer supplies it, as a table column always does.
-> So the planner reads `has(R.attr.x)` as the guard for the `x` access beside it and folds it to true
-> by design: alone it plans as `ALWAYS_ALLOWED`, and `has(R.attr.x) && R.attr.y > 0` plans as
-> `R.attr.y > 0`. A document can lack a field, so the filter then returns documents missing `x` that
-> `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
-> with `check()` whether `x` is missing, null or present.
+> **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
+> attribute the plan request omits is unknown to those planners, which assume the data layer
+> supplies it, so they fold `has(R.attr.x)` to true: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`, which never excludes a document missing
+> `x`. From 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+> `x`'s null convention or refuses it: under `omitted` a document has `x` when its value is not
+> null, and under `explicit` every document has it. The planner still drops a `has(R.attr.x)` that
+> only guards an access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because that access
+> already denies a document without `x`.
 
 ## Custom operator overrides
 
@@ -421,8 +422,10 @@ throws, because JSON cannot carry it. An integral double is bound as a `long` on
 Lucene's optional operators disabled, so `@` and similar stay literal. Refused: partial non-literal
 patterns, inline flags, RE2 shorthand and Unicode classes, POSIX classes, interior anchors,
 empty-string-only patterns, unescaped `.` (RE2's dot excludes newline, Lucene's does not), an
-unparenthesised top-level `|` (RE2 reads `^a|b$` as two anchored alternatives; write `^(a|b)$`), and
-a `{` that does not start a `{n}`, `{n,}` or `{n,m}` repetition.
+unparenthesised top-level `|` (RE2 reads `^a|b$` as two anchored alternatives; write `^(a|b)$`),
+a `{` that does not start a `{n}`, `{n,}` or `{n,m}` repetition, a count with a leading zero (`{01}`,
+literal text to RE2), and nested counts whose copies multiply past 1000 (`(a{2}){600}`, which RE2
+rejects).
 
 ### Collection macros over known values
 
@@ -482,29 +485,28 @@ would change the security and performance profile of every filter.
   sub-millisecond timestamps
 - positive comparisons with `null`, and membership or intersection that would need an explicit null
   value or array element told apart from a missing field
+- `has()` under `explicitNullAttributes`, on an object field other mapped fields sit below, and
+  negated below a mapped object: each needs a present null told apart from a missing field
 
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the harness
-indexes the 42 seed documents in a real Elasticsearch, translates every plan recorded from the
+indexes the 43 seed documents in a real Elasticsearch, translates every plan recorded from the
 pinned PDPs, runs the query, and compares the returned ids with the ones `check()` allowed. Against
-the current PDP (0.55.0), where the total is every golden case in the tier:
+the current PDP (0.57.0), where the total is every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 28 / 29 |
-| extended | 34 / 97 |
-| adversarial | 120 / 338 |
+| core | 29 / 30 |
+| extended | 38 / 102 |
+| adversarial | 124 / 344 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
 [Unsupported shapes](#unsupported-shapes), and
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
 cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.55.0 that is four extended cases and five adversarial cases. In
-`null/has/missing-attribute` and `null/has/composed-with-comparison` the plan request leaves an
-omitted attribute unknown, so the planner folds `has()` to true by design, while `check()` receives
-the omission as absent and denies the document; use `R.attr.x != null` instead of `has(R.attr.x)`. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
+pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps `has()` in the plan. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
 cases a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it excludes j2,
 while `check()` receives `aNumber` as absent and treats the erroring DENY as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). In `type-mismatch/in/number-field-in-scalar-principal` and
@@ -559,6 +561,11 @@ applies to every field, and quietly returns more rows.
 
 ## Behaviour changes
 
+- **Breaking ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)).** `matches()`
+  refuses a repetition count with a leading zero (`^one{01}$`), which RE2 reads as literal text and
+  Lucene as `{1}`, and nested counts whose copies multiply past 1000 (`^(a{2}){600}$`), which RE2
+  rejects and Lucene accepts. Both used to reach Lucene: the first matched `"one"`, and the second's
+  negation matched every document (over-grant fixes).
 - **Breaking.** A comparison against a field with no `scalarTypes` declaration throws
   `UnmappedAttributeException` instead of emitting a query Elasticsearch would coerce
   ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). The positional overloads

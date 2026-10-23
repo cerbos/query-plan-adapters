@@ -120,6 +120,27 @@ const lookUp = (name: string, scope: Scope): unknown => {
   return readPath(getNestedValue(doc, resolveField(name, mapper)), scope);
 };
 
+/**
+ * `has(name)`: the key at the end of the path is present, resolving the path as `lookUp` does. A
+ * stored null is absent under the omitted convention, where the caller sends no attribute for it.
+ */
+const hasPath = (name: string, scope: Scope): unknown => {
+  const { doc, mapper, bindings, nullIsMissing } = scope;
+  const dotIdx = name.indexOf(".");
+  const root = dotIdx === -1 ? name : name.substring(0, dotIdx);
+  const [base, path] =
+    dotIdx !== -1 && root in bindings
+      ? [bindings[root], name.substring(dotIdx + 1)]
+      : [doc, resolveField(name, mapper)];
+  const parts = path.split(".");
+  const key = parts.pop()!;
+  const parent = parts.length === 0 ? base : getNestedValue(base, parts.join("."));
+  if (!isRecord(parent)) return EVALUATION_ERROR;
+  if (!Object.prototype.hasOwnProperty.call(parent, key)) return false;
+  const value = parent[key];
+  return value !== undefined && !(nullIsMissing && value === null);
+};
+
 const readPath = (value: unknown, { nullIsMissing }: Scope): unknown =>
   nullIsMissing && value === null ? EVALUATION_ERROR : value;
 
@@ -817,6 +838,22 @@ const OPERATORS: Record<string, Operator> = {
       throw new UnsupportedQueryPlanError(
         "set-field is only meaningful as a map literal's entry",
       );
+    },
+  },
+
+  // `has(a.b)`: whether the attribute carries key `b`, the presence test the planner emits from
+  // Cerbos 0.57.0. A missing value is never an error here, only `false`; selecting through a
+  // missing or non-map parent is, as it is in CEL.
+  has: {
+    evaluate: ({ operands, scope }) =>
+      hasPath((operands[0] as PlanExpressionVariable).name, scope),
+    validate: ({ operands }: PlanExpression): void => {
+      const [operand] = operands;
+      if (operands.length !== 1 || operand === undefined || !isVariable(operand)) {
+        throw new UnsupportedQueryPlanError(
+          "has requires exactly one attribute reference",
+        );
+      }
     },
   },
 

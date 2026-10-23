@@ -88,8 +88,8 @@ never opened, is the evidence. A deleted directory cannot accumulate a further m
 **A shape worth proving is a corpus action, and there is nowhere else to put one.** That is the
 point, and it moves work rather than removing it: the migrations parked some policy-reachable shapes
 in per-adapter unit tests, which is a corpus gap wearing a unit test rather than a home for them.
-`CLAUDE.md` ("What a translator unit test may pin") names that as a bridge to be deleted when the
-action lands, and [#414](https://github.com/cerbos/query-plan-adapters/issues/414) is the port.
+`CODING_STANDARDS.md` ("What a translator unit test may pin") names that as a bridge to be deleted
+when the action lands, and [#414](https://github.com/cerbos/query-plan-adapters/issues/414) is the port.
 
 **Convex's integration suite goes with the file.** It was the last thing that read the root suite,
 and it proved that Convex's real filter engine evaluates a pushed-down filter the way the adapter

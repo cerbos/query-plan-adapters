@@ -38,8 +38,34 @@ function refuse(pattern: string, why: string): never {
 
 const DIGITS = [..."0123456789"];
 
-/** A repetition count, `{n}`, `{n,}` or `{n,m}`; any other brace is a literal to RE2. */
-const REPEAT = /^\{(\d+)(,(\d*))?\}/;
+/**
+ * A repetition count, `{n}`, `{n,}` or `{n,m}`; any other brace is a literal to RE2. A count is
+ * read as Go's `regexp/syntax` `parseInt` reads it, which takes no leading zero: `a{01}` is `a`
+ * then the text "{01}".
+ */
+const REPEAT = /^\{(0|[1-9]\d*)(,(0|[1-9]\d*)?)?\}/;
+
+/** RE2's bound on the copies a counted repetition, nested ones included, may make. */
+const MAX_REPEAT = 1000;
+
+/**
+ * Go's `repeatIsValid`: each repetition divides the budget by its count (its maximum, or its
+ * minimum when unbounded), and a count beyond what is left is invalid: `(a{2}){600}`.
+ */
+function repeatIsValid(node: Node, budget: number): boolean {
+  switch (node.kind) {
+    case "repeat": {
+      if (node.max === 0) return true;
+      const count = node.max === Infinity ? node.min : node.max;
+      if (count > budget) return false;
+      return repeatIsValid(node.node, count === 0 ? budget : Math.floor(budget / count));
+    }
+    case "alt":
+      return node.branches.every((branch) => branch.every((inner) => repeatIsValid(inner, budget)));
+    default:
+      return true;
+  }
+}
 
 /** RE2's simple case folding over ASCII letters: `k` and `s` fold with a non-ASCII sign too. */
 function foldOrbit(char: string): string[] {
@@ -113,8 +139,10 @@ class Parser {
       if (match === null) return node;
       this.index += Array.from(match[0]).length;
       min = Number(match[1]);
-      max = match[2] === undefined ? min : match[3] === "" ? Infinity : Number(match[3]);
-      if (max < min || max > 1000) throw new InvalidRegexError("invalid repeat count");
+      max = match[2] === undefined ? min : match[3] === undefined ? Infinity : Number(match[3]);
+      if (min > MAX_REPEAT || (max !== Infinity && (max > MAX_REPEAT || max < min))) {
+        throw new InvalidRegexError("invalid repeat count");
+      }
     } else {
       return node;
     }
@@ -126,7 +154,9 @@ class Parser {
     if (node.kind === "begin" || node.kind === "end") {
       refuse(this.pattern, "a repeated anchor");
     }
-    return { kind: "repeat", node, min, max };
+    const repeat: Node = { kind: "repeat", node, min, max };
+    if (!repeatIsValid(repeat, MAX_REPEAT)) throw new InvalidRegexError("invalid repeat count");
+    return repeat;
   }
 
   private atom(): Node {

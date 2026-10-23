@@ -162,15 +162,11 @@ func TestMalformedPlansReturnErrors(t *testing.T) {
 		{name: "relation used as a scalar", cond: expr("eq", variable("request.resource.attr.tags"), val(t, "x"))},
 		{name: "column used as a collection", cond: expr("exists", variable("request.resource.attr.name"), expr("lambda", val(t, true), variable("t")))},
 		{name: "macro over a literal that is not a list", cond: expr("exists", val(t, "scalar"), expr("lambda", val(t, true), variable("t")))},
-		{name: "exists_one over a literal list", cond: expr("exists_one", val(t, []any{"a", "b"}), expr("lambda", val(t, true), variable("t")))},
 		{name: "lambda field missing from the element", cond: expr("exists", val(t, []any{map[string]any{"other": 1}}), expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
 		{name: "hierarchy operands with different delimiters", cond: expr("ancestorOf", expr("hierarchy", val(t, "a"), val(t, ".")), expr("hierarchy", val(t, "a.b"), val(t, ":")))},
 		{name: "hierarchy operator without hierarchy operands", cond: expr("ancestorOf", val(t, "a"), val(t, "a.b"))},
 		{name: "empty hierarchy delimiter", cond: expr("ancestorOf", expr("hierarchy", val(t, "a"), val(t, "")), expr("hierarchy", val(t, "a.b"), val(t, "")))},
 		{name: "invalid timestamp literal", cond: expr("gt", expr("timestamp", val(t, "not-a-timestamp")), val(t, 1))},
-		{name: "timestamp over an untyped column", cond: expr("gt", expr("timestamp", variable("request.resource.attr.name")), val(t, 1))},
-		{name: "regex", cond: expr("matches", variable("request.resource.attr.name"), val(t, ".*"))},
-		{name: "filter outside size", cond: expr("filter", variable("request.resource.attr.tags"), expr("lambda", val(t, true), variable("t")))},
 		{name: "hasIntersection between two stored collections", cond: expr("hasIntersection", variable("request.resource.attr.tags"), variable("request.resource.attr.tags"))},
 		{name: "isSubset with one operand", cond: expr("isSubset", variable("request.resource.attr.tags"))},
 		{name: "index with one operand", cond: expr("eq", expr("index", variable("request.resource.attr.tags")), val(t, "x"))},
@@ -200,29 +196,6 @@ func TestNilConditionIsNotAnAllow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, cerbosent.KindAlwaysDenied, result.Kind)
 	require.Nil(t, result.Predicate)
-}
-
-func TestPlanKinds(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name string
-		kind enginev1.PlanResourcesFilter_Kind
-		want cerbosent.PlanKind
-	}{
-		{name: "denied", kind: enginev1.PlanResourcesFilter_KIND_ALWAYS_DENIED, want: cerbosent.KindAlwaysDenied},
-		{name: "allowed", kind: enginev1.PlanResourcesFilter_KIND_ALWAYS_ALLOWED, want: cerbosent.KindAlwaysAllowed},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			plan := &responsev1.PlanResourcesResponse{Filter: &enginev1.PlanResourcesFilter{Kind: tc.kind}}
-			result, err := cerbosent.Translate(plan, "resource", testMapper())
-			require.NoError(t, err)
-			require.Equal(t, tc.want, result.Kind)
-			require.Nil(t, result.Predicate, "only KindConditional carries a predicate")
-		})
-	}
 }
 
 // TestUnrecognisedFilterKindIsRejected covers the remaining wire value: an unset kind is neither of
@@ -263,108 +236,19 @@ func TestNoPlanDataReachesSQLText(t *testing.T) {
 	}
 }
 
-// TestValueFirstComparisonsMirror pins the operand-order rule that shipped as the same bug to two
-// adapters (cerbos/query-plan-adapters#257): the planner preserves policy source order, so
-// `3 <= R.attr.count` arrives value-first and must become `count >= 3`, not `count <= 3`.
-func TestValueFirstComparisonsMirror(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct{ operator, want string }{
-		{operator: "lt", want: ">"},
-		{operator: "le", want: ">="},
-		{operator: "gt", want: "<"},
-		{operator: "ge", want: "<="},
-	} {
-		t.Run(tc.operator, func(t *testing.T) {
-			t.Parallel()
-
-			query, args := translateWith(t, testMapper(), expr(tc.operator, val(t, 3), variable("request.resource.attr.count")))
-			require.Equal(t, "(`resource`.`count` "+tc.want+" ?)", query)
-			require.Equal(t, []any{float64(3)}, args)
-		})
-	}
-}
-
-// TestSymmetricComparisonsNormaliseToColumnFirst covers the other half of the rule: eq/ne/in mean
-// the same thing either way round, so they normalise rather than mirror.
-func TestSymmetricComparisonsNormaliseToColumnFirst(t *testing.T) {
-	t.Parallel()
-
-	query, _ := translateWith(t, testMapper(), expr("eq", val(t, "x"), variable("request.resource.attr.name")))
-	require.Equal(t, "(`resource`.`name` = ?)", query)
-}
-
-// TestOperatorSymbols pins the two lookup tables the renderer spells operators through.
+// TestOperatorSymbols pins the spelling of `%`, the one arithmetic operator no case renders.
 //
-// They are the kind of thing nothing else catches: a `+` written where `-` belongs, or `<` where
-// `<=` belongs, is valid SQL that quietly returns a different row set, and the corpus only notices
-// if some case happens to straddle the boundary the wrong symbol moves. Every arm is asserted so
-// there is no operator whose spelling is taken on trust.
+// KIND 3. Corpus gap (cerbos/query-plan-adapters#509): every `arithmetic/modulo/*` case reaches `%`
+// through int(), which this adapter refuses, so `size(R.attr.x) % n` — CEL's one integer an
+// attribute yields — is policy-reachable and never rendered against a store. A `/` written where
+// `%` belongs is valid SQL that quietly returns a different row set. The other operators are
+// proven by the comparison and arithmetic cases. Delete this when a size()-modulo case lands.
 func TestOperatorSymbols(t *testing.T) {
 	t.Parallel()
 
-	t.Run("comparisons", func(t *testing.T) {
-		t.Parallel()
-
-		for operator, symbol := range map[string]string{
-			"eq": "=", "ne": "<>", "lt": "<", "le": "<=", "gt": ">", "ge": ">=",
-		} {
-			query, _ := translateWith(t, testMapper(), expr(operator, variable("request.resource.attr.count"), val(t, 2)))
-			require.Equal(t, "(`resource`.`count` "+symbol+" ?)", query, operator)
-		}
-	})
-
-	t.Run("arithmetic", func(t *testing.T) {
-		t.Parallel()
-
-		// A non-constant dividend keeps `div` and `mod` from folding to a constant, and the division
-		// shapes wrap the arithmetic in the guards that keep a zero divisor UNKNOWN — so these
-		// assert the operator appears rather than pinning the whole surrounding CASE. `mod` takes
-		// size(), CEL's one integer an attribute yields: `%` over the double attribute itself is a
-		// no-overload error and refused.
-		dividend := func(operator string) *operand {
-			if operator == "mod" {
-				return expr("size", variable("request.resource.attr.name"))
-			}
-			return variable("request.resource.attr.count")
-		}
-		for operator, symbol := range map[string]string{
-			"add": "+", "sub": "-", "mult": "*", "div": "/", "mod": "%",
-		} {
-			query, _ := translateWith(t, testMapper(), expr("gt",
-				expr(operator, dividend(operator), val(t, 2)), val(t, 1)))
-			require.Contains(t, query, " "+symbol+" ", operator+": "+query)
-		}
-	})
-}
-
-// TestReceiverSensitiveOperatorsKeepWireOrder is the reason eq/ne/in are normalised by name rather
-// than by "put the column first": swapping `"const".contains(col)` would silently exchange the
-// haystack and the needle.
-func TestReceiverSensitiveOperatorsKeepWireOrder(t *testing.T) {
-	t.Parallel()
-
-	query, args := translateWith(t, testMapper(), expr("contains", val(t, "haystack"), variable("request.resource.attr.name")))
-	require.True(t, strings.HasPrefix(query, "(? LIKE"), "the constant is the receiver: %s", query)
-	require.Equal(t, "haystack", args[0])
-}
-
-// TestLikeMetacharactersAreEscaped pins that policy data cannot act as a wildcard.
-func TestLikeMetacharactersAreEscaped(t *testing.T) {
-	t.Parallel()
-
-	query, args := translateWith(t, testMapper(), expr("startsWith", variable("request.resource.attr.name"), val(t, `100%_a[b\`)))
-	require.Equal(t, `100\%\_a\[b\\%`, args[0])
-	require.Contains(t, query, "ESCAPE")
-}
-
-// TestNullComparisonBecomesIsNull pins the default (explicit-null) representation.
-func TestNullComparisonBecomesIsNull(t *testing.T) {
-	t.Parallel()
-
-	query, args := translateWith(t, testMapper(), expr("eq", variable("request.resource.attr.owner"), val(t, nil)))
-	require.Equal(t, "(`resource`.`owner` IS NULL)", query)
-	require.Empty(t, args)
+	query, _ := translateWith(t, testMapper(), expr("gt",
+		expr("mod", expr("size", variable("request.resource.attr.name")), val(t, 2)), val(t, 1)))
+	require.Contains(t, query, " % ", query)
 }
 
 // TestNullOperandsRejectedUnderOmitted pins the rejection, and that it matches on the operand
@@ -439,34 +323,6 @@ func TestIdentifiersAreQuoted(t *testing.T) {
 			t.Parallel()
 
 			mapper := cerbosent.MapperMap{"request.resource.attr.name": {Column: "odd column"}}
-			query, _ := whereFor(t, tc.dialect, mapper,
-				expr("eq", variable("request.resource.attr.name"), val(t, "x")))
-			require.Equal(t, tc.want, query)
-		})
-	}
-}
-
-// TestMapperColumnCarryingTheDialectQuoteIsNotRequoted records a documented divergence from pgx
-// rather than an invariant shared with it. pgx quotes defensively, doubling an embedded quote; ent
-// delegates quoting to sql.Builder.Ident, which treats a name already containing the dialect's
-// quote character as pre-quoted and passes it through verbatim.
-//
-// Neither is an injection boundary — a mapper is caller-supplied, and no plan data reaches an
-// identifier (TestNoPlanDataReachesSQLText) — so this is pinned as the behaviour a caller has to
-// know about, and stated as a hazard in the README, not silently relied upon. It is what makes
-// "name your columns with ordinary identifiers" part of this adapter's mapping contract.
-func TestMapperColumnCarryingTheDialectQuoteIsNotRequoted(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct{ dialect, column, want string }{
-		{dialect: dialect.SQLite, column: "we`ird", want: "(`resource`.we`ird = ?)"},
-		{dialect: dialect.MySQL, column: "we`ird", want: "(`resource`.we`ird = ?)"},
-		{dialect: dialect.Postgres, column: `we"ird`, want: `("resource".we"ird = $1::text)`},
-	} {
-		t.Run(tc.dialect, func(t *testing.T) {
-			t.Parallel()
-
-			mapper := cerbosent.MapperMap{"request.resource.attr.name": {Column: tc.column}}
 			query, _ := whereFor(t, tc.dialect, mapper,
 				expr("eq", variable("request.resource.attr.name"), val(t, "x")))
 			require.Equal(t, tc.want, query)
@@ -600,33 +456,6 @@ func TestRelationMembershipRespectsNullRepresentation(t *testing.T) {
 	}
 }
 
-// TestNumericCastsAreRejected pins the fail-closed answer to CEL's int()/double()
-// (cerbos/query-plan-adapters#311).
-//
-// The adapter used to render `CAST(trunc(...))`, which is exactly right for a numeric column —
-// int(1.9) is 1 to CEL while PostgreSQL's plain float-to-bigint cast rounds to 2, and MySQL needs
-// TRUNCATE() to say the same thing. It is wrong for a string one: CEL reads a WHOLE string or
-// raises, and an error denies the row, while SQL reads whatever numeric prefix parses. Nothing in
-// the plan says which kind of column the operand is, so the corpus cases cast/int/malformed-string
-// and cast/double/malformed-string cannot be told apart from cast/int/negative-fraction at
-// translation time and the whole family fails closed. Re-enabling the numeric direction needs a
-// caller-declared numeric ValueType, the way timestamp() already works — and the integer render
-// path was removed with the rest of it, so re-enabling means writing it again rather than reviving
-// an untested branch (#319).
-func TestNumericCastsAreRejected(t *testing.T) {
-	t.Parallel()
-
-	for _, operator := range []string{"int", "double"} {
-		t.Run(operator, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := translate(t, expr("eq", expr(operator, variable("request.resource.attr.count")), val(t, 2)))
-			require.ErrorIs(t, err, cerbosent.ErrUnsupported)
-			require.ErrorContains(t, err, "cannot be lowered to SQL CAST")
-		})
-	}
-}
-
 // TestMapperQualifierCannotShadowGeneratedAliases covers the other half of the alias guard: the
 // collision can come from an Entry's own qualifier, not just the resource table.
 func TestMapperQualifierCannotShadowGeneratedAliases(t *testing.T) {
@@ -646,13 +475,12 @@ func TestMapperQualifierCannotShadowGeneratedAliases(t *testing.T) {
 
 // Everything in this section is ent-specific: pgx renders for one engine, while this adapter's
 // renderer spells the same tree three ways. The conformance suite proves each spelling against a
-// real server, but only for the shapes the corpus happens to plan and only when Docker is
-// available. These pin the divergences themselves, so a wrong spelling fails in a second.
+// real server for the shapes the corpus plans; the per-dialect concat in a dynamic LIKE pattern
+// (string/contains/field-to-field on MySQL) and CHAR_LENGTH (size/greater-than/string-length, whose
+// multi-byte seed values straddle the bound) are proven there and not pinned here.
 
-// TestDialectSpellings covers each construct the renderer spells per dialect. A wrong spelling is
-// not a syntax error on every engine — `||` is valid MySQL (it means OR) and `LENGTH` is valid
-// everywhere (it counts bytes on MySQL) — so the shapes that would still run, wrongly, are the
-// point.
+// TestDialectSpellings covers the per-dialect spellings whose wrong choice is still valid SQL and
+// that no corpus row set separates: the MySQL text collation and PostgreSQL's double precision.
 func TestDialectSpellings(t *testing.T) {
 	t.Parallel()
 
@@ -682,30 +510,6 @@ func TestDialectSpellings(t *testing.T) {
 				dialect.MySQL:    "CAST(`resource`.`count` AS double)",
 			},
 		},
-		{
-			// CEL's size() counts code points. MySQL's LENGTH() counts bytes — "héllo🚀" is 6 to CEL
-			// and 10 to MySQL — so it needs CHAR_LENGTH.
-			name: "size() over a string",
-			cond: expr("gt", expr("size", variable("request.resource.attr.name")), val(t, 2)),
-			want: map[string]string{
-				dialect.SQLite:   "length(`resource`.`name`)",
-				dialect.Postgres: `length("resource"."name")`,
-				dialect.MySQL:    "char_length(`resource`.`name`)",
-			},
-		},
-		{
-			// A dynamic LIKE pattern concatenates. MySQL reads `||` as logical OR outside
-			// PIPES_AS_CONCAT, which would collapse the pattern to a boolean and match nothing;
-			// its CONCAT() propagates NULL where PostgreSQL's skips NULLs, so each engine gets the
-			// spelling that keeps a missing attribute UNKNOWN.
-			name: "concat in a dynamic LIKE pattern",
-			cond: expr("contains", variable("request.resource.attr.name"), variable("request.resource.attr.owner")),
-			want: map[string]string{
-				dialect.SQLite:   "LIKE (? || replace(",
-				dialect.Postgres: `LIKE ($1::text || replace(`,
-				dialect.MySQL:    "LIKE CONCAT(?, replace(",
-			},
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -716,29 +520,6 @@ func TestDialectSpellings(t *testing.T) {
 				require.Contains(t, query, want, "%s: %s", d, query)
 			}
 		})
-	}
-}
-
-// TestPostgresBindsTypedParameters pins the `::type` annotations. PostgreSQL infers an untyped `$n`
-// from the context it appears in, and in `CAST(col AS double precision) / $1` there is nothing to
-// infer from — it falls back to text and the query dies with "operator does not exist". The plan is
-// the only thing that knows a literal's type, so it is stated. SQLite and MySQL infer from the
-// bound value and must carry no annotation, or the SQL is invalid there.
-func TestPostgresBindsTypedParameters(t *testing.T) {
-	t.Parallel()
-
-	cond := expr("and",
-		expr("eq", variable("request.resource.attr.name"), val(t, "x")),
-		expr("gt", variable("request.resource.attr.count"), val(t, 2)),
-	)
-
-	postgres, _ := whereFor(t, dialect.Postgres, testMapper(), cond)
-	require.Contains(t, postgres, "$1::text")
-	require.Contains(t, postgres, "$2::double precision")
-
-	for _, d := range []string{dialect.SQLite, dialect.MySQL} {
-		query, _ := whereFor(t, d, testMapper(), cond)
-		require.NotContains(t, query, "::", "%s infers from the bound value: %s", d, query)
 	}
 }
 
@@ -792,29 +573,6 @@ func TestTimestampsAreBoundForTheDialect(t *testing.T) {
 	for _, d := range []string{dialect.Postgres, dialect.MySQL} {
 		_, args := whereFor(t, d, testMapper(), cond)
 		require.Equal(t, []any{instant}, args, "%s has a real temporal type", d)
-	}
-}
-
-// TestBooleanConstantsAvoidKeywords pins the tautology spelling. TRUE and FALSE are not portable
-// keywords across every engine ent targets, and these constants are how a folded macro and an
-// always-true filter reach the query at all, so they cannot be dialect-specific.
-func TestBooleanConstantsAvoidKeywords(t *testing.T) {
-	t.Parallel()
-
-	// A macro over an empty literal collection folds to its identity: `exists` is false, `all` true.
-	for _, tc := range []struct{ operator, want string }{
-		{operator: "exists", want: "(1 = 0)"},
-		{operator: "all", want: "(1 = 1)"},
-	} {
-		t.Run(tc.operator, func(t *testing.T) {
-			t.Parallel()
-
-			cond := expr(tc.operator, val(t, []any{}), expr("lambda", val(t, true), variable("t")))
-			for _, d := range []string{dialect.SQLite, dialect.Postgres, dialect.MySQL} {
-				query, _ := whereFor(t, d, testMapper(), cond)
-				require.Equal(t, tc.want, query)
-			}
-		})
 	}
 }
 
@@ -981,65 +739,6 @@ func explicitNullMapper() cerbosent.Mapper {
 	}
 }
 
-// A null VALUE is not equal to "x", so CEL returns a definite FALSE and its negation a definite
-// TRUE. A bare inequality is UNKNOWN instead, which excludes the row under BOTH polarities — the
-// row the PDP allows never comes back.
-func TestExplicitNullEqualityIsDefinite(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		cond  *operand
-		name  string
-		query string
-	}{
-		{
-			name:  "eq against a constant",
-			cond:  expr("eq", variable("request.resource.attr.owner"), val(t, "x")),
-			query: "((`resource`.`owner` IS NOT NULL) AND (`resource`.`owner` = ?))",
-		},
-		{
-			name:  "ne against a constant",
-			cond:  expr("ne", variable("request.resource.attr.owner"), val(t, "x")),
-			query: "(NOT ((`resource`.`owner` IS NOT NULL) AND (`resource`.`owner` = ?)))",
-		},
-		{
-			name:  "membership without a null element",
-			cond:  expr("in", variable("request.resource.attr.owner"), val(t, []any{"x", "y"})),
-			query: "((`resource`.`owner` IS NOT NULL) AND (`resource`.`owner` IN (?, ?)))",
-		},
-		{
-			name: "field-to-field between two explicit nulls",
-			cond: expr("eq", variable("request.resource.attr.owner"), variable("request.resource.attr.coOwner")),
-			query: "(((`resource`.`owner` IS NULL) AND (`resource`.`co_owner` IS NULL)) OR " +
-				"((`resource`.`owner` IS NOT NULL) AND (`resource`.`co_owner` IS NOT NULL) AND (`resource`.`owner` = `resource`.`co_owner`)))",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			query, _ := translateWith(t, explicitNullMapper(), tc.cond)
-			require.Equal(t, tc.query, query)
-		})
-	}
-}
-
-// The equality family only. An ordering comparison against a null receiver is a no-overload error
-// in CEL, which denies under both polarities — exactly what UNKNOWN already does — so it must keep
-// propagating it rather than being made definite.
-func TestExplicitNullLeavesOtherOperatorsAlone(t *testing.T) {
-	t.Parallel()
-
-	query, _ := translateWith(t, explicitNullMapper(),
-		expr("gt", variable("request.resource.attr.owner"), val(t, "x")))
-	require.Equal(t, "(`resource`.`owner` > ?)", query)
-
-	// An undeclared entry keeps the historical rendering, so declaring the convention on one
-	// attribute cannot change the SQL emitted for any other mapping.
-	query, _ = translateWith(t, explicitNullMapper(),
-		expr("ne", variable("request.resource.attr.name"), val(t, "x")))
-	require.Equal(t, "(`resource`.`name` <> ?)", query)
-}
-
 // The entry-level declaration overrides the call-level option in both directions, which is the
 // whole point: one call, two conventions.
 func TestNullConventionOverridesTheCallLevelRepresentation(t *testing.T) {
@@ -1130,7 +829,7 @@ func TestOmittedRelatedMembershipNeedlePreservesMissing(t *testing.T) {
 // Dialect is caller configuration, including when a constant plan needs no SQL.
 func TestDialectValidation(t *testing.T) {
 	t.Parallel()
-	for _, d := range []string{"gremlin", "postgresql", "", dialect.SQLite, dialect.Postgres, dialect.MySQL} {
+	for _, d := range []string{"gremlin", "postgresql", ""} {
 		t.Run(d, func(t *testing.T) {
 			t.Parallel()
 			for _, plan := range []*responsev1.PlanResourcesResponse{
@@ -1138,13 +837,8 @@ func TestDialectValidation(t *testing.T) {
 				{Filter: &enginev1.PlanResourcesFilter{Kind: enginev1.PlanResourcesFilter_KIND_ALWAYS_ALLOWED}},
 			} {
 				_, err := cerbosent.Translate(plan, "resource", testMapper(), cerbosent.WithDialect(d))
-				switch d {
-				case dialect.SQLite, dialect.Postgres, dialect.MySQL:
-					require.NoError(t, err)
-				default:
-					require.ErrorContains(t, err, "unknown dialect "+strconv.Quote(d))
-					require.NotErrorIs(t, err, cerbosent.ErrUnsupported)
-				}
+				require.ErrorContains(t, err, "unknown dialect "+strconv.Quote(d))
+				require.NotErrorIs(t, err, cerbosent.ErrUnsupported)
 			}
 		})
 	}

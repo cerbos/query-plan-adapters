@@ -1,0 +1,102 @@
+{
+  "allowed": [
+    "a1",
+    "a5"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/relative-window-in-body",
+  "intent": "A relative time window inside an exists body, so the folded now() literal sits in a lambda.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "value": "public"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.createdAt"
+                                  }
+                                ],
+                                "operator": "timestamp"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "value": "__NOW_MINUS_24H__"
+                                  }
+                                ],
+                                "operator": "timestamp"
+                              }
+                            }
+                          ],
+                          "operator": "lt"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/relative-window-in-body",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tags.exists(t, t.name == \"public\" && timestamp(R.attr.createdAt) < now() - duration(\"24h\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "The harness and translator must handle the folded timestamp inside the lambda; a4 (private) and the future-dated public rows deny."
+}

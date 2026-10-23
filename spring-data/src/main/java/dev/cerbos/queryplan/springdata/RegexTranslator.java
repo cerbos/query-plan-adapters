@@ -49,7 +49,11 @@ final class RegexTranslator {
     /** The most strings one alternative may expand to. */
     static final int MAX_STRINGS = 256;
 
-    private static final int MAX_REPEAT = 16;
+    /** The largest count a repetition is expanded to. */
+    private static final int MAX_EXPANDED_REPEAT = 16;
+
+    /** RE2's bound on the copies a counted repetition, nested ones included, may make. */
+    private static final int RE2_MAX_REPEAT = 1000;
 
     private final CriteriaBuilder cb;
     private final TriPredicate tri;
@@ -225,7 +229,7 @@ final class RegexTranslator {
                 out.addAll(expand(option, pattern));
             }
         } else if (node instanceof Node.Rep rep) {
-            if (rep.max() < 0 || rep.max() > MAX_REPEAT) {
+            if (rep.max() < 0 || rep.max() > MAX_EXPANDED_REPEAT) {
                 throw unsupported(pattern, "an unbounded repetition");
             }
             out = new LinkedHashSet<>();
@@ -360,29 +364,64 @@ final class RegexTranslator {
                     pos++;
                 }
                 atom = new Node.Rep(atom, min, max);
+                // RE2 rejects a repetition whose nested copies exceed RE2_MAX_REPEAT: (a{2}){600}.
+                if (!repeatIsValid(atom, RE2_MAX_REPEAT)) {
+                    throw new InvalidRe2();
+                }
             }
             return atom;
         }
 
-        /** {@code {n}}, {@code {n,}} or {@code {n,m}}; {@code null} for a literal brace. */
+        /**
+         * {@code {n}}, {@code {n,}} or {@code {n,m}}; {@code null} for a literal brace. A count is
+         * read as Go's {@code regexp/syntax} {@code parseInt} reads it, which takes no leading
+         * zero: {@code a{01}} is {@code a} then the text "{01}".
+         */
         private int[] braces() {
             int close = src.indexOf('}', pos);
             if (close < 0) {
                 return null;
             }
             String body = src.substring(pos + 1, close);
-            if (!body.matches("[0-9]+(,[0-9]*)?")) {
+            if (!body.matches("(0|[1-9][0-9]*)(,(0|[1-9][0-9]*)?)?")) {
                 return null;
             }
             String[] bounds = body.split(",", -1);
-            int min = Integer.parseInt(bounds[0]);
+            int min = parseCount(bounds[0]);
             int max = bounds.length == 1 ? min
-                    : bounds[1].isEmpty() ? -1 : Integer.parseInt(bounds[1]);
-            if (min > 1000 || max > 1000 || (max >= 0 && max < min)) {
+                    : bounds[1].isEmpty() ? -1 : parseCount(bounds[1]);
+            if (min > RE2_MAX_REPEAT || max > RE2_MAX_REPEAT || (max >= 0 && max < min)) {
                 throw new InvalidRe2();
             }
             pos = close + 1;
             return new int[] {min, max};
+        }
+
+        /** A count's digits; one too long for an int is past RE2's bound anyway. */
+        private static int parseCount(String digits) {
+            return digits.length() > 4 ? RE2_MAX_REPEAT + 1 : Integer.parseInt(digits);
+        }
+
+        /**
+         * Go's {@code repeatIsValid}: each repetition divides the budget by its count (its
+         * maximum, or its minimum when unbounded), and a count beyond what is left is invalid.
+         */
+        private static boolean repeatIsValid(Node node, int budget) {
+            if (node instanceof Node.Rep rep) {
+                if (rep.max() == 0) {
+                    return true;
+                }
+                int count = rep.max() >= 0 ? rep.max() : rep.min();
+                return count <= budget
+                        && repeatIsValid(rep.node(), count == 0 ? budget : budget / count);
+            }
+            if (node instanceof Node.Cat cat) {
+                return cat.parts().stream().allMatch(part -> repeatIsValid(part, budget));
+            }
+            if (node instanceof Node.Alt alt) {
+                return alt.options().stream().allMatch(option -> repeatIsValid(option, budget));
+            }
+            return true;
         }
 
         private Node atom() {
