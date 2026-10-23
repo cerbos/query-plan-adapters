@@ -127,14 +127,14 @@ null literal throws, including `null/equals/null-literal-on-missing-attribute`).
 [#302](https://github.com/cerbos/query-plan-adapters/issues/302).
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
-> unknown to the planner, which assumes the data layer supplies it, as a table column always does.
-> So the planner reads `has(R.attr.x)` as the guard for the `x` access beside it and folds it to true
-> by design: alone it plans as `ALWAYS_ALLOWED`, and `has(R.attr.x) && R.attr.y > 0` plans as
-> `R.attr.y > 0`. A record can lack a field, so the filter then returns records missing `x` that
-> `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
-> with `check()` whether `x` is missing, null or present.
+> **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
+> attribute the plan request omits is unknown to those planners, which assume the data layer
+> supplies it, so they fold `has(R.attr.x)` to true: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`, which never excludes a record missing
+> `x`. From 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the post-filter checks whether
+> the record's metadata carries the key, or refuses an attribute the mapping does not declare. The
+> planner still drops a `has(R.attr.x)` that only guards an access to `x`, as in `has(R.attr.x) &&
+> R.attr.x == "a"`, because that access already denies a record without `x`.
 
 ## Write membership as `in`, not as a collection macro
 
@@ -316,16 +316,16 @@ field name.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real ChromaDB
-metadata queries over the corpus's 42 seed records. The harness translates every case with
+and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real ChromaDB
+metadata queries over the corpus's 43 seed records. The harness translates every case with
 `allowPostFilter: true` and applies the `postFilter` to every record the `where` returns, as a
-caller must. Passed cases on the current PDP, 0.55.0, out of every golden case in the tier:
+caller must. Passed cases on the current PDP, 0.57.0, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 23 / 29 |
-| extended | 48 / 97 |
-| adversarial | 167 / 338 |
+| core | 24 / 30 |
+| extended | 52 / 102 |
+| adversarial | 170 / 344 |
 
 Without `allowPostFilter`, the 167 cases the post-filter answers throw `UnsupportedOperatorError`
 instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 71
@@ -333,11 +333,8 @@ passing: 20, 12 and 39 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
-Planner-divergence cases are skipped, and count in the total but never as passed. On 0.55.0 that is
-four extended cases and five adversarial cases. `null/has/missing-attribute` and
-`null/has/composed-with-comparison`: the plan request leaves an omitted attribute unknown, so the
-planner folds `has()` to true by design, while `checkResource` receives the omission as absent and
-denies the record; use `R.attr.x != null` instead of `has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*`
+Planner-divergence cases are skipped, and count in the total but never as passed. On 0.57.0 that is
+three extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the record; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*`
 cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2,
 while `checkResource` receives `aNumber` as absent and treats the erroring deny rule as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Two `type-mismatch/in/*` cases
@@ -422,6 +419,10 @@ demo/scripts/run-example.sh langchain-chromadb
 ```
 
 ## Development
+
+Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
+gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
+`*.test.ts`.
 
 | Command | What it does | Needs |
 | --- | --- | --- |

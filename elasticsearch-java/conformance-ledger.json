@@ -657,6 +657,13 @@
       "status": "unsupported",
       "reason": "hasIntersection with null requires an explicit null-value mapping"
     },
+    "null/has/explicit-null-attribute": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
     "null/in/literal-list-of-only-null": {
       "status": "unsupported",
       "reason": "The planner folds this to positive equality with null, which Elasticsearch cannot distinguish from a missing attribute without an indexed null-value sentinel"
@@ -757,6 +764,10 @@
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .+ — Lucene's . matches a newline where RE2's does not"
     },
+    "regex/matches/leading-zero-count-is-literal": {
+      "status": "unsupported",
+      "reason": "matches regex has a brace at index 4 whose count has a leading zero, which RE2 reads as literal text and Lucene as a repetition: (one{01}|one{1,02})"
+    },
     "regex/matches/literal-brace": {
       "status": "unsupported",
       "reason": "matches regex has a brace at index 1 that does not begin a {n}, {n,} or {n,m} repetition, which Lucene rejects at query time: a{q}[*][?]b"
@@ -768,6 +779,10 @@
     "regex/matches/negated-invalid-patterns-from-principal": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 3: (a)\\1 — the invalid patterns are refused rather than handed to Lucene, and the disjunction with them"
+    },
+    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
+      "status": "unsupported",
+      "reason": "matches regex has a repetition at index 6 whose nested copies exceed RE2's bound of 1000, so RE2 rejects the pattern and CEL's matches() errors; Lucene would accept it: (a{2}){600}"
     },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
@@ -792,6 +807,10 @@
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",
       "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix: a Lucene regexp always matches the whole term"
+    },
+    "regex/matches/unbounded-count": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .{8,} — RE2's `.` excludes a newline and Lucene's does not, so an unescaped `.` is refused"
     },
     "regex/matches/whitespace-class": {
       "status": "unsupported",
@@ -820,6 +839,10 @@
     "relation/has-intersection/negated-to-one-chain": {
       "status": "unsupported",
       "reason": "Same missing-versus-empty ambiguity as relation/in/negated-to-one-chain, reached through hasIntersection over the same operand"
+    },
+    "relation/has/parent": {
+      "status": "unsupported",
+      "reason": "has() on the parent object: Elasticsearch has no exists query that finds an object whose fields are all null, so a present parent and a missing one can be the same document; the adapter refuses."
     },
     "relation/in/negated-to-one-chain": {
       "status": "unsupported",

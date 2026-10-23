@@ -36,6 +36,7 @@ final class PlanWalker {
     private final ComparisonTranslator comparisons;
     private final MembershipTranslator membership;
     private final CollectionTranslator collections;
+    private final PresenceTranslator presence;
     private final int maxMacroDepth;
     /** Current collection-macro nesting depth; maintained by {@link #enterMacro}. */
     private int macroDepth;
@@ -54,6 +55,7 @@ final class PlanWalker {
                 new SizeTranslator(cb, tri, this, subqueries));
         this.membership = new MembershipTranslator(cb, tri, leaf, subqueries);
         this.collections = new CollectionTranslator(cb, this, subqueries);
+        this.presence = new PresenceTranslator(cb, tri, options.nullAttributeRepresentation());
     }
 
     /**
@@ -116,6 +118,7 @@ final class PlanWalker {
                             + "its own; only size(filter(...)) has a boolean meaning");
             // List difference has no JPA Criteria translation.
             case "except" -> throw Refusals.exceptUnsupported();
+            case "has" -> presence.handleHas(operands, scope);
             // has_intersection is a deprecated alias the PDP still accepts.
             case "hasIntersection", "has_intersection" ->
                     membership.handleHasIntersection(operands, scope);

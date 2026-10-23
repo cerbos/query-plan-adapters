@@ -228,13 +228,15 @@ mapper := cerbospgx.MapperMap{
   of the same or undeclared scalar type is rejected.
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
-> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
-> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
-> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
-> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
-> with `check()` whether `x` is missing, null or present.
+> **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
+> attribute the plan request omits is unknown to those planners, which assume the data layer
+> supplies it, so they fold `has(R.attr.x)` to true: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`, which never excludes a row missing `x`.
+> From 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+> `x`'s null convention or refuses it: under `omitted` a row has `x` when its value is not null, and
+> under `explicit` every row has it. The planner still drops a `has(R.attr.x)` that only guards an
+> access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because that access already denies a row
+> without `x`.
 
 ## Collation
 
@@ -260,25 +262,21 @@ TestAdversarialConformance ./...` replays the corpus under a linguistic order an
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the plans
-Cerbos PDP 0.55.0 recorded for each case are translated, run against the corpus dataset in real
+Cerbos PDP 0.57.0 recorded for each case are translated, run against the corpus dataset in real
 PostgreSQL, and the returned ids are compared with the recorded `check()` decisions. The previous
-PDP's goldens (0.54.0) are replayed too.
+PDP's goldens (0.55.0) are replayed too.
 
-| Tier | Passed / total (PDP 0.55.0) |
+| Tier | Passed / total (PDP 0.57.0) |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 74 / 97 |
-| adversarial | 256 / 338 |
+| core | 30 / 30 |
+| extended | 79 / 102 |
+| adversarial | 261 / 344 |
 
-The total is every golden case in the tier for PDP 0.55.0. A case whose golden records a
+The total is every golden case in the tier for PDP 0.57.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
-[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. Two of the
-skipped cases, `null/has/missing-attribute` and `null/has/composed-with-comparison`, are the two
-calls answering different questions: the plan request leaves an omitted attribute unknown, so the
-planner folds `has()` to true by design, while `check()` receives the omission as absent and denies
-the row. Use `R.attr.x != null` instead of `has(R.attr.x)`. Two more, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
+[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. Two of the skipped cases, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
 planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
 while `check()` has no double + int overload and denies every row, so write `1.0`.
 Two more, `type-mismatch/in/number-field-in-scalar-principal` and
@@ -452,9 +450,17 @@ golangci-lint fmt ./...
   return `ErrUnsupported`) or `divergent` (the result must differ, with an issue).
 - The unit suite needs nothing running. It covers what the corpus cannot: malformed and hostile
   plans no planner emits. CI runs it as a separate step before the Docker-backed one.
-- `internal/queryplan` is vendored byte-for-byte into the [ent module](../ent);
-  `conformance/scripts/validate-corpus.sh` fails on any difference, so a semantic fix must land in
-  both. Per-engine code belongs in `render.go`, outside the shared tree.
+- The module is standalone: it depends on nothing else in this repository, so a consumer pulls in
+  this one module alone. `internal/queryplan` is therefore vendored byte-for-byte into the
+  [ent module](../ent); `conformance/scripts/validate-corpus.sh` fails on any difference, so a
+  semantic fix lands in both copies. Per-engine code belongs in `render.go`, outside the shared
+  tree. The unit suites (`translate_test.go`, `render_test.go`) mirror the ent module's for the
+  same reason.
+- `./...` stops at a nested `go.mod`, so neither command reaches `example/`. It is its own module on
+  purpose: a directory holding a `go.mod` is excluded from its parent's zip, which keeps the
+  example's dependencies out of a consumer's build. Lint it from `example/` with
+  `golangci-lint run --config=../.golangci.yaml ./...` (hence the `gomoddirectives` exclusion
+  scoped to `^example/go\.mod$`), and run it with `demo/scripts/run-example.sh pgx`.
 
 See [conformance/README.md](../conformance/README.md) before changing how a shape is translated.
 

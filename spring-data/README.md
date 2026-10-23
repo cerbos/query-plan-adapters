@@ -50,7 +50,7 @@ Requirements:
   application — an always-allowed plan becomes `Specification.unrestricted()`, added in 3.5.2. From
   the Spring Boot BOM that means **Boot 3.5.4 or later** (3.5.0–3.5.3 manage 3.5.0/3.5.1).
 - Developed against Spring Data JPA 3.5 / Hibernate 6.6; CI also runs every suite under Spring Data
-  JPA 4 / Hibernate 7 (the Spring Boot 4 pair) — see [Build](#build).
+  JPA 4 / Hibernate 7 (the Spring Boot 4 pair) — see [Building](#building).
 - String columns the mapping references need a byte-exact collation — see
   [Database collation requirements](#database-collation-requirements).
 
@@ -417,26 +417,23 @@ consulted.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.55.0 and 0.54.0, it translates the plan, runs the query against 42 seed rows on
+plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 seed rows on
 H2, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
-recorded. No PDP runs in the test. Results for the current PDP (0.55.0), where the total is every
+recorded. No PDP runs in the test. Results for the current PDP (0.56.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
 total but not as passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 93 / 97 |
-| adversarial | 295 / 338 |
+| core | 30 / 30 |
+| extended | 97 / 102 |
+| adversarial | 302 / 344 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 38 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 39 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the plan reads an attribute the mapping does not declare) rather than emit a filter. Four
-extended cases and five adversarial cases are planner divergences the corpus skips: `null/has/missing-attribute` and
-`null/has/composed-with-comparison`, where the planner folds `has()` to true by design while
-`check()` receives the omitted attribute as absent (see
-[Gotchas](#has-does-not-filter-a-null-column--write--null-instead)),
+when the plan reads an attribute the mapping does not declare) rather than emit a filter. On 0.57.0,
+three extended cases and four adversarial cases are planner divergences the corpus skips:
 `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
 planner drops the int type of the literal in `R.attr.x + 1` while `check()` has no double + int
 overload and denies every row (write `1.0`),
@@ -444,7 +441,9 @@ overload and denies every row (write `1.0`),
 whose `in` over a scalar the plan and `check()` answer differently, and
 three `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's
 `not(...)` of it denies j2, while `check()` receives `aNumber` as absent and treats the erroring
-DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too:
+that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0
+keeps `has()` in the plan.
 
 Other guarantees:
 
@@ -564,17 +563,23 @@ A CEL evaluation error denies, and the adapter reproduces this with SQL three-va
 - A ternary with a NULL condition column is UNKNOWN, so `!(ternary)` can't include the row.
 - `ne` against an unsolvable string concatenation reduces to `IS NOT NULL`, not `TRUE`.
 
-### `has(...)` does not filter a NULL column — write `!= null` instead
+### `has(...)` before PDP 0.57.0 does not filter a NULL column — write `!= null` instead
 
-An attribute the plan request omits is unknown to the planner, which assumes the data layer supplies
-it: for a mapped column, the column exists and only its value is open. So the planner reads
-`has(R.attr.aOptionalString)` as the guard for the access beside it and folds it to true by design.
-Alone it plans as `KIND_ALWAYS_ALLOWED`; composed, as in
+From Cerbos 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+the attribute's null convention: under `OMITTED` it is `x IS NOT NULL`, and under `EXPLICIT` it is
+true for every row, since a NULL column reaches `check()` as a present null. The planner still drops a
+`has(R.attr.x)` that only guards an access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because
+that access already denies a row without `x`.
+
+On 0.56.0 and earlier, an attribute the plan request omits is unknown to the planner, which assumes
+the data layer supplies it: for a mapped column, the column exists and only its value is open. So
+the planner reads `has(R.attr.aOptionalString)` as the guard for the access beside it and folds it to
+true by design. Alone it plans as `KIND_ALWAYS_ALLOWED`; composed, as in
 `has(R.attr.aOptionalString) && R.attr.aNumber > 0`, only `R.attr.aNumber > 0` reaches the adapter,
 so a row whose column is NULL is not excluded. The corpus's per-row `check()` calls send the same
 omission as absent, where `has()` is false, so the two calls answer different questions: the corpus
 declares both forms, `null/has/missing-attribute` and `null/has/composed-with-comparison`, as
-planner divergences, and the conformance suite skips them for the PDP versions they name.
+planner divergences on 0.56.0.
 
 **Workaround (PDP-verified):**
 
@@ -685,6 +690,14 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- **Fix ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)):** `matches()` reads a
+  repetition count as RE2 does. A count with a leading zero opens no repetition, so `^one{01}$` is
+  the literal `one{01}`; it used to be read as `{1}` and matched the row `"one"` (over-grant fix).
+  Nested counts whose copies multiply past 1000 (`(a{2}){600}`), and a count too long for an
+  `int`, are a pattern RE2 rejects, so the condition is UNKNOWN. Nested counts of at most 16 each
+  (`((a{10}){10}){11}`) used to be expanded into one long literal, whose negation matched every row
+  (over-grant fix); larger ones were refused, and an over-long count threw
+  `NumberFormatException`.
 - New translations, where these used to throw: membership in a `map()` over a relation, in a
   `filter()`, in a list concatenation (`R.attr.x in R.attr.tags + ["a"]`) and in a list holding
   attributes (`R.attr.x in [R.attr.a]`); `exists`/`all` over a list holding attributes, and their
@@ -793,7 +806,9 @@ mavenLocal as a real Maven coordinate
 three resource kinds, and a program implementing the [shared demo domain](../demo). Run the latter
 from the repository root with `demo/scripts/run-example.sh spring-data`.
 
-## Build
+## Development
+
+### Building
 
 JDK 17+. Gradle comes from the committed wrapper. The suites read `../conformance/`, so build in a
 checkout of the **whole repository**; the conformance suite needs Docker on PostgreSQL and MySQL:
@@ -815,7 +830,7 @@ H2, PostgreSQL and MySQL under both ORM sets. Spring Data JPA 4 removed
 `JpaSpecificationExecutor.delete(Specification)`, so the bulk-delete hazard can't be reached through
 that overload there; the guard still fires on any `CriteriaDelete`.
 
-## Testing
+### Testing
 
 | Suite | Role | Needs |
 |---|---|---|

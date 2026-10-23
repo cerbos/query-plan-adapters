@@ -125,6 +125,18 @@ cases:
   condition:
     match:
       expr: '(R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))'
+- id: 'collection/exists/has-in-lambda'
+  tier: adversarial
+  intent: 'tags.exists(t, has(t.name)): a presence test on a field of each element.'
+  trap: 'b5, b6 and e1 carry a tag with no name; has() over the lambda variable must test each tag, not the tags relation, and a store that cannot test a related row''s field must refuse.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, has(t.name))'
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    pdp:
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds has(t.name) to true, so the plan is exists(tags, true) and grants b5 and e1, whose only tags have no name. check() denies them. From 0.57.0 the plan carries the has().'
 - id: 'collection/exists/map-keys'
   tier: adversarial
   intent: 'exists() over a map-valued attribute, which ranges over its keys (parent.exists(k, k == "inner")).'

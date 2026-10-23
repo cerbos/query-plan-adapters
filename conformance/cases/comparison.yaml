@@ -118,11 +118,6 @@ cases:
   condition:
     match:
       expr: '!((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) <= (R.attr.aBool ? 2.0 : 0.0/0.0)) && now() == now()'
-  plannerDivergence:
-    issue: 'Cerbos 0.54 check() errors on an ordering against NaN, which 0.55 evaluates to false'
-    pdp:
-    - 0.54.0
-    reason: 'The plan is identical on both tags, but 0.54 check() denies every row where the negated NaN ordering should be true; 0.55 allows them. Adapters translate the plan, so they return the 0.55 answer on both tags.'
 
 - id: 'comparison/less-or-equal/string-code-point-order'
   tier: adversarial

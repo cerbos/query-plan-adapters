@@ -343,11 +343,12 @@ module Cerbos
       def repeat_size_valid?(node, budget)
         case node
         when Repeat
+          return true if node.max&.zero?
+
           count = node.max || node.min
-          return true if count.zero?
           return false if count > budget
 
-          repeat_size_valid?(node.node, budget / count)
+          repeat_size_valid?(node.node, count.zero? ? budget : budget / count)
         when Group
           node.alternatives.all? { |sequence| sequence.all? { |inner| repeat_size_valid?(inner, budget) } }
         else true

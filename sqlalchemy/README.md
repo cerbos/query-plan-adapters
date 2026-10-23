@@ -184,13 +184,15 @@ comparison throws. See [#308](https://github.com/cerbos/query-plan-adapters/issu
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
-> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
-> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
-> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
-> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
-> with `check()` whether `x` is missing, null or present.
+> **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
+> attribute the plan request omits is unknown to those planners, which assume the data layer
+> supplies it, so they fold `has(R.attr.x)` to true: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`, which never excludes a row missing `x`.
+> From 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+> `x`'s null convention or refuses it: under `omitted` a row has `x` when its value is not null, and
+> under `explicit` every row has it. The planner still drops a `has(R.attr.x)` that only guards an
+> access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because that access already denies a row
+> without `x`.
 
 ### Collection storage
 
@@ -430,36 +432,36 @@ error and stayed denied under negation). A bare boolean column is accepted as a 
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): every
-recorded plan from Cerbos PDP 0.55.0 and 0.54.0 is served by a stub PDP and fetched through the SDK's
+recorded plan from Cerbos PDP 0.57.0 and 0.56.0 is served by a stub PDP and fetched through the SDK's
 HTTP `CerbosClient`, so it arrives as your application receives it, then translated with one mapping,
 executed on SQLite (through a `Connection` and through an `AsyncSession`), PostgreSQL and MySQL
 (`utf8mb4_0900_bin`), and the returned ids are compared with the decisions the PDP recorded. The
 collections are stored as JSON on every store; the cases that read a collection declared in
 `collection_columns` run once more on PostgreSQL with them stored as arrays (`pgArray`). The results
-are the same on every store. For the current PDP, 0.55.0, where the total is every golden case
+are the same on every store. For the current PDP, 0.57.0, where the total is every golden case
 recorded in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 69 / 97 |
-| adversarial | 252 / 338 |
+| core | 30 / 30 |
+| extended | 73 / 102 |
+| adversarial | 256 / 344 |
 
-Every case that does not pass is either refused with `UnsupportedPlanError` (105 cases) or is
+Every case that does not pass is either refused with `UnsupportedPlanError` (107 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
-harness does not compare. Under 0.55.0 those are four extended cases and five adversarial cases:
-`null/has/missing-attribute` and `null/has/composed-with-comparison` (the plan request leaves an
-omitted attribute unknown, so the planner folds `has()` to true by design, while `check()` receives
-the omission as absent and denies the row; use `R.attr.x != null` instead), `arithmetic/add/int-literal-plus-constant` and
+harness does not compare. Under 0.57.0 those are three extended cases and four adversarial cases:
+`arithmetic/add/int-literal-plus-constant` and
 `arithmetic/add/int-literal-negated` (the planner drops the int type of the literal in
 `R.attr.x + 1`, while `check()` has no double + int overload and denies every row, so write `1.0`),
-and three
+three
 `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of
 it denies j2, while `check()` receives `aNumber` as absent and treats the erroring DENY as not
 matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)), and
 `type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`
 (the planner rewrites `in` over a scalar container to `==`, which `check()` has no overload for;
-[#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
+[#596](https://github.com/cerbos/query-plan-adapters/issues/596)). On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too:
+that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0
+keeps `has()` in the plan.
 [`conformance-ledger.json`](conformance-ledger.json) lists each refused case with the mechanism that
 rules it out.
 
@@ -626,7 +628,7 @@ demo/scripts/run-example.sh sqlalchemy
 | --- | --- | --- |
 | `tests/test_translator.py` | caller options over recorded corpus plans: null representation, overrides, collection storage, transports, model styles | nothing — plans from `conformance/golden/` |
 | `tests/test_query.py`, `tests/test_relations.py` | plans the planner cannot produce; options no policy can reach | nothing |
-| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised | SQLite, and Docker for PostgreSQL and MySQL, pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE) |
+| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised: every case on SQLite (sync and async), PostgreSQL and MySQL, and the cases that read a `collection_columns` declaration once more on PostgreSQL with the collections stored as native arrays. CI runs it under SQLAlchemy 1.4 and 2.x | SQLite, and Docker for PostgreSQL and MySQL, pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE) |
 
 ```bash
 pdm install -G :all

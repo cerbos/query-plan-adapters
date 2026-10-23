@@ -128,7 +128,7 @@ done
 # CI on each bump. The rule is shared instead. Add a repository here when you add a service.
 IMAGE_REPOSITORIES=(
   "postgres" "mysql" "mongo" "chromadb/chroma"
-  "docker.elastic.co/elasticsearch/elasticsearch" "ghcr.io/get-convex/convex-backend"
+  "docker.elastic.co/elasticsearch/elasticsearch" "ghcr.io/convex/convex-backend"
 )
 : >"${TMP}/image-refs"
 for repository in "${IMAGE_REPOSITORIES[@]}"; do

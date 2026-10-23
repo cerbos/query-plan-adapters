@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `has()`, which Cerbos 0.57.0 keeps in the plan as a `has` operator, translates from the
+  attribute's null convention: `IS NOT NULL` under omitted, true under explicit, and the related
+  row's existence for a scalar relation. A presence test through a to-many relation fails closed.
 - **Breaking:** a bare attribute mapped `ValueTimestamp` compared with a `timestamp()` value
   (`R.attr.createdAt < now() - duration("24h")`) is answered as CEL answers it: CEL holds the bare
   attribute as its RFC 3339 string, so an ordering is a no-overload error (UNKNOWN, the row is

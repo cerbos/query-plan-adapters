@@ -634,8 +634,8 @@ class Translator:
             # Lambda bodies arrive here. Apply the same NULL conventions as at the root.
             return self.predicate(expression)
 
-        # e.g. an `and(...)` lambda body.
-        if operator in _BOOLEAN_OPERATORS:
+        # e.g. an `and(...)` or `has(...)` lambda body.
+        if operator in _BOOLEAN_OPERATORS or operator == "has":
             return self.predicate(expression)
 
         folded = self._try_fold_value_list_macro(operator, operands)
@@ -691,6 +691,8 @@ class Translator:
             if operator == "or":
                 return or_(*branches)
             return not_(*branches)
+        if operator == "has" and "has" not in self._overrides:
+            return self._presence(operands)
         if operator == "if":
             return self.value(operand)
         if operator == "index" or self._declared_collection(operand) is not None:
@@ -741,6 +743,41 @@ class Translator:
         if isinstance(left_operand, Value):
             return self._value_first(operator, left_operand, right_operand)
         return self._column_first(operator, left_operand, right_operand)
+
+    def _presence(self, operands: tuple[Operand, ...]) -> Any:
+        """``has(x)``, the presence test the planner emits from Cerbos 0.57.0.
+
+        Presence is a property of the caller's null convention, not of the column: an
+        attribute sent as an explicit null is present on every row, and one omitted when
+        its column is NULL is present exactly when the column is not NULL. ``has()`` never
+        errors on a missing value, so ``IS NOT NULL`` is two-valued and its negation exact.
+
+        The one error ``has()`` raises is selecting through a missing parent:
+        ``has(parent.x)`` on a parentless row denies under both polarities, while a
+        mapped expression for ``parent.x`` is NULL there and its negation selects the row.
+        The attribute map cannot say whether a mapped prefix can be absent, so a reference
+        below one is refused unless an ``operator_override_fns`` entry for ``has`` answers it.
+        """
+        (operand,) = operands if len(operands) == 1 else (None,)
+        if not isinstance(operand, Variable):
+            raise UnsupportedPlanError("has requires exactly one attribute reference")
+        name = operand.name
+        prefix = name.rsplit(".", 1)[0]
+        if prefix.startswith("request.") and prefix in self._attr_map:
+            raise UnsupportedPlanError(
+                f"Cannot translate has({name}): {prefix} is itself mapped, so it can be "
+                "absent, and a has() through a missing parent is an error CEL denies under "
+                "both polarities, which IS NULL over the mapped expression would select; "
+                "supply an operator_override_fns entry for 'has'"
+            )
+        column = self._resolve_variable(name)
+        if not isinstance(column, (ColumnElement, InstrumentedAttribute)):
+            raise UnsupportedPlanError(
+                f"Cannot translate has({name}): it is not mapped to a column"
+            )
+        if self._is_omitted_null(name):
+            return column.is_not(None)
+        return true()
 
     def _with_null_conventions(
         self,

@@ -1,0 +1,72 @@
+{
+  "allowed": [
+    "a1",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/intersect/duplicates-in-shorter-list",
+  "intent": "The size of intersect() between a resource list and a list literal (size(intersect(tagNames, [\"public\", \"other\"])) == 1).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tagNames"
+                      },
+                      {
+                        "value": [
+                          "public",
+                          "other"
+                        ]
+                      }
+                    ],
+                    "operator": "intersect"
+                  }
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/intersect/duplicates-in-shorter-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(intersect(R.attr.tagNames, [\"public\", \"other\"])) == 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Cerbos intersect keeps duplicates from the shorter list, so a3 [\"public\", \"public\"] has size 2 and denies; set semantics over-grants it."
+}

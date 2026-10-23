@@ -666,6 +666,15 @@ resourcePolicy:
       condition:
         match:
           expr: (R.attr.tagNames.exists(tagName, tagName in ["public", "other"]))
+    # collection/exists/has-in-lambda
+    - actions:
+        - collection/exists/has-in-lambda
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, has(t.name))
     # collection/exists/map-keys
     - actions:
         - collection/exists/map-keys
@@ -2316,15 +2325,6 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(["public", null], R.attr.tagNames)
-    # null/has/missing-attribute
-    - actions:
-        - null/has/missing-attribute
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: has(R.attr.aOptionalString)
     # null/has/composed-with-comparison
     - actions:
         - null/has/composed-with-comparison
@@ -2334,6 +2334,74 @@ resourcePolicy:
       condition:
         match:
           expr: has(R.attr.aOptionalString) && R.attr.aNumber > 0
+    # null/has/deny-on-absence
+    - actions:
+        - null/has/deny-on-absence
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+    - actions:
+        - null/has/deny-on-absence
+      effect: EFFECT_DENY
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!has(R.attr.aOptionalString)'
+    # null/has/explicit-null-attribute
+    - actions:
+        - null/has/explicit-null-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.owner) && R.attr.aBool == true
+    # null/has/guard-on-same-attribute
+    - actions:
+        - null/has/guard-on-same-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.aOptionalString) && R.attr.aOptionalString == "set"
+    # null/has/missing-attribute
+    - actions:
+        - null/has/missing-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.aOptionalString)
+    # null/has/negated
+    - actions:
+        - null/has/negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!has(R.attr.aOptionalString)'
+    # null/has/negated-under-or-with-same-attribute
+    - actions:
+        - null/has/negated-under-or-with-same-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!has(R.attr.aString) || R.attr.aString == "one"'
+    # null/has/nested-map-key
+    - actions:
+        - null/has/nested-map-key
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.obj.inner)
     # null/in/literal-list-of-only-null
     - actions:
         - null/in/literal-list-of-only-null
@@ -2793,6 +2861,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^(ab|b)$")
+    # regex/matches/leading-zero-count-is-literal
+    - actions:
+        - regex/matches/leading-zero-count-is-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^(one{01}|one{1,02})$")
     # regex/matches/literal-brace
     - actions:
         - regex/matches/literal-brace
@@ -2829,6 +2906,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a)\\1" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "{2}a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a**" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{1001}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "[b-a]" : "^h") || R.attr.aNumber == 5'
+    # regex/matches/negated-nested-repetition-over-budget-from-principal
+    - actions:
+        - regex/matches/negated-nested-repetition-over-budget-from-principal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(a{2}){600}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(?:a{1000}){2}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^((a{10}){10}){11}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^((?:(a{10}){10}){0,}){11}$" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a{2147483648}$" : "^h") || R.attr.aNumber == 5'
     # regex/matches/posix-character-class
     - actions:
         - regex/matches/posix-character-class
@@ -2865,6 +2951,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^a|b$")
+    # regex/matches/unbounded-count
+    - actions:
+        - regex/matches/unbounded-count
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^.{8,}$")
     # regex/matches/unanchored
     - actions:
         - regex/matches/unanchored
@@ -3117,6 +3212,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!hasIntersection(R.attr.mainCategory.subNames, ["finance"])'
+    # relation/has/parent
+    - actions:
+        - relation/has/parent
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.parent)
+    # relation/has/parent-attribute
+    - actions:
+        - relation/has/parent-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.parent.aOptionalString)
     # relation/in/negated-to-one-chain
     - actions:
         - relation/in/negated-to-one-chain

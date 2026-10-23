@@ -7,6 +7,8 @@ package dev.cerbos.queryplan.elasticsearch;
 
 import static dev.cerbos.queryplan.elasticsearch.Refusals.unsupported;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Map;
 
 /**
@@ -18,6 +20,9 @@ import java.util.Map;
  * Lucene's optional operators are disabled with {@code flags=NONE}.
  */
 final class RegexTranslator {
+
+    /** RE2's bound on the copies a counted repetition, nested ones included, may make. */
+    private static final int MAX_REPEAT = 1000;
 
     private RegexTranslator() {}
 
@@ -60,6 +65,15 @@ final class RegexTranslator {
         boolean escaped = false;
         boolean inCharacterClass = false;
         int depth = 0;
+        // Go's repeatIsValid divides RE2's budget by each enclosing count, so a pattern is valid
+        // when the counts along every nesting path multiply to at most MAX_REPEAT. These track
+        // the most copies any atom of the current group makes, and the copies of the last atom.
+        Deque<Integer> enclosingCopies = new ArrayDeque<>();
+        int groupCopies = 1;
+        int atomCopies = 1;
+        // The current group's copies before its last atom when that atom is a group, else -1: a
+        // {0} after the group copies nothing, and Go's repeatIsValid stops there.
+        int copiesBeforeLastGroup = -1;
         for (int index = 0; index < pattern.length(); index++) {
             char current = pattern.charAt(index);
             if (escaped) {
@@ -68,6 +82,8 @@ final class RegexTranslator {
                 }
                 translated.append('\\').append(current);
                 escaped = false;
+                atomCopies = 1;
+                copiesBeforeLastGroup = -1;
                 continue;
             }
             if (current == '\\') {
@@ -88,6 +104,8 @@ final class RegexTranslator {
                 }
                 inCharacterClass = false;
                 translated.append(current);
+                atomCopies = 1;
+                copiesBeforeLastGroup = -1;
                 continue;
             }
             if (inCharacterClass) {
@@ -102,11 +120,18 @@ final class RegexTranslator {
                     throw unsupportedRegexSyntax(pattern, index);
                 }
                 depth++;
+                enclosingCopies.push(groupCopies);
+                groupCopies = 1;
             } else if (current == ')') {
                 if (depth == 0) {
                     throw unsupportedRegexSyntax(pattern, index);
                 }
                 depth--;
+                atomCopies = groupCopies;
+                copiesBeforeLastGroup = enclosingCopies.pop();
+                groupCopies = Math.max(copiesBeforeLastGroup, groupCopies);
+                translated.append(current);
+                continue;
             } else if (current == '|' && depth == 0) {
                 throw unsupported("matches regex has a top-level alternation at index " + index
                         + ": RE2 reads ^a|b$ as two separately anchored alternatives, while "
@@ -119,6 +144,30 @@ final class RegexTranslator {
                             + " that does not begin a {n}, {n,} or {n,m} repetition, which "
                             + "Lucene rejects at query time: " + pattern);
                 }
+                String interval = pattern.substring(index + 1, close);
+                // RE2 reads a count as Go's regexp/syntax parseInt does, without a leading zero.
+                if (!interval.matches("(0|[1-9][0-9]*)(,(0|[1-9][0-9]*)?)?")) {
+                    throw unsupported("matches regex has a brace at index " + index
+                            + " whose count has a leading zero, which RE2 reads as literal text"
+                            + " and Lucene as a repetition: " + pattern);
+                }
+                if (interval.equals("0") || interval.equals("0,0")) {
+                    if (copiesBeforeLastGroup >= 0) {
+                        groupCopies = copiesBeforeLastGroup;
+                    }
+                    atomCopies = 0;
+                    translated.append(pattern, index, close + 1);
+                    index = close;
+                    continue;
+                }
+                atomCopies = atomCopies * repeatCount(interval);
+                if (atomCopies > MAX_REPEAT) {
+                    throw unsupported("matches regex has a repetition at index " + index
+                            + " whose nested copies exceed RE2's bound of " + MAX_REPEAT
+                            + ", so RE2 rejects the pattern and CEL's matches() errors; Lucene"
+                            + " would accept it: " + pattern);
+                }
+                groupCopies = Math.max(groupCopies, atomCopies);
                 translated.append(pattern, index, close + 1);
                 index = close;
                 continue;
@@ -127,6 +176,10 @@ final class RegexTranslator {
                 translated.append("\\\"");
             } else {
                 translated.append(current);
+            }
+            if (current != '*' && current != '+' && current != '?') {
+                atomCopies = 1;
+                copiesBeforeLastGroup = -1;
             }
         }
         if (escaped || inCharacterClass || depth != 0) {
@@ -160,6 +213,19 @@ final class RegexTranslator {
             cursor++;
         }
         return cursor < pattern.length() && pattern.charAt(cursor) == '}' ? cursor : -1;
+    }
+
+    /**
+     * The count Go's repeatIsValid charges an interval's body ({@code n}, {@code n,} or
+     * {@code n,m}): its maximum, or its minimum when unbounded. A count too long for an int is
+     * past the bound anyway.
+     */
+    private static int repeatCount(String interval) {
+        int comma = interval.indexOf(',');
+        String count = comma < 0 || comma == interval.length() - 1
+                ? interval.substring(0, comma < 0 ? interval.length() : comma)
+                : interval.substring(comma + 1);
+        return count.length() > 4 ? MAX_REPEAT + 1 : Integer.parseInt(count);
     }
 
     private static boolean isEscaped(String value, int index) {
