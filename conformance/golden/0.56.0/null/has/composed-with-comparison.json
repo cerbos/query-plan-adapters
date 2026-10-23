@@ -59,10 +59,9 @@
   "plannerDivergence": {
     "issue": "has() over an omitted attribute: unknown to the planner, absent to check()",
     "pdp": [
-      "0.55.0",
       "0.56.0"
     ],
-    "reason": "The plan request omits aOptionalString, so the planner treats it as unknown, assumes the data layer supplies it and folds the has() guard to true by design: the plan is gt(aNumber, 0) alone. The per-row check() calls send the same omission as absent, so check() denies a4, a8, c2 and e1, which lack aOptionalString. The two calls answer different questions, so no adapter can match the recorded decision."
+    "reason": "Before 0.57.0 the planner folds the has() guard to true: the plan is gt(aNumber, 0) alone. The per-row check() calls send the omitted aOptionalString as absent, so check() denies a4, a8, c2 and e1, which lack it. The two calls answer different questions, so no adapter can match the recorded decision. From 0.57.0 the plan carries the has()."
   },
   "request": {
     "action": "null/has/composed-with-comparison",

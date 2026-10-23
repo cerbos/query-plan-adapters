@@ -51,10 +51,9 @@
   "plannerDivergence": {
     "issue": "has() over an omitted attribute: unknown to the planner, absent to check()",
     "pdp": [
-      "0.55.0",
       "0.56.0"
     ],
-    "reason": "The plan request omits aOptionalString, so the planner treats it as unknown and assumes the data layer supplies it; it reads has() as the guard for that access and folds it to KIND_ALWAYS_ALLOWED by design. The per-row check() calls send the same omission as absent, so has() is false and check() denies those rows. The two calls answer different questions, so no adapter can match the recorded decision."
+    "reason": "Before 0.57.0 the planner treats the omitted aOptionalString as unknown, reads has() as the guard for that access and folds it to KIND_ALWAYS_ALLOWED. The per-row check() calls send the same omission as absent, so has() is false and check() denies those rows. The two calls answer different questions, so no adapter can match the recorded decision. From 0.57.0 the plan carries the has()."
   },
   "request": {
     "action": "null/has/missing-attribute",
@@ -74,5 +73,5 @@
     }
   ],
   "tier": "extended",
-  "trap": "has() reads as a presence (IS NOT NULL) test, but the planner folds it to always-allowed by design, so adapters return every row while check() denies rows missing the attribute."
+  "trap": "has() is a presence (IS NOT NULL) test over a NULL column; before 0.57.0 the planner folds it to always-allowed, so adapters return every row while check() denies rows missing the attribute."
 }
