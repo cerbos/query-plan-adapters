@@ -33,6 +33,7 @@ import {
   isValueOperand,
 } from "./plan";
 import type { OperatorOperand } from "./plan";
+import { handleHasOperator } from "./presence";
 import { negateRequiringHops, referencesRequiredHop } from "./relations";
 import { containsCollectionOperator } from "./rewrite";
 import { handleMatchesOperator } from "./regex";
@@ -102,6 +103,8 @@ export function buildPrismaFilterFromCerbosExpression(
       return handleStringOperator(operator, operands, context);
     case "matches":
       return handleMatchesOperator(operands, context);
+    case "has":
+      return handleHasOperator(operands, context, false);
     case "hasIntersection":
       return handleHasIntersectionOperator(operands, context);
     case "lambda":
@@ -150,6 +153,9 @@ export function buildNegatedFilter(
         assertDefined(operand.operands[0], "not requires an operand"),
         context
       );
+    }
+    if (operand.operator === "has") {
+      return handleHasOperator(operand.operands, context, true);
     }
     const ternary = tryHandleTernaryComparison(
       operand.operator,
