@@ -1,0 +1,101 @@
+{
+  "allowed": [
+    "a1",
+    "a9"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/map-literal-by-attribute-key-value-first",
+  "intent": "The literal on the left of a map literal indexed by an attribute (\"ADMIN\" == {...}[aString]), which the planner does not rewrite.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "ADMIN"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "one"
+                            },
+                            {
+                              "value": "ADMIN"
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "same"
+                            },
+                            {
+                              "value": "ADMIN"
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "xa_by"
+                            },
+                            {
+                              "value": "USER"
+                            }
+                          ],
+                          "operator": "set-field"
+                        }
+                      }
+                    ],
+                    "operator": "struct"
+                  }
+                },
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ],
+              "operator": "index"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/map-literal-by-attribute-key-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "\"ADMIN\" == {\"one\": \"ADMIN\", \"same\": \"ADMIN\", \"xa_by\": \"USER\"}[R.attr.aString]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The plan keeps the index over a struct literal; translating it as a column lookup, or letting a missing key match, is wrong."
+}

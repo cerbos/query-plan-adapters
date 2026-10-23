@@ -111,19 +111,6 @@ cases:
   condition:
     match:
       expr: 'hasIntersection(["public", null], R.attr.tagNames)'
-- id: 'null/has/missing-attribute'
-  tier: extended
-  intent: has() presence test over an optional attribute.
-  trap: 'has() reads as a presence (IS NOT NULL) test, but the planner folds it to always-allowed by design, so adapters return every row while check() denies rows missing the attribute.'
-  condition:
-    match:
-      expr: has(R.attr.aOptionalString)
-  plannerDivergence:
-    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
-    reason: 'The plan request omits aOptionalString, so the planner treats it as unknown and assumes the data layer supplies it; it reads has() as the guard for that access and folds it to KIND_ALWAYS_ALLOWED by design. The per-row check() calls send the same omission as absent, so has() is false and check() denies those rows. The two calls answer different questions, so no adapter can match the recorded decision.'
-    pdp:
-    - 0.54.0
-    - 0.55.0
 - id: 'null/has/composed-with-comparison'
   tier: adversarial
   intent: 'has(aOptionalString) && aNumber > 0: a presence guard composed with a comparison on another attribute.'
@@ -134,9 +121,85 @@ cases:
   plannerDivergence:
     issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
     pdp:
-    - 0.54.0
-    - 0.55.0
-    reason: 'The plan request omits aOptionalString, so the planner treats it as unknown, assumes the data layer supplies it and folds the has() guard to true by design: the plan is gt(aNumber, 0) alone. The per-row check() calls send the same omission as absent, so check() denies a4, a8, c2 and e1, which lack aOptionalString. The two calls answer different questions, so no adapter can match the recorded decision.'
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds the has() guard to true: the plan is gt(aNumber, 0) alone. The per-row check() calls send the omitted aOptionalString as absent, so check() denies a4, a8, c2 and e1, which lack it. The two calls answer different questions, so no adapter can match the recorded decision. From 0.57.0 the plan carries the has().'
+- id: 'null/has/deny-on-absence'
+  tier: extended
+  intent: 'An unconditional ALLOW plus a DENY on !has(aOptionalString): the DENY arrives as not(not(has)), which the planner folds to has().'
+  trap: 'Before 0.57.0 the DENY was dropped from the plan, granting every row; a translation that loses the double negation, or reads has() as always true, grants a2, a4, a8, c2 and e1.'
+  rules:
+  - effect: EFFECT_ALLOW
+  - effect: EFFECT_DENY
+    condition:
+      match:
+        expr: '!has(R.attr.aOptionalString)'
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    pdp:
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds has() to true and drops the DENY, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() calls send the omitted aOptionalString as absent, so the DENY matches and check() denies a2, a4, a8, c2 and e1. From 0.57.0 the plan carries the has().'
+- id: 'null/has/explicit-null-attribute'
+  tier: adversarial
+  intent: 'has(owner) && aBool == true: a presence test on an attribute sent as an explicit null.'
+  trap: 'owner is present on every row, null where aOptionalString is NULL, and has() is true for a present null; translating has() as IS NOT NULL denies a2, a4, a8, c2 and e1.'
+  condition:
+    match:
+      expr: 'has(R.attr.owner) && R.attr.aBool == true'
+- id: 'null/has/guard-on-same-attribute'
+  tier: core
+  intent: 'has(aOptionalString) && aOptionalString == "set": the usual guard, which the planner leaves out of the plan.'
+  trap: 'The comparison already excludes rows without aOptionalString, so the plan is the eq alone; a translation must not need the guard to deny a2, a4, a8, c2 and e1.'
+  condition:
+    match:
+      expr: 'has(R.attr.aOptionalString) && R.attr.aOptionalString == "set"'
+- id: 'null/has/missing-attribute'
+  tier: extended
+  intent: has() presence test over an optional attribute.
+  trap: 'has() is a presence (IS NOT NULL) test over a NULL column; before 0.57.0 the planner folds it to always-allowed, so adapters return every row while check() denies rows missing the attribute.'
+  condition:
+    match:
+      expr: has(R.attr.aOptionalString)
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    reason: 'Before 0.57.0 the planner treats the omitted aOptionalString as unknown, reads has() as the guard for that access and folds it to KIND_ALWAYS_ALLOWED. The per-row check() calls send the same omission as absent, so has() is false and check() denies those rows. The two calls answer different questions, so no adapter can match the recorded decision. From 0.57.0 the plan carries the has().'
+    pdp:
+    - 0.56.0
+- id: 'null/has/negated'
+  tier: extended
+  intent: '!has(aOptionalString): rows missing the attribute.'
+  trap: 'Before 0.57.0 the planner folded has() to true and the plan denied every row; NOT over a three-valued IS NOT NULL is still two-valued, so a translation that treats has() like a comparison (UNKNOWN on NULL) denies the rows it should return.'
+  condition:
+    match:
+      expr: '!has(R.attr.aOptionalString)'
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    pdp:
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_DENIED. The per-row check() calls send the omitted aOptionalString as absent, so !has() is true and check() allows a2, a4, a8, c2 and e1. From 0.57.0 the plan carries the has().'
+- id: 'null/has/negated-under-or-with-same-attribute'
+  tier: adversarial
+  intent: '!has(aString) || aString == "one": absence or a value, so the has() is not a guard and stays in the plan.'
+  trap: 'j1 lacks aString and is allowed by the !has(); dropping the has() as a guard, or folding it like an AND guard, denies j1.'
+  condition:
+    match:
+      expr: '!has(R.attr.aString) || R.attr.aString == "one"'
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    pdp:
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds has() to true, so the plan is eq(aString, "one") alone. The per-row check() call sends j1''s omitted aString as absent, so !has() is true and check() allows j1. From 0.57.0 the plan carries the has().'
+- id: 'null/has/nested-map-key'
+  tier: extended
+  intent: 'has(obj.inner): a presence test on a key below a map attribute.'
+  trap: 'obj is present on every row; only j1''s obj lacks inner. Testing the presence of obj, not obj.inner, grants j1.'
+  condition:
+    match:
+      expr: 'has(R.attr.obj.inner)'
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    pdp:
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() call sends j1''s obj without inner, so check() denies j1. From 0.57.0 the plan carries the has().'
 - id: 'null/in/literal-list-of-only-null'
   tier: adversarial
   intent: 'Membership in a list whose only element is null (owner in [null]).'

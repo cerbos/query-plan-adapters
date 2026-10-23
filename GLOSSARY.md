@@ -63,8 +63,8 @@ _Avoid_: adversarial suite, differential test, integration test
 
 **Translator unit test**:
 An adapter's offline test of what the corpus cannot ask: branches CEL cannot reach, caller-supplied
-arguments the corpus cannot vary, and the refusal type (`CLAUDE.md`, "What a translator unit test
-may pin"). It never re-asserts a case's output. Distinct from the conformance harness, which proves
+arguments the corpus cannot vary, and the refusal type (`CODING_STANDARDS.md`, "What a translator
+unit test may pin"). It never re-asserts a case's output. Distinct from the conformance harness, which proves
 rows.
 _Avoid_: filter test, shape test
 

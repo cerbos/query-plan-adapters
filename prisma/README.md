@@ -17,7 +17,7 @@ npm install @cerbos/grpc   # or @cerbos/http — whichever client your deploymen
   your application and the adapter must share one copy. npm 7+ installs peers automatically; pnpm
   and Yarn expect you to declare it.
 - **A Cerbos client** (`@cerbos/grpc` or `@cerbos/http`). The adapter depends on neither.
-- **Cerbos PDP** 0.55 or later is recommended; the contract below is tested against 0.55.0.
+- **Cerbos PDP** 0.55 or later is recommended; the contract below is tested against 0.57.0.
 - **A byte-exact database collation** on mapped columns, and on SQLite
   `PRAGMA case_sensitive_like = ON`. See
   [Database collation is an authorization invariant](#database-collation-is-an-authorization-invariant).
@@ -238,13 +238,15 @@ explicit side's NULL compares as a value, the other side's NULL stays an error. 
 [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
-> unknown to the planner, which assumes the data layer supplies it: for a table, the column exists
-> and only its value is open. So the planner reads `has(R.attr.x)` as the guard for the `x` access
-> beside it and folds it to true by design: alone it plans as `ALWAYS_ALLOWED`, and
-> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`. It never excludes a row whose `x` is NULL.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
-> with `check()` whether `x` is missing, null or present.
+> **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
+> attribute the plan request omits is unknown to those planners, which assume the data layer
+> supplies it, so they fold `has(R.attr.x)` to true: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`, which never excludes a row missing `x`.
+> From 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+> `x`'s null convention or refuses it: under `omitted` a row has `x` when its value is not null, and
+> under `explicit` every row has it. The planner still drops a `has(R.attr.x)` that only guards an
+> access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because that access already denies a row
+> without `x`.
 
 ## Relation element nullability
 
@@ -411,25 +413,22 @@ API and is out of scope.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed as real Prisma
-queries over the corpus's 42 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
-`utf8mb4_0900_bin`). Passed cases on the current PDP, 0.55.0, identical on all six combinations,
+and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real Prisma
+queries over the corpus's 43 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
+`utf8mb4_0900_bin`). Passed cases on the current PDP, 0.57.0, identical on all six combinations,
 out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 75 / 97 |
-| adversarial | 250 / 338 |
+| core | 30 / 30 |
+| extended | 81 / 102 |
+| adversarial | 257 / 344 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
-on 0.55.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
+on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
-never as passed. On 0.55.0 that is four extended cases and five adversarial cases.
-`null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
-omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
-receives the omission as absent and denies the row; use `R.attr.x != null` instead of
-`has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. The three `composition/*` cases with a conditional `DENY` rule: the deny
+never as passed. On 0.57.0 that is three extended cases and four adversarial cases.
+On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. The three `composition/*` cases with a conditional `DENY` rule: the deny
 condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while
 `checkResource` receives `aNumber` as absent and treats the erroring deny as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). And
@@ -491,6 +490,12 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- **Fix ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)):** `matches()` reads a
+  repetition count as RE2 does. A count with a leading zero opens no repetition, so `^one{01}$` is
+  the literal `one{01}`; it used to be read as `{1}` and returned the row `"one"`. Nested counts
+  whose copies multiply past 1000 (`(a{2}){600}`) are a pattern RE2 rejects, an error on every row;
+  the pattern used to be expanded into one long literal, so its negation returned every row
+  (over-grant fixes). An unbounded count (`a{2,}`) is no longer mistaken for one past 1000.
 - **Fix:** a string function (`startsWith`, `endsWith`, `contains`) over the element
   of a projected list (`R.attr.tagNames.all(t, t.startsWith("p"))`) is an error on a null element,
   and `all()` and a negated `exists()` now deny the row holding one; they used to admit it.
@@ -635,6 +640,10 @@ demo/scripts/run-example.sh prisma
 A fuller app: [cerbos/express-prisma-cerbos](https://github.com/cerbos/express-prisma-cerbos).
 
 ## Development
+
+Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
+gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
+`*.test.ts`.
 
 | Command | What it runs | Needs |
 | --- | --- | --- |

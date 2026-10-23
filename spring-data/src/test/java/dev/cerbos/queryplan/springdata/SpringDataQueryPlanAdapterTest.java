@@ -49,9 +49,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit tests that hand-build plans and run the resulting Specification against in-memory H2. No
- * Docker. Each test sits under one of the three banners from CLAUDE.md, "What a translator unit
- * test may pin": a branch CEL cannot reach, a caller-supplied argument the corpus cannot vary, or
- * a corpus gap (tracked by #509, deleted when the corpus action lands).
+ * Docker. Each test sits under one of the three banners from CODING_STANDARDS.md, "What a
+ * translator unit test may pin": a branch CEL cannot reach, a caller-supplied argument the corpus
+ * cannot vary, or a corpus gap (tracked by #509, deleted when the corpus action lands).
  */
 class SpringDataQueryPlanAdapterTest {
 

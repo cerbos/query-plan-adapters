@@ -1,0 +1,53 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/has/parent-attribute",
+  "intent": "has(parent.aOptionalString): presence of a field one hop across the to-one relation.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aOptionalString"
+          }
+        ],
+        "operator": "has"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/has/parent-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "has(R.attr.parent.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Rows without a parent and rows whose parent lacks aOptionalString (a4, a7, c1) are both denied; testing only the relation grants the second group, testing only the column without the join mishandles the first."
+}

@@ -31,8 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests on hand-built plans, grouped under the three kinds of material CLAUDE.md allows only in a
- * unit test ("What a translator unit test may pin"). Corpus cases are covered by
+ * Tests on hand-built plans, grouped under the three kinds of material CODING_STANDARDS.md allows
+ * only in a unit test ("What a translator unit test may pin"). Corpus cases are covered by
  * {@link ElasticsearchAdversarialConformanceTest}, which replays the recorded planner output
  * against Elasticsearch. Needs no Docker.
  */

@@ -26,7 +26,8 @@ import java.util.Map;
  */
 final class PlanWalker {
 
-    private final Scope root;
+    private final Scope.Root root;
+    private final Options options;
     private final LeafTranslator leaf;
     private final HierarchyTranslator hierarchy;
     private final SizeTranslator sizes;
@@ -34,6 +35,7 @@ final class PlanWalker {
 
     PlanWalker(Options options) {
         this.root = new Scope.Root(options.fieldMap());
+        this.options = options;
         this.leaf = new LeafTranslator(options);
         this.hierarchy = new HierarchyTranslator(root, options.scalarTypes());
         this.sizes = new SizeTranslator(options, root);
@@ -75,6 +77,7 @@ final class PlanWalker {
             }
             case "except" -> throw exceptUnsupported();
             case "if" -> throw ternaryUnsupported();
+            case "has" -> presence(operands, scope, polarity);
             default -> scope instanceof Scope.Root
                     ? rootExpression(operator, operands, polarity)
                     : leaf.applyResolvedLeaf(operator, operands, scope, polarity);
@@ -105,6 +108,46 @@ final class PlanWalker {
                 yield leaf.applyResolvedLeaf(operator, operands, root, polarity);
             }
         };
+    }
+
+    /**
+     * {@code has(x)}, the presence test the planner emits from Cerbos 0.57.0 for an attribute it
+     * does not fold into a guard: an {@code exists} query, or its negation.
+     *
+     * <p>Elasticsearch does not index a JSON {@code null}, so a field is present to the DSL
+     * exactly when CEL holds a non-null value there. That is CEL's presence only when a NULL
+     * column is omitted: an attribute declared in {@code explicitNullAttributes} is present
+     * while null, and is refused. {@code has()} through a missing parent object is an error CEL
+     * denies under both polarities, and the DSL cannot prove an object present when every field
+     * under it is null, so a negated {@code has()} below another mapped field, and any
+     * {@code has()} of a field other mapped fields sit below, is refused.
+     */
+    private Map<String, Object> presence(List<Operand> operands, Scope scope, Polarity polarity) {
+        requireUnary("has", operands);
+        if (operands.get(0).getNodeCase() != Operand.NodeCase.VARIABLE) {
+            throw malformed("has requires an attribute reference");
+        }
+        String variable = operands.get(0).getVariable();
+        if (options.explicitNullAttributes().contains(variable)) {
+            throw unsupported("has(" + variable + ") over an attribute sent as an explicit null: "
+                    + "Elasticsearch does not index null, so a present null and a missing field are "
+                    + "the same document");
+        }
+        String field = scope.field(variable);
+        if (scope instanceof Scope.Root) {
+            for (String mapped : options.fieldMap().values()) {
+                if (mapped.startsWith(field + ".")) {
+                    throw unsupported("has(" + variable + ") tests the object " + field
+                            + ": an object whose fields are all null is not found by exists");
+                }
+                if (!polarity.holds() && field.startsWith(mapped + ".")) {
+                    throw unsupported("!has(" + variable + ") below the object " + mapped
+                            + ": a missing parent is an error CEL denies, and the DSL cannot "
+                            + "require an object whose fields are all null to be present");
+                }
+            }
+        }
+        return polarity.holds() ? Queries.exists(field) : Queries.notExists(field);
     }
 
     private static UnsupportedPlanShapeException existsOneUnsupported() {

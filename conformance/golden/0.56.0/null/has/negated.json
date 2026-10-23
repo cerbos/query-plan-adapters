@@ -1,0 +1,44 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a8",
+    "c2",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "null/has/negated",
+  "intent": "!has(aOptionalString): rows missing the attribute.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "has() over an omitted attribute: unknown to the planner, absent to check()",
+    "pdp": [
+      "0.56.0"
+    ],
+    "reason": "Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_DENIED. The per-row check() calls send the omitted aOptionalString as absent, so !has() is true and check() allows a2, a4, a8, c2 and e1. From 0.57.0 the plan carries the has()."
+  },
+  "request": {
+    "action": "null/has/negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!has(R.attr.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Before 0.57.0 the planner folded has() to true and the plan denied every row; NOT over a three-valued IS NOT NULL is still two-valued, so a translation that treats has() like a comparison (UNKNOWN on NULL) denies the rows it should return."
+}

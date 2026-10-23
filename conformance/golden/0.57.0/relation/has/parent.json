@@ -1,0 +1,56 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "c1",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/has/parent",
+  "intent": "has(parent): presence of the to-one relation itself.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent"
+          }
+        ],
+        "operator": "has"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/has/parent",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "has(R.attr.parent)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Rows with no parent hop must be denied; a translation that tests a parent column instead of the relation, or reads has() as always true, grants them."
+}

@@ -191,14 +191,15 @@ under `"omitted"` the adapter:
 comparisons go to Convex's filter engine as they do under `"explicit"`.
 
 > [!WARNING]
-> **Do not guard with `has()`: write `R.attr.x != null`.** An attribute the plan request omits is
-> unknown to the planner, which assumes the data layer supplies it, as a table column always does.
-> So the planner reads `has(R.attr.x)` as the guard for the `x` access beside it and folds it to true
-> by design: alone it plans as `ALWAYS_ALLOWED`, and `has(R.attr.x) && R.attr.y > 0` plans as
-> `R.attr.y > 0`. A document can lack a field, so the filter then returns documents missing `x` that
-> `check()` denies, and the adapter, which only sees the plan, cannot restore the guard.
-> `R.attr.x != null` stays in the plan, where the adapter translates it or refuses it, and agrees
-> with `check()` whether `x` is missing, null or present.
+> **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
+> attribute the plan request omits is unknown to those planners, which assume the data layer
+> supplies it, so they fold `has(R.attr.x)` to true: alone it plans as `ALWAYS_ALLOWED`, and
+> `has(R.attr.x) && R.attr.y > 0` plans as `R.attr.y > 0`, which never excludes a document missing
+> `x`. From 0.57.0 the planner keeps `has(R.attr.x)` in the plan, and the adapter translates it from
+> `x`'s null convention or refuses it: under `omitted` a document has `x` when its value is not
+> null, and under `explicit` every document has it. The planner still drops a `has(R.attr.x)` that
+> only guards an access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because that access
+> already denies a document without `x`.
 
 ## Supported operators
 
@@ -270,23 +271,20 @@ that needs a `postFilter` when `allowPostFilter` is not `true`.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.55.0 (and 0.54.0), executed inside a Convex query
-function over the corpus's 42 seed documents. Passed cases on the current PDP, 0.55.0, where the
+and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed inside a Convex query
+function over the corpus's 43 seed documents. Passed cases on the current PDP, 0.57.0, where the
 total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 29 / 29 |
-| extended | 88 / 97 |
-| adversarial | 312 / 338 |
+| core | 30 / 30 |
+| extended | 93 / 102 |
+| adversarial | 317 / 344 |
 
 Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
-them, because the plan and `check()` disagree. On 0.55.0 there are nine, four extended and five
+them, because the plan and `check()` disagree. On 0.57.0 there are seven, three extended and four
 adversarial, which is why those tiers' passed and refused cases fall short of their totals.
-`null/has/missing-attribute` and `null/has/composed-with-comparison`: the plan request leaves an
-omitted attribute unknown, so the planner folds `has()` to true by design, while `checkResource`
-receives the omission as absent and denies the document; use `R.attr.x != null` instead of
-`has(R.attr.x)`. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: the plan's
+On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: the plan's
 `not(...)` of it denies j2, which lacks `aNumber`, while `check()` receives `aNumber` as absent and
 treats the erroring DENY as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). And
@@ -305,7 +303,7 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 429 cases that pass on 0.55.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 429 cases that pass on 0.56.0,
 the harness reports:
 
 | Decided by | Cases |
@@ -414,6 +412,10 @@ demo/scripts/run-example.sh convex
 ```
 
 ## Development
+
+Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
+gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
+`*.test.ts`.
 
 | Command | What it does | Needs |
 | --- | --- | --- |
