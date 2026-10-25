@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Breaking:** `Result.Predicate` is never nil: `FALSE` for `KindAlwaysDenied`, where a nil
+  predicate left the query unrestricted, and `TRUE` for `KindAlwaysAllowed`
+  ([#494](https://github.com/cerbos/query-plan-adapters/issues/494)).
+- **Breaking:** the default null representation is `NullOmitted`; pass
+  `WithNullRepresentation(NullExplicit)` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499)).
 - `has()`, which Cerbos 0.57.0 keeps in the plan as a `has` operator, translates from the
   attribute's null convention: `IS NOT NULL` under omitted, true under explicit, and the related
   row's existence for a scalar relation. A presence test through a to-many relation fails closed.

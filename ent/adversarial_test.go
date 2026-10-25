@@ -709,23 +709,23 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 		return entry, ok
 	})
 
-	result, err := cerbosent.Translate(plan, resourceTable, recording, cerbosent.WithDialect(s.target.dialect))
+	// Every column the dataset omits when NULL is declared NullConventionOmitted in the mapping. The
+	// call-level option covers what is left, list elements and principal-side literals, which the
+	// dataset sends as values; the adapter's own default is pinned in translate_test.go.
+	result, err := cerbosent.Translate(plan, resourceTable, recording,
+		cerbosent.WithDialect(s.target.dialect), cerbosent.WithNullRepresentation(cerbosent.NullExplicit))
 	if len(unmapped) > 0 {
 		return nil, fmt.Errorf("the harness mapping has no entry for %s (a harness defect, not a refusal)", strings.Join(unmapped, ", "))
 	}
 	if err != nil {
 		return nil, err
 	}
-	if result.Kind == cerbosent.KindAlwaysDenied {
-		return []string{}, nil
-	}
-
 	// The outer FROM holds only the resource table — every relation is reached through a
-	// correlated subquery — so an unqualified `id` is unambiguous here.
-	selector := entsql.Dialect(s.target.dialect).Select("id").From(entsql.Table(resourceTable))
-	if result.Kind == cerbosent.KindConditional {
-		selector.Where(result.Predicate)
-	}
+	// correlated subquery — so an unqualified `id` is unambiguous here. The predicate is applied
+	// without switching on Kind, as a caller that skips the switch would: every kind's Predicate
+	// must return exactly the rows the PDP allows on its own (ADR 0011).
+	selector := entsql.Dialect(s.target.dialect).Select("id").From(entsql.Table(resourceTable)).
+		Where(result.Predicate)
 
 	// Query() runs the predicate's closure — the second write pass. Translate already surfaced a
 	// render error from its own probe pass, so a failure here is one only this pass can reach, and

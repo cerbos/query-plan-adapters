@@ -75,10 +75,12 @@ const (
 // https://github.com/cerbos/query-plan-adapters/issues/302.
 const (
 	// NullExplicit — a NULL column is sent to check() as an explicit null attribute. IS NULL
-	// then selects exactly the rows check() allows. This is the default.
+	// then selects exactly the rows check() allows.
 	NullExplicit = queryplan.NullExplicit
 	// NullOmitted — a NULL column sends no attribute, so CEL raises a missing-attribute error
-	// (a deny) and a NULL-selecting filter would over-grant. Null operands are rejected.
+	// (a deny) and a NULL-selecting filter would over-grant. Null operands are rejected. This is
+	// the default: its wrong guess is a refusal, where NullExplicit's is an over-grant
+	// (docs/adr/0011-denial-fails-closed-in-the-result.md).
 	NullOmitted = queryplan.NullOmitted
 )
 
@@ -105,20 +107,27 @@ const (
 type PlanKind int
 
 const (
-	// KindAlwaysDenied means no row is accessible; the caller should skip the query entirely.
+	// KindAlwaysDenied means no row is accessible. Predicate is FALSE; the caller may skip the
+	// query entirely.
 	KindAlwaysDenied PlanKind = iota
-	// KindAlwaysAllowed means every row is accessible; the caller should apply no filter.
+	// KindAlwaysAllowed means every row is accessible. Predicate is TRUE.
 	KindAlwaysAllowed
-	// KindConditional means Predicate carries the filter to apply.
+	// KindConditional means Predicate carries the translated condition.
 	KindConditional
 )
 
 // Result is a translated plan.
 type Result struct {
-	// Predicate is the filter to apply, set only for KindConditional. It is an ordinary ent
-	// predicate: pass it to a selector with `s.Where(result.Predicate)`.
+	// Predicate is the filter to apply, for every Kind: an ordinary ent predicate, passed to a
+	// selector with `s.Where(result.Predicate)`. It is never nil on a successful translation, so a
+	// caller that applies it without switching on Kind still gets exactly the rows the PDP allows
+	// (docs/adr/0011-denial-fails-closed-in-the-result.md).
 	Predicate *sql.Predicate
 	Kind      PlanKind
+}
+
+func alwaysDenied() Result {
+	return Result{Kind: KindAlwaysDenied, Predicate: sql.False()}
 }
 
 // ErrUnsupported wraps every shape this adapter refuses to translate, so callers can distinguish
@@ -142,7 +151,7 @@ func WithDialect(d string) Option {
 }
 
 // WithNullRepresentation declares how the caller represents a NULL column in the attributes it
-// sends to check(). Defaults to NullExplicit.
+// sends to check(). Defaults to NullOmitted.
 func WithNullRepresentation(rep NullRepresentation) Option {
 	return func(o *options) { o.nullRepresentation = rep }
 }
@@ -167,7 +176,7 @@ func Translate(plan *responsev1.PlanResourcesResponse, table string, mapper Mapp
 		return Result{}, fmt.Errorf("cerbosent: mapper is required")
 	}
 
-	cfg := options{dialect: dialect.SQLite}
+	cfg := options{dialect: dialect.SQLite, nullRepresentation: NullOmitted}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -180,14 +189,14 @@ func Translate(plan *responsev1.PlanResourcesResponse, table string, mapper Mapp
 
 	filter := plan.GetFilter()
 	if filter == nil {
-		return Result{Kind: KindAlwaysDenied}, nil
+		return alwaysDenied(), nil
 	}
 
 	switch filter.GetKind() {
 	case enginev1.PlanResourcesFilter_KIND_ALWAYS_DENIED:
-		return Result{Kind: KindAlwaysDenied}, nil
+		return alwaysDenied(), nil
 	case enginev1.PlanResourcesFilter_KIND_ALWAYS_ALLOWED:
-		return Result{Kind: KindAlwaysAllowed}, nil
+		return Result{Kind: KindAlwaysAllowed, Predicate: sql.ExprP("TRUE")}, nil
 	case enginev1.PlanResourcesFilter_KIND_CONDITIONAL:
 	default:
 		return Result{}, fmt.Errorf("cerbosent: unrecognised filter kind %s", filter.GetKind())

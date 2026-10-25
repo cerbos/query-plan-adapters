@@ -360,8 +360,8 @@ func (a *app) translate(ctx context.Context, principalID, action string) (cerbos
 // applyPlan hands a translated plan to a generated ent query — the one line every consumer of this
 // adapter writes, and the line no suite in ../ reaches.
 //
-// The bool is "any row may be accessible". A KindAlwaysDenied plan carries no predicate at all,
-// because the adapter's contract for it is that the caller skips the query entirely.
+// The bool is "any row may be accessible". A KindAlwaysDenied plan's Predicate is FALSE, so a caller
+// who forgot the switch would still get no rows, but the contract is to skip the query entirely.
 func applyPlan(query *ent.DocumentQuery, result cerbosent.Result) (*ent.DocumentQuery, bool, error) {
 	switch result.Kind {
 	case cerbosent.KindAlwaysDenied:
