@@ -283,18 +283,21 @@ The planner emits the same `eq(x, null)` node whether your application sends a N
 | `{"x": null}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
-The call-level `nullAttributeRepresentation` defaults to `"explicit"`. If you omit attributes for
-NULL columns, set it to `"omitted"`. A null operand is then read the way CEL reads it on that
+The call-level `nullAttributeRepresentation` defaults to `"omitted"`, the convention that fails
+closed when the guess is wrong. If you send NULL columns as explicit nulls, set it to `"explicit"`,
+and `x == null` renders as `IS NULL`:
+
+```ts
+queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "explicit" });
+```
+
+Under `"omitted"` a null operand is read the way CEL reads it on that
 convention: a present value is never null, so `x == null` matches no row and `x != null` every
 present one, while a NULL column — a missing attribute — is UNKNOWN, excluded under both polarities
 as CEL's error denies it ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). A null
 element of an `in` list can never match and is dropped. A mapping with a `transform`, a function
 mapping or a relation still throws for a null operand, since the adapter does not own its
 comparison.
-
-```ts
-queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
-```
 
 The option is scoped to each call, including when a mapper starts another translation.
 
@@ -322,8 +325,9 @@ UNKNOWN: CEL's `null != "x"` is true and the row must come back. Ordering and st
 unchanged, since CEL errors (and denies) on a null receiver. Declaring `"omitted"` on an entry
 applies the omitted reading of a null operand to that attribute only.
 
-- Undeclared attributes keep the default rendering, so `!=` against a constant under-grants NULL
-  rows until you declare them.
+- Undeclared attributes follow the call-level convention. If that is `"omitted"` and the caller in
+  fact sends an explicit null, `!=` against a constant under-grants the NULL rows, which fails
+  closed, until you declare them.
 - A field-to-field `==` / `!=` between an attribute declared `"explicit"` and one that is not is
   read the way CEL reads it: UNKNOWN when the undeclared side is NULL (a missing attribute), and a
   definite answer otherwise, with the declared side's NULL a null value.
@@ -516,6 +520,12 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- **Breaking:** `nullAttributeRepresentation` defaults to `"omitted"`, where it defaulted to
+  `"explicit"`. A caller that sends explicit nulls and set nothing now gets `x == null` matching no
+  row where it rendered `IS NULL`, and a refusal for a null operand over a `transform`, function
+  mapping or relation; pass `nullAttributeRepresentation: "explicit"` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
 - **Fix ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)):** `matches()` reads a
   repetition count as RE2 does. A count with a leading zero opens no repetition, so `^one{01}$` is
   the literal `one{01}`; it used to be read as `{1}` and returned the row `"one"`. Nested counts

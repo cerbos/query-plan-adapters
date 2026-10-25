@@ -39,7 +39,7 @@ export { UnsupportedQueryPlanError };
 export function queryPlanToDrizzle({
   queryPlan,
   mapper,
-  nullAttributeRepresentation = "explicit",
+  nullAttributeRepresentation = "omitted",
 }: QueryPlanToDrizzleArgs): QueryPlanToDrizzleResult {
   const options: BuildFilterOptions = {
     nullRepresentation: nullAttributeRepresentation,
