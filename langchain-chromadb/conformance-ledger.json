@@ -301,6 +301,10 @@
       "status": "unsupported",
       "reason": "Same missing positional access as `collection/index/first-element-of-number-list`: the negation is pushed down to the comparison, which refuses the index() operand before choosing an inverted operator. `allowPostFilter` does not lift it: `R.attr.aNumberList` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
       "reason": "Same missing positional access as `collection/index/first-element-of-number-list`, over a string list: `$eq` on a list key and a dotted `key.N` both match nothing, and the index() node is refused as a nested expression before its comparison is examined. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -392,6 +396,10 @@
     "conditional/ternary/inside-exists": {
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "conditional/ternary/negated-collection-condition": {
+      "status": "unsupported",
+      "reason": "The ternary's condition is an all() over tags: Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so the collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",
@@ -719,6 +727,17 @@
     "relation/has-intersection/negated-to-one-chain": {
       "status": "unsupported",
       "reason": "Chroma has no operator that intersects a list-valued metadata field with a literal list, so hasIntersection has no Where equivalent to negate; the adapter refuses to invert it. `allowPostFilter` does not lift it: `R.attr.mainCategory.subNames` is a list reached through a relation, which Chroma metadata has no model for, so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "relation/has/negated-parent-attribute": {
+      "status": "unsupported",
+      "reason": "has(parent.aOptionalString) under a negation: Chroma metadata is flat, so a record without the parent.aOptionalString key cannot tell a missing parent, which CEL denies as an error under both polarities, from a parent without aOptionalString, which is false; the post-filter refuses a nested has() anywhere false and error would answer differently."
+    },
+    "relation/has/negated-two-hops-attribute": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has(parent.inner.aString) under a negation: Chroma metadata is flat, so a record without the parent.inner.aString key cannot tell a missing parent or parent.inner, which CEL denies as an error under both polarities, from a parent.inner without aString, which is false; the post-filter refuses a nested has() anywhere false and error would answer differently. The 0.56.0 planner folds the has() away, so that plan translates."
     },
     "relation/has/parent": {
       "status": "unsupported",
