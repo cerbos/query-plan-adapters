@@ -1,0 +1,49 @@
+{
+  "allowed": [],
+  "degenerateReason": "Every seed that holds a parent.inner holds its aString, so the negated presence is false for it, and every seed without a parent or a parent.inner is a missing-path error. The case exists for those error rows, which a presence test that guards only the parent returns.",
+  "id": "relation/has/negated-two-hops-attribute",
+  "intent": "!has(parent.inner.aString): absence of a field two hops across the to-one relations.",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.inner.aString"
+                }
+              ],
+              "operator": "has"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/has/negated-two-hops-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!has(R.attr.parent.inner.aString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A missing parent and a missing parent.inner are both errors that deny under both polarities; guarding only a mapped parent, and not the unmapped parent.inner below it, returns the rows whose parent has no inner."
+}

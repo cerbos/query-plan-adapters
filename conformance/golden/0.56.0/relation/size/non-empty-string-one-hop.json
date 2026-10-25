@@ -1,0 +1,65 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "c1",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/size/non-empty-string-one-hop",
+  "intent": "size(parent.aString) > 0: a non-empty string reached through the to-one parent.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aString"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/size/non-empty-string-one-hop",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.parent.aString) > 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The > 0 spelling must not take the relation-emptiness fast path: a7's parent holds \"\", so reading it as \"has a parent\" returns a7."
+}

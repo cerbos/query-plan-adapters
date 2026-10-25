@@ -389,6 +389,10 @@
       "status": "unsupported",
       "reason": "Same positional read as collection/index/first-element-of-number-list under negation: the index operand is refused at the same site whatever the polarity, so a must_not over an any-position match is never emitted"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch indexes an array as an unordered set of terms, so a positional read (tags[0].name) has no Query DSL form."
+    },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
       "reason": "A positional read of an array field has no Query DSL form: a terms query matches ANY element, which is a different predicate, and the adapter refuses the computed operand rather than substituting it"
@@ -504,6 +508,10 @@
     "conditional/ternary/negated-branch-on-relation": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression for selecting the constant or parent attribute without scripts; the translator refuses the ternary leaf."
+    },
+    "conditional/ternary/negated-collection-condition": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
     },
     "conditional/ternary/negated-missing-attribute-condition": {
       "status": "unsupported",
@@ -844,6 +852,17 @@
       "status": "unsupported",
       "reason": "Same missing-versus-empty ambiguity as relation/in/negated-to-one-chain, reached through hasIntersection over the same operand"
     },
+    "relation/has/negated-parent-attribute": {
+      "status": "unsupported",
+      "reason": "!has() on a field of the parent object: a missing parent is an error CEL denies under both polarities, and Elasticsearch has no exists query that finds an object whose fields are all null, so a missing parent and a parent without the field can be the same document; the adapter refuses."
+    },
+    "relation/has/negated-two-hops-attribute": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "!has() on a field two objects down (parent.inner.aString): a missing parent or parent.inner is an error CEL denies under both polarities, and Elasticsearch has no exists query that finds an object whose fields are all null, so a missing object and one without the field can be the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
     "relation/has/parent": {
       "status": "unsupported",
       "reason": "has() on the parent object: Elasticsearch has no exists query that finds an object whose fields are all null, so a present parent and a missing one can be the same document; the adapter refuses."
@@ -880,9 +899,21 @@
       "status": "unsupported",
       "reason": "Same missing-versus-empty ambiguity as relation/size/zero-to-one-chain, reached through the negated positive-count spelling rather than the direct zero-count one"
     },
+    "relation/size/non-empty-string-one-hop": {
+      "status": "unsupported",
+      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+    },
     "relation/size/non-negative-to-one-chain": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL expresses only emptiness checks over nested collections, not arbitrary count thresholds, so a >= 0 threshold — which is TRUE exactly when the to-one parent exists — has no equivalent"
+    },
+    "relation/size/string-length-one-hop": {
+      "status": "unsupported",
+      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+    },
+    "relation/size/string-length-two-hops": {
+      "status": "unsupported",
+      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
     },
     "relation/size/zero-to-one-chain": {
       "status": "unsupported",
