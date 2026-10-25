@@ -4,7 +4,9 @@
 package cerbospgx_test
 
 import (
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -77,6 +79,7 @@ type Golden struct {
 	// only where it applies to that tag, so non-null is the whole skip rule.
 	PlannerDivergence json.RawMessage `json:"plannerDivergence"`
 	ID                string          `json:"id"`
+	PDP               string          `json:"pdp"`
 	Tier              string          `json:"tier"`
 	Plan              json.RawMessage `json:"plan"`
 	Allowed           []string        `json:"allowed"`
@@ -167,6 +170,9 @@ func loadCorpus(tb testing.TB) *Corpus {
 
 	for _, tag := range c.Tags {
 		root := filepath.Join(dir, "golden", tag)
+		if fuzzDir != "" {
+			root = filepath.Join(fuzzDir, tag)
+		}
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() || filepath.Ext(path) != ".json" {
 				return err
@@ -186,8 +192,12 @@ func loadCorpus(tb testing.TB) *Corpus {
 		slices.SortFunc(c.Goldens[tag], func(a, b Golden) int { return strings.Compare(a.ID, b.ID) })
 	}
 
-	// The stale-ledger guard: every entry must name a case some PDP still has a golden for.
+	// The stale-ledger guard: every entry must name a case some PDP still has a golden for. A fuzz
+	// run is judged without the ledger, so its goldens cannot make an entry stale.
 	for id, entry := range c.Ledger {
+		if fuzzDir != "" {
+			break
+		}
 		if entry.Status != "unsupported" && entry.Status != "divergent" {
 			tb.Fatalf("%s: ledger entry %q has status %q, want unsupported or divergent", ledgerFile, id, entry.Status)
 		}
@@ -265,3 +275,75 @@ func categoryID(s Seed) string           { return s.ID + "-cat" }
 func subCategoryID(s Seed, i int) string { return fmt.Sprintf("%s-sub%d", s.ID, i) }
 func parentID(s Seed) string             { return s.ID + "-parent" }
 func innerID(s Seed) string              { return s.ID + "-parent-inner" }
+
+// -- fuzz mode ----------------------------------------------------------------------------------
+
+// fuzzDir is the directory a fuzz run was recorded into (conformance/README.md, "Fuzzing"). When
+// it is set, loadCorpus reads the generated cases from it instead of the corpus, and the harness
+// judges each case with fuzzVerdict instead of the ledger: a refusal is always acceptable, since the
+// ledger has no entry for a shape nobody has written down yet.
+var fuzzDir = os.Getenv("QPA_FUZZ_DIR")
+
+// FuzzVerdict is one case's line in <fuzzDir>/results/<adapter>-<store>.json, which the
+// generator's fuzz-report reads.
+type FuzzVerdict struct {
+	PDP      string   `json:"pdp"`
+	ID       string   `json:"id"`
+	Verdict  string   `json:"verdict"`
+	Expected []string `json:"expected,omitempty"`
+	Returned []string `json:"returned,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
+}
+
+// OK reports whether the verdict is a match or a refusal, the two the invariant allows.
+func (v FuzzVerdict) OK() bool { return v.Verdict == "match" || v.Verdict == "refused" }
+
+// fuzzVerdict judges what translating and running a fuzz case gave: refusal is an error wrapping
+// the adapter's refusal sentinel.
+func fuzzVerdict(golden Golden, returned []string, err, refusal error) FuzzVerdict {
+	v := FuzzVerdict{PDP: golden.PDP, ID: golden.ID}
+	expected := sortedCopy(golden.Allowed)
+	switch {
+	case errors.Is(err, refusal):
+		v.Verdict = "refused"
+		return v
+	case err != nil:
+		v.Verdict, v.Detail = "error", err.Error()
+		return v
+	case slices.Equal(returned, expected):
+		v.Verdict = "match"
+		return v
+	}
+	v.Expected, v.Returned = expected, returned
+	switch {
+	case slices.ContainsFunc(returned, func(id string) bool { return !slices.Contains(expected, id) }):
+		v.Verdict = "over-grant"
+	case slices.ContainsFunc(expected, func(id string) bool { return !slices.Contains(returned, id) }):
+		v.Verdict = "under-grant"
+	default:
+		v.Verdict, v.Detail = "error", "the right rows, but some of them repeated"
+	}
+	return v
+}
+
+// writeFuzzResults writes one store's verdicts; outside fuzz mode it does nothing.
+func writeFuzzResults(tb testing.TB, adapter, store string, results []FuzzVerdict) {
+	tb.Helper()
+	if fuzzDir == "" {
+		return
+	}
+	slices.SortFunc(results, func(a, b FuzzVerdict) int {
+		return cmp.Or(strings.Compare(a.ID, b.ID), strings.Compare(a.PDP, b.PDP))
+	})
+	raw, err := json.MarshalIndent(map[string]any{"adapter": adapter, "store": store, "results": results}, "", "  ")
+	if err != nil {
+		tb.Fatalf("encoding the fuzz results: %v", err)
+	}
+	dir := filepath.Join(fuzzDir, "results")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		tb.Fatalf("writing the fuzz results: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, adapter+"-"+store+".json"), append(raw, '\n'), 0o600); err != nil {
+		tb.Fatalf("writing the fuzz results: %v", err)
+	}
+}

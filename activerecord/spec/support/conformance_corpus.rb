@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "time"
 
 # Reads the shared conformance corpus: the dataset, the recorded goldens, and this adapter's
@@ -24,6 +25,12 @@ module ConformanceCorpus
     .values_at("current", "previous").map { |pdp| pdp.fetch("tag") }.freeze
 
   LEDGER = JSON.parse(File.read(LEDGER_FILE)).fetch("cases").freeze
+
+  # The directory a fuzz run was recorded into (conformance/README.md, "Fuzzing"). When it is set,
+  # `goldens` reads the generated cases from it instead of the corpus, and the harness judges each
+  # case with `fuzz_verdict` instead of the ledger: a refusal is always acceptable, since the
+  # ledger has no entry for a shape nobody has written down yet.
+  FUZZ_DIR = ENV.fetch("QPA_FUZZ_DIR", "").then { |dir| dir.empty? ? nil : dir }.freeze
 
   # The planner folds `now() - duration("24h")` into a literal, which the goldens record as
   # this placeholder. The real instant goes back in, at the nanosecond precision the planner
@@ -50,8 +57,9 @@ module ConformanceCorpus
   # @return [Array<Hash>] every golden file recorded against one PDP, sorted by case id.
   # Raises when the tag has no golden files, so a missing directory cannot pass as zero cases.
   def goldens(tag)
-    paths = Dir[File.join(DIR, "golden", tag, "**", "*.json")].sort
-    raise "no golden files for PDP #{tag} under #{File.join(DIR, "golden", tag)}" if paths.empty?
+    root = FUZZ_DIR ? File.join(FUZZ_DIR, tag) : File.join(DIR, "golden", tag)
+    paths = Dir[File.join(root, "**", "*.json")].sort
+    raise "no golden files for PDP #{tag} under #{root}" if paths.empty?
 
     paths.map { |path|
       golden = JSON.parse(File.read(path).gsub(NOW_PLACEHOLDER, NOW_MINUS_24H))
@@ -73,6 +81,42 @@ module ConformanceCorpus
     entry if entry && (entry["pdp"].nil? || entry["pdp"].include?(tag))
   end
 
+  # Judges one fuzz case: the block translates and runs it, returning the ids it selected. A
+  # Cerbos::ActiveRecord::Error is the adapter refusing, as an `unsupported` ledger entry expects.
+  def fuzz_verdict(golden, expected)
+    base = {"pdp" => golden.fetch("pdp"), "id" => golden.fetch("id")}
+    begin
+      returned = yield
+    rescue Cerbos::ActiveRecord::Error
+      return base.merge("verdict" => "refused")
+    rescue => e
+      return base.merge("verdict" => "error", "detail" => "#{e.class}: #{e.message}")
+    end
+    return base.merge("verdict" => "match") if returned == expected
+
+    verdict =
+      if (returned - expected).any? then "over-grant"
+      elsif (expected - returned).any? then "under-grant"
+      else "error"
+      end
+    out = base.merge("verdict" => verdict, "expected" => expected, "returned" => returned)
+    (verdict == "error") ? out.merge("detail" => "the right rows, but some of them repeated") : out
+  end
+
+  # The verdicts the conformance spec gathered, written once the suite ends.
+  def fuzz_results = (@fuzz_results ||= [])
+
+  # Writes <FUZZ_DIR>/results/activerecord-<store>.json, which `fuzz-report` reads.
+  def write_fuzz_results(store)
+    return unless FUZZ_DIR && fuzz_results.any?
+
+    dir = File.join(FUZZ_DIR, "results")
+    FileUtils.mkdir_p(dir)
+    sorted = fuzz_results.sort_by { |r| [r.fetch("id"), r.fetch("pdp")] }
+    File.write(File.join(dir, "activerecord-#{store}.json"),
+      "#{JSON.pretty_generate("adapter" => "activerecord", "store" => store, "results" => sorted)}\n")
+  end
+
   def skipped?(golden, tag)
     divergence = golden["plannerDivergence"]
     !divergence.nil? && (divergence["pdp"].nil? || divergence["pdp"].include?(tag))
@@ -88,4 +132,8 @@ module ConformanceCorpus
     parent_id = seed&.fetch("parentSeedId")
     parent_id && SEEDS_BY_ID.fetch(parent_id)
   end
+end
+
+RSpec.configure do |config|
+  config.after(:suite) { ConformanceCorpus.write_fuzz_results(ENV.fetch("ADAPTER_TEST_DB", "sqlite")) }
 end

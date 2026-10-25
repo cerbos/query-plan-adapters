@@ -24,6 +24,9 @@
 #
 # Caches (Gradle, pytest's basetemp) go under QPA_CACHE_DIR, default ~/.cache/query-plan-adapters,
 # not /tmp, which is often a small tmpfs.
+#
+# With QPA_FUZZ_DIR set to an absolute path, every harness replays that fuzz run instead of the
+# corpus and writes its verdicts to QPA_FUZZ_DIR/results/ (conformance/README.md, "Fuzzing").
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,9 +86,11 @@ gradle() { # <adapter> <gradle args...>, with the environment passed through
   mkdir -p "${home}"
   local env_args=()
   for var in ELASTICSEARCH_IMAGE_FILE ADAPTER_TEST_ORM ADAPTER_TEST_DB ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS \
-    ADAPTER_TEST_POSTGRES_INITDB_ARGS ADAPTER_TEST_MYSQL_COLLATION; do
+    ADAPTER_TEST_POSTGRES_INITDB_ARGS ADAPTER_TEST_MYSQL_COLLATION QPA_FUZZ_DIR QPA_HARNESS_STORE; do
     [[ -n "${!var:-}" ]] && env_args+=(-e "${var}=${!var}")
   done
+  # A fuzz run is recorded outside the repository, so the container needs it mounted too.
+  [[ -n "${QPA_FUZZ_DIR:-}" ]] && env_args+=(-v "${QPA_FUZZ_DIR}:${QPA_FUZZ_DIR}")
   docker run --rm --network host --user "$(id -u):$(id -g)" \
     --group-add "$(stat -c %g /var/run/docker.sock)" \
     -e HOME=/tmp/home -e GRADLE_USER_HOME=/gradle "${env_args[@]}" \
@@ -97,6 +102,8 @@ gradle() { # <adapter> <gradle args...>, with the environment passed through
 run_leg() { # <adapter> <store>
   local adapter="$1" store="$2"
   cd "${REPO_ROOT}/${adapter}" || return 1
+  # The leg's name, for a harness whose fuzz results file cannot tell its store from the inside.
+  export QPA_HARNESS_STORE="${store}"
   case "${adapter}:${store}" in
     drizzle:sqlite) npm_ready && npm run test:adversarial ;;
     drizzle:postgres | drizzle:mysql) npm_ready && npm run "test:adversarial:${store}" ;;
@@ -198,7 +205,7 @@ run_adapter() { # <adapter> [store...]
 }
 
 case "${1:-}" in
-  "" | -h | --help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "" | -h | --help) sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
   --list) for adapter in $(roster); do printf '%-20s %s\n' "${adapter}" "$(stores_for "${adapter}" || echo '(not in this script)')"; done; exit 0 ;;
   --all)
     for adapter in $(roster); do

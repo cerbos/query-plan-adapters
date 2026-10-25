@@ -5,6 +5,7 @@
 
 package dev.cerbos.queryplan.springdata;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,9 +23,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -82,9 +85,9 @@ final class Corpus {
         return pdpTags().get(0);
     }
 
-    /** Every golden file recorded for {@code tag}, sorted by case id. */
+    /** Every golden file recorded for {@code tag} (in fuzz mode, the run's), sorted by case id. */
     static List<JsonNode> goldens(String tag) {
-        Path dir = conformanceDir().resolve("golden").resolve(tag);
+        Path dir = fuzzing() ? Path.of(FUZZ_DIR, tag) : conformanceDir().resolve("golden").resolve(tag);
         try (Stream<Path> files = Files.walk(dir)) {
             return files.filter(p -> p.toString().endsWith(".json"))
                     .sorted()
@@ -257,4 +260,69 @@ final class Corpus {
                     e -> e.getValue() instanceof AttributeMapping.Field f
                             ? AttributeMapping.field(f.jpaPath())
                             : e.getValue()));
+
+    // -- fuzz mode --------------------------------------------------------------------------------
+
+    /**
+     * The directory a fuzz run was recorded into (conformance/README.md, "Fuzzing"), or empty.
+     * When it is set, {@code goldens} reads the generated cases from it instead of the corpus, and
+     * the harness judges each case with {@link #fuzzVerdict} instead of the ledger: a refusal is
+     * always acceptable, since the ledger has no entry for a shape nobody has written down yet.
+     */
+    static final String FUZZ_DIR = System.getenv().getOrDefault("QPA_FUZZ_DIR", "");
+
+    static boolean fuzzing() {
+        return !FUZZ_DIR.isEmpty();
+    }
+
+    /** One case's line in {@code <FUZZ_DIR>/results/<adapter>-<store>.json}, for fuzz-report. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record FuzzVerdict(String pdp, String id, String verdict, List<String> expected, List<String> returned,
+                       String detail) {
+
+        /** A match or a refusal, the two answers the invariant allows. */
+        boolean ok() {
+            return verdict.equals("match") || verdict.equals("refused");
+        }
+    }
+
+    /** Translates and runs one case, returning the selected ids sorted. */
+    @FunctionalInterface
+    interface Selection {
+        List<String> ids() throws Exception;
+    }
+
+    /** Judges one fuzz case: {@code refusal} says which throws are the adapter refusing. */
+    static FuzzVerdict fuzzVerdict(String pdp, String id, List<String> expected, Selection selection,
+                                   Predicate<Exception> refusal) {
+        List<String> returned;
+        try {
+            returned = selection.ids();
+        } catch (Exception e) {
+            return refusal.test(e)
+                    ? new FuzzVerdict(pdp, id, "refused", null, null, null)
+                    : new FuzzVerdict(pdp, id, "error", null, null, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+        if (returned.equals(expected)) return new FuzzVerdict(pdp, id, "match", null, null, null);
+        String verdict = !expected.containsAll(returned) ? "over-grant"
+                : !returned.containsAll(expected) ? "under-grant" : "error";
+        return new FuzzVerdict(pdp, id, verdict, expected, returned,
+                verdict.equals("error") ? "the right rows, but some of them repeated" : null);
+    }
+
+    /** Writes one store's verdicts; outside fuzz mode it does nothing. */
+    static void writeFuzzResults(String adapter, String store, List<FuzzVerdict> results) {
+        if (!fuzzing()) return;
+        List<FuzzVerdict> sorted = results.stream()
+                .sorted(Comparator.comparing(FuzzVerdict::id).thenComparing(FuzzVerdict::pdp)).toList();
+        Path dir = Path.of(FUZZ_DIR, "results");
+        try {
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve(adapter + "-" + store + ".json"), new ObjectMapper()
+                    .writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(Map.of("adapter", adapter, "store", store, "results", sorted)) + "\n");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
 }

@@ -44,6 +44,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -89,6 +90,9 @@ class AdversarialConformanceTest {
     /** (tag, tier, outcome) to count, printed after the run. */
     private static final Map<String, Integer> TALLY = new TreeMap<>();
 
+    /** Every fuzz case's verdict, written once the run ends (conformance/README.md, "Fuzzing"). */
+    private static final List<Corpus.FuzzVerdict> FUZZ_RESULTS = Collections.synchronizedList(new ArrayList<>());
+
     @BeforeAll
     static void setUp() {
         emf = createEntityManagerFactory();
@@ -98,6 +102,9 @@ class AdversarialConformanceTest {
     @AfterAll
     static void tearDown() {
         TALLY.forEach((key, count) -> System.out.printf("conformance %s: %d%n", key, count));
+        Corpus.writeFuzzResults("spring-data",
+                System.getenv().getOrDefault("QPA_HARNESS_STORE", System.getenv().getOrDefault("ADAPTER_TEST_DB", "h2")),
+                FUZZ_RESULTS);
         if (emf != null) emf.close();
         if (database != null) database.stop();
     }
@@ -129,6 +136,14 @@ class AdversarialConformanceTest {
         });
         allowed.sort(null);
 
+        if (Corpus.fuzzing()) {
+            // The adapter's two refusal types, as an `unsupported` ledger entry expects.
+            Corpus.FuzzVerdict verdict = Corpus.fuzzVerdict(tag, id, allowed, () -> ids(golden),
+                    e -> e instanceof UnsupportedPlanShapeException || e instanceof UnmappedAttributeException);
+            FUZZ_RESULTS.add(verdict);
+            assertTrue(verdict.ok(), verdict::toString);
+            return;
+        }
         LedgerEntry entry = LEDGER.get(id);
         String status = entry != null && entry.appliesTo(tag) ? entry.status() : "pass";
         switch (status) {
@@ -151,6 +166,7 @@ class AdversarialConformanceTest {
 
     @Test
     void everyLedgerEntryNamesAGoldenCase() {
+        Assumptions.assumeFalse(Corpus.fuzzing(), "a fuzz run is judged without the ledger");
         Set<String> recorded = new HashSet<>();
         Corpus.pdpTags().forEach(tag -> Corpus.goldens(tag).forEach(g -> recorded.add(g.get("id").asText())));
         assertEquals(Set.of(), LEDGER.keySet().stream()

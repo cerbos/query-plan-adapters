@@ -11,6 +11,10 @@ import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core"
 
 import { queryPlanToPrisma, PlanKind, UnsupportedQueryPlanError } from ".";
 import {
+  assertFuzzVerdict,
+  FUZZ_DIR,
+  fuzzThrown,
+  fuzzVerdict,
   MAPPER,
   MODEL,
   pdpTags,
@@ -18,8 +22,9 @@ import {
   readCorpusJson,
   readGolden,
   readGoldens,
+  writeFuzzResults,
 } from "./corpus";
-import type { Golden } from "./corpus";
+import type { FuzzVerdict, Golden } from "./corpus";
 import { prisma } from "./test-setup.adversarial";
 
 /**
@@ -286,6 +291,16 @@ const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
+const fuzzResults: FuzzVerdict[] = [];
+
+/** A fuzz case judged on this store (conformance/README.md, "Fuzzing"). */
+async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+  try {
+    return fuzzVerdict(golden, held(golden.allowed).sort(), await selectAllowed(await planOf(golden)));
+  } catch (error) {
+    return fuzzThrown(golden, error, UnsupportedQueryPlanError);
+  }
+}
 
 beforeAll(async () => {
   // CEL string matching is case-sensitive, and this adapter lowers contains/startsWith/endsWith to
@@ -299,6 +314,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.$disconnect();
+  writeFuzzResults("prisma", `${STORE_NAME}-v${process.env["PRISMA_VERSION"] ?? "7"}`, fuzzResults);
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
     const skipped = GOLDENS.get(tag)!.filter((golden) => golden.plannerDivergence !== null);
@@ -361,7 +377,7 @@ describe(`conformance (${STORE_NAME})`, () => {
     }
   });
 
-  test("the ledger names no case without a golden file", () => {
+  (FUZZ_DIR ? test.skip : test)("the ledger names no case without a golden file", () => {
     const ids = new Set(TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)));
     expect(Object.keys(LEDGER).filter((id) => !ids.has(id))).toEqual([]);
   });
@@ -385,6 +401,12 @@ describe(`conformance (${STORE_NAME})`, () => {
     test.each(cases.map((golden) => [golden.id, golden] as const))(
       `${tag} %s`,
       async (_id, golden) => {
+        if (FUZZ_DIR) {
+          const verdict = await fuzzReplay(golden);
+          fuzzResults.push(verdict);
+          assertFuzzVerdict(verdict);
+          return;
+        }
         const entry = ledgerEntry(golden, tag);
         const queryPlan = await planOf(golden);
         if (entry?.status === "unsupported") {

@@ -514,6 +514,8 @@ func TestAdversarialConformance(t *testing.T) {
 	corpus := loadCorpus(t)
 	pool := startPostgres(t, corpus)
 	mapper := buildMapper()
+	var fuzzResults []FuzzVerdict
+	defer func() { writeFuzzResults(t, "pgx", "postgres", fuzzResults) }()
 
 	for _, tag := range corpus.Tags {
 		t.Run(tag, func(t *testing.T) {
@@ -529,6 +531,12 @@ func TestAdversarialConformance(t *testing.T) {
 						t.Skip("plannerDivergence: the recorded plan and check() disagree under this PDP")
 					}
 					ids, err := filteredIDs(t.Context(), pool, mapper, golden)
+					if fuzzDir != "" {
+						v := fuzzVerdict(golden, ids, err, cerbospgx.ErrUnsupported)
+						fuzzResults = append(fuzzResults, v)
+						require.True(t, v.OK(), "%+v", v)
+						return
+					}
 					switch {
 					case !listed:
 						require.NoError(t, err)
