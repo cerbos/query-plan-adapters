@@ -76,7 +76,8 @@ final class Refusals {
                         + " attribute, so Cerbos evaluates the comparison as a"
                         + " missing-attribute error (deny) while a NULL-selecting filter"
                         + " would return those rows. Send NULL columns as explicit nulls and"
-                        + " use EXPLICIT, or keep this shape out of the policy.");
+                        + " declare EXPLICIT (the default is OMITTED), or keep this shape out of"
+                        + " the policy.");
     }
 
     /**

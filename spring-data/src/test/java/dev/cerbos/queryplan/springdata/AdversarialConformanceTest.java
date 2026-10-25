@@ -174,8 +174,17 @@ class AdversarialConformanceTest {
 
     // -- the query ----------------------------------------------------------------------------
 
+    /**
+     * Every column the dataset omits when NULL is declared OMITTED in {@link Corpus#MAPPING}. The
+     * call-level convention covers what is left, list elements and principal-side literals, which
+     * the dataset sends as values; the adapter's own default is pinned in OptionsTest.
+     */
+    private static final SpringDataQueryPlanAdapter.Options OPTIONS =
+            SpringDataQueryPlanAdapter.Options.of(Corpus.MAPPING)
+                    .withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT);
+
     private static List<String> ids(JsonNode golden) {
-        return executeIds(SpringDataQueryPlanAdapter.toSpecification(Corpus.plan(golden), Corpus.MAPPING));
+        return executeIds(SpringDataQueryPlanAdapter.toSpecification(Corpus.plan(golden), OPTIONS));
     }
 
     /** The ids a {@code select distinct id} returns under {@code spec}, sorted. */
@@ -444,6 +453,6 @@ class AdversarialConformanceTest {
                 PlanResourcesResponse.newBuilder().setFilter(PlanResourcesFilter.newBuilder()
                         .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
                         .setCondition(condition)).build(),
-                Corpus.MAPPING));
+                OPTIONS));
     }
 }

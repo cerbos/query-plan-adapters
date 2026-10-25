@@ -99,14 +99,14 @@ public final class SpringDataQueryPlanAdapter {
         }
 
         /**
-         * Options with only a mapping: no overrides, {@link NullAttributeRepresentation#EXPLICIT},
+         * Options with only a mapping: no overrides, {@link NullAttributeRepresentation#OMITTED},
          * and no macro-depth bound of their own.
          *
          * @param mapping maps each plan variable to a JPA path or relation
          * @return the options
          */
         public static Options of(Map<String, AttributeMapping> mapping) {
-            return new Options(mapping, Map.of(), NullAttributeRepresentation.EXPLICIT,
+            return new Options(mapping, Map.of(), NullAttributeRepresentation.OMITTED,
                     OptionalInt.empty());
         }
 
@@ -234,7 +234,7 @@ public final class SpringDataQueryPlanAdapter {
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides) {
         return toSpecification(
-                planResult, mapper, overrides, NullAttributeRepresentation.EXPLICIT);
+                planResult, mapper, overrides, NullAttributeRepresentation.OMITTED);
     }
 
     /**
@@ -295,7 +295,7 @@ public final class SpringDataQueryPlanAdapter {
             Map<String, AttributeMapping> mapper,
             Map<String, OperatorFunction> overrides) {
         return toSpecification(
-                response, mapper, overrides, NullAttributeRepresentation.EXPLICIT);
+                response, mapper, overrides, NullAttributeRepresentation.OMITTED);
     }
 
     /**

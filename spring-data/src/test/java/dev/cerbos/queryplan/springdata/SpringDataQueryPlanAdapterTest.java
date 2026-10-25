@@ -166,8 +166,10 @@ class SpringDataQueryPlanAdapterTest {
                                 Map<String, OperatorFunction> overrides) {
         PlanResourcesResponse resp =
                 buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-        Specification<ResourceEntity> spec =
-                SpringDataQueryPlanAdapter.toSpecification(resp, mapper, overrides);
+        // EXPLICIT, the convention these vary from; the default is pinned in
+        // NullAttributeRepresentationTest.
+        Specification<ResourceEntity> spec = SpringDataQueryPlanAdapter.toSpecification(
+                resp, mapper, overrides, NullAttributeRepresentation.EXPLICIT);
 
         EntityManager em = emf.createEntityManager();
         try {
@@ -806,8 +808,13 @@ class SpringDataQueryPlanAdapterTest {
         }
 
         @Test
-        void explicitIsTheDefaultAndKeepsIsNull() {
-            // The three-argument overload gives IS NULL; an explicit EXPLICIT also translates.
+        void omittedIsTheDefaultAndExplicitKeepsIsNull() {
+            // The three-argument overload refuses the null operand: OMITTED is the default,
+            // because its wrong guess is a refusal rather than an over-grant (ADR 0011).
+            PlanResourcesResponse resp =
+                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, nullEq());
+            assertThrows(UnsupportedPlanShapeException.class,
+                    () -> SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of()));
             ResourceEntity nullColumn = new ResourceEntity("explicit-default-1");
             nullColumn.setaOptionalString(null);
             withResource(nullColumn, () -> assertEquals(1, runCount(nullEq())));
@@ -2010,8 +2017,8 @@ class SpringDataQueryPlanAdapterTest {
         private Set<String> runIds(Operand condition) {
             PlanResourcesResponse resp =
                     buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            Specification<ResourceEntity> spec =
-                    SpringDataQueryPlanAdapter.toSpecification(resp, MAPPER, Map.of());
+            Specification<ResourceEntity> spec = SpringDataQueryPlanAdapter.toSpecification(
+                    resp, MAPPER, Map.of(), NullAttributeRepresentation.EXPLICIT);
             EntityManager em = emf.createEntityManager();
             try {
                 CriteriaBuilder cb = em.getCriteriaBuilder();

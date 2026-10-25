@@ -59,6 +59,16 @@ class OptionsTest {
         emf.close();
     }
 
+    /**
+     * The default null convention is the one whose wrong guess is a refusal rather than an
+     * over-grant (docs/adr/0011-denial-fails-closed-in-the-result.md).
+     */
+    @Test
+    void theDefaultNullConventionIsOmitted() {
+        assertSame(NullAttributeRepresentation.OMITTED,
+                Options.of(Corpus.MAPPING).nullAttributeRepresentation());
+    }
+
     @Nested
     class Immutability {
 

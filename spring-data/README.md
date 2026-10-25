@@ -160,9 +160,9 @@ overloads (`mapper`, `overrides`, `nullAttributeRepresentation`) are shorthand f
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter.Options;
 
 Options options = Options.of(MAPPING)
-    .withOperatorOverrides(overrides)                                     // Map<String, OperatorFunction>
-    .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED) // default EXPLICIT
-    .withMaxMacroDepth(8);                                                // default 5
+    .withOperatorOverrides(overrides)                                      // Map<String, OperatorFunction>
+    .withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT) // default OMITTED
+    .withMaxMacroDepth(8);                                                 // default 5
 
 Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, options);
 ```
@@ -171,7 +171,7 @@ Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(plan
 |---|---|---|
 | mapping | — (required) | [Field mapping](#field-mapping) |
 | `withOperatorOverrides` | none | [Operator overrides](#operator-overrides) |
-| `withNullAttributeRepresentation` | `EXPLICIT` | [NULL attribute representation](#null-attribute-representation) |
+| `withNullAttributeRepresentation` | `OMITTED` | [NULL attribute representation](#null-attribute-representation) |
 | `withMaxMacroDepth` | 5, or the `dev.cerbos.queryplan.springdata.maxMacroDepth` system property | [Nested collection macros](#nested-collection-macros-multiply-correlated-subqueries--depth-is-bounded) |
 
 Collections are copied on construction and each `with…` returns a new instance, so build an
@@ -235,19 +235,20 @@ attributes it sends to `check()`, so tell the adapter which convention you use:
 | `{"x": null}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (missing attribute) | selects it — **over-grants** |
 
-The default, `EXPLICIT`, translates to `IS NULL`. If you omit attributes for NULL columns, pass
-`OMITTED`: every null comparison operand against an undeclared attribute then throws
+The default is `OMITTED`, the convention that fails closed when the guess is wrong: every null
+comparison operand against an undeclared attribute throws
 `UnsupportedPlanShapeException` instead of emitting a filter that returns denied rows. This check is
 eager (in `toSpecification`), and it rejects every such null operand, including aligned ones like
 `x != null`, because a leaf can't tell whether an enclosing `not` will flip it
 ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)). Declare `OMITTED` on the
-attribute itself (below) and `eq`/`ne` against a bare null translate instead.
+attribute itself (below) and `eq`/`ne` against a bare null translate instead. If you send NULL
+columns as explicit nulls, pass `EXPLICIT`, which translates `== null` to `IS NULL`:
 
 ```java
 SpringDataQueryPlanAdapter.toSpecification(plan,
-    Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED));
+    Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT));
 // or positionally:
-SpringDataQueryPlanAdapter.toSpecification(plan, mapping, Map.of(), NullAttributeRepresentation.OMITTED);
+SpringDataQueryPlanAdapter.toSpecification(plan, mapping, Map.of(), NullAttributeRepresentation.EXPLICIT);
 ```
 
 ### Declare the convention per attribute
@@ -267,8 +268,8 @@ Map<String, AttributeMapping> mapping = Map.of(
 Declaring `EXPLICIT` asserts the column can be NULL **and** a NULL reaches `check()` as an explicit
 null. The equality family (`eq`, `ne`, `in`) over it then never renders as SQL UNKNOWN, so
 `null != "x"` includes the row as CEL does. Ordering and string operators are unchanged (a null
-receiver is a CEL error, which denies like UNKNOWN). Undeclared attributes keep the old rendering,
-where `!=` against a constant under-grants NULL rows.
+receiver is a CEL error, which denies like UNKNOWN). Undeclared attributes follow the call-level
+option.
 
 Declaring `OMITTED` asserts a NULL reaches `check()` as a missing attribute. `x == null` and
 `x != null` against it then translate three-valued: a NULL column is UNKNOWN under both polarities,
@@ -690,6 +691,12 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- **Breaking:** the call-level null representation defaults to `OMITTED`, in `Options.of` and in
+  the `toSpecification` overloads that take no `NullAttributeRepresentation`, where it defaulted to
+  `EXPLICIT`. A caller that sends explicit nulls and set nothing now gets
+  `UnsupportedPlanShapeException` on a null comparison; pass `EXPLICIT` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
 - **Fix ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)):** `matches()` reads a
   repetition count as RE2 does. A count with a leading zero opens no repetition, so `^one{01}$` is
   the literal `one{01}`; it used to be read as `{1}` and matched the row `"one"` (over-grant fix).
