@@ -429,6 +429,10 @@
       "status": "unsupported",
       "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated. `allowPostFilter` does not lift it: `R.attr.owner` reaches `check()` as an explicit null on some rows, and Chroma metadata has no null, so the harness stores it nowhere, the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "membership/in/negated-literal-in-null-resource-list": {
+      "status": "unsupported",
+      "reason": "The negation of `membership/in/literal-in-resource-number-list`: value-first membership is refused when mirroring it whatever the polarity, because Chroma's $in and $nin test a field against a literal list, not the reverse. `allowPostFilter` does not lift it: `R.attr.aNumberList` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "membership/in/negated-literal-in-resource-list": {
       "status": "unsupported",
       "reason": "Value-first membership in a list-valued attribute, under negation. The adapter refuses `literal in field` because Chroma's $in tests a field against a literal list, not the reverse, and Chroma has no `$not` to negate a `$contains` with. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."

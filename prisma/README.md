@@ -414,15 +414,15 @@ API and is out of scope.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real Prisma
-queries over the corpus's 43 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL (under
-`utf8mb4_0900_bin`). Passed cases on the current PDP, 0.57.0, identical on all six combinations,
-out of every golden case in the tier:
+queries over 43 of the corpus's 44 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL
+(under `utf8mb4_0900_bin`). The ledger lacks `null-list`, so j4 is not loaded. Passed cases on the
+current PDP, 0.57.0, identical on all six combinations, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
 | extended | 81 / 102 |
-| adversarial | 257 / 344 |
+| adversarial | 258 / 345 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.

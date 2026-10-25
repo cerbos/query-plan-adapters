@@ -54,6 +54,8 @@ type Seed struct {
 	ABoolList        []*bool    `json:"aBoolList"`
 	ANumber          *int       `json:"aNumber"`
 	ABool            *bool      `json:"aBool"`
+	// Requires names the store capabilities the row needs; a store that lacks one cannot hold it.
+	Requires []string `json:"requires"`
 }
 
 // Derived is one seed's entry in conformance/derived-fields.json. A nil value is a NULL column; a nil
@@ -142,9 +144,22 @@ func loadCorpus(tb testing.TB) *Corpus {
 
 	var ledger struct {
 		Cases map[string]LedgerEntry `json:"cases"`
+		// Lacks maps each store capability this adapter's store lacks to the reason.
+		Lacks map[string]string `json:"lacks"`
 	}
 	readJSON(tb, ledgerFile, &ledger)
 	c.Ledger = ledger.Cases
+
+	// A seed requiring a capability this store lacks is a resource it cannot hold: it is not
+	// loaded, and its id is struck from every golden's allowed set.
+	var unheld []string
+	c.Seeds = slices.DeleteFunc(c.Seeds, func(s Seed) bool {
+		if slices.ContainsFunc(s.Requires, func(r string) bool { _, lacked := ledger.Lacks[r]; return lacked }) {
+			unheld = append(unheld, s.ID)
+			return true
+		}
+		return false
+	})
 
 	var versions map[string]struct {
 		Tag string `json:"tag"`
@@ -172,6 +187,10 @@ func loadCorpus(tb testing.TB) *Corpus {
 		})
 		if err != nil || len(c.Goldens[tag]) == 0 {
 			tb.Fatalf("reading the goldens for PDP %q under %s: %v", tag, root, err)
+		}
+		for i := range c.Goldens[tag] {
+			g := &c.Goldens[tag][i]
+			g.Allowed = slices.DeleteFunc(g.Allowed, func(id string) bool { return slices.Contains(unheld, id) })
 		}
 		slices.SortFunc(c.Goldens[tag], func(a, b Golden) int { return strings.Compare(a.ID, b.ID) })
 	}

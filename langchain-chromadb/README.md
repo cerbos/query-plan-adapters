@@ -317,7 +317,7 @@ field name.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real ChromaDB
-metadata queries over the corpus's 43 seed records. The harness translates every case with
+metadata queries over the corpus's 44 seed records. The harness translates every case with
 `allowPostFilter: true` and applies the `postFilter` to every record the `where` returns, as a
 caller must. Passed cases on the current PDP, 0.57.0, out of every golden case in the tier:
 
@@ -325,7 +325,7 @@ caller must. Passed cases on the current PDP, 0.57.0, out of every golden case i
 | --- | --- |
 | core | 24 / 30 |
 | extended | 52 / 102 |
-| adversarial | 170 / 344 |
+| adversarial | 170 / 345 |
 
 Without `allowPostFilter`, the 167 cases the post-filter answers throw `UnsupportedOperatorError`
 instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 71

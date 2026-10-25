@@ -2091,6 +2091,15 @@ resourcePolicy:
       condition:
         match:
           expr: 2 in R.attr.aNumberList
+    # membership/in/negated-literal-in-null-resource-list
+    - actions:
+        - membership/in/negated-literal-in-null-resource-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(2 in R.attr.aNumberList)'
     # membership/in/map-attribute-keys
     - actions:
         - membership/in/map-attribute-keys
