@@ -86,6 +86,12 @@ final class PlanWalker {
         return switch (operand.getNodeCase()) {
             case EXPRESSION -> traverseExpression(operand.getExpression(), scope);
             case VARIABLE -> handleBareVariable(operand.getVariable(), scope);
+            // The planner folds a lambda body it can decide to a bare value: `t.name in []` arrives
+            // as `false`. Any other value where CEL needs a boolean is a no-overload error, which
+            // denies under both polarities.
+            case VALUE -> operand.getValue().getKindCase() == Value.KindCase.BOOL_VALUE
+                    ? (operand.getValue().getBoolValue() ? cb.conjunction() : cb.disjunction())
+                    : tri.unknown();
             default -> throw Refusals.malformed("Unexpected operand type: " + operand.getNodeCase());
         };
     }

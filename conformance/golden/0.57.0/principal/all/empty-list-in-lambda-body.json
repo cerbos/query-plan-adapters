@@ -1,0 +1,87 @@
+{
+  "allowed": [
+    "a2",
+    "b1",
+    "b2",
+    "b3",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "principal/all/empty-list-in-lambda-body",
+  "intent": "all() over the resource tags whose body tests membership in an empty principal list (tags.all(t, t.name in P.attr.emptyTeams)).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": false
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "all"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/all/empty-list-in-lambda-body",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tags.all(t, t.name in P.attr.emptyTeams)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The planner folds the body to the constant false, so all() holds only for rows with no tags. An adapter that expects an expression as the lambda body crashes on the bare value. Found by fuzzing (fuzz/s23/0144)."
+}

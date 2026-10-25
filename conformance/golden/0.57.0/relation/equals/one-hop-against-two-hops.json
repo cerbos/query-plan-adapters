@@ -1,0 +1,49 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/one-hop-against-two-hops",
+  "intent": "A parent field compared with the same field one level further out (parent.aBool == parent.inner.aBool).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aBool"
+          },
+          {
+            "variable": "request.resource.attr.parent.inner.aBool"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/one-hop-against-two-hops",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aBool == R.attr.parent.inner.aBool"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Both sides read the parents table at different depths, so the inner hop must correlate to the parent row, not to the root: a1, a4 and e1 match. Nesting the inner subquery outside the parent one names a table that is not in scope. Found by fuzzing (fuzz/s23/0040)."
+}

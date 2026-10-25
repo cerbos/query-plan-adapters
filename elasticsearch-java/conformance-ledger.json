@@ -720,6 +720,10 @@
       "status": "unsupported",
       "reason": "The Query DSL cannot compare two document fields without scripts."
     },
+    "principal/all/empty-list-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "all cannot distinguish a missing collection from an empty collection in Elasticsearch, so the macro is refused before its folded body is read"
+    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
@@ -831,6 +835,14 @@
     "relation/all/to-one-chain": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a positive all over a chained collection cannot distinguish an absent to-one parent (CEL error, denies) from an empty collection (vacuously true)"
+    },
+    "relation/equals/negated-one-hop-against-two-hops": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "relation/equals/one-hop-against-two-hops": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
     },
     "relation/equals/one-hop-null-literal": {
       "status": "unsupported",

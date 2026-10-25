@@ -409,6 +409,10 @@
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
     },
+    "principal/all/empty-list-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "The planner folds the lambda body to a bare `false`, and the translator builds a filter only from an expression or a variable in boolean position: a constant would have to be a top-level `$expr`, which MongoDB refuses inside the `$elemMatch` the macro becomes, so the plan is refused rather than guessed."
+    },
     "principal/all/negated-long-list": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: not over nullable fields or collection macros cannot preserve Cerbos error semantics."
@@ -424,6 +428,10 @@
     "principal/exists-one/long-list": {
       "status": "unsupported",
       "reason": "The mongoose adapter refuses this planner shape at its existing lowering boundary: exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat filter.."
+    },
+    "principal/exists/empty-list-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "The planner folds the lambda body to a bare `false`, and the translator builds a filter only from an expression or a variable in boolean position: a constant would have to be a top-level `$expr`, which MongoDB refuses inside the `$elemMatch` the macro becomes, so the plan is refused rather than guessed."
     },
     "principal/exists/list-of-structs": {
       "status": "unsupported",

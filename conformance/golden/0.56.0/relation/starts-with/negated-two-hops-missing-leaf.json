@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/starts-with/negated-two-hops-missing-leaf",
+  "intent": "Negated startsWith() two levels out on a field that one inner parent lacks (!parent.inner.aOptionalString.startsWith(\"x\")).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.inner.aOptionalString"
+                },
+                {
+                  "value": "x"
+                }
+              ],
+              "operator": "startsWith"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/starts-with/negated-two-hops-missing-leaf",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.parent.inner.aOptionalString.startsWith(\"x\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "b1's inner has no aOptionalString, so the negation is a missing-attribute error that denies; a NOT over the two-hop EXISTS admits b1, and the rows with no inner at all."
+}

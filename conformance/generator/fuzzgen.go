@@ -431,8 +431,11 @@ func (f *fuzzer) numberAtom() string {
 	case 0, 1:
 		return fmt.Sprintf("%s %s %s", n, f.pick(fuzzOrderings), f.numLit(n, double))
 	case 2:
+		// The operand is always a double literal: every numeric attribute reaches CEL as a double,
+		// which has no double + int overload, and the planner drops an int literal's type, so an
+		// int operand only rediscovers that planner divergence (#544) on every leg.
 		op := f.pick([]string{"+", "-", "*"})
-		return fmt.Sprintf("%s %s %s %s %s", n, op, f.numLit(n, double), f.pick(fuzzOrderings), f.numLit(n, double))
+		return fmt.Sprintf("%s %s %s %s %s", n, op, f.numLit(n, true), f.pick(fuzzOrderings), f.numLit(n, double))
 	case 3:
 		if double {
 			return fmt.Sprintf("%s / 2.0 %s %s", n, f.pick(fuzzOrderings), f.numLit(n, true))

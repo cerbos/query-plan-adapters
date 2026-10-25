@@ -2600,6 +2600,15 @@ resourcePolicy:
       condition:
         match:
           expr: (P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))
+    # principal/all/empty-list-in-lambda-body
+    - actions:
+        - principal/all/empty-list-in-lambda-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.all(t, t.name in P.attr.emptyTeams)
     # principal/all/long-list
     - actions:
         - principal/all/long-list
@@ -2672,6 +2681,15 @@ resourcePolicy:
       condition:
         match:
           expr: (P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))
+    # principal/exists/empty-list-in-lambda-body
+    - actions:
+        - principal/exists/empty-list-in-lambda-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name in P.attr.emptyTeams) || R.attr.aNumber == 5
     # principal/exists/list-of-structs
     - actions:
         - principal/exists/list-of-structs
@@ -3113,6 +3131,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.aString.contains("done")
+    # relation/ends-with/negated-one-hop-missing-leaf
+    - actions:
+        - relation/ends-with/negated-one-hop-missing-leaf
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.parent.aOptionalString.endsWith("ror")'
     # relation/equals/negated-one-hop
     - actions:
         - relation/equals/negated-one-hop
@@ -3122,6 +3149,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.aString == "One")'
+    # relation/equals/negated-one-hop-against-two-hops
+    - actions:
+        - relation/equals/negated-one-hop-against-two-hops
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aBool == R.attr.parent.inner.aBool)'
     # relation/equals/negated-one-hop-null-literal
     - actions:
         - relation/equals/negated-one-hop-null-literal
@@ -3140,6 +3176,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.inner.aOptionalString == null)'
+    # relation/equals/one-hop-against-two-hops
+    - actions:
+        - relation/equals/one-hop-against-two-hops
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aBool == R.attr.parent.inner.aBool
     # relation/equals/one-hop-null-literal
     - actions:
         - relation/equals/one-hop-null-literal
@@ -3464,6 +3509,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) == 0
+    # relation/starts-with/negated-two-hops-missing-leaf
+    - actions:
+        - relation/starts-with/negated-two-hops-missing-leaf
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.parent.inner.aOptionalString.startsWith("x")'
     # relation/starts-with/two-hops
     - actions:
         - relation/starts-with/two-hops
