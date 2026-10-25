@@ -182,17 +182,33 @@ async function translate(golden: Golden) {
 
 async function selectAllowed(golden: Golden): Promise<string[]> {
   const result = await translate(golden);
-  if (result.kind === PlanKind.ALWAYS_DENIED) return [];
-  const rows = await collection!.get({
-    where: result.kind === PlanKind.CONDITIONAL ? result.filters : undefined,
-    include: ["metadatas"],
-  });
+  if (result.kind !== PlanKind.CONDITIONAL) {
+    return result.kind === PlanKind.ALWAYS_DENIED
+      ? []
+      : (await collection!.get()).ids.sort();
+  }
+  if (!("postFilter" in result)) {
+    return (await collection!.get({ where: result.filters })).ids.sort();
+  }
   const { postFilter } = result;
   // The post-filter is part of the authorization predicate: it is applied to every record the
-  // `where` returned, exactly as a caller must.
-  return rows.ids
-    .filter((_id, index) => !postFilter || postFilter(rows.metadatas[index]))
+  // prefilter returned, exactly as a caller must. Its prefilter only narrows, so the post-filter
+  // alone over every record has to agree.
+  const narrowed = await collection!.get({
+    where: result.prefilter,
+    include: ["metadatas"],
+  });
+  const ids = narrowed.ids
+    .filter((_id, index) => postFilter(narrowed.metadatas[index]))
     .sort();
+  if (result.prefilter !== undefined) {
+    const every = await collection!.get({ include: ["metadatas"] });
+    const alone = every.ids
+      .filter((_id, index) => postFilter(every.metadatas[index]))
+      .sort();
+    expect(alone).toEqual(ids);
+  }
+  return ids;
 }
 
 const TAGS = pdpTags();

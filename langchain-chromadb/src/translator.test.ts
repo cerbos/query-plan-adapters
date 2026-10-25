@@ -14,6 +14,7 @@ import { PlanKind, queryPlanToChromaDB, UnsupportedOperatorError } from ".";
 import type {
   FieldMapper,
   FieldNameMapperConfig,
+  PostFilter,
   QueryPlanToChromaDBResult,
 } from ".";
 import {
@@ -46,6 +47,13 @@ async function translate(
     queryPlan: await planOf(readGolden(CURRENT, id)),
     fieldNameMapper: options.fieldNameMapper ?? FIELD_NAME_MAPPER,
   });
+}
+
+/** An opted-in result's post-filter, which only a post-filtered conditional result carries. */
+function postFilterOf(
+  result: QueryPlanToChromaDBResult<boolean> | undefined,
+): PostFilter | undefined {
+  return result && "postFilter" in result ? result.postFilter : undefined;
 }
 
 /** Whatever `run` throws or rejects with, or `undefined` if it returns. */
@@ -468,7 +476,7 @@ describe("allowPostFilter", () => {
         };
       }),
     );
-    POST_FILTERED = OUTCOMES.filter(({ on }) => on.result?.postFilter);
+    POST_FILTERED = OUTCOMES.filter(({ on }) => postFilterOf(on.result));
   });
 
   const describeError = (error: unknown): string =>
@@ -486,7 +494,7 @@ describe("allowPostFilter", () => {
 
   test("left off, no result carries a postFilter, and false is the same as omitting it", () => {
     for (const { omitted, off } of OUTCOMES) {
-      expect(omitted.result?.postFilter).toBeUndefined();
+      expect(postFilterOf(omitted.result)).toBeUndefined();
       expect(off.result).toEqual(omitted.result);
       expect(describeError(off.error)).toBe(describeError(omitted.error));
     }
@@ -523,7 +531,7 @@ describe("allowPostFilter", () => {
     ];
     for (const { on } of POST_FILTERED) {
       for (const metadata of shapes) {
-        expect(typeof on.result!.postFilter!(metadata)).toBe("boolean");
+        expect(typeof postFilterOf(on.result)!(metadata)).toBe("boolean");
       }
     }
   });
@@ -532,8 +540,8 @@ describe("allowPostFilter", () => {
   // It reads as a missing attribute, which CEL denies under a negation as well: a list is never
   // compared as though it were whatever the PDP was sent.
   test("a key holding a list reads as missing, which denies under negation too", async () => {
-    const { postFilter } = await allowing(
-      "string/starts-with/negated-field-to-field",
+    const postFilter = postFilterOf(
+      await allowing("string/starts-with/negated-field-to-field"),
     );
     expect(postFilter?.({ aString: "one", aOptionalString: "x" })).toBe(true);
     expect(postFilter?.({ aString: ["one"], aOptionalString: "x" })).toBe(false);
@@ -561,7 +569,7 @@ describe("allowPostFilter", () => {
     ],
   ])("the post-filter refuses a reference the mapping does not declare: %s", async (_label, mapper) => {
     const id = "relation/contains/one-hop";
-    expect((await allowing(id)).postFilter).toBeDefined();
+    expect(postFilterOf(await allowing(id))).toBeDefined();
     const raised = await thrownBy(() => allowing(id, mapper));
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
     expect((raised as UnsupportedOperatorError).operator).toBe("contains");
@@ -572,7 +580,7 @@ describe("allowPostFilter", () => {
   // mapping's `valueType: "boolean"` admit it.
   test("valueType boolean is what lets string() read a boolean key", async () => {
     const id = "cast/string/from-boolean";
-    expect((await allowing(id)).postFilter).toBeDefined();
+    expect(postFilterOf(await allowing(id))).toBeDefined();
     const undeclared = {
       ...FIELD_NAME_MAPPER,
       "request.resource.attr.aBool": "aBool",

@@ -51,22 +51,20 @@ export type { PostFilter };
 // resolves this package through its published surface
 // (docs/adr/0002-examples-install-the-packed-artifact.md).
 //
+// Only a conditional result carries a filter, so a caller cannot read one without narrowing on
+// `kind` first, and `filters`, wherever it appears, is the whole condition
+// (docs/adr/0011-denial-fails-closed-in-the-result.md).
+//
 // `AllowPostFilter` is `false` unless the call passes `allowPostFilter`, so a caller that has not
-// opted in keeps a conditional variant whose `filters` is always a `Where`. Only an opted-in call's
-// result can carry a `postFilter`, and only then can `filters` be absent: a plan with no conjunct
-// Chroma can express is answered by the `postFilter` alone.
+// opted in never sees a `postFilter`. An opted-in call's post-filtered result carries no `filters`
+// at all: its `postFilter` decides the whole condition, and the conjuncts Chroma can express ride
+// beside it as a `prefilter`, which only narrows the candidates. Reading `filters` off such a result
+// does not compile without narrowing first.
 export type QueryPlanToChromaDBResult<AllowPostFilter extends boolean = false> =
-  | {
-      kind: PK.ALWAYS_ALLOWED;
-      filters: Record<string, never>;
-      postFilter?: undefined;
-    }
-  | { kind: PK.ALWAYS_DENIED; filters?: undefined; postFilter?: undefined }
-  | { kind: PK.CONDITIONAL; filters: Where; postFilter?: undefined }
+  | { kind: PK.ALWAYS_ALLOWED | PK.ALWAYS_DENIED }
+  | { kind: PK.CONDITIONAL; filters: Where }
   | (AllowPostFilter extends true
-      ?
-          | { kind: PK.CONDITIONAL; filters: Where; postFilter: PostFilter }
-          | { kind: PK.CONDITIONAL; filters?: undefined; postFilter: PostFilter }
+      ? { kind: PK.CONDITIONAL; prefilter?: Where; postFilter: PostFilter }
       : never);
 
 export function queryPlanToChromaDB(
@@ -82,7 +80,7 @@ export function queryPlanToChromaDB({
 }: QueryPlanToChromaDBArgs): QueryPlanToChromaDBResult<boolean> {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
-      return { kind: PlanKind.ALWAYS_ALLOWED, filters: {} };
+      return { kind: PlanKind.ALWAYS_ALLOWED };
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
@@ -117,13 +115,14 @@ function tryPushdown(
 
 /**
  * An opted-in condition, split between Chroma and the post-filter. Whatever Chroma can express
- * stays in `filters`, so the similarity search still narrows the candidates:
+ * still narrows the similarity search:
  *
  * - the whole condition, when it translates, is `filters` alone, as without the option;
- * - a root `and` keeps its expressible conjuncts in `filters` and post-filters the rest, which is
- *   exact because a record satisfies the conjunction exactly when it satisfies every conjunct;
- * - anything else — an `or` with any inexpressible child included, since pushing half a
- *   disjunction drops the records only the other half admits — is post-filtered whole.
+ * - otherwise the post-filter evaluates the whole condition, so it is correct on its own. A root
+ *   `and` also hands its expressible conjuncts to Chroma as a `prefilter`, which only narrows: a
+ *   record satisfies the conjunction only if it satisfies every conjunct. Pushing half of any other
+ *   shape — an `or` with an inexpressible child, say — would drop the records only the other half
+ *   admits, so it carries no prefilter.
  *
  * The post-filtered part compiles before anything is returned, so a shape it cannot evaluate
  * exactly throws `UnsupportedOperatorError` here, never from the predicate.
@@ -136,35 +135,22 @@ function splitCondition(
   const whole = tryPushdown(condition, resolveField);
   if (whole !== undefined) return { kind: PlanKind.CONDITIONAL, filters: whole };
 
-  const fields = postFilterFields(fieldNameMapper, resolveField);
-  if (
-    isExpression(condition) &&
-    condition.operator === "and" &&
-    condition.operands.length >= 2
-  ) {
-    const pushed: Where[] = [];
-    const rest: PlanExpressionOperand[] = [];
-    for (const conjunct of condition.operands) {
-      const where = tryPushdown(conjunct, resolveField);
-      if (where === undefined) rest.push(conjunct);
-      else pushed.push(where);
-    }
-    const postFilter = compilePostFilter(
-      rest.length === 1 ? rest[0]! : new PlanExpression("and", rest),
-      fields,
-    );
-    if (pushed.length === 0) {
-      return { kind: PlanKind.CONDITIONAL, postFilter };
-    }
-    return {
-      kind: PlanKind.CONDITIONAL,
-      filters: pushed.length === 1 ? pushed[0]! : { $and: pushed },
-      postFilter,
-    };
-  }
+  const postFilter = compilePostFilter(
+    condition,
+    postFilterFields(fieldNameMapper, resolveField),
+  );
+  const pushed =
+    isExpression(condition) && condition.operator === "and"
+      ? condition.operands.flatMap((conjunct) => {
+          const where = tryPushdown(conjunct, resolveField);
+          return where === undefined ? [] : [where];
+        })
+      : [];
+  if (pushed.length === 0) return { kind: PlanKind.CONDITIONAL, postFilter };
   return {
     kind: PlanKind.CONDITIONAL,
-    postFilter: compilePostFilter(condition, fields),
+    prefilter: pushed.length === 1 ? pushed[0]! : { $and: pushed },
+    postFilter,
   };
 }
 
