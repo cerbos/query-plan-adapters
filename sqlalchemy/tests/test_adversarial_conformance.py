@@ -350,6 +350,11 @@ def _translate(store: str, case: dict[str, Any]):
         AdvResource,
         ATTR_MAP,
         operator_override_fns=OPERATOR_OVERRIDES,
+        # Every column the dataset omits when NULL is declared "omitted" in
+        # ATTRIBUTE_NULL_REPRESENTATION. The call-level value covers what is left, list
+        # elements and principal-side literals, which the dataset sends as values; the
+        # adapter's own default is pinned in test_query.py.
+        null_attribute_representation="explicit",
         attribute_null_representation=ATTRIBUTE_NULL_REPRESENTATION,
         collection_columns=(
             PG_ARRAY_COLLECTION_COLUMNS
