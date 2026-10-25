@@ -97,6 +97,10 @@
       "status": "unsupported",
       "reason": "List indexing (tags[0].name): Unsupported value-expression operator: get-field."
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "List indexing under negation (!(tags[0].name == \"public\")): Unsupported value-expression operator: get-field."
+    },
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
       "reason": "size(intersect(L, K)): Cerbos's intersect() keeps the duplicates of whichever list is shorter, so the size depends on comparing the stored list's length with the literal's on every row before counting matches. The adapter has no SQL form for that comparison, so it refuses the shape instead of counting a set."

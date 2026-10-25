@@ -2,11 +2,11 @@
 
 # PDP 0.56.0 → 0.57.0
 
-What changes for the 477 cases between the previous PDP (`0.56.0`) and the current one (`0.57.0`).
+What changes for the 484 cases between the previous PDP (`0.56.0`) and the current one (`0.57.0`).
 
 | Change | Cases |
 |---|---|
-| Plan | 12 |
+| Plan | 14 |
 | Allowed set | 0 |
 | Plan error | 0 |
 
@@ -150,6 +150,34 @@ What changes for the 477 cases between the previous PDP (`0.56.0`) and the curre
 
 ```json
 {"condition":{"expression":{"operands":[{"variable":"request.resource.attr.obj.inner"}],"operator":"has"}},"kind":"KIND_CONDITIONAL"}
+```
+
+### `relation/has/negated-parent-attribute`
+
+`0.56.0`:
+
+```json
+{"kind":"KIND_ALWAYS_DENIED"}
+```
+
+`0.57.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"expression":{"operands":[{"variable":"request.resource.attr.parent.aOptionalString"}],"operator":"has"}}],"operator":"not"}},"kind":"KIND_CONDITIONAL"}
+```
+
+### `relation/has/negated-two-hops-attribute`
+
+`0.56.0`:
+
+```json
+{"kind":"KIND_ALWAYS_DENIED"}
+```
+
+`0.57.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"expression":{"operands":[{"variable":"request.resource.attr.parent.inner.aString"}],"operator":"has"}}],"operator":"not"}},"kind":"KIND_CONDITIONAL"}
 ```
 
 ### `relation/has/parent`

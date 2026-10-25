@@ -1,0 +1,53 @@
+{
+  "allowed": [
+    "a4",
+    "a7",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/has/negated-parent-attribute",
+  "intent": "!has(parent.aOptionalString): absence of a field one hop across the to-one relation.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aOptionalString"
+                }
+              ],
+              "operator": "has"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/has/negated-parent-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!has(R.attr.parent.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "has() through a missing parent is an error CEL denies under both polarities, so only rows whose parent lacks the field are allowed; a flat key or an IS NULL over the joined column cannot tell a missing parent from a missing field, and its negation returns every parentless row."
+}

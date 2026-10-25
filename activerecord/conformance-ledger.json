@@ -112,6 +112,10 @@
       "reason": "Positional access into a list of numbers, the same refusal as `collection/index/first-element-of-string-list`: `index` has no case in the translator's operator dispatch, so the walk falls through to the generic unsupported-operator refusal before the comparison around it is built. `aNumberList` is a has_many association mapped by member field, and a relation mapping carries no element order, so `aNumberList[0]` names whichever row the engine returns first without an ORDER BY the plan does not carry. A caller whose element table has a position column, as the harness table does, can supply the override the message offers",
       "status": "unsupported"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "reason": "A has_many relation has no element order, so list indexing is refused.",
+      "status": "unsupported"
+    },
     "collection/index/negated-first-element-of-string-list": {
       "reason": "Positional access into a scalar list. `index` has no case in the translator's operator dispatch at all, so the walk falls through to the generic unsupported-operator refusal rather than to a leaf-operand guard — which is why the message names the operator and offers an override. No case was written because row order in a SQL relation is not defined without an ORDER BY the plan does not carry: `tagNames` is a has_many association, and `tagNames[0]` names whichever row the engine happens to return first. A caller whose table has a deterministic ordering column can express it faithfully, and the override the message offers is that escape hatch",
       "status": "unsupported"

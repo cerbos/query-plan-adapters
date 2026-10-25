@@ -66,6 +66,13 @@ cases:
   condition:
     match:
       expr: '!((R.attr.aBool ? "one" : R.attr.parent.aOptionalString) == "set")'
+- id: 'conditional/ternary/negated-collection-condition'
+  tier: adversarial
+  intent: 'A negated boolean ternary whose condition is an all() over a nullable element field.'
+  trap: 'all() over a NULL element name is an error, so the ternary errors and denies under both polarities (b5, b6, e1); a NOT over the guarded-branch disjunction turns that error into a match.'
+  condition:
+    match:
+      expr: '!(R.attr.tags.all(t, t.name != "other") ? R.attr.aBool : R.attr.aNumber > 5)'
 - id: 'conditional/ternary/negated-missing-attribute-condition'
   tier: adversarial
   intent: Negated comparison over a ternary whose condition reads an attribute that is missing on some rows.

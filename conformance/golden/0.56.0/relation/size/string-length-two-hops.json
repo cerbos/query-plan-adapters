@@ -1,0 +1,58 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "b1",
+    "b6",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/size/string-length-two-hops",
+  "intent": "size(parent.inner.aString) <= 7: the length of a string reached through two to-one hops.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.inner.aString"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 7
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/size/string-length-two-hops",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.parent.inner.aString) <= 7"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Counting the inner row instead of measuring its string returns every row with a parent.inner; a row whose parent has no inner, or no parent, is a missing-path error and denies."
+}

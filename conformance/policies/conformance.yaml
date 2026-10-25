@@ -984,6 +984,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames[0.5] == "public" || R.attr.aNumber == 5
+    # collection/index/negated-first-element-of-object-list
+    - actions:
+        - collection/index/negated-first-element-of-object-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.tags[0].name == "public")'
     # collection/index/map-literal-by-attribute-key
     - actions:
         - collection/index/map-literal-by-attribute-key
@@ -1656,6 +1665,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aBool ? "one" : R.attr.parent.aOptionalString) == "set")'
+    # conditional/ternary/negated-collection-condition
+    - actions:
+        - conditional/ternary/negated-collection-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.tags.all(t, t.name != "other") ? R.attr.aBool : R.attr.aNumber > 5)'
     # conditional/ternary/negated-missing-attribute-condition
     - actions:
         - conditional/ternary/negated-missing-attribute-condition
@@ -3221,6 +3239,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!hasIntersection(R.attr.mainCategory.subNames, ["finance"])'
+    # relation/has/negated-parent-attribute
+    - actions:
+        - relation/has/negated-parent-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!has(R.attr.parent.aOptionalString)'
+    # relation/has/negated-two-hops-attribute
+    - actions:
+        - relation/has/negated-two-hops-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!has(R.attr.parent.inner.aString)'
     # relation/has/parent
     - actions:
         - relation/has/parent
@@ -3383,6 +3419,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) > 0
+    # relation/size/non-empty-string-one-hop
+    - actions:
+        - relation/size/non-empty-string-one-hop
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.parent.aString) > 0
     # relation/size/non-negative-to-one-chain
     - actions:
         - relation/size/non-negative-to-one-chain
@@ -3392,6 +3437,24 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) >= 0
+    # relation/size/string-length-one-hop
+    - actions:
+        - relation/size/string-length-one-hop
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.parent.aString) <= 3
+    # relation/size/string-length-two-hops
+    - actions:
+        - relation/size/string-length-two-hops
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.parent.inner.aString) <= 7
     # relation/size/zero-to-one-chain
     - actions:
         - relation/size/zero-to-one-chain

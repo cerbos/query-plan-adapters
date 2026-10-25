@@ -180,6 +180,10 @@
       "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from.",
+      "status": "unsupported"
+    },
     "collection/index/negated-first-element-of-string-list": {
       "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
       "status": "unsupported"

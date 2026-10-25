@@ -184,6 +184,28 @@ cases:
   condition:
     match:
       expr: '!hasIntersection(R.attr.mainCategory.subNames, ["finance"])'
+- id: 'relation/has/negated-parent-attribute'
+  tier: adversarial
+  intent: '!has(parent.aOptionalString): absence of a field one hop across the to-one relation.'
+  trap: 'has() through a missing parent is an error CEL denies under both polarities, so only rows whose parent lacks the field are allowed; a flat key or an IS NULL over the joined column cannot tell a missing parent from a missing field, and its negation returns every parentless row.'
+  condition:
+    match:
+      expr: '!has(R.attr.parent.aOptionalString)'
+  plannerDivergence:
+    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
+    pdp:
+    - 0.56.0
+    reason: 'Before 0.57.0 the planner folds has() to true, so the negation plans as KIND_ALWAYS_DENIED. The per-row check() calls omit parent.aOptionalString where the parent lacks it, so check() allows those rows. From 0.57.0 the plan carries the has().'
+- id: 'relation/has/negated-two-hops-attribute'
+  tier: adversarial
+  intent: '!has(parent.inner.aString): absence of a field two hops across the to-one relations.'
+  trap: 'A missing parent and a missing parent.inner are both errors that deny under both polarities; guarding only a mapped parent, and not the unmapped parent.inner below it, returns the rows whose parent has no inner.'
+  condition:
+    match:
+      expr: '!has(R.attr.parent.inner.aString)'
+  degenerate:
+    oracle: empty
+    reason: 'Every seed that holds a parent.inner holds its aString, so the negated presence is false for it, and every seed without a parent or a parent.inner is a missing-path error. The case exists for those error rows, which a presence test that guards only the parent returns.'
 - id: 'relation/has/parent'
   tier: extended
   intent: 'has(parent): presence of the to-one relation itself.'
@@ -329,6 +351,13 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.mainCategory.subCategories) > 0'
+- id: 'relation/size/non-empty-string-one-hop'
+  tier: adversarial
+  intent: 'size(parent.aString) > 0: a non-empty string reached through the to-one parent.'
+  trap: 'The > 0 spelling must not take the relation-emptiness fast path: a7''s parent holds "", so reading it as "has a parent" returns a7.'
+  condition:
+    match:
+      expr: 'size(R.attr.parent.aString) > 0'
 - id: 'relation/size/non-negative-to-one-chain'
   tier: adversarial
   intent: 'size(mainCategory.subCategories) >= 0, true exactly for rows that have a mainCategory.'
@@ -336,6 +365,20 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.mainCategory.subCategories) >= 0'
+- id: 'relation/size/string-length-one-hop'
+  tier: adversarial
+  intent: 'size(parent.aString) <= 3: the length of a string reached through the to-one parent.'
+  trap: 'size() of a scalar behind a to-one hop is a string length, not a count of the hop''s rows: counting the parent row makes the size 1 and returns every row with a parent.'
+  condition:
+    match:
+      expr: 'size(R.attr.parent.aString) <= 3'
+- id: 'relation/size/string-length-two-hops'
+  tier: adversarial
+  intent: 'size(parent.inner.aString) <= 7: the length of a string reached through two to-one hops.'
+  trap: 'Counting the inner row instead of measuring its string returns every row with a parent.inner; a row whose parent has no inner, or no parent, is a missing-path error and denies.'
+  condition:
+    match:
+      expr: 'size(R.attr.parent.inner.aString) <= 7'
 - id: 'relation/size/zero-to-one-chain'
   tier: adversarial
   intent: size(mainCategory.subCategories) == 0 where most rows have no mainCategory.

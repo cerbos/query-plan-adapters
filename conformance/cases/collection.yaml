@@ -384,6 +384,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.tagNames[0.5] == "public" || R.attr.aNumber == 5'
+- id: 'collection/index/negated-first-element-of-object-list'
+  tier: adversarial
+  intent: 'A field of the first element of an object list compared with a literal, negated (!(tags[0].name == "public")).'
+  trap: 'A NULL name at position 0 is a missing field, an error CEL denies under both polarities (b5, b6, e1); a negation guarded only by the index range treats it as unequal and returns those rows.'
+  condition:
+    match:
+      expr: '!(R.attr.tags[0].name == "public")'
 - id: 'collection/index/map-literal-by-attribute-key'
   tier: extended
   intent: 'A map literal indexed by an attribute and compared at the root ({...}[aString] == "ADMIN"), which the planner rewrites to an or of equalities on the key.'

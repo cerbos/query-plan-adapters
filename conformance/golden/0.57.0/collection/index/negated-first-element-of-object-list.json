@@ -1,0 +1,78 @@
+{
+  "allowed": [
+    "a4",
+    "a7",
+    "a9",
+    "b4",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/negated-first-element-of-object-list",
+  "intent": "A field of the first element of an object list compared with a literal, negated (!(tags[0].name == \"public\")).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.tags"
+                            },
+                            {
+                              "value": 0
+                            }
+                          ],
+                          "operator": "index"
+                        }
+                      },
+                      {
+                        "variable": "name"
+                      }
+                    ],
+                    "operator": "get-field"
+                  }
+                },
+                {
+                  "value": "public"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/negated-first-element-of-object-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.tags[0].name == \"public\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A NULL name at position 0 is a missing field, an error CEL denies under both polarities (b5, b6, e1); a negation guarded only by the index range treats it as unequal and returns those rows."
+}
