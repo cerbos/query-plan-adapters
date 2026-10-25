@@ -309,6 +309,10 @@
       "status": "unsupported",
       "reason": "The negated conditional reaches a nullable parent attribute; the filter lowering refuses NOT because it cannot preserve selected-branch missing-attribute errors."
     },
+    "conditional/ternary/negated-collection-condition": {
+      "status": "unsupported",
+      "reason": "A negated ternary whose condition is an all() macro: the filter lowering refuses NOT over a collection macro, since a $nor over its $elemMatch would turn the CEL error a NULL element name raises into a match."
+    },
     "conditional/ternary/negated-missing-attribute-condition": {
       "status": "unsupported",
       "reason": "negating a ternary over a nullable field cannot preserve CEL error semantics"

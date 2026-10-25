@@ -4,6 +4,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper, MongooseFilter } from "./index";
 import {
   declaredScalarType,
+  isNullableReference,
   relationOfReference,
   resolveFieldReference,
 } from "./mapper";
@@ -528,6 +529,30 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
           field: fieldOperand.name,
           input: buildAggregationExpression(inputOperand, mapper),
         },
+      };
+    },
+    // A field the element lacks is a missing-key error to CEL, and so is a stored null on a field
+    // the relation declares nullable. `$getField` yields missing or null there instead, which a
+    // negated comparison would read as unequal: `!(tags[0].name == "public")` selected a first
+    // tag with no name.
+    guard: (expression, mapper) => {
+      const [inputOperand, fieldOperand] = expression.operands;
+      if (!inputOperand || !fieldOperand || !isVariable(fieldOperand)) {
+        return undefined;
+      }
+      const value = buildAggregationExpressionFromExpression(expression, mapper);
+      const collection =
+        isExpression(inputOperand) && inputOperand.operator === "index"
+          ? inputOperand.operands[0]
+          : undefined;
+      const nullable =
+        collection !== undefined &&
+        isVariable(collection) &&
+        isNullableReference(`${collection.name}.${fieldOperand.name}`, mapper);
+      return {
+        $expr: nullable
+          ? { $ne: [{ $ifNull: [value, null] }, null] }
+          : { $ne: [{ $type: value }, "missing"] },
       };
     },
   },
