@@ -317,7 +317,7 @@ func (v FuzzVerdict) OK() bool { return v.Verdict == "match" || v.Verdict == "re
 
 // fuzzVerdict judges what translating and running a fuzz case gave: refusal is an error wrapping
 // the adapter's refusal sentinel.
-func fuzzVerdict(golden Golden, returned []string, err error, refusal error) FuzzVerdict {
+func fuzzVerdict(golden Golden, returned []string, err, refusal error) FuzzVerdict {
 	v := FuzzVerdict{PDP: golden.PDP, ID: golden.ID}
 	expected := sortedCopy(golden.Allowed)
 	switch {
@@ -360,7 +360,7 @@ func writeFuzzResults(tb testing.TB, adapter, store string, results []FuzzVerdic
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		tb.Fatalf("writing the fuzz results: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, adapter+"-"+store+".json"), append(raw, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, adapter+"-"+store+".json"), append(raw, '\n'), 0o600); err != nil {
 		tb.Fatalf("writing the fuzz results: %v", err)
 	}
 }
