@@ -209,6 +209,26 @@ export function buildNegatedFilter(
         return {
           AND: operand.operands.map((o) => buildNegatedFilter(o, context)),
         };
+      // `!(c ? a : b)` is `c ? !a : !b`, errors included: a condition that errors errors either
+      // way. A NOT over the guarded-branch disjunction instead selects the rows where the
+      // condition is UNKNOWN, which neither guarded branch matched.
+      case "if":
+        if (operand.operands.length === 3) {
+          const [condition, thenBranch, elseBranch] = operand.operands as [
+            PlanExpressionOperand,
+            PlanExpressionOperand,
+            PlanExpressionOperand,
+          ];
+          return handleBooleanTernaryOperator(
+            [
+              condition,
+              { operator: "not", operands: [thenBranch] },
+              { operator: "not", operands: [elseBranch] },
+            ],
+            context
+          );
+        }
+        break;
       case "exists":
       case "all":
       case "except":

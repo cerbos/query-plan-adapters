@@ -474,10 +474,17 @@ function handleSizeComparison(
 
   const fieldRef = resolveFieldReference(collectionOperand.name, context);
   const { relations } = fieldRef;
+  // A string column reached through to-one hops is measured on the hop's row, never counted as
+  // one: `size(parent.aString) >= 1` read as "has a parent" returned a parent whose aString is
+  // empty. The length's own negation sits inside the hops, so a missing hop is unmatched under
+  // both polarities, the missing-path error CEL denies.
+  if (fieldRef.valueType === "string") {
+    return wrapInRelations(
+      relations,
+      buildStringLengthFilter({ ...fieldRef, relations: [] }, predicate)
+    );
+  }
   if (!relations || relations.length === 0) {
-    if (fieldRef.valueType === "string") {
-      return buildStringLengthFilter(fieldRef, predicate);
-    }
     throw new UnsupportedQueryPlanError("size operator requires a relation mapping");
   }
 

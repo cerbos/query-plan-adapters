@@ -208,6 +208,10 @@
       "status": "unsupported",
       "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "List indexing under negation (!(tags[0].name == \"public\")): a Prisma relation filter (some/every/none) has no positional element access."
+    },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
       "reason": "Indexing a scalar list needs a positional read of an array column, which Prisma's filter API cannot express. The refusal arrives one node earlier than collection/index/first-element-of-object-list's, because there is no get-field projection wrapping this index"
