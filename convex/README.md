@@ -39,9 +39,10 @@ import { action, internalQuery } from "./_generated/server";
 
 const cerbos = new HTTP("http://localhost:3592");
 
+// `nullable: false`: always stored, never null, so comparisons stay on Convex's filter engine.
 const mapper: Mapper = {
-  "request.resource.attr.ownerId": { field: "ownerId" },
-  "request.resource.attr.status": { field: "status" },
+  "request.resource.attr.ownerId": { field: "ownerId", nullable: false },
+  "request.resource.attr.status": { field: "status", nullable: false },
 };
 
 export const listDocuments = action({
@@ -75,22 +76,29 @@ export const listAllowed = internalQuery({
       allowPostFilter: true, // only if your policies need it — see below
     });
 
-    if (result.kind === PlanKind.ALWAYS_DENIED) return [];
-
-    // ALWAYS_ALLOWED carries no filter; CONDITIONAL carries filter, postFilter, or both.
     const table = ctx.db.query("documents");
-    let docs = await (result.filter ? table.filter(result.filter) : table).collect();
-    if (result.postFilter) docs = docs.filter(result.postFilter);
-    return docs;
+    if (result.kind === PlanKind.ALWAYS_DENIED) return [];
+    if (result.kind === PlanKind.ALWAYS_ALLOWED) return await table.collect();
+    switch (result.path) {
+      case "db":
+        return await table.filter(result.filter).collect();
+      case "split": // the prefilter only narrows the read; postFilter decides
+        return (await table.filter(result.prefilter).collect()).filter(result.postFilter);
+      case "post":
+        return (await table.collect()).filter(result.postFilter);
+    }
   },
 });
 ```
 
-`queryPlanToConvex` returns `{ kind, path?, filter?, postFilter? }`. After narrowing `kind` to
-`PlanKind.CONDITIONAL`, `path` says which fields are present: `"db"` → `filter`, `"post"` →
-`postFilter`, `"split"` → both. `PlanKind` is re-exported from `@cerbos/core`. The plan survives the
-JSON round trip because the adapter classifies operands by shape, not with `instanceof`
-([#419](https://github.com/cerbos/query-plan-adapters/issues/419)).
+`queryPlanToConvex` returns a union on `kind` and `path`. `ALWAYS_ALLOWED` and `ALWAYS_DENIED` carry
+nothing else. A `CONDITIONAL` result's `path` says which fields it carries: `"db"` → `filter`, the
+whole condition; `"post"` → `postFilter`, the whole condition; `"split"` → `prefilter` and
+`postFilter`, where `postFilter` is the whole condition and `prefilter` only narrows the read.
+TypeScript will not let you read a field until you have narrowed to the result that carries it, and
+a field named `filter` is always the whole condition. `PlanKind` is re-exported from
+`@cerbos/core`. The plan survives the JSON round trip because the adapter classifies operands by
+shape, not with `instanceof` ([#419](https://github.com/cerbos/query-plan-adapters/issues/419)).
 
 ## Trusted usage pattern
 
@@ -142,8 +150,8 @@ If your policies only use comparisons, `in`, null checks and logical operators, 
 
 How the tree is split:
 
-- A root `and` is split: pushable conjuncts go to `filter` (narrowing the read), the rest to
-  `postFilter` (`path: "split"`).
+- A root `and` is split (`path: "split"`): pushable conjuncts go to `prefilter`, which narrows the
+  read, and `postFilter` evaluates the whole condition.
 - An `or` with any non-pushable child goes entirely to `postFilter`; a partial push-down would drop
   matches.
 - Post-filtered conditions do not reduce the number of documents read.
@@ -166,19 +174,19 @@ field in the attributes you send to `check()`, so tell the adapter which convent
 | `{"x": null}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (missing-attribute error) | selects a stored null — **over-grants** |
 
-`nullAttributeRepresentation` defaults to `"explicit"`. If you omit attributes for NULL fields, set
-`"omitted"`:
+`nullAttributeRepresentation` defaults to `"omitted"`, the convention that fails closed when the
+guess is wrong. If you send NULL attributes as explicit nulls, set `"explicit"`:
 
 ```ts
-queryPlanToConvex({ queryPlan, mapper, nullAttributeRepresentation: "omitted", allowPostFilter: true });
+queryPlanToConvex({ queryPlan, mapper, nullAttributeRepresentation: "explicit" });
 ```
 
 The call-level option is the default for every mapper entry that does not declare `nullable`, so
-under `"omitted"` the adapter:
+under `"omitted"`, the default, the adapter:
 
-- rejects every null comparison operand, in both `filter` and `postFilter`. The rejection is wider
-  than the shapes that actually over-grant (`x != null` is aligned under both conventions), because
-  a leaf cannot see whether an enclosing `not` will flip it
+- rejects every null comparison operand, in `filter`, `prefilter` and `postFilter`. The rejection
+  is wider than the shapes that actually over-grant (`x != null` is aligned under both
+  conventions), because a leaf cannot see whether an enclosing `not` will flip it
   ([#302](https://github.com/cerbos/query-plan-adapters/issues/302));
 - treats every entry that does not declare `nullable` as `nullable: true`, so its comparisons are
   answered by `postFilter` and need `allowPostFilter: true`. Convex's engine cannot guard them:
@@ -203,7 +211,7 @@ comparisons go to Convex's filter engine as they do under `"explicit"`.
 
 ## Supported operators
 
-Pushed to Convex's filter engine (`filter`):
+Pushed to Convex's filter engine (`filter`, `prefilter`):
 
 | Category | Operators | Emits |
 | --- | --- | --- |
@@ -344,6 +352,18 @@ document — so most do not apply.
 
 See also [CHANGELOG.md](CHANGELOG.md).
 
+- **Breaking:** a `path: "split"` result carries `prefilter` and `postFilter`, and `postFilter`
+  evaluates the whole condition. It used to carry the pushable conjuncts as `filter` and only the
+  rest as `postFilter`, so a caller that applied `filter` without reading `path` returned documents
+  the PDP denies. `ALWAYS_ALLOWED` and `ALWAYS_DENIED` no longer declare `filter` or `postFilter`
+  ([#494](https://github.com/cerbos/query-plan-adapters/issues/494),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
+- **Breaking:** `nullAttributeRepresentation` defaults to `"omitted"`, where it defaulted to
+  `"explicit"`. A mapper entry that does not declare `nullable` is now nullable, so its comparisons
+  move to `postFilter` and need `allowPostFilter: true`, and every null operand is refused. Declare
+  `nullable: false` on entries that are always stored, or pass `nullAttributeRepresentation:
+  "explicit"`, to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499)).
 - `postFilter` now evaluates shapes it used to refuse: the `list` and `struct` literals, `except`,
   `intersect`, `isSubset`, list `+`, `upperAscii`, `duration`, `timeSince` with timestamp and
   duration arithmetic, the two-variable `exists`/`all`/`exists_one`, and `index` on a map. Plans
