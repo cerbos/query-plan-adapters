@@ -51,13 +51,15 @@ async function listDocuments(principalId: string) {
     case PlanKind.ALWAYS_ALLOWED:
       return Document.find({ archived: false });
     case PlanKind.CONDITIONAL:
-      return Document.find({ $and: [result.filters!, { archived: false }] });
+      return Document.find({ $and: [result.filters, { archived: false }] });
   }
 }
 ```
 
-`queryPlanToMongoose` returns `{ kind, filters? }`; `filters` is set only for `CONDITIONAL`.
-`PlanKind` is re-exported from `@cerbos/core`. Combine the adapter's filter with your own criteria
+`queryPlanToMongoose` returns a union on `kind`: `{ kind: CONDITIONAL, filters }`, or `{ kind }` for
+`ALWAYS_ALLOWED` and `ALWAYS_DENIED`, which carry no filter. TypeScript will not let you read
+`filters` until you have narrowed on `kind`, so a denial cannot reach `Model.find()` as an absent
+filter, which MongoDB reads as "every document". `PlanKind` is re-exported from `@cerbos/core`. Combine the adapter's filter with your own criteria
 under `$and`, as above. Unsupported shapes throw rather than returning a weaker filter.
 
 ## Mapping attributes
@@ -195,15 +197,15 @@ const mapper: Mapper = {
 | `{"x": null}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (missing-attribute error) | selects it — **over-grants** |
 
-`nullAttributeRepresentation` defaults to `"explicit"`. If you omit NULL attributes, set
-`"omitted"`:
+`nullAttributeRepresentation` defaults to `"omitted"`, the convention that fails closed when the
+guess is wrong. If you send NULL attributes as explicit nulls, set `"explicit"`:
 
 ```ts
-queryPlanToMongoose({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
+queryPlanToMongoose({ queryPlan, mapper, nullAttributeRepresentation: "explicit" });
 ```
 
 The call-level option is the default for every mapper entry that does not declare `nullable`, so
-under `"omitted"` the adapter:
+under `"omitted"`, the default, the adapter:
 
 - rejects every null comparison operand. The rejection is wider than the shapes that actually
   over-grant, because a leaf cannot tell whether an enclosing `not` will flip it
@@ -380,6 +382,17 @@ asserts that, since five of the rows below depend on it.
 
 ## Behaviour changes
 
+- **Breaking:** `QueryPlanToMongooseResult` is a union on `kind`, and `ALWAYS_ALLOWED` and
+  `ALWAYS_DENIED` carry no `filters` field. A caller that passed `result.filters` to `find()`
+  without switching on `kind` got every document on a denial, because `find(undefined)` matches
+  everything; reading `filters` now needs a narrowed `CONDITIONAL` result
+  ([#494](https://github.com/cerbos/query-plan-adapters/issues/494),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
+- **Breaking:** `nullAttributeRepresentation` defaults to `"omitted"`, where it defaulted to
+  `"explicit"`. A caller that sends explicit nulls and set nothing now gets
+  `UnsupportedQueryPlanError` on a null comparison, and a comparison over an undeclared entry gains
+  a `$ne: null` guard; pass `nullAttributeRepresentation: "explicit"` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499)).
 - A negated `hasIntersection` over a `map` projection (`!hasIntersection(R.attr.tags.map(t, t.name),
   ["public"])`) requires the relation to be an array and no element to lack the projected field,
   outside the negation. The `$nor` over the positive filter flipped its no-null-projection guard
