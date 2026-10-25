@@ -1,0 +1,117 @@
+name: MongoDB Ruby Test
+
+# No `policies/**` trigger: conformance/policies/ is the only policy suite for semantics
+# (docs/adr/0008-the-shared-policy-suite-is-absorbed-into-the-conformance-corpus.md).
+on:
+  pull_request:
+    paths:
+      - "mongodb-ruby/**"
+      - "conformance/**"
+      - "demo/**"
+      - ".github/workflows/mongodb-ruby.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
+  push:
+    tags:
+      - mongodb-ruby/v*
+
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: mongodb-ruby-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: mongodb-ruby
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      # The conformance harness shares this matrix, so the default fail-fast would let an unrelated
+      # Ruby leg cancel a baseline leg mid-corpus and report it as neither a pass nor a failure.
+      fail-fast: false
+      matrix:
+        # The MongoDB server is a real one, started by scripts/test.sh from the pinned reference in
+        # the named file — tag AND digest, which conformance/scripts/validate-corpus.sh holds to one
+        # digest per tag repo-wide. MONGO_IMAGE is the baseline, the server the example also runs;
+        # MONGO_NEXT_IMAGE is the forward-compatibility leg. Listed as FILENAMES so no image is
+        # restated here, where a matrix value could drift from the file a local run reads.
+        mongodb-image-file:
+          - MONGO_IMAGE
+          - MONGO_NEXT_IMAGE
+        ruby-version: ["3.2", "3.3", "3.4"]
+        # The server dimension only discriminates the conformance harness, which is gated to the
+        # baseline Ruby leg, so off that leg the second server would run byte-identical work.
+        exclude:
+          - mongodb-image-file: MONGO_NEXT_IMAGE
+            ruby-version: "3.2"
+          - mongodb-image-file: MONGO_NEXT_IMAGE
+            ruby-version: "3.3"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      # `working-directory` here too: `defaults.run` applies only to `run` steps, and without it
+      # the action looks for a Gemfile at the repository root, which has none.
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+          bundler-cache: true
+          working-directory: mongodb-ruby
+
+      # Offline: the contract suite builds its own plans and the Mongoid selector suite reads the
+      # recorded goldens. scripts/test.sh starts NO MongoDB for them, which is the assertion that
+      # neither suite quietly grew a dependency on one.
+      - name: Run the adapter contract suite and the Mongoid selector suite
+        run: ./scripts/test.sh spec/adapter_contract_spec.rb spec/mongoid_spec.rb
+
+      # In the SAME job as the tests above, not a job of its own. Gated to the baseline Ruby leg,
+      # because the corpus discriminates the translator and the store, not the Ruby runtime; the
+      # store dimension gets its own run through the matrix above. No PDP: scripts/test.sh starts
+      # only a real MongoDB server from the file this leg names, on a port Docker chooses, and the
+      # harness replays both pinned PDPs' recorded goldens against it.
+      - name: Run the conformance harness against a real MongoDB
+        if: matrix.ruby-version == '3.4'
+        env:
+          ADAPTER_TEST_MONGO_IMAGE_FILE: ${{ matrix.mongodb-image-file }}
+        run: ./scripts/test.sh spec/conformance_spec.rb
+
+      - name: Lint
+        if: matrix.ruby-version == '3.4' && matrix.mongodb-image-file == 'MONGO_IMAGE'
+        run: ./scripts/lint.sh
+
+  # THIS JOB MUST STAY IN THIS WORKFLOW. `renovate.json` automerges non-major bumps, and this
+  # job, being a check on the PR that bumps the pinned server, is what blocks the automerge when
+  # it breaks real usage. A nightly or standalone workflow silently restores that gap.
+  #
+  # One Ruby leg only: the demo domain discriminates the published gem and the driver, not the
+  # runtime.
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      # No `bundler-cache`: the example commits no Gemfile.lock, deliberately. It installs the
+      # adapter from the artifact run.sh builds, which has no stable checksum.
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.4"
+
+      # The PDP is a container the shared runner starts from demo/docker-compose.yml, and the
+      # example's run.sh starts a real MongoDB from MONGO_IMAGE beside it.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh mongodb-ruby
