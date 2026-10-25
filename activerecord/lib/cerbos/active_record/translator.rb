@@ -164,7 +164,7 @@ module Cerbos
       #   {NULL_REPRESENTATIONS}, or an override names one of {STRUCTURAL_OPERATORS}.
       #
       # @see Cerbos::ActiveRecord.query_plan_to_relation
-      def initialize(model:, attributes:, operator_overrides: {}, null_attribute_representation: :explicit)
+      def initialize(model:, attributes:, operator_overrides: {}, null_attribute_representation: :omitted)
         @model = model
         @attributes = attributes.transform_keys(&:to_s)
         @operator_overrides = operator_overrides.transform_keys(&:to_s)

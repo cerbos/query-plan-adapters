@@ -223,10 +223,12 @@ both, so you must tell the adapter which one you use:
 
 | Convention | What you send for a NULL column | `R.attr.x == null` |
 | --- | --- | --- |
-| `:explicit` (default) | An attribute whose value is null | true in Cerbos; `IS NULL` agrees |
-| `:omitted` | No attribute | Missing-attribute error; Cerbos denies the row |
+| `:omitted` (default) | No attribute | Missing-attribute error; Cerbos denies the row |
+| `:explicit` | An attribute whose value is null | true in Cerbos; `IS NULL` agrees |
 
-Set the fallback for the whole call with `null_attribute_representation:`. Under `:omitted` a
+Set the fallback for the whole call with `null_attribute_representation:`. It defaults to
+`:omitted`, the convention that fails closed when the guess is wrong; pass `:explicit` if you send
+NULL columns as explicit nulls. Under `:omitted` a
 NULL column is a missing attribute, which CEL answers with an error, and a present column is never
 null. So `==` and `!=` between a field attribute and `null` are rendered UNKNOWN for a NULL column,
 which stays UNKNOWN under any `not` above it:
@@ -244,7 +246,7 @@ override would receive it:
 ```ruby
 Cerbos::ActiveRecord.query_plan_to_relation(
   plan: plan, model: Document, attributes: MAPPING,
-  null_attribute_representation: :omitted
+  null_attribute_representation: :omitted # the default, spelled out
 )
 # => Cerbos::ActiveRecord::UnsupportedOperatorError when the plan holds such a null constant
 ```

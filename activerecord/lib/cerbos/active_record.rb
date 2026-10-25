@@ -27,11 +27,13 @@ module Cerbos
     #   such as JSON containment or full-text search.
     # @param null_attribute_representation [Symbol] how the caller sends a NULL column to
     #   Cerbos, for attributes that declare nothing themselves.
-    #   `:explicit` (default): the attribute is sent with a null value, so `R.attr.x == null`
-    #   matches and `IS NULL` agrees with the PDP.
-    #   `:omitted`: the attribute is not sent. CEL errors and the PDP denies, but `IS NULL` would
-    #   match, so `==` and `!=` against null are UNKNOWN for a NULL column, and the adapter
-    #   refuses any other null constant in the plan (cerbos/query-plan-adapters#551).
+    #   `:explicit`: the attribute is sent with a null value, so `R.attr.x == null` matches and
+    #   `IS NULL` agrees with the PDP.
+    #   `:omitted` (default): the attribute is not sent. CEL errors and the PDP denies, but
+    #   `IS NULL` would match, so `==` and `!=` against null are UNKNOWN for a NULL column, and
+    #   the adapter refuses any other null constant in the plan
+    #   (cerbos/query-plan-adapters#551). It is the default because its wrong guess is a refusal,
+    #   where `:explicit`'s is an over-grant (docs/adr/0011-denial-fails-closed-in-the-result.md).
     #
     #   Set it per attribute with `null_representation:` on {Cerbos::ActiveRecord.field}; this
     #   value is the fallback. Per-attribute lets one column be mapped twice under different
@@ -67,7 +69,7 @@ module Cerbos
     # @see https://github.com/cerbos/cerbos-sdk-ruby Cerbos Ruby SDK
     def self.query_plan_to_relation(
       plan:, model:, attributes:,
-      operator_overrides: {}, null_attribute_representation: :explicit
+      operator_overrides: {}, null_attribute_representation: :omitted
     )
       Translator.new(
         model: model,
