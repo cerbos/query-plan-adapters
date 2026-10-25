@@ -188,6 +188,47 @@ down; `--list` names each adapter's store legs, and `--all` runs every adapter. 
 time: several harnesses at once overload a laptop into timeouts that read as failures. The commands
 behind each leg, and the adapter's other suites, are in its README's "Development" section.
 
+## Fuzzing
+
+The cases above are the shapes someone thought to write down. The fuzzer looks for the ones nobody
+did: it composes conditions, records what the pinned PDPs answer, and replays them through every
+harness. A fuzz run is never committed and never gates a pull request; what it finds becomes a case
+([ADR 0011](../docs/adr/0011-fuzzing-finds-cases-the-corpus-keeps-them.md)).
+
+```bash
+conformance/scripts/fuzz.sh -s 7 -n 500 [adapter...]   # record, replay every store leg, report
+go -C conformance/generator run . fuzz -seed 7 -count 500 -out <dir>   # record only (Docker)
+QPA_FUZZ_DIR=<dir> conformance/scripts/run-harness.sh <adapter> [store...]   # replay one adapter
+go -C conformance/generator run . fuzz-report -dir <dir>   # <dir>/report.md; exit 1 on a failure
+go -C conformance/generator run . fuzz-shrink -dir <dir> -case <id> -adapter <adapter> -store <store>
+```
+
+`.github/workflows/fuzz.yaml` runs the same round when someone starts it by hand; it has no
+schedule. The seed and the PDP pins fix the run: the same seed gives the same cases and goldens.
+
+- **Cases.** Each is `fuzz/s<seed>/<index>`: an ALLOW rule over a tree of `&&`, `||`, `!` and
+  ternaries, and sometimes a DENY rule. The leaves are expressions taken from the hand-written cases,
+  or drawn from a typed grammar over the dataset, with literals drawn from the values the seeds hold.
+  The grammar reads only attributes, macros and lambda variables some hand-written case already
+  reads, so every harness's mapping covers them; the generator stops if a case it relies on goes.
+- **Recording.** `cerbos compile` (from the current pinned image) checks the policy first, and a
+  case that does not compile is bisected out. A case whose plan fails, or folds to always allowed or
+  always denied while `check()` disagrees, is dropped. `<dir>/manifest.json` lists every drop and
+  why.
+- **Replay.** With `QPA_FUZZ_DIR` set, a harness reads `<dir>/<tag>/` instead of `golden/<tag>/`,
+  ignores its ledger, and gives each case one verdict: `match`, `refused` (the adapter's refusal
+  type), `over-grant`, `under-grant` or `error` (any other throw, a query the store rejects, or
+  the right rows repeated). It writes them to `<dir>/results/<adapter>-<store>.json` and fails on
+  the last three.
+- **Report.** `fuzz-report` tabulates every leg and lists each failing case. A case every
+  translating leg got wrong with the same rows is listed apart as a suspected planner divergence
+  and does not fail the run: that agreement points at the plan and `check()` disagreeing. The
+  refusal rate is not a failure, but a rise in it is worth a look.
+- **Promotion.** `fuzz-shrink` replays one-step reductions of a failing case through that leg until
+  none still fails, and writes the smallest as a YAML entry. Give it an id, intent and trap, add it
+  to `cases/<area>.yaml`, and it reaches every adapter through the usual route (["Changing how a
+  condition is translated"](#changing-how-a-condition-is-translated)).
+
 ## The dataset
 
 - `seeds.json` holds the rows: scalars, a `tags` to-many relation, `subCategoryNames` for the

@@ -764,6 +764,8 @@ func TestAdversarialConformance(t *testing.T) {
 	for _, tgt := range targets() {
 		t.Run(tgt.name, func(t *testing.T) {
 			s := openStore(t, tgt, corpus)
+			var fuzzResults []FuzzVerdict
+			defer func() { writeFuzzResults(t, "ent", tgt.name, fuzzResults) }()
 			for _, tag := range corpus.Tags {
 				t.Run(tag, func(t *testing.T) {
 					// passed[tier] and total[tier] feed the summary logged at the end.
@@ -778,6 +780,12 @@ func TestAdversarialConformance(t *testing.T) {
 								t.Skip("plannerDivergence: the recorded plan and check() disagree under this PDP")
 							}
 							ids, err := s.filteredIDs(t.Context(), mapper, golden)
+							if fuzzDir != "" {
+								v := fuzzVerdict(golden, ids, err, cerbosent.ErrUnsupported)
+								fuzzResults = append(fuzzResults, v)
+								require.True(t, v.OK(), "%+v", v)
+								return
+							}
 							switch {
 							case !listed:
 								require.NoError(t, err)

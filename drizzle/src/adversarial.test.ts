@@ -19,7 +19,11 @@ import { Pool } from "pg";
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
 import type { Mapper, MapperEntry } from ".";
 import {
+  assertFuzzVerdict,
   buildMapper,
+  FUZZ_DIR,
+  fuzzThrown,
+  fuzzVerdict,
   mysqlSchema,
   pdpTags,
   planOf,
@@ -27,8 +31,9 @@ import {
   readCorpusJson,
   readGoldens,
   sqliteSchema,
+  writeFuzzResults,
 } from "./corpus";
-import type { Golden } from "./corpus";
+import type { FuzzVerdict, Golden } from "./corpus";
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -931,16 +936,34 @@ async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> 
 /** Cases whose plan reads one of the ordered lists, replayed under every storage on PostgreSQL. */
 const LIST_REFERENCE = /"request\.resource\.attr\.(tagNames|aNumberList|aBoolList)"/;
 
+/** A fuzz case replayed under every mapper a corpus case would be; the first failure is its verdict. */
+async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+  const mappers = LIST_REFERENCE.test(JSON.stringify(golden.plan))
+    ? [MAPPER, ...(store.indexMappers ?? [])]
+    : [MAPPER];
+  const verdicts: FuzzVerdict[] = [];
+  for (const mapper of mappers) {
+    try {
+      verdicts.push(fuzzVerdict(golden, golden.allowed, await selectAllowed(golden, mapper)));
+    } catch (error) {
+      verdicts.push(fuzzThrown(golden, error, UnsupportedQueryPlanError));
+    }
+  }
+  return verdicts.find((v) => v.verdict !== "match" && v.verdict !== "refused") ?? verdicts[0]!;
+}
+
 const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
 const skipped: Record<string, number> = {};
+const fuzzResults: FuzzVerdict[] = [];
 
 beforeAll(() => store.start(), STORE_STARTUP_TIMEOUT_MS);
 
 afterAll(async () => {
   await store.stop();
+  writeFuzzResults("drizzle", STORE_NAME, fuzzResults);
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
     return `${tag}: ${tiers.map((tier) => `${tier} ${passed[tag]?.[tier] ?? 0}/${totals[tag]?.[tier]}`).join(", ")} (${skipped[tag] ?? 0} planner divergence skipped)`;
@@ -971,7 +994,7 @@ describe(`conformance (${STORE_NAME})`, () => {
     },
   );
 
-  test("the ledger names no case without a golden file", () => {
+  (FUZZ_DIR ? test.skip : test)("the ledger names no case without a golden file", () => {
     const ids = new Set(TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)));
     expect(Object.keys(LEDGER).filter((id) => !ids.has(id))).toEqual([]);
   });
@@ -986,6 +1009,12 @@ describe(`conformance (${STORE_NAME})`, () => {
       async (_id, golden) => {
         // A golden filed under the wrong tag directory would be replayed against the wrong ledger scope.
         expect(golden.pdp).toBe(tag);
+        if (FUZZ_DIR) {
+          const verdict = await fuzzReplay(golden);
+          fuzzResults.push(verdict);
+          assertFuzzVerdict(verdict);
+          return;
+        }
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);

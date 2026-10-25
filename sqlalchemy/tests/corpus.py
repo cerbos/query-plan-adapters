@@ -74,9 +74,20 @@ PDP_TAGS: list[str] = [
 ]
 
 
+#: The directory a fuzz run was recorded into (conformance/README.md, "Fuzzing"). When it is
+#: set, ``golden_cases`` reads the generated cases from it instead of the corpus, and the
+#: harness judges each case with ``fuzz_verdict`` instead of the ledger: a refusal is always
+#: acceptable, since the ledger has no entry for a shape nobody has written down yet.
+FUZZ_DIR = os.environ.get("QPA_FUZZ_DIR") or None
+
+
 def golden_cases(tag: str) -> list[dict[str, Any]]:
-    """Every golden file recorded for one PDP tag, sorted by case id."""
-    root = os.path.join(CONFORMANCE_DIR, "golden", tag)
+    """Every golden file recorded for one PDP tag (in fuzz mode, the run's), sorted by case id."""
+    root = (
+        os.path.join(FUZZ_DIR, tag)
+        if FUZZ_DIR
+        else os.path.join(CONFORMANCE_DIR, "golden", tag)
+    )
     paths = glob.glob(os.path.join(root, "**", "*.json"), recursive=True)
     cases = []
     for path in paths:
@@ -92,6 +103,55 @@ def golden_case(case_id: str, tag: str | None = None) -> dict[str, Any]:
     )
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def fuzz_verdict(
+    case: dict[str, Any], expected: list[str], returned: list[str]
+) -> dict[str, Any]:
+    """Judges the ids a translated filter returned against the ids the PDP allowed."""
+    base = {"pdp": case["pdp"], "id": case["id"]}
+    if sorted(returned) == sorted(expected):
+        return {**base, "verdict": "match"}
+    if set(returned) - set(expected):
+        verdict, detail = "over-grant", None
+    elif set(expected) - set(returned):
+        verdict, detail = "under-grant", None
+    else:
+        verdict, detail = "error", "the right rows, but some of them repeated"
+    out = {
+        **base,
+        "verdict": verdict,
+        "expected": sorted(expected),
+        "returned": sorted(returned),
+    }
+    return {**out, "detail": detail} if detail else out
+
+
+def fuzz_thrown(
+    case: dict[str, Any], error: BaseException, refusal: type
+) -> dict[str, Any]:
+    """A translation or query that raised, judged: the refusal type is the invariant working."""
+    base = {"pdp": case["pdp"], "id": case["id"]}
+    if isinstance(error, refusal):
+        return {**base, "verdict": "refused"}
+    return {**base, "verdict": "error", "detail": f"{type(error).__name__}: {error}"}
+
+
+def write_fuzz_results(adapter: str, results: dict[str, list[dict[str, Any]]]) -> None:
+    """Writes ``<FUZZ_DIR>/results/<adapter>-<store>.json`` per store, for ``fuzz-report``."""
+    if not FUZZ_DIR:
+        return
+    out = os.path.join(FUZZ_DIR, "results")
+    os.makedirs(out, exist_ok=True)
+    for store, verdicts in results.items():
+        verdicts = sorted(verdicts, key=lambda v: (v["id"], v["pdp"]))
+        with open(
+            os.path.join(out, f"{adapter}-{store}.json"), "w", encoding="utf-8"
+        ) as f:
+            json.dump(
+                {"adapter": adapter, "store": store, "results": verdicts}, f, indent=2
+            )
+            f.write("\n")
 
 
 _NOW_MINUS_24H = "__NOW_MINUS_24H__"
@@ -750,7 +810,7 @@ def reads_declared_collection(case: dict[str, Any]) -> bool:
         expression = node.get("expression")
         if expression is None:
             return False
-        operands = expression["operands"]
+        operands = expression.get("operands", [])
         if (
             expression["operator"] in ("size", "index")
             and operands

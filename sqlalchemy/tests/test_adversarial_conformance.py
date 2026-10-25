@@ -22,6 +22,7 @@ from corpus import (
     ATTR_MAP,
     ATTRIBUTE_NULL_REPRESENTATION,
     COLLECTION_COLUMNS,
+    FUZZ_DIR,
     OPERATOR_OVERRIDES,
     PDP_TAGS,
     PG_ARRAY_COLLECTION_COLUMNS,
@@ -33,6 +34,8 @@ from corpus import (
     AdvResource,
     AdvSubCategory,
     AdvTag,
+    fuzz_thrown,
+    fuzz_verdict,
     golden_cases,
     plan_from_golden,
     read_corpus_json,
@@ -58,6 +61,9 @@ STORES = ("sqlite", "sqlite-async", "postgresql-json", "postgresql-pgArray", "my
 
 #: ``(tier, outcome)`` per store and tag, printed by ``conftest.py`` after the run.
 RESULTS: dict[str, Counter] = {}
+
+#: Fuzz verdicts per store, written by ``conftest.py`` when the session ends.
+FUZZ_RESULTS: dict[str, list[dict[str, Any]]] = {}
 
 
 def _params():
@@ -363,6 +369,17 @@ def _translate(store: str, case: dict[str, Any]):
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 @pytest.mark.parametrize("store,tag,case", _params())
 def test_case(store, tag, case, request):
+    if FUZZ_DIR:
+        try:
+            verdict = fuzz_verdict(
+                case, case["allowed"], _execute(store, _translate(store, case), request)
+            )
+        except Exception as error:  # noqa: BLE001 - every throw is judged, not raised
+            verdict = fuzz_thrown(case, error, UnsupportedPlanError)
+        FUZZ_RESULTS.setdefault(store, []).append(verdict)
+        assert verdict["verdict"] in ("match", "refused"), verdict
+        return
+
     tally = RESULTS.setdefault(f"{store} @ {tag}", Counter())
     # A golden file carries `plannerDivergence` only for the PDP tags it applies to.
     if case["plannerDivergence"] is not None:
@@ -388,6 +405,9 @@ def test_case(store, tag, case, request):
     tally[(case["tier"], status)] += 1
 
 
+@pytest.mark.skipif(
+    FUZZ_DIR is not None, reason="a fuzz run is judged without the ledger"
+)
 def test_every_ledger_entry_names_a_golden_case():
     ids = {case["id"] for cases in GOLDEN.values() for case in cases}
     assert sorted(set(LEDGER) - ids) == []

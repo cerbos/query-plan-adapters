@@ -5,8 +5,19 @@ import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import mongoose, { model, Schema } from "mongoose";
 
 import { PlanKind, queryPlanToMongoose, UnsupportedQueryPlanError } from ".";
-import { MAPPER, pdpTags, planOf, readCorpusJson, readGoldens } from "./corpus";
-import type { Golden } from "./corpus";
+import {
+  assertFuzzVerdict,
+  FUZZ_DIR,
+  fuzzThrown,
+  fuzzVerdict,
+  MAPPER,
+  pdpTags,
+  planOf,
+  readCorpusJson,
+  readGoldens,
+  writeFuzzResults,
+} from "./corpus";
+import type { FuzzVerdict, Golden } from "./corpus";
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -320,6 +331,16 @@ const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
+const fuzzResults: FuzzVerdict[] = [];
+
+/** A fuzz case judged on this store (conformance/README.md, "Fuzzing"). */
+async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+  try {
+    return fuzzVerdict(golden, golden.allowed, await selectAllowed(golden));
+  } catch (error) {
+    return fuzzThrown(golden, error, UnsupportedQueryPlanError);
+  }
+}
 
 beforeAll(async () => {
   await mongoose.connect(MONGO_URL);
@@ -329,6 +350,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await mongoose.disconnect();
+  // run-harness.sh names the leg, since the MongoDB image is the store dimension here.
+  writeFuzzResults("mongoose", process.env["QPA_HARNESS_STORE"] ?? "mongo", fuzzResults);
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
     return `${tag}: ${tiers
@@ -341,7 +364,7 @@ afterAll(async () => {
 });
 
 describe("conformance (mongodb)", () => {
-  test("the ledger names no case without a golden file", () => {
+  (FUZZ_DIR ? test.skip : test)("the ledger names no case without a golden file", () => {
     const ids = new Set(
       TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)),
     );
@@ -358,6 +381,12 @@ describe("conformance (mongodb)", () => {
     test.each(cases.map((golden) => [golden.id, golden] as const))(
       `${tag} %s`,
       async (_id, golden) => {
+        if (FUZZ_DIR) {
+          const verdict = await fuzzReplay(golden);
+          fuzzResults.push(verdict);
+          assertFuzzVerdict(verdict);
+          return;
+        }
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);

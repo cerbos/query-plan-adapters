@@ -1,0 +1,182 @@
+name: Fuzz
+
+# Differential fuzzing (conformance/README.md, "Fuzzing"). Manual only: a run generates new cases
+# every time, so it is never a pull request's gate, and it runs when someone asks for one rather
+# than on a schedule. conformance/scripts/fuzz.sh runs the same round locally.
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Generator seed; empty picks the run number, which the summary names so the run can be repeated"
+        required: false
+        default: ""
+      count:
+        description: "Cases to generate"
+        required: false
+        default: "500"
+      adapters:
+        description: "Space-separated adapters to replay (run-harness.sh --list); empty replays every store leg of every adapter"
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  record:
+    name: Record the fuzz cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      legs: ${{ steps.legs.outputs.legs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Must match the key warm-caches.yaml writes on main.
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: conformance/generator/go.mod
+          cache-dependency-path: conformance/generator/go.sum
+
+      # Starts both pinned PDPs, as the conformance workflow does, and records each generated
+      # case's plan and per-seed check() decisions outside the repository.
+      - name: Generate and record
+        env:
+          SEED: ${{ inputs.seed || github.run_number }}
+          COUNT: ${{ inputs.count }}
+        run: go -C conformance/generator run . fuzz -seed "${SEED}" -count "${COUNT}" -out "${RUNNER_TEMP}/fuzz"
+
+      # One matrix leg per adapter and store, from the same roster run-harness.sh runs locally.
+      - name: List the store legs
+        id: legs
+        env:
+          ADAPTERS: ${{ inputs.adapters }}
+        run: |
+          legs="$(conformance/scripts/run-harness.sh --list | python3 -c '
+          import json, os, sys
+          wanted = os.environ["ADAPTERS"].split()
+          roster = {line.split()[0]: line.split()[1:] for line in sys.stdin if line.strip()}
+          unknown = sorted(set(wanted) - set(roster))
+          if unknown:
+              sys.exit(f"not in run-harness.sh: {unknown}")
+          print(json.dumps([{"adapter": a, "store": s} for a in (wanted or sorted(roster)) for s in roster[a]]))
+          ')"
+          echo "legs=${legs}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-run
+          path: ${{ runner.temp }}/fuzz/
+          if-no-files-found: error
+
+  replay:
+    name: Replay (${{ matrix.adapter }} / ${{ matrix.store }})
+    needs: record
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.record.outputs.legs) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-run
+          path: ${{ runner.temp }}/fuzz
+
+      # The toolchain each harness needs; Docker covers the stores and ActiveRecord's Ruby.
+      - name: Setup Node.js
+        if: contains(fromJSON('["drizzle","prisma","mongoose","langchain-chromadb","convex"]'), matrix.adapter)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Setup Go
+        if: matrix.adapter == 'ent' || matrix.adapter == 'pgx'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.adapter }}/go.mod
+          cache-dependency-path: ${{ matrix.adapter }}/go.sum
+      - name: Setup Java
+        if: matrix.adapter == 'spring-data' || matrix.adapter == 'elasticsearch-java'
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Setup PDM
+        if: matrix.adapter == 'sqlalchemy'
+        uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
+        with:
+          python-version: "3.10"
+      - name: Install the SQLAlchemy harness
+        if: matrix.adapter == 'sqlalchemy'
+        working-directory: sqlalchemy
+        run: pdm install -G testcontainers -G test
+
+      # A failing case fails the harness, and the report says which; what fails this step is a
+      # harness that wrote no verdicts at all, which the report could not tell from a skipped leg.
+      - name: Replay the fuzz cases
+        env:
+          QPA_FUZZ_DIR: ${{ runner.temp }}/fuzz
+          ADAPTER: ${{ matrix.adapter }}
+          STORE: ${{ matrix.store }}
+        run: |
+          conformance/scripts/run-harness.sh "${ADAPTER}" "${STORE}" || true
+          compgen -G "${QPA_FUZZ_DIR}/results/${ADAPTER}-*.json" >/dev/null \
+            || { echo "::error::${ADAPTER} / ${STORE} wrote no fuzz results"; exit 1; }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: fuzz-results-${{ matrix.adapter }}-${{ matrix.store }}
+          path: ${{ runner.temp }}/fuzz/results/
+          if-no-files-found: ignore
+
+  report:
+    name: Report
+    needs: [record, replay]
+    if: always() && needs.record.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: conformance/generator/go.mod
+          cache-dependency-path: conformance/generator/go.sum
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-run
+          path: ${{ runner.temp }}/fuzz
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: fuzz-results-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/fuzz/results
+
+      # Fails the run on any adapter failure. The summary names the seed, so a run reproduces
+      # with conformance/scripts/fuzz.sh -s <seed>.
+      - name: Write the report
+        run: |
+          status=0
+          go -C conformance/generator run . fuzz-report -dir "${RUNNER_TEMP}/fuzz" >/dev/null || status=$?
+          # A step summary holds at most 1 MiB; the fuzz-report artifact has the whole report.
+          head -c 900000 "${RUNNER_TEMP}/fuzz/report.md" >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: fuzz-report
+          path: ${{ runner.temp }}/fuzz/

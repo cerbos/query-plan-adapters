@@ -34,4 +34,9 @@ docker compose build tests
 if [[ "${ADAPTER_TEST_DB}" != sqlite ]]; then
   docker compose up --detach --wait "${ADAPTER_TEST_DB}"
 fi
-docker compose run --rm tests bundle exec rspec "$@"
+# A fuzz run is recorded outside the repository, so it is mounted at its own path.
+fuzz_args=()
+if [[ -n "${QPA_FUZZ_DIR:-}" ]]; then
+  fuzz_args=(-v "${QPA_FUZZ_DIR}:${QPA_FUZZ_DIR}" -e QPA_FUZZ_DIR)
+fi
+docker compose run --rm "${fuzz_args[@]}" tests bundle exec rspec "$@"

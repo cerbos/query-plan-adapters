@@ -13,6 +13,9 @@
 //	go -C conformance/generator run . -check    # exit 1 if regenerating would change a file
 //	go run . -cases <dir> -out <conformance dir> # from conformance/generator
 //
+// The fuzz, fuzz-report and fuzz-shrink subcommands (fuzz.go) record generated cases outside the
+// corpus instead; conformance/README.md, "Fuzzing", says how a run goes.
+//
 // Requires Docker with the pinned images pullable.
 package main
 
@@ -36,7 +39,17 @@ type pdpVersion struct {
 	Digest string `json:"digest"`
 }
 
+// imageOf is the release image a pin names, by tag and digest. Never a source build.
+func imageOf(v pdpVersion) string {
+	return fmt.Sprintf("ghcr.io/cerbos/cerbos:%s@%s", v.Tag, v.Digest)
+}
+
 func main() {
+	run := run
+	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "fuzz") {
+		name, args := os.Args[1], os.Args[2:]
+		run = func() error { return runSubcommand(name, args) }
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -118,9 +131,8 @@ func run() error {
 	recorded := map[string][]*Golden{}
 	var violations []string
 	for _, v := range []pdpVersion{versions.Previous, versions.Current} {
-		image := fmt.Sprintf("ghcr.io/cerbos/cerbos:%s@%s", v.Tag, v.Digest)
 		fmt.Fprintf(os.Stderr, "==> PDP %s: recording %d cases\n", v.Tag, len(corpus.Cases))
-		goldens, err := recordWith(ctx, image, v.Tag, staged, corpus, ds)
+		goldens, err := recordWith(ctx, imageOf(v), v.Tag, staged, corpus, ds)
 		if err != nil {
 			return err
 		}

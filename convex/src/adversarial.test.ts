@@ -8,8 +8,18 @@ import { api } from "../convex/_generated/api.js";
 import { MAPPER } from "../convex/adversarialMapper";
 import type { AdversarialDocument } from "../convex/schema";
 import { queryPlanToConvex, UnsupportedQueryPlanError } from ".";
-import { pdpTags, planOf, readCorpusJson, readGoldens } from "./corpus";
-import type { Golden } from "./corpus";
+import {
+  assertFuzzVerdict,
+  FUZZ_DIR,
+  fuzzThrown,
+  fuzzVerdict,
+  pdpTags,
+  planOf,
+  readCorpusJson,
+  readGoldens,
+  writeFuzzResults,
+} from "./corpus";
+import type { FuzzVerdict, Golden } from "./corpus";
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -225,6 +235,21 @@ const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
+const fuzzResults: FuzzVerdict[] = [];
+
+/**
+ * A fuzz case judged on this store (conformance/README.md, "Fuzzing"). It is translated here first,
+ * where a refusal is still an `UnsupportedQueryPlanError`: from the backend it arrives as a
+ * function error that no longer carries its type.
+ */
+async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+  try {
+    queryPlanToConvex({ queryPlan: await planOf(golden), mapper: MAPPER, allowPostFilter: true });
+    return fuzzVerdict(golden, golden.allowed, (await selectAllowed(golden)).ids);
+  } catch (error) {
+    return fuzzThrown(golden, error, UnsupportedQueryPlanError);
+  }
+}
 const executions: Record<string, Record<string, number>> = {};
 
 const count = (
@@ -244,6 +269,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await convex.mutation(api.adversarial.deleteAll, {});
+  writeFuzzResults("convex", "convex", fuzzResults);
   const summary = (
     table: Record<string, Record<string, number>>,
     tag: string,
@@ -266,7 +292,7 @@ afterAll(async () => {
 });
 
 describe("conformance (convex)", () => {
-  test("the ledger names no case without a golden file", () => {
+  (FUZZ_DIR ? test.skip : test)("the ledger names no case without a golden file", () => {
     const ids = new Set(
       TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)),
     );
@@ -309,6 +335,12 @@ describe("conformance (convex)", () => {
     test.each(cases.map((golden) => [golden.id, golden] as const))(
       `${tag} %s`,
       async (_id, golden) => {
+        if (FUZZ_DIR) {
+          const verdict = await fuzzReplay(golden);
+          fuzzResults.push(verdict);
+          assertFuzzVerdict(verdict);
+          return;
+        }
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);
