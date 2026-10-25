@@ -90,7 +90,7 @@ class Translator:
         overrides: dict[str, Callable[[Any, Any], Any]],
         null_conventions: dict[str, NullAttributeRepresentation],
         declared_collections: dict[str, CollectionColumn],
-        null_fallback: NullAttributeRepresentation = "explicit",
+        null_fallback: NullAttributeRepresentation = "omitted",
     ) -> None:
         self._attr_map = attr_map
         # No None values: an operator is overridden exactly when it is a key here.

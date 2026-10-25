@@ -125,7 +125,7 @@ If your models use `relationship()`, consider `query.with_only_columns(...)` to 
 | --- | --- | --- |
 | `table_mapping` | `None` | `attr_map` spans more than one table |
 | `operator_override_fns` | `None` | you need a dialect-specific operator, or a collection in a related table |
-| `null_attribute_representation` | `"explicit"` | your app omits attributes for NULL columns (`"omitted"`) |
+| `null_attribute_representation` | `"omitted"` | your app sends explicit nulls for NULL columns (`"explicit"`) |
 | `attribute_null_representation` | `None` | the NULL convention differs per attribute |
 | `collection_columns` | `None` | a policy calls `size()`, indexes, or tests literal membership in a JSON / PostgreSQL array column |
 
@@ -139,11 +139,11 @@ the attributes it sends to `check()`, so you have to tell the adapter which conv
 | `{"x": None}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
-The default, `"explicit"`, translates `== null` to `IS NULL`. If you omit attributes for NULL
-columns, pass `"omitted"`:
+The default is `"omitted"`, the convention that fails closed when the guess is wrong. If you send
+NULL columns as explicit nulls, pass `"explicit"`, which translates `== null` to `IS NULL`:
 
 ```python
-get_query(plan, Resource, attr_map, null_attribute_representation="omitted")
+get_query(plan, Resource, attr_map, null_attribute_representation="explicit")
 ```
 
 Under `"omitted"`, `x == null` and `x != null` answer exactly what CEL does: a NULL column is a
@@ -177,7 +177,8 @@ Declaring `"explicit"` asserts that the column can be NULL **and** that a NULL r
 an explicit null. The equality family (`eq`, `ne`, `in`) over that attribute then renders so it is
 never SQL UNKNOWN: CEL's `null != "x"` is TRUE, so the NULL row comes back. Ordering and string
 operators are unchanged (CEL raises on a null receiver, which denies like UNKNOWN does). An
-undeclared attribute keeps the old rendering, where `!=` against a constant under-grants NULL rows.
+undeclared attribute follows the call-level option; if that is `"omitted"` and the caller in fact
+sends an explicit null, `!=` against a constant under-grants the NULL rows, which fails closed.
 
 **Declare both sides of a field-to-field comparison, or neither** — mixing conventions in one
 comparison throws. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
@@ -547,6 +548,12 @@ chain.
 
 ## Behaviour changes
 
+- **Breaking:** `null_attribute_representation` defaults to `"omitted"`, where it defaulted to
+  `"explicit"`. A caller that sends explicit nulls and set nothing now gets `x == null` matching no
+  row where it rendered `IS NULL`, and a refusal for the other null operands; pass
+  `null_attribute_representation="explicit"` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
 - [#500](https://github.com/cerbos/query-plan-adapters/issues/500), found by running the corpus on
   PostgreSQL and MySQL:
   - `+`, `-` and `*` read an integer or `Numeric` column as a double, as CEL reads every attribute

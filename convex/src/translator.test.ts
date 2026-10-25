@@ -106,9 +106,10 @@ function translate(
     queryPlan: planFor(id),
     mapper: options.mapper ?? MAPPER,
     allowPostFilter: options.allowPostFilter ?? true,
-    ...(options.nullAttributeRepresentation
-      ? { nullAttributeRepresentation: options.nullAttributeRepresentation }
-      : {}),
+    // The conformance mapping's convention, as the harness passes it; the adapter's own default is
+    // pinned under "omitted: an undeclared entry is nullable".
+    nullAttributeRepresentation:
+      options.nullAttributeRepresentation ?? "explicit",
   });
 }
 
@@ -136,6 +137,15 @@ function recordFilter(label: string, filter: (q: Recorder) => unknown) {
   return emitted;
 }
 
+/** What Convex's own engine is handed for a conditional plan: its `filter` or its `prefilter`. */
+function engineHalf(
+  result: QueryPlanToConvexResult<Recorder, unknown>,
+): ((q: Recorder) => unknown) | undefined {
+  if (result.kind !== PlanKind.CONDITIONAL) return undefined;
+  if (result.path === "db") return result.filter;
+  return result.path === "split" ? result.prefilter : undefined;
+}
+
 type Translated = {
   id: string;
   result: QueryPlanToConvexResult<Recorder, unknown>;
@@ -153,7 +163,7 @@ beforeAll(async () => {
     const result = translated(g.id);
     return result === "refused" ? [] : [{ id: g.id, result }];
   });
-  PUSHED = TRANSLATED.filter(({ result }) => result.filter !== undefined);
+  PUSHED = TRANSLATED.filter(({ result }) => engineHalf(result) !== undefined);
 });
 
 // The documents as the PDP saw them (conformance/resources.json), which is also exactly what the
@@ -224,7 +234,7 @@ describe("what the adapter asks Convex to do", () => {
     // A nullable field is CEL's missing-attribute case, which Convex's engine cannot tell from
     // a false one, so it has to stay with the post-filter (#375).
     const violations = PUSHED.flatMap(({ id, result }) => {
-      const fields = fieldsNamedBy(recordFilter(id, result.filter!));
+      const fields = fieldsNamedBy(recordFilter(id, engineHalf(result)!));
       const undeclared = fields.filter((field) => !declaredFields.has(field));
       const nullable = fields.filter((field) => nullableFields.has(field));
       return undeclared.length || nullable.length
@@ -253,11 +263,33 @@ describe("the allowPostFilter gate", () => {
           ? "opt-in required"
           : `threw: ${error.message}`;
       }
-      const expected =
-        result.postFilter !== undefined ? "opt-in required" : result.kind;
+      const expected = "postFilter" in result ? "opt-in required" : result.kind;
       return outcome === expected ? [] : [{ id, expected, outcome }];
     });
     expect(violations).toEqual([]);
+  });
+});
+
+/**
+ * A `split` arises only from a mapping that makes some root conjuncts pushable and others not, and
+ * the conformance mapping declares every scalar `nullable`, so no corpus case reaches it. Declaring
+ * `aBool` never null pushes `aBool == true` down beside a `contains` the engine cannot run.
+ */
+describe("a split result", () => {
+  const SPLIT_CASE = "relation/and/one-hop-and-root-attribute";
+  const mapper: Mapper = {
+    ...MAPPER,
+    "request.resource.attr.aBool": { field: "aBool", nullable: false },
+  };
+
+  test("its postFilter decides the whole condition, so the prefilter only narrows", () => {
+    const result = translate(SPLIT_CASE, { mapper });
+    if (result.path !== "split") throw new Error(`${SPLIT_CASE} did not split`);
+    // Applied alone to every document, with no prefilter, it selects exactly what the PDP allowed.
+    const alone = DOCUMENTS.filter((doc) => result.postFilter(doc))
+      .map((doc) => doc.id)
+      .sort();
+    expect(alone).toEqual(golden(SPLIT_CASE).allowed);
   });
 });
 
@@ -270,9 +302,10 @@ describe("mapper forms", () => {
   test("a function mapper resolves the same references as a record mapper", () => {
     const asFunction: Mapper = (reference) => MAPPER[reference] ?? {};
     const decisions = (mapper: Mapper) => {
-      const { postFilter } = translate(DEEP_CASE, { mapper });
-      if (!postFilter) throw new Error(`${DEEP_CASE} emitted no postFilter`);
-      return DOCUMENTS.map((doc) => postFilter(doc));
+      const result = translate(DEEP_CASE, { mapper });
+      if (!("postFilter" in result))
+        throw new Error(`${DEEP_CASE} emitted no postFilter`);
+      return DOCUMENTS.map((doc) => result.postFilter(doc));
     };
     const byRecord = decisions(MAPPER);
     expect(byRecord).toContain(true);
@@ -317,9 +350,11 @@ describe("mapper forms", () => {
 
   // The opt-in: an entry that names no `field` keeps the plan path.
   test("an empty entry keeps the plan path verbatim", () => {
-    const { filter } = translate("string/equals/case-sensitive", {
-      mapper: { "request.resource.attr.aString": {} },
-    });
+    const filter = engineHalf(
+      translate("string/equals/case-sensitive", {
+        mapper: { "request.resource.attr.aString": {} },
+      }),
+    );
     if (!filter)
       throw new Error("emitted no filter under an empty-entry mapper");
     expect(recordFilter("empty entry", filter)).toEqual({
@@ -409,13 +444,31 @@ describe("omitted: an undeclared entry is nullable", () => {
       const mapper = undeclared(field);
       // Anti-vacuity: under "explicit" the same entry is pushed down.
       expect(translate(id, { mapper }).path).toBe("db");
-      const { postFilter } = omitted(id, { mapper });
+      const result = omitted(id, { mapper });
+      const postFilter = "postFilter" in result ? result.postFilter : undefined;
       expect(postFilter!({ [field]: allowed })).toBe(true);
       expect(postFilter!({ [field]: denied })).toBe(false);
       expect(postFilter!({})).toBe(false);
       expect(postFilter!({ [field]: null })).toBe(false);
     },
   );
+
+  test("unset: the call-level default is omitted", () => {
+    // The default is the convention whose wrong guess fails closed (ADR 0011): a null operand is
+    // refused, and an undeclared entry stays off Convex's engine.
+    const call = (id: string, mapper: Mapper = MAPPER) =>
+      queryPlanToConvex<Recorder, unknown>({
+        queryPlan: planFor(id),
+        mapper,
+        allowPostFilter: true,
+      });
+    expect(() => call("null/equals/null-literal-on-missing-attribute")).toThrow(
+      'the default is "omitted"',
+    );
+    expect(
+      call("string/equals/case-sensitive", undeclared("aString")).path,
+    ).toBe("post");
+  });
 
   test("a function mapper takes the default too", () => {
     const mapper = undeclared("aString") as Record<string, MapperConfig>;
@@ -435,8 +488,10 @@ describe("omitted: an undeclared entry is nullable", () => {
         { ...config, nullable: config.nullable ?? false },
       ]),
     );
-    const pushedDown = (result: QueryPlanToConvexResult<Recorder, unknown>) =>
-      result.filter ? recordFilter("filter", result.filter) : undefined;
+    const pushedDown = (result: QueryPlanToConvexResult<Recorder, unknown>) => {
+      const half = engineHalf(result);
+      return half ? recordFilter("filter", half) : undefined;
+    };
     const differing = TRANSLATED.filter(
       ({ id }) => !/\bnull\b/.test(JSON.stringify(golden(id).plan)),
     )
@@ -567,7 +622,13 @@ describe("an ordering against a value of another type, on a non-nullable field",
       return result !== "refused" &&
         result.path === "db" &&
         queryPlan.kind === PlanKind.CONDITIONAL
-        ? [{ id: g.id, condition: queryPlan.condition, filter: result.filter }]
+        ? [
+            {
+              id: g.id,
+              condition: queryPlan.condition,
+              filter: engineHalf(result)!,
+            },
+          ]
         : [];
     });
   });
@@ -788,7 +849,8 @@ describe("shapes the corpus does not reach yet", () => {
         mapper: MAPPER,
         allowPostFilter: true,
       });
-      if (!result.postFilter) throw new Error(`${macro} emitted no postFilter`);
+      if (!("postFilter" in result))
+        throw new Error(`${macro} emitted no postFilter`);
       return result.postFilter;
     };
 
@@ -834,17 +896,28 @@ test("result types require the payload declared by each execution path", () => {
   const missingSplitPostFilter: Rejects<{
     kind: PlanKind.CONDITIONAL;
     path: "split";
-    filter: (q: Recorder) => unknown;
+    prefilter: (q: Recorder) => unknown;
   }> = true;
-  const unconditionalFilter: Rejects<{
-    kind: PlanKind.ALWAYS_ALLOWED;
+  // The pushable half of a split is never named `filter`, which is only ever the whole condition.
+  const splitHalfAsFilter: Rejects<{
+    kind: PlanKind.CONDITIONAL;
+    path: "split";
     filter: (q: Recorder) => unknown;
+    postFilter: (doc: Record<string, unknown>) => boolean;
   }> = true;
   expect([
     bareConditional,
     missingDbFilter,
     missingPostFilter,
     missingSplitPostFilter,
-    unconditionalFilter,
+    splitHalfAsFilter,
   ]).toEqual([true, true, true, true, true]);
+  // The filter cannot be read without narrowing first: no field is common to every result but
+  // `kind` and `path`, so an unconditional result has none to apply by mistake (ADR 0011).
+  const noUnnarrowedFilter: [
+    Extract<keyof Result, "filter" | "prefilter" | "postFilter">,
+  ] extends [never]
+    ? true
+    : false = true;
+  expect(noUnnarrowedFilter).toBe(true);
 });

@@ -75,7 +75,7 @@ returns a broader filter.
 | `queryPlan` | yes | The `PlanResourcesResponse` from `planResources`. |
 | `mapper` | no | Maps Cerbos attribute paths to Prisma fields and relations. Defaults to `{}`. |
 | `model` | no | Prisma model name of the queried model (e.g. `"Resource"`). Needed only for [field-to-field comparisons](#field-to-field-comparisons) between root columns. |
-| `nullAttributeRepresentation` | no | `"explicit"` (default) or `"omitted"`. See [NULL attribute representation](#null-attribute-representation). |
+| `nullAttributeRepresentation` | no | `"omitted"` (default) or `"explicit"`. See [NULL attribute representation](#null-attribute-representation). |
 
 Exported types: `QueryPlanToPrismaArgs`, `QueryPlanToPrismaResult`, `Mapper`, `MapperConfig`,
 `NullAttributeRepresentation`, `PrismaFilter`, and `PlanKind` (re-exported from `@cerbos/core`).
@@ -189,8 +189,14 @@ attributes it sends to `check()`, so tell the adapter which convention you use:
 | `{"x": null}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
-The default is `"explicit"` (`IS NULL`). If you omit attributes for NULL columns, set `"omitted"`:
-the adapter then never emits a filter that selects the NULL rows. `x == null` is FALSE for a
+The default is `"omitted"`, the convention that fails closed when the guess is wrong. If you send
+NULL columns as explicit nulls, set `"explicit"` and `x == null` renders as `IS NULL`:
+
+```ts
+queryPlanToPrisma({ queryPlan, mapper, nullAttributeRepresentation: "explicit" });
+```
+
+Under `"omitted"` the adapter never emits a filter that selects the NULL rows. `x == null` is FALSE for a
 present value and an error for an absent one, so it becomes `NOT startsWith(x, "")` (for a string
 column): FALSE when present, UNKNOWN when NULL, under either polarity. `x != null` is the
 presence test itself. Every other null comparison operand is rejected.
@@ -203,10 +209,6 @@ exists and `x` is not NULL) and `parent.x == null` is never true; where it needs
 `parent.x == null` is the negated presence test and `parent.x != null` is never false. A missing
 parent or a NULL `x` is then denied under any nesting of `!`. A null comparison whose polarity is
 not fixed (a ternary condition, an operand of `==`, the body of `exists_one`) is still rejected.
-
-```ts
-queryPlanToPrisma({ queryPlan, mapper, nullAttributeRepresentation: "omitted" });
-```
 
 The rejection covers every other null operand, including `x != null`, which is aligned under both
 conventions: Prisma negates by wrapping in `{ NOT: … }`, so a leaf cannot tell whether an enclosing
@@ -229,8 +231,9 @@ const mapper = {
 Declaring `"explicit"` asserts the column can be NULL **and** that NULL reaches `check()` as an
 explicit null. The equality family (`eq`, `ne`, `in`) is then rendered so it is never SQL UNKNOWN:
 `null != "x"` is true in CEL, so the row is returned. Ordering and string operators are unchanged,
-because CEL denies them on a null receiver anyway. An undeclared attribute keeps the old rendering,
-under which `!=` against a constant under-grants NULL rows.
+because CEL denies them on a null receiver anyway. An undeclared attribute follows the call-level
+convention; if that is `"omitted"` and the caller in fact sends an explicit null, `!=` against a
+constant under-grants the NULL rows, which fails closed.
 
 A field-to-field `==`/`!=` between an explicit-null attribute and one that is not keeps both: the
 explicit side's NULL compares as a value, the other side's NULL stays an error. See
@@ -490,6 +493,12 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- **Breaking:** `nullAttributeRepresentation` defaults to `"omitted"`, where it defaulted to
+  `"explicit"`. A caller that sends explicit nulls and set nothing now gets a refusal on most null
+  comparisons, and `x == null` selects no row where it rendered `IS NULL`; pass
+  `nullAttributeRepresentation: "explicit"` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
 - **Fix ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)):** `matches()` reads a
   repetition count as RE2 does. A count with a leading zero opens no repetition, so `^one{01}$` is
   the literal `one{01}`; it used to be read as `{1}` and returned the row `"one"`. Nested counts

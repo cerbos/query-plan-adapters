@@ -77,8 +77,9 @@ module Cerbos
             "Cannot translate a null constant with null_attribute_representation: :omitted. " \
             "A NULL column then sends no attribute, so Cerbos evaluates the comparison as a " \
             "missing-attribute error and denies the row, but a filter that selects NULL " \
-            "would return that row. Send a NULL column as an explicit null and use " \
-            ":explicit, or keep this shape out of the policy."
+            "would return that row. Send a NULL column as an explicit null and pass " \
+            "null_attribute_representation: :explicit (the default is :omitted), or keep this " \
+            "shape out of the policy."
           )
         end
 

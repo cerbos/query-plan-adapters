@@ -16,9 +16,14 @@
 RSpec.describe "conformance" do
   before { ConformanceStore.establish! }
 
+  # Every column the dataset omits when NULL declares `null_representation: :omitted` in the
+  # mapping. The call-level value covers what is left, list elements and principal-side literals,
+  # which the dataset sends as values; the adapter's own default is pinned in
+  # adapter_contract_spec.rb.
   def ids(plan)
     Cerbos::ActiveRecord.query_plan_to_relation(
-      plan: plan, model: AdvResource, attributes: CorpusAttributes::ATTRIBUTES
+      plan: plan, model: AdvResource, attributes: CorpusAttributes::ATTRIBUTES,
+      null_attribute_representation: :explicit
     ).pluck(:id).sort
   end
 

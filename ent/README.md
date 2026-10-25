@@ -64,10 +64,12 @@ func listContacts(ctx context.Context, c *cerbos.GRPCClient, db *ent.Client, pri
 ```
 
 `Translate` takes the resource's table name (ent's generated `<entity>.Table`) and a mapper.
-`Result.Predicate` is set only for `KindConditional`; it is an ordinary `*sql.Predicate`, so it
-composes with ent's own predicates, `Limit` and `Offset`. The predicate is rendered through ent's
-`sql.Builder`, so quoting and placeholders follow the dialect, and every value from the plan is a
-bound parameter.
+`Result.Predicate` is never nil: it renders `FALSE` for `KindAlwaysDenied` and `TRUE` for
+`KindAlwaysAllowed`, so a caller that applies it without switching on `Kind` still gets exactly the
+rows the PDP allows. The switch above only skips a query that cannot return a row. It is an
+ordinary `*sql.Predicate`, so it composes with ent's own predicates, `Limit` and `Offset`. The
+predicate is rendered through ent's `sql.Builder`, so quoting and placeholders follow the dialect,
+and every value from the plan is a bound parameter.
 
 Every shape the adapter refuses returns an error wrapping `cerbosent.ErrUnsupported` — never a broader
 predicate. Use `errors.Is(err, cerbosent.ErrUnsupported)` to tell "the policy asks for something SQL
@@ -148,12 +150,15 @@ explicit `null` or omitted, so you have to tell the adapter which you do
 
 | Call option | When a column is NULL, your attributes… | Effect |
 | --- | --- | --- |
-| `NullExplicit` (default) | send an explicit `null` | `== null` translates to `IS NULL`. |
-| `NullOmitted` | omit the attribute | Null operands are rejected: CEL raises a missing-attribute error (a deny), so an `IS NULL` filter would over-grant. |
+| `NullOmitted` (default) | omit the attribute | Null operands are rejected: CEL raises a missing-attribute error (a deny), so an `IS NULL` filter would over-grant. |
+| `NullExplicit` | send an explicit `null` | `== null` translates to `IS NULL`. |
+
+`NullOmitted` is the default because it fails closed when the guess is wrong. If you send explicit
+nulls, say so:
 
 ```go
 cerbosent.Translate(plan.PlanResourcesResponse, contact.Table, mapper,
-    cerbosent.WithNullRepresentation(cerbosent.NullOmitted))
+    cerbosent.WithNullRepresentation(cerbosent.NullExplicit))
 ```
 
 ### Declare the convention per attribute
@@ -183,8 +188,9 @@ mapper := cerbosent.MapperMap{
   UNKNOWN under any `NOT`, and a true sibling in an `||` still absorbs it. A column read through
   a to-one hop is NULL for an absent parent too, and renders the same way. Every other null
   operand against it (a null in an `in` list, say) is rejected.
-- Undeclared attributes keep the historical rendering, where `!=` against a constant under-grants
-  the NULL rows.
+- Undeclared attributes follow the call-level option. If that is the default omitted convention and the caller
+  in fact sends an explicit null, `!=` against a constant under-grants the NULL rows, which fails
+  closed.
 - **Declare both sides of a field-to-field equality, or neither.** Mixing conventions on operands
   of the same or undeclared scalar type is rejected.
 
@@ -331,6 +337,15 @@ tags := &cerbosent.Relation{
 
 ## Behaviour changes
 
+- **Breaking:** `Result.Predicate` is never nil. It renders `FALSE` for `KindAlwaysDenied`, where it
+  was nil and `s.Where(nil)` left the query unrestricted, and `TRUE` for `KindAlwaysAllowed`
+  ([#494](https://github.com/cerbos/query-plan-adapters/issues/494),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)). A caller that tested
+  `Predicate == nil` must switch on `Kind` instead.
+- **Breaking:** the default null representation is `NullOmitted`, where it was `NullExplicit`. A
+  caller that sends explicit nulls and set nothing now gets `ErrUnsupported` on a null comparison;
+  pass `WithNullRepresentation(NullExplicit)` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499)).
 - **Membership across types:** a literal whose type differs from a relation element's declared
   `ValueType` no longer matches it. `"2" in R.attr.numbers` and `hasIntersection(R.attr.flags,
   ["true"])` are false, as CEL says, and a mixed literal list keeps only the members of the

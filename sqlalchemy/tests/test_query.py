@@ -62,9 +62,16 @@ class TestNullAttributeRepresentation:
             }
         )
 
-    def test_explicit_is_the_default_and_keeps_is_null(self, resource_table):
+    def test_omitted_is_the_default_and_never_selects_null(self, resource_table):
+        # The default is the convention whose wrong guess fails closed (ADR 0011).
         attr = {"request.resource.attr.name": resource_table.name}
         default = get_query(self._null_eq_plan(), resource_table, attr)
+        omitted = get_query(
+            self._null_eq_plan(),
+            resource_table,
+            attr,
+            null_attribute_representation="omitted",
+        )
         explicit = get_query(
             self._null_eq_plan(),
             resource_table,
@@ -72,9 +79,12 @@ class TestNullAttributeRepresentation:
             null_attribute_representation="explicit",
         )
 
-        compiled = str(default.compile(compile_kwargs={"literal_binds": True}))
-        assert " IS NULL" in compiled
-        assert compiled == str(explicit.compile(compile_kwargs={"literal_binds": True}))
+        def compiled(query):
+            return str(query.compile(compile_kwargs={"literal_binds": True}))
+
+        assert compiled(default) == compiled(omitted)
+        assert " IS NULL" in compiled(explicit)
+        assert compiled(default) != compiled(explicit)
 
     @pytest.mark.parametrize(
         "operator, negated, expected",
@@ -400,6 +410,7 @@ class TestSemanticEdgeTranslations:
             plan,
             resource_table,
             {"request.resource.attr.name": resource_table.name},
+            null_attribute_representation="explicit",
         )
 
         compiled = str(query.compile(compile_kwargs={"literal_binds": True}))

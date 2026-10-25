@@ -473,7 +473,11 @@ func filteredIDs(ctx context.Context, pool *pgxpool.Pool, mapper cerbospgx.Mappe
 		return entry, ok
 	})
 
-	result, err := cerbospgx.Translate(plan, resourceTable, recording)
+	// Every column the dataset omits when NULL is declared NullConventionOmitted in the mapping. The
+	// call-level option covers what is left, list elements and principal-side literals, which the
+	// dataset sends as values; the adapter's own default is pinned in translate_test.go.
+	result, err := cerbospgx.Translate(plan, resourceTable, recording,
+		cerbospgx.WithNullRepresentation(cerbospgx.NullExplicit))
 	if len(unmapped) > 0 {
 		return nil, fmt.Errorf("the harness mapping has no entry for %s (a harness defect, not a refusal)", strings.Join(unmapped, ", "))
 	}
@@ -481,14 +485,9 @@ func filteredIDs(ctx context.Context, pool *pgxpool.Pool, mapper cerbospgx.Mappe
 		return nil, err
 	}
 
-	query := `SELECT id FROM ` + resourceTable
-	switch result.Kind {
-	case cerbospgx.KindAlwaysDenied:
-		return []string{}, nil
-	case cerbospgx.KindAlwaysAllowed:
-	case cerbospgx.KindConditional:
-		query += " WHERE " + result.Where
-	}
+	// Spliced without switching on Kind, as a caller that skips the switch would: every kind's
+	// Where must return exactly the rows the PDP allows on its own (ADR 0011).
+	query := `SELECT id FROM ` + resourceTable + " WHERE " + result.Where
 
 	rows, err := pool.Query(ctx, query, result.Args...)
 	if err != nil {

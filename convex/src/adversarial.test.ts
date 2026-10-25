@@ -349,6 +349,7 @@ describe("conformance (convex)", () => {
               queryPlan,
               mapper: MAPPER,
               allowPostFilter: true,
+              nullAttributeRepresentation: "explicit",
             }),
           ).toThrow(UnsupportedQueryPlanError);
           return;

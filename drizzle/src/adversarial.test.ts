@@ -16,6 +16,7 @@ import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import mysql from "mysql2/promise";
 import { Pool } from "pg";
 
+import type { PlanResourcesResponse } from "@cerbos/core";
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
 import type { Mapper, MapperEntry } from ".";
 import {
@@ -927,8 +928,14 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 
 // -- the replay -----------------------------------------------------------------------------------
 
+// Every column the dataset omits when NULL is declared `omitted` in the mapping. The call-level
+// option covers what is left, list elements and principal-side literals, which the dataset sends as
+// values; the adapter's own default is pinned in translator.test.ts.
+const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) =>
+  queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "explicit" });
+
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
-  const result = queryPlanToDrizzle({ queryPlan: await planOf(golden), mapper });
+  const result = translatePlan(await planOf(golden), mapper);
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
   return store.selectIds(result.kind === PlanKind.CONDITIONAL ? result.filter : undefined);
 }
@@ -1018,7 +1025,7 @@ describe(`conformance (${STORE_NAME})`, () => {
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);
-          expect(() => queryPlanToDrizzle({ queryPlan, mapper: MAPPER })).toThrow(
+          expect(() => translatePlan(queryPlan, MAPPER)).toThrow(
             UnsupportedQueryPlanError,
           );
           return;

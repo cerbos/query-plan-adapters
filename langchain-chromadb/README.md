@@ -50,22 +50,22 @@ async function search(principalId: string, query: string) {
     case PlanKind.ALWAYS_DENIED:
       return [];
     case PlanKind.ALWAYS_ALLOWED:
-      return chroma.similaritySearch(query, 10); // omit the filter: Chroma rejects `{}`
+      return chroma.similaritySearch(query, 10);
     case PlanKind.CONDITIONAL:
       return chroma.similaritySearch(query, 10, result.filters);
   }
 }
 ```
 
-`result` is a discriminated union: `CONDITIONAL` always carries `filters` (a `Where`),
-`ALWAYS_ALLOWED` carries `filters: {}`, `ALWAYS_DENIED` carries none. **Do not pass the empty `{}`
-to Chroma** — its validator rejects it ("Expected 'where' to have exactly one operator, but got 0");
-omit `where` instead, and do not wrap `{}` in an `$and` with your own clause either. `PlanKind`,
+`result` is a discriminated union on `kind`: `CONDITIONAL` carries `filters` (a `Where`), and
+`ALWAYS_ALLOWED` and `ALWAYS_DENIED` carry nothing else. TypeScript will not let you read `filters`
+until you have narrowed on `kind`, so a denial cannot reach Chroma as an absent `where`, which
+Chroma reads as "every record". `PlanKind`,
 `QueryPlanToChromaDBArgs`, `QueryPlanToChromaDBResult`, `PostFilter`, `FieldMapper`,
 `FieldNameMapperConfig` and `UnsupportedOperatorError` are exported.
 
-A call that passes `allowPostFilter: true` can also get a `postFilter` back, and then `filters` may
-be absent; see [Post-filtering](#post-filtering).
+A call that passes `allowPostFilter: true` can also get a conditional result with a `postFilter`
+and no `filters`; see [Post-filtering](#post-filtering).
 
 ## Field name mapper
 
@@ -210,34 +210,39 @@ switch (result.kind) {
   case PlanKind.ALWAYS_ALLOWED:
     return collection.query({ queryTexts: [query], nResults: k });
   case PlanKind.CONDITIONAL: {
+    if ("filters" in result) {
+      return collection.query({ queryTexts: [query], nResults: k, where: result.filters });
+    }
+    const { prefilter, postFilter } = result;
     // Over-fetch: the post-filter drops records after Chroma has already ranked and cut them.
     const rows = await collection.query({
       queryTexts: [query],
-      nResults: result.postFilter ? k * 4 : k,
-      where: result.filters, // absent when nothing in the plan has a `Where` form
+      nResults: k * 4,
+      where: prefilter, // absent when nothing in the plan has a `Where` form
       include: ["metadatas", "documents"],
     });
     const metadatas = rows.metadatas[0] ?? [];
     return rows.ids[0]!
       .map((id, i) => ({ id, metadata: metadatas[i] }))
-      .filter(({ metadata }) => !result.postFilter || result.postFilter(metadata))
+      .filter(({ metadata }) => postFilter(metadata))
       .slice(0, k);
   }
 }
 ```
 
-- **`postFilter` is part of the authorization predicate.** A record is allowed only when it
-  matches `filters` **and** `postFilter` returns `true`. Apply it to every candidate before the
-  record is used, returned or passed to a model, and ask Chroma for `metadatas` so it has something
-  to read.
+- **`postFilter` is the authorization predicate.** It evaluates the whole condition, so a record is
+  allowed exactly when `postFilter` returns `true`. Apply it to every candidate before the record is
+  used, returned or passed to a model, and ask Chroma for `metadatas` so it has something to read.
+  `prefilter` only narrows the candidates: it is never enough on its own, which is why it is not
+  called `filters`.
 - **A top-k search can return fewer than k results.** Chroma ranks and truncates before the
   post-filter runs, so records it drops are not replaced. Over-fetch (a larger `nResults` or
   `limit`) and cut back to k afterwards, or page with `collection.get` until you have enough.
-- **Whatever Chroma can express stays in `filters`.** A plan Chroma can express whole returns
-  `filters` alone, exactly as without the option. A root `and` keeps its expressible conjuncts in
-  `filters` and post-filters the rest, so the vector search still narrows the candidates. Anything
-  else, including an `or` with any inexpressible child, goes to `postFilter` whole, with no
-  `filters`: pushing half of a disjunction would drop the records only the other half admits.
+- **Whatever Chroma can express still reaches Chroma.** A plan Chroma can express whole returns
+  `filters` alone, exactly as without the option. A root `and` hands its expressible conjuncts to
+  Chroma as `prefilter`, so the vector search still narrows the candidates. Anything else, including
+  an `or` with any inexpressible child, carries `postFilter` alone: pushing half of a disjunction
+  would drop the records only the other half admits.
 - **Post-filtered conditions do not narrow the search.** They cost a read of every candidate
   Chroma returns.
 
@@ -374,6 +379,16 @@ flat metadata on the record being matched, and every shape that would reach a se
 
 ## Behaviour changes
 
+- **Breaking:** `ALWAYS_ALLOWED` and `ALWAYS_DENIED` carry no `filters` field. `ALWAYS_ALLOWED` used
+  to carry `filters: {}`, which Chroma's validator rejects, and `ALWAYS_DENIED` declared
+  `filters?: undefined`, which a caller that skipped the switch on `kind` passed to Chroma as no
+  `where`, returning every record
+  ([#494](https://github.com/cerbos/query-plan-adapters/issues/494),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
+- **Breaking, opt-in only:** under `allowPostFilter: true`, a post-filtered result carries
+  `postFilter` and, for a root `and`, the expressible conjuncts as `prefilter`; it never carries
+  `filters`. `postFilter` now evaluates the whole condition, so it is correct on its own. A caller
+  that applied `filters` and dropped `postFilter` used to over-grant.
 - **Widening, opt-in:** `allowPostFilter: true` answers in memory, with CEL's semantics, the parts
   of a plan Chroma's `Where` cannot express, and returns them as a `postFilter`
   ([#228](https://github.com/cerbos/query-plan-adapters/issues/228)). See

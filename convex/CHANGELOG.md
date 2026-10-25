@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Breaking:** a `path: "split"` result carries `prefilter` and `postFilter`, and `postFilter`
+  evaluates the whole condition. It used to carry the pushable conjuncts as `filter`, so a caller
+  that applied `filter` without reading `path` over-granted. `ALWAYS_ALLOWED` and `ALWAYS_DENIED`
+  no longer declare `filter` or `postFilter`
+  ([#494](https://github.com/cerbos/query-plan-adapters/issues/494)).
+
+- **Breaking:** `nullAttributeRepresentation` defaults to `"omitted"`. An entry that does not
+  declare `nullable` is nullable, so its comparisons need `allowPostFilter: true`; declare
+  `nullable: false` or pass `"explicit"` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499)).
+
 - `postFilter` evaluates `has()`, which Cerbos 0.57.0 keeps in the plan as a `has` operator. A
   stored `null` is absent under `nullAttributeRepresentation: "omitted"`.
 

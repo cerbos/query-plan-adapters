@@ -257,7 +257,7 @@ def get_query(
     attr_map: dict[str, GenericColumn],
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = None,
     operator_override_fns: OperatorFnMap | None = None,
-    null_attribute_representation: NullAttributeRepresentation = "explicit",
+    null_attribute_representation: NullAttributeRepresentation = "omitted",
     attribute_null_representation: dict[str, NullAttributeRepresentation] | None = None,
     collection_columns: dict[str, CollectionColumn] | None = None,
 ) -> "Select[Any]":
@@ -274,10 +274,12 @@ def get_query(
             of an operator. An overridden operator owns its operand subtree.
         null_attribute_representation: How a NULL column is sent to ``check()``.
             The plan is the same either way, so the caller must say. ``"explicit"``
-            (default) sends a ``null`` attribute, so ``IS NULL`` matches.
-            ``"omitted"`` sends no attribute, which CEL denies, so ``eq``/``ne``
+            sends a ``null`` attribute, so ``IS NULL`` matches. ``"omitted"``
+            (default) sends no attribute, which CEL denies, so ``eq``/``ne``
             against null is UNKNOWN for a NULL column, and every other null
-            operand is rejected rather than translated. See #551.
+            operand is rejected rather than translated. The default is the
+            convention whose wrong guess fails closed. See #551 and
+            docs/adr/0011-denial-fails-closed-in-the-result.md.
         attribute_null_representation: The same, per attribute, overriding the
             call-level value. Use it when a policy mixes conventions. An
             ``"explicit"`` attribute renders ``eq``, ``ne`` and ``in`` so they are

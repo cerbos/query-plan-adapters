@@ -316,6 +316,8 @@ async function selectAllowed(golden: Golden): Promise<string[]> {
   const result = queryPlanToMongoose({
     queryPlan: await planOf(golden),
     mapper: MAPPER,
+    // The dataset stores what it sends: `owner` as an explicit null, the rest declared `nullable`.
+    nullAttributeRepresentation: "explicit",
   });
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
   const rows = await AdversarialResource.find(

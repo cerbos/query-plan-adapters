@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `null_attribute_representation:` defaults to `:omitted`, where it defaulted to `:explicit`. A caller that sends explicit nulls and set nothing now gets `col == null` matching no row where it rendered `IS NULL`, and a refusal for the other null constants; pass `null_attribute_representation: :explicit` to keep the old output ([#499](https://github.com/cerbos/query-plan-adapters/issues/499), [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
+
 ### Added
 
 - `has()`, which Cerbos 0.57.0 keeps in the plan as a `has` operator. It translates from the attribute's null convention: `IS NOT NULL` under `omitted`, true under `explicit`, and the related row's existence for a `relation`. A presence test over a collection relation raises a `Cerbos::ActiveRecord::Error`.

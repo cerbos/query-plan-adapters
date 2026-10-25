@@ -6,7 +6,9 @@
 package dev.cerbos.example.photos;
 
 import dev.cerbos.queryplan.springdata.AttributeMapping;
+import dev.cerbos.queryplan.springdata.NullAttributeRepresentation;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
+import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter.Options;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.PlanResourcesResult;
 import dev.cerbos.sdk.builders.Resource;
@@ -49,6 +51,12 @@ public class PhotoService {
             )))
     );
 
+    // A NULL location or grant subject reaches check() as an explicit null, which the located and
+    // *-group-grant scenarios rely on, so the call declares EXPLICIT; the adapter defaults to
+    // OMITTED (docs/adr/0011-denial-fails-closed-in-the-result.md).
+    private static final Options PHOTO_OPTIONS =
+            Options.of(PHOTO_ATTRS).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT);
+
     private final CerbosBlockingClient cerbos;
     private final PhotoRepository repository;
 
@@ -86,7 +94,7 @@ public class PhotoService {
                 Resource.newInstance("photo"),
                 List.of(action));
 
-        Specification<Photo> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, PHOTO_ATTRS);
+        Specification<Photo> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, PHOTO_OPTIONS);
         Specification<Photo> tenantBoundary = (root, query, cb) ->
                 cb.equal(root.get("tenantId"), context.tenantId());
         Specification<Photo> specification = tenantBoundary.and(allowed);

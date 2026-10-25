@@ -259,8 +259,19 @@ async function selectIds(where: object): Promise<string[]> {
   return rows.map((row) => row.id).sort();
 }
 
+// Every attribute the dataset omits when NULL is declared `omitted` in MAPPER. The call-level
+// option covers what is left, the list and relation elements, which the dataset sends as values;
+// the adapter's own default is pinned in translator.test.ts.
+const translatePlan = (queryPlan: PlanResourcesResponse) =>
+  queryPlanToPrisma({
+    queryPlan,
+    mapper: MAPPER,
+    model: MODEL,
+    nullAttributeRepresentation: "explicit",
+  });
+
 async function selectAllowed(queryPlan: PlanResourcesResponse): Promise<string[]> {
-  const result = queryPlanToPrisma({ queryPlan, mapper: MAPPER, model: MODEL });
+  const result = translatePlan(queryPlan);
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
   return selectIds(result.kind === PlanKind.CONDITIONAL ? result.filters : {});
 }
@@ -410,9 +421,7 @@ describe(`conformance (${STORE_NAME})`, () => {
         const entry = ledgerEntry(golden, tag);
         const queryPlan = await planOf(golden);
         if (entry?.status === "unsupported") {
-          expect(() =>
-            queryPlanToPrisma({ queryPlan, mapper: MAPPER, model: MODEL })
-          ).toThrow(UnsupportedQueryPlanError);
+          expect(() => translatePlan(queryPlan)).toThrow(UnsupportedQueryPlanError);
           return;
         }
         // Both sides sorted the same way, so a divergent entry cannot pass on ordering alone.

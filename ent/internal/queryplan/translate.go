@@ -1627,7 +1627,8 @@ func errNullOperandUnderOmitted() error {
 		"cannot translate a null operand under NullOmitted: a NULL column sends no " +
 			"attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
 			"(deny) while a NULL-selecting filter would return those rows. Send NULL " +
-			"columns as explicit nulls and use NullExplicit, or keep this shape out of the policy",
+			"columns as explicit nulls and declare NullExplicit (the default is NullOmitted), or " +
+			"keep this shape out of the policy",
 	)
 }
 
