@@ -1,0 +1,211 @@
+name: Exposed Test
+
+on:
+  pull_request:
+    paths:
+      - "exposed/**"
+      - "conformance/**"
+      - "demo/**"
+      - ".github/workflows/exposed.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
+  push:
+    tags:
+      - exposed/v*
+
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: exposed-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+    working-directory: exposed
+
+permissions: {}
+
+jobs:
+  # All suites run here on H2, including the conformance suite, which replays the recorded golden
+  # plans of both pinned PDPs (conformance/golden/) and needs no PDP (CLAUDE.md, "CI").
+  test:
+    permissions:
+      contents: read
+    strategy:
+      # A failed floor leg is a finding of its own and should not cancel the baseline leg.
+      fail-fast: false
+      matrix:
+        java-version: ["17", "21"]
+        # ORM version sets declared in build.gradle.kts. `baseline` is the latest Exposed release;
+        # `floor` is the release the published jar compiles against, and so the one the README
+        # claims support from. Exposed is `compileOnly`, and JetBrains' 1.x promise only runs
+        # forwards, so without this leg the floor would be a claim nothing executes.
+        orm: [baseline, floor]
+        # The ORM leg only needs the baseline JDK.
+        exclude:
+          - orm: floor
+            java-version: "21"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Setup JDK
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java-version }}
+          # Must match the key warm-caches.yaml writes on main.
+          cache: gradle
+          cache-dependency-path: |
+            exposed/**/*.gradle*
+            exposed/**/gradle-wrapper.properties
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      # build.gradle.kts forwards ADAPTER_TEST_ORM to the suites and declares it as an input.
+      # ADAPTER_TEST_CONTAINER_SUITES skips the suites that start containers of their own
+      # (OfflineRendererTest's server cross-check, ReviewOperandTypeTest's MySQL): each answers a
+      # question about the Exposed release or a server image, which the JDK does not decide.
+      - name: Build and test (${{ matrix.orm }}, JDK ${{ matrix.java-version }})
+        run: ./gradlew build --no-daemon
+        env:
+          ADAPTER_TEST_ORM: ${{ matrix.orm }}
+          ADAPTER_TEST_CONTAINER_SUITES: ${{ matrix.java-version == '21' && 'skip' || 'run' }}
+
+      - name: Store reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "Reports for Java ${{ matrix.java-version }} (${{ matrix.orm }})"
+          path: |-
+            **/build/reports/
+            **/build/test-results/
+
+  # AdversarialConformanceTest on another store: SQLite in process, PostgreSQL and MySQL through
+  # Testcontainers. Collation, LIKE escaping, cast targets and parameter typing are translator
+  # behaviour, so a store this job does not execute is a store the adapter does not cover. MySQL
+  # runs with client-side and with server-side prepared statements: Connector/J's default sends a
+  # double bind as an exact DECIMAL literal, and the adapter casts explicitly rather than relying
+  # on either (README.md, "MySQL"). Every store leg runs under both ORM sets: Exposed renders the
+  # SQL each store executes, so a leg one ORM set skips is a store that ORM set does not cover.
+  test-database:
+    permissions:
+      contents: read
+    strategy:
+      # Each store leg is a separate finding.
+      fail-fast: false
+      matrix:
+        # ORM version sets declared in build.gradle.kts, as in the `test` job.
+        orm: [baseline, floor]
+        database: [sqlite, postgres, mysql]
+        server-prep-stmts: [""]
+        # Each entry changes server-prep-stmts, so it adds a MySQL leg rather than altering one:
+        # eight legs in all.
+        include:
+          - orm: baseline
+            database: mysql
+            server-prep-stmts: "true"
+          - orm: floor
+            database: mysql
+            server-prep-stmts: "true"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Setup JDK
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          # Must match the key warm-caches.yaml writes on main.
+          cache: gradle
+          cache-dependency-path: |
+            exposed/**/*.gradle*
+            exposed/**/gradle-wrapper.properties
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      # Only AdversarialConformanceTest reads ADAPTER_TEST_DB; the `test` job runs the other suites.
+      - name: Conformance suite (${{ matrix.database }}, ${{ matrix.orm }})
+        run: ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
+        env:
+          ADAPTER_TEST_ORM: ${{ matrix.orm }}
+          ADAPTER_TEST_DB: ${{ matrix.database }}
+          ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
+
+      - name: Store reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "Reports for ${{ matrix.database }} (${{ matrix.orm }})${{ matrix.server-prep-stmts && ' (server prepared statements)' || '' }}"
+          path: |-
+            **/build/reports/
+            **/build/test-results/
+
+  # The example installs the published artifact (docs/adr/0002-examples-install-the-packed-artifact.md):
+  # every suite above compiles against the adapter's source set, so its POM and dependency scopes
+  # are executed nowhere else. Exposed is `compileOnly` and must stay out of a consumer's graph.
+  # Keep this job in this workflow: it is what blocks Renovate's automerge of a breaking bump.
+  example:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Check the PDP pin in demo/docker-compose.yml before running against it.
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup JDK
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          # Must match the key warm-caches.yaml writes on main.
+          cache: gradle
+          cache-dependency-path: |
+            exposed/**/*.gradle*
+            exposed/**/gradle-wrapper.properties
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      # The example resolves the adapter from mavenLocal.
+      - name: Publish the adapter to mavenLocal
+        run: ./gradlew publishToMavenLocal --no-daemon
+
+      - name: Build example
+        run: ./gradlew -p example build --no-daemon
+
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh exposed
+
+      - name: Store reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "Reports for the example"
+          path: |-
+            **/build/reports/
+            **/build/test-results/
