@@ -74,7 +74,8 @@ jobs:
   replay:
     name: Replay (${{ matrix.adapter }} / ${{ matrix.store }})
     needs: record
-    runs-on: ubuntu-latest
+    # mongoose.yaml says why its legs run on ubuntu-24.04 (MongoDB 8.0 and the 6.19 kernel).
+    runs-on: ${{ matrix.adapter == 'mongoose' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     timeout-minutes: 60
     permissions:
       contents: read

@@ -67,7 +67,9 @@ jobs:
         exclude:
           - mongodb-image-file: MONGO_NEXT_IMAGE
             node-version: "24"
-    runs-on: ubuntu-latest
+    # Pinned below ubuntu-latest: its Linux 6.19+ kernel stops the pinned MongoDB 8.0 from starting
+    # (SERVER-121912, fixed in 8.0.35). Back to ubuntu-latest once MONGO_NEXT_IMAGE carries the fix.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
