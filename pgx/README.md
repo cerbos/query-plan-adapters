@@ -62,7 +62,10 @@ func listContacts(ctx context.Context, c *cerbos.GRPCClient, pool *pgxpool.Pool,
 
 `Translate` takes the resource's table name and a mapper. `Result.Where` is a bare boolean
 expression (no `WHERE` keyword) with placeholders numbered from `$1`, and `Result.Args` binds them
-in order; both are set only for `KindConditional`. Every value from the plan is a bound parameter
+in order. `Where` is never empty: it is `FALSE` for `KindAlwaysDenied` and `TRUE` for
+`KindAlwaysAllowed`, with no `Args`, so a caller that splices it without switching on `Kind` still
+gets exactly the rows the PDP allows. The switch above only skips a query that cannot return a
+row. Every value from the plan is a bound parameter
 with an explicit cast (`$1::text`), and every identifier is double-quoted.
 
 Every shape the adapter refuses returns an error wrapping `cerbospgx.ErrUnsupported` — never a broader
@@ -89,18 +92,15 @@ if err != nil {
 }
 
 if result.Kind == cerbospgx.KindAlwaysDenied {
-    return nil // don't run the application-only query
+    return nil // optional: the fragment is FALSE, so the query would return no row
 }
-if result.Kind == cerbospgx.KindConditional {
-    where += " AND (" + result.Where + ")"
-    args = append(args, result.Args...) // Result.Args must follow yours
-}
+where += " AND (" + result.Where + ")"
+args = append(args, result.Args...) // Result.Args must follow yours
 rows, err := pool.Query(ctx, `SELECT id FROM contact WHERE `+where, args...)
 ```
 
 **The fragment first** (pagination is the usual case): there is no option for this side. The
-fragment keeps `$1…`, and you number your parameters from `len(result.Args)+1`. This assumes you
-have already handled the unconditional kinds:
+fragment keeps `$1…`, and you number your parameters from `len(result.Args)+1`:
 
 ```go
 stmt := fmt.Sprintf(`SELECT id FROM contact WHERE %s ORDER BY id LIMIT $%d OFFSET $%d`,
@@ -114,9 +114,8 @@ Two things the offset does **not** do:
   `Result.Args` at positions `n+1…` of the slice you send is up to you. Two swapped same-typed
   arguments bind without error and answer the wrong question. (A count or type mismatch is refused
   by pgx or the server.)
-- **It does not apply to a non-conditional plan.** `Where` is empty and `Args` is nil for
-  `KindAlwaysAllowed` and `KindAlwaysDenied`, so branch on `Kind` before splicing. An empty `Where`
-  spliced after `AND` is a syntax error at run time.
+- **It has nothing to renumber on a non-conditional plan.** `Where` is `TRUE` or `FALSE` and `Args`
+  is nil for `KindAlwaysAllowed` and `KindAlwaysDenied`, so the splice above still holds.
 
 [`example/`](example/) runs both directions against a real PostgreSQL server.
 
@@ -187,12 +186,15 @@ explicit `null` or omitted, so you have to tell the adapter which you do
 
 | Call option | When a column is NULL, your attributes… | Effect |
 | --- | --- | --- |
-| `NullExplicit` (default) | send an explicit `null` | `== null` translates to `IS NULL`. |
-| `NullOmitted` | omit the attribute | Null operands are rejected: CEL raises a missing-attribute error (a deny), so an `IS NULL` filter would over-grant. |
+| `NullOmitted` (default) | omit the attribute | Null operands are rejected: CEL raises a missing-attribute error (a deny), so an `IS NULL` filter would over-grant. |
+| `NullExplicit` | send an explicit `null` | `== null` translates to `IS NULL`. |
+
+`NullOmitted` is the default because it fails closed when the guess is wrong. If you send explicit
+nulls, say so:
 
 ```go
 cerbospgx.Translate(plan.PlanResourcesResponse, "contact", mapper,
-    cerbospgx.WithNullRepresentation(cerbospgx.NullOmitted))
+    cerbospgx.WithNullRepresentation(cerbospgx.NullExplicit))
 ```
 
 ### Declare the convention per attribute
@@ -222,8 +224,9 @@ mapper := cerbospgx.MapperMap{
   UNKNOWN under any `NOT`, and a true sibling in an `||` still absorbs it. A column read through
   a to-one hop is NULL for an absent parent too, and renders the same way. Every other null
   operand against it (a null in an `in` list, say) is rejected.
-- Undeclared attributes keep the historical rendering, where `!=` against a constant under-grants
-  the NULL rows.
+- Undeclared attributes follow the call-level option. If that is the default omitted convention and the caller
+  in fact sends an explicit null, `!=` against a constant under-grants the NULL rows, which fails
+  closed.
 - **Declare both sides of a field-to-field equality, or neither.** Mixing conventions on operands
   of the same or undeclared scalar type is rejected.
 
@@ -341,6 +344,15 @@ tags := &cerbospgx.Relation{
 
 ## Behaviour changes
 
+- **Breaking:** `Result.Where` is never empty. It is `FALSE` for `KindAlwaysDenied`, where it was
+  empty and a builder that skips an empty `WHERE` returned every row, and `TRUE` for
+  `KindAlwaysAllowed` ([#494](https://github.com/cerbos/query-plan-adapters/issues/494),
+  [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)). A caller that tested
+  `Where == ""` must switch on `Kind` instead.
+- **Breaking:** the default null representation is `NullOmitted`, where it was `NullExplicit`. A
+  caller that sends explicit nulls and set nothing now gets `ErrUnsupported` on a null comparison;
+  pass `WithNullRepresentation(NullExplicit)` to keep the old output
+  ([#499](https://github.com/cerbos/query-plan-adapters/issues/499)).
 - **Membership across types:** a literal whose type differs from a relation element's declared
   `ValueType` no longer matches it. `"2" in R.attr.numbers` and `hasIntersection(R.attr.flags,
   ["true"])` are false, as CEL says, and a mixed literal list keeps only the members of the

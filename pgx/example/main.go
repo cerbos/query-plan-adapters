@@ -24,9 +24,9 @@
 //
 // Every statement a usage shape builds goes through checkPlaceholders before it is executed, so a
 // misnumbered composition fails by name instead of returning plausible rows. The two negative controls
-// — assertOffsetIsLoadBearing and assertDenialCannotBeSpliced — go straight to the database instead,
+// — assertOffsetIsLoadBearing and assertDenialSplicesToNoRows — go straight to the database instead,
 // which is the point of them: the first executes a statement checkPlaceholders has just been required
-// to REJECT, and the second is about syntax rather than numbering. Nothing else bypasses the check.
+// to REJECT, and the second runs a statement no usage shape would. Nothing else bypasses the check.
 //
 // It does NOT prove packaging. Go has no packaging step: this module resolves the adapter through a
 // `replace` directive, which is not what a consumer does. See pgx/example/README.md and the
@@ -381,7 +381,7 @@ func (a *app) paginated(ctx context.Context, principalID, action string, pageSiz
 // matching position of the argument slice is still the caller's job.
 //
 // All three plan kinds go through here on purpose. KindAlwaysAllowed leaves nothing to AND with, and
-// KindAlwaysDenied must not have its denial undone — see assertDenialCannotBeSpliced.
+// KindAlwaysDenied must not have its denial undone — see assertDenialSplicesToNoRows.
 func (a *app) composed(ctx context.Context, principalID, action string) (shapeResult, error) {
 	appWhere, appArgs := a.seeds.applicationPredicate()
 
@@ -395,10 +395,9 @@ func (a *app) composed(ctx context.Context, principalID, action string) (shapeRe
 		return shapeResult{}, err
 	}
 	if !accessible {
-		// No fragment to compose with, so no query runs. The application predicate cannot widen a
-		// denial because there is nothing here for it to widen — and splicing the empty fragment in
-		// anyway is refused by PostgreSQL rather than quietly returning the application's own rows.
-		if err := a.assertDenialCannotBeSpliced(ctx, appWhere, appArgs, result); err != nil {
+		// No query runs for a denial. The application predicate cannot widen it — and splicing the
+		// denial's FALSE in anyway returns no rows rather than the application's own.
+		if err := a.assertDenialSplicesToNoRows(ctx, appWhere, appArgs, result); err != nil {
 			return shapeResult{}, err
 		}
 		return shapeResult{Kind: kind, IDs: []string{}}, nil
@@ -593,39 +592,38 @@ func (a *app) assertOffsetIsLoadBearing(
 	}
 }
 
-// assertDenialCannotBeSpliced pins what happens to a caller who ignores Kind on a denied plan.
+// assertDenialSplicesToNoRows pins what happens to a caller who ignores Kind on a denied plan.
 //
-// Translate returns Where and Args for KindConditional only; for a denial there is no fragment at
-// all, and the caller's contract is to run no query. That is the same structural situation as the
-// ent adapter — there is nothing for the application's predicate to be ANDed with, so it cannot
-// resurrect a denied row — and it is worth pinning rather than asserting, because THIS adapter hands
-// back a string and a string can be concatenated whatever it contains. So the question "what does
-// the mistake do" has an answer here that it does not have for an ORM object, and the answer is that
-// the empty fragment makes the statement unparseable: PostgreSQL refuses it, no rows come back, and
-// the denial survives the mistake. An adapter that rendered `TRUE` for a denial would instead answer
-// with the application's own rows, which is why this is checked and not assumed.
-func (a *app) assertDenialCannotBeSpliced(
+// The caller's contract for a denial is to run no query, so there is nothing for the application's
+// predicate to be ANDed with. It is worth pinning rather than asserting what a caller who skips the
+// switch gets, because THIS adapter hands back a string and a string can be concatenated whatever it
+// contains: a denial's Where is FALSE, so the spliced statement is valid and returns no rows, and the
+// denial survives the mistake (docs/adr/0011-denial-fails-closed-in-the-result.md).
+func (a *app) assertDenialSplicesToNoRows(
 	ctx context.Context, appWhere string, appArgs []any, result cerbospgx.Result,
 ) error {
-	if result.Where != "" || len(result.Args) != 0 {
+	if result.Where != "FALSE" || len(result.Args) != 0 {
 		return fmt.Errorf(
-			"a denied plan carried a filter (%q, %d argument(s)) — this adapter's contract is that it carries none",
+			"a denied plan carried %q with %d argument(s) — this adapter's contract is FALSE and none",
 			result.Where, len(result.Args),
 		)
 	}
 
-	// Straight to query, past checkPlaceholders: the numbering here is fine and the SYNTAX is what is
-	// being tested, so there is nothing for that check to say.
-	stmt := idSelect + " WHERE " + appWhere + " AND " + result.Where
+	// Straight to query, past checkPlaceholders: the fragment binds nothing, so there is nothing for
+	// that check to say.
+	stmt := idSelect + " WHERE " + appWhere + " AND (" + result.Where + ")"
 	ids, err := a.query(ctx, stmt, appArgs)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "    splicing a denied plan's empty filter: refused by PostgreSQL (%v)\n", err)
-		return nil
+		return fmt.Errorf("splicing a denied plan's filter: %w", err)
 	}
-	return fmt.Errorf(
-		"splicing a denied plan's empty filter into a statement returned [%s] rather than failing — "+
-			"a caller ignoring Kind would see rows the PDP denies", joinIDs(ids),
-	)
+	if len(ids) != 0 {
+		return fmt.Errorf(
+			"splicing a denied plan's filter into a statement returned [%s] — "+
+				"a caller ignoring Kind would see rows the PDP denies", joinIDs(ids),
+		)
+	}
+	fmt.Fprintln(os.Stderr, "    splicing a denied plan's filter: no rows")
+	return nil
 }
 
 // -- plumbing -----------------------------------------------------------------------------------
