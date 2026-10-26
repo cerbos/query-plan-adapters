@@ -318,7 +318,7 @@ queries over the corpus's 44 seed documents on MongoDB 7 and 8. Passed cases on 
 | --- | --- |
 | core | 30 / 30 |
 | extended | 66 / 102 |
-| adversarial | 236 / 358 |
+| adversarial | 238 / 360 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases.

@@ -94,6 +94,13 @@ cases:
   condition:
     match:
       expr: '!(R.attr.parent.aString == "One")'
+- id: 'relation/equals/negated-one-hop-against-explicit-null-field'
+  tier: adversarial
+  intent: 'A negated equality between a parent field and a root field sent as an explicit null (!(parent.aOptionalString == owner)).'
+  trap: 'owner is a null value on a4, a8 and c2 but their parent leaf is missing, an error that denies; a null-safe rendering that treats the parent side as a constant answers owner-is-null as a definite false, which the negation turns into a grant. Found by fuzzing (fuzz/s37/0113).'
+  condition:
+    match:
+      expr: '!(R.attr.parent.aOptionalString == R.attr.owner)'
 - id: 'relation/equals/negated-one-hop-against-two-hops'
   tier: adversarial
   intent: 'The negated cross-depth comparison (!(parent.aBool == parent.inner.aBool)).'
@@ -299,6 +306,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'aOptionalString is omitted when NULL, so != null is true for every set inner leaf (its negation false) and an error for a missing leaf or level: no row can be allowed. The empty oracle still fails any translation that returns a row; relation/or/negated-two-hops-not-null-or-negated-root-attribute carries the discriminating oracle.'
+- id: 'relation/not-equals/one-hop-against-explicit-null-field'
+  tier: adversarial
+  intent: 'A parent field compared with a root field sent as an explicit null (parent.aOptionalString != owner).'
+  trap: 'owner is a null value on a4, a8 and c2 but their parent leaf is missing, an error that denies; rendering the explicit-null side definitely and the parent side as if it could not be missing answers those rows true. Found by fuzzing (fuzz/s37/0113).'
+  condition:
+    match:
+      expr: 'R.attr.parent.aOptionalString != R.attr.owner'
 - id: 'relation/not-equals/one-hop-null-literal'
   tier: adversarial
   intent: 'parent.aOptionalString != null through the to-one parent.'

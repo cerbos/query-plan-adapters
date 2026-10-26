@@ -836,6 +836,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a positive all over a chained collection cannot distinguish an absent to-one parent (CEL error, denies) from an empty collection (vacuously true)"
     },
+    "relation/equals/negated-one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `relation/not-equals/one-hop-against-explicit-null-field`, under negation."
+    },
     "relation/equals/negated-one-hop-against-two-hops": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
@@ -890,6 +894,10 @@
     "relation/not-equals/negated-two-hops-null-literal": {
       "status": "unsupported",
       "reason": "`parent.inner.aOptionalString == null` is a null-selecting comparison once the negation is pushed into `!= null`. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
+    "relation/not-equals/one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts, so the parent field against owner is refused, as in `comparison/equals/field-to-field`."
     },
     "relation/or/negated-one-hop-not-null-or-negated-root-attribute": {
       "status": "unsupported",

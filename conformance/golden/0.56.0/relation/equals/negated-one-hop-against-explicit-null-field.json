@@ -1,0 +1,63 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/negated-one-hop-against-explicit-null-field",
+  "intent": "A negated equality between a parent field and a root field sent as an explicit null (!(parent.aOptionalString == owner)).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aOptionalString"
+                },
+                {
+                  "variable": "request.resource.attr.owner"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/negated-one-hop-against-explicit-null-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.parent.aOptionalString == R.attr.owner)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "owner is a null value on a4, a8 and c2 but their parent leaf is missing, an error that denies; a null-safe rendering that treats the parent side as a constant answers owner-is-null as a definite false, which the negation turns into a grant. Found by fuzzing (fuzz/s37/0113)."
+}

@@ -643,13 +643,22 @@ func definiteEquality(op CmpOp, l, r Expr) (Expr, bool) {
 	if !lExplicit && !rExplicit {
 		return nil, false
 	}
-	// Mixing the two conventions across one comparison has no faithful rendering, so it is
-	// refused by the caller rather than answered here. A Lit operand is different: a constant
-	// can never be a missing attribute, so one declared column against a constant is fine.
+	// Mixing the two conventions across two columns has no faithful rendering, so it is refused
+	// by the caller rather than answered here.
 	if _, lIsColumn := l.(Column); lIsColumn {
 		if _, rIsColumn := r.(Column); rIsColumn && (!lExplicit || !rExplicit) {
 			return nil, false
 		}
+	}
+	// The undeclared side, when it is not a constant, can be NULL because an attribute is missing:
+	// a column of a to-one hop read as a scalar subquery, or a call or arithmetic over an omitted
+	// column. That NULL is a CEL error, so it must stay UNKNOWN rather than reach the definite
+	// expansion below, which answers it as if it were a value.
+	var missable Expr
+	if !lExplicit && !isConstantExpr(l) {
+		missable = l
+	} else if !rExplicit && !isConstantExpr(r) {
+		missable = r
 	}
 
 	// At most both sides' presence tests plus the equality itself.
@@ -668,9 +677,22 @@ func definiteEquality(op CmpOp, l, r Expr) (Expr, bool) {
 		equality = or(and(IsNull{X: lCol}, IsNull{X: rCol}), equality)
 	}
 	if op == OpNe {
-		return Not{X: equality}, true
+		equality = Not{X: equality}
+	}
+	if missable != nil {
+		return Case{Whens: []When{{Cond: IsNull{X: missable, Negate: true}, Then: equality}}}, true
 	}
 	return equality, true
+}
+
+// isConstantExpr reports whether e is a constant, which can never be a missing attribute.
+func isConstantExpr(e Expr) bool {
+	switch e.(type) {
+	case Lit, BoolConst:
+		return true
+	default:
+		return false
+	}
 }
 
 // assertNoMixedNullConventions refuses an equality between two columns where only ONE declares
