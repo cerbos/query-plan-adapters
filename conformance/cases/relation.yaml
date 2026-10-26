@@ -80,6 +80,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.parent.aString.contains("done")'
+- id: 'relation/ends-with/negated-one-hop-missing-leaf'
+  tier: adversarial
+  intent: 'Negated endsWith() on a parent field that some parents lack (!parent.aOptionalString.endsWith("ror")).'
+  trap: 'a4, a7 and c1 have a parent with no aOptionalString, a missing attribute CEL denies under negation; a NOT over EXISTS (parent WHERE col LIKE ...) is true for their NULL column and over-grants them. Found by fuzzing (fuzz/s23/0190).'
+  condition:
+    match:
+      expr: '!R.attr.parent.aOptionalString.endsWith("ror")'
 - id: 'relation/equals/negated-one-hop'
   tier: adversarial
   intent: 'Negated equality on a parent field (!(parent.aString == "One")).'
@@ -87,6 +94,13 @@ cases:
   condition:
     match:
       expr: '!(R.attr.parent.aString == "One")'
+- id: 'relation/equals/negated-one-hop-against-two-hops'
+  tier: adversarial
+  intent: 'The negated cross-depth comparison (!(parent.aBool == parent.inner.aBool)).'
+  trap: 'a2, b1, b6 and f1 differ; the rows with a parent but no inner are missing-attribute errors that deny, so a negation that does not require the inner hop over-grants a3, a7, a9, b2, c1 and d1.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.aBool == R.attr.parent.inner.aBool)'
 - id: 'relation/equals/negated-one-hop-null-literal'
   tier: adversarial
   intent: '!(parent.aOptionalString == null) through the to-one parent.'
@@ -101,6 +115,13 @@ cases:
   condition:
     match:
       expr: '!(R.attr.parent.inner.aOptionalString == null)'
+- id: 'relation/equals/one-hop-against-two-hops'
+  tier: adversarial
+  intent: 'A parent field compared with the same field one level further out (parent.aBool == parent.inner.aBool).'
+  trap: 'Both sides read the parents table at different depths, so the inner hop must correlate to the parent row, not to the root: a1, a4 and e1 match. Nesting the inner subquery outside the parent one names a table that is not in scope. Found by fuzzing (fuzz/s23/0040).'
+  condition:
+    match:
+      expr: 'R.attr.parent.aBool == R.attr.parent.inner.aBool'
 - id: 'relation/equals/one-hop-null-literal'
   tier: adversarial
   intent: 'parent.aOptionalString == null through the to-one parent.'
@@ -389,6 +410,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'No seed holds a mainCategory with zero subCategories, and every seed without one is a missing-path error. The non-negative size sibling carries the discriminating oracle for the same chain.'
+- id: 'relation/starts-with/negated-two-hops-missing-leaf'
+  tier: adversarial
+  intent: 'Negated startsWith() two levels out on a field that one inner parent lacks (!parent.inner.aOptionalString.startsWith("x")).'
+  trap: 'b1''s inner has no aOptionalString, so the negation is a missing-attribute error that denies; a NOT over the two-hop EXISTS admits b1, and the rows with no inner at all.'
+  condition:
+    match:
+      expr: '!R.attr.parent.inner.aOptionalString.startsWith("x")'
 - id: 'relation/starts-with/two-hops'
   tier: extended
   intent: 'Prefix match two levels out (parent.inner.aString.startsWith("100")).'

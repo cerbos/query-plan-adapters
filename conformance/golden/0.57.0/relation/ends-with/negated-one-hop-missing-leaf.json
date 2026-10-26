@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "b1",
+    "b2",
+    "b6",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/ends-with/negated-one-hop-missing-leaf",
+  "intent": "Negated endsWith() on a parent field that some parents lack (!parent.aOptionalString.endsWith(\"ror\")).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aOptionalString"
+                },
+                {
+                  "value": "ror"
+                }
+              ],
+              "operator": "endsWith"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/ends-with/negated-one-hop-missing-leaf",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.parent.aOptionalString.endsWith(\"ror\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a4, a7 and c1 have a parent with no aOptionalString, a missing attribute CEL denies under negation; a NOT over EXISTS (parent WHERE col LIKE ...) is true for their NULL column and over-grants them. Found by fuzzing (fuzz/s23/0190)."
+}

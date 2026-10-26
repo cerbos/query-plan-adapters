@@ -580,9 +580,17 @@
       "status": "unsupported",
       "reason": "Value-first form of `null/not-equals/null-literal`; the same $ne absent-key mismatch applies after the planner mirrors the operands. `allowPostFilter` does not lift it: `ne` compares a null literal, and Chroma metadata has no null, so a record cannot tell an explicit null attribute from a missing one."
     },
+    "principal/all/empty-list-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `except`."
+    },
+    "principal/exists/empty-list-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "principal/exists/list-of-structs": {
       "status": "unsupported",

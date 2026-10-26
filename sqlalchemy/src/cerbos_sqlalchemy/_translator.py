@@ -140,6 +140,10 @@ class Translator:
     def _apply(self, operator: str, left: Any, right: Any) -> Any:
         """Lower one operator with the caller's override, else the default."""
         override = self._overrides.get(operator)
+        if operator == "lambda" and isinstance(left, bool):
+            # The planner folds a lambda body it can decide to a bare value: `t.name in []`
+            # arrives as `false`, and the macro around the body needs a SQL expression.
+            left = true() if left else false()
         if override is not None:
             return override(left, right)
         default = OPERATOR_FNS.get(operator)

@@ -216,8 +216,17 @@ const wrapToOneChain = (
 
 /**
  * Wrap a filter with two operands' relation chains (deduplicated by identity) so both
- * sides' columns are in scope: the primary chain innermost, any extra relations from the
- * secondary chain around it. skipRelations (enclosing lambda scopes) are honoured.
+ * sides' columns are in scope. skipRelations (enclosing lambda scopes) are honoured.
+ *
+ * The hops the two chains share go outermost, then the secondary chain's own hops, then the
+ * primary's, so every hop is correlated inside the subquery of the hop it hangs off.
+ * `parent.aBool == parent.inner.aBool` used to nest `inner` OUTSIDE `parent`, correlating it to
+ * a table not yet in scope, which every store rejected.
+ *
+ * A chain of to-ONE hops goes through `wrapToOneChain`, as in `wrapRelationChain`: a bare
+ * `NOT EXISTS (parent WHERE col LIKE ...)` is TRUE for a parent whose column is NULL, which CEL
+ * reads as a missing attribute and denies, so `!parent.aOptionalString.endsWith("ror")` returned
+ * those rows.
  */
 export const wrapCombinedRelations = (
   filter: SQL,
@@ -226,19 +235,29 @@ export const wrapCombinedRelations = (
   reference: string,
   options: BuildFilterOptions,
 ): SQL => {
+  let shared = 0;
+  while (
+    shared < primary.length &&
+    shared < secondary.length &&
+    primary[shared] === secondary[shared]
+  ) {
+    shared++;
+  }
   const seen = new Set(primary);
-  const extra = secondary.filter((relation) => !seen.has(relation));
-  const wrapped = wrapWithRelations(
-    extra,
-    wrapWithRelations(primary, filter, reference, options),
-    reference,
-    options,
-  );
+  const chain = [
+    ...primary.slice(0, shared),
+    ...secondary.slice(shared).filter((relation) => !seen.has(relation)),
+    ...primary.slice(shared),
+  ];
+  const wrapped = chain.filter((relation) => !options.skipRelations?.has(relation));
+  if (wrapped.length > 0 && wrapped.every((relation) => relation.type === "one")) {
+    return wrapToOneChain(chain, filter, reference, options);
+  }
   return requireLeadingHops(
     requiredRelationHops(secondary),
     requireLeadingHops(
       requiredRelationHops(primary),
-      wrapped,
+      wrapWithRelations(chain, filter, reference, options),
       reference,
       options,
     ),

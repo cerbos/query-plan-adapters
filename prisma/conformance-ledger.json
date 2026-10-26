@@ -332,6 +332,14 @@
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and \\s* anchored at both ends (a string made only of RE2 whitespace) has no LIKE spelling: LIKE has no character classes, so the translator refuses the \\s escape"
     },
+    "relation/equals/negated-one-hop-against-two-hops": {
+      "status": "unsupported",
+      "reason": "Prisma field references only work between fields of the same model; `parent.aBool` and `parent.inner.aBool` are columns of two different models, so the adapter throws"
+    },
+    "relation/equals/one-hop-against-two-hops": {
+      "status": "unsupported",
+      "reason": "Prisma field references only work between fields of the same model; `parent.aBool` and `parent.inner.aBool` are columns of two different models, so the adapter throws"
+    },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "The count is taken over filter(tags, ...) rather than a named relation, and a Prisma where-filter can only count a relation it can name; the underlying relation-count limitation is size/greater-than/collection-above-one's, but this operand shape is rejected one step earlier"
