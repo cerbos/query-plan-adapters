@@ -65,7 +65,7 @@ jobs:
           ')"
           echo "legs=${legs}" >> "${GITHUB_OUTPUT}"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-run
           path: ${{ runner.temp }}/fuzz/
@@ -94,7 +94,7 @@ jobs:
       # The toolchain each harness needs; Docker covers the stores and ActiveRecord's Ruby.
       - name: Setup Node.js
         if: contains(fromJSON('["drizzle","prisma","mongoose","langchain-chromadb","convex"]'), matrix.adapter)
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
       - name: Setup Go
@@ -105,13 +105,13 @@ jobs:
           cache-dependency-path: ${{ matrix.adapter }}/go.sum
       - name: Setup Java
         if: matrix.adapter == 'spring-data' || matrix.adapter == 'elasticsearch-java'
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"
       - name: Setup PDM
         if: matrix.adapter == 'sqlalchemy'
-        uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
+        uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37 # v4.6
         with:
           python-version: "3.10"
       - name: Install the SQLAlchemy harness
@@ -131,7 +131,7 @@ jobs:
           compgen -G "${QPA_FUZZ_DIR}/results/${ADAPTER}-*.json" >/dev/null \
             || { echo "::error::${ADAPTER} / ${STORE} wrote no fuzz results"; exit 1; }
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: fuzz-results-${{ matrix.adapter }}-${{ matrix.store }}
@@ -176,7 +176,7 @@ jobs:
           head -c 900000 "${RUNNER_TEMP}/fuzz/report.md" >> "${GITHUB_STEP_SUMMARY}"
           exit "${status}"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: fuzz-report

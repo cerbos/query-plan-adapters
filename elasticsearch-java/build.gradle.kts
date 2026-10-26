@@ -32,19 +32,19 @@ dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     // At least the protobuf version cerbos-sdk-java was generated with; an older runtime throws
     // ProtobufRuntimeVersionException on first decode.
-    implementation("com.google.protobuf:protobuf-java:4.35.1")
+    implementation("com.google.protobuf:protobuf-java:4.36.2")
 
-    testImplementation(platform("org.junit:junit-bom:6.1.2"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     // Testcontainers 2.x renamed its modules; keep all three on the same version.
     testImplementation("org.testcontainers:testcontainers:2.0.5")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
     testImplementation("org.testcontainers:testcontainers-elasticsearch:2.0.5")
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.4")
     // JsonFormat decodes the recorded plans in conformance/golden/ (see Corpus.goldens).
-    testImplementation("com.google.protobuf:protobuf-java-util:4.35.1")
+    testImplementation("com.google.protobuf:protobuf-java-util:4.36.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.20")
 }
 
 tasks.test {

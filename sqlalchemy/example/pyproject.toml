@@ -9,8 +9,8 @@ requires-python = ">=3.10"
 # cerbos-sqlalchemy is absent: run.sh installs the freshly built wheel.
 # Exact pins so every Renovate bump opens a PR that the `example` job gates.
 dependencies = [
-    "cerbos==0.16.0",
-    "sqlalchemy==2.0.52",
+    "cerbos==0.16.1",
+    "sqlalchemy==2.1.6",
 ]
 
 [tool.pdm]
