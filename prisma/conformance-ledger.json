@@ -332,6 +332,10 @@
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and \\s* anchored at both ends (a string made only of RE2 whitespace) has no LIKE spelling: LIKE has no character classes, so the translator refuses the \\s escape"
     },
+    "relation/equals/negated-one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `relation/not-equals/one-hop-against-explicit-null-field`, under negation."
+    },
     "relation/equals/negated-one-hop-against-two-hops": {
       "status": "unsupported",
       "reason": "Prisma field references only work between fields of the same model; `parent.aBool` and `parent.inner.aBool` are columns of two different models, so the adapter throws"
@@ -339,6 +343,10 @@
     "relation/equals/one-hop-against-two-hops": {
       "status": "unsupported",
       "reason": "Prisma field references only work between fields of the same model; `parent.aBool` and `parent.inner.aBool` are columns of two different models, so the adapter throws"
+    },
+    "relation/not-equals/one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Prisma field references only compare fields of the same model, so a parent field against a root field is refused."
     },
     "size/equals/filtered-collection": {
       "status": "unsupported",

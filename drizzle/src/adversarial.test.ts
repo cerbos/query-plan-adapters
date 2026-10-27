@@ -620,7 +620,7 @@ function postgresStore(): AdversarialStore {
  * server, pinned by tag AND digest for the same reason the PostgreSQL image is.
  */
 const MYSQL_IMAGE =
-  "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb";
+  "mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69";
 
 /**
  * The collation this leg runs the whole corpus under, set on the SERVER so that the database the

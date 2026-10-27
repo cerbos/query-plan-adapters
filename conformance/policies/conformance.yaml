@@ -3149,6 +3149,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.aString == "One")'
+    # relation/equals/negated-one-hop-against-explicit-null-field
+    - actions:
+        - relation/equals/negated-one-hop-against-explicit-null-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aOptionalString == R.attr.owner)'
     # relation/equals/negated-one-hop-against-two-hops
     - actions:
         - relation/equals/negated-one-hop-against-two-hops
@@ -3374,6 +3383,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.inner.aOptionalString != null)'
+    # relation/not-equals/one-hop-against-explicit-null-field
+    - actions:
+        - relation/not-equals/one-hop-against-explicit-null-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aOptionalString != R.attr.owner
     # relation/not-equals/one-hop-null-literal
     - actions:
         - relation/not-equals/one-hop-null-literal
