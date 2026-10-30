@@ -2,11 +2,11 @@
 
 # PDP 0.56.0 → 0.57.0
 
-What changes for the 495 cases between the previous PDP (`0.56.0`) and the current one (`0.57.0`).
+What changes for the 499 cases between the previous PDP (`0.56.0`) and the current one (`0.57.0`).
 
 | Change | Cases |
 |---|---|
-| Plan | 14 |
+| Plan | 16 |
 | Allowed set | 0 |
 | Plan error | 0 |
 
@@ -94,6 +94,34 @@ What changes for the 495 cases between the previous PDP (`0.56.0`) and the curre
 
 ```json
 {"condition":{"expression":{"operands":[{"expression":{"operands":[{"variable":"request.resource.attr.owner"}],"operator":"has"}},{"expression":{"operands":[{"variable":"request.resource.attr.aBool"},{"value":true}],"operator":"eq"}}],"operator":"and"}},"kind":"KIND_CONDITIONAL"}
+```
+
+### `null/has/explicit-null-attribute-in-disjunction`
+
+`0.56.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"variable":"request.resource.attr.aNumber"},{"value":3}],"operator":"gt"}},"kind":"KIND_CONDITIONAL"}
+```
+
+`0.57.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"expression":{"operands":[{"expression":{"operands":[{"variable":"request.resource.attr.coOwner"}],"operator":"has"}},{"expression":{"operands":[{"variable":"request.resource.attr.aBool"},{"value":true}],"operator":"eq"}}],"operator":"or"}},{"expression":{"operands":[{"variable":"request.resource.attr.aNumber"},{"value":3}],"operator":"gt"}}],"operator":"and"}},"kind":"KIND_CONDITIONAL"}
+```
+
+### `null/has/explicit-null-attribute-negated-disjunction`
+
+`0.56.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"variable":"request.resource.attr.aNumber"},{"value":5}],"operator":"eq"}},"kind":"KIND_CONDITIONAL"}
+```
+
+`0.57.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"expression":{"operands":[{"expression":{"operands":[{"expression":{"operands":[{"variable":"request.resource.attr.owner"}],"operator":"has"}},{"expression":{"operands":[{"variable":"request.resource.attr.aBool"},{"value":true}],"operator":"eq"}}],"operator":"or"}}],"operator":"not"}},{"expression":{"operands":[{"variable":"request.resource.attr.aNumber"},{"value":5}],"operator":"eq"}}],"operator":"or"}},"kind":"KIND_CONDITIONAL"}
 ```
 
 ### `null/has/missing-attribute`

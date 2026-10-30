@@ -7,6 +7,7 @@ import type { PrismaFilter } from "./index";
 import { getLeafField, namesToOneRelation, resolveFieldReference } from "./mapping";
 import type { TranslationContext } from "./mapping";
 import { isNamedOperand } from "./plan";
+import type { OperatorOperand } from "./plan";
 import { negateFilter, wrapInRelations } from "./relations";
 import { UnsupportedQueryPlanError } from "./errors";
 
@@ -58,6 +59,31 @@ export function handleHasOperator(
   if (!negated) return presence;
   const absence = negateFilter(presence);
   return hops.length === 0 ? absence : { AND: [wrapInRelations(hops, {}), absence] };
+}
+
+/**
+ * `has(R.attr.x)` on an attribute sent as an explicit null is true on every row, so it becomes the
+ * constant `true` before translation. Left to the translator it lowers to `{}`, which Prisma drops
+ * from an OR or a NOT, losing the rows it admits and, negated, admitting rows it denies.
+ */
+export function constantPresence(
+  node: OperatorOperand,
+  context: TranslationContext
+): PlanExpressionOperand | undefined {
+  const [operand] = node.operands;
+  if (
+    node.operator !== "has" ||
+    node.operands.length !== 1 ||
+    operand === undefined ||
+    !isNamedOperand(operand) ||
+    !operand.name.startsWith("request.") ||
+    namesToOneRelation(context.mapper, operand.name)
+  ) {
+    return undefined;
+  }
+  const fieldRef = resolveFieldReference(operand.name, context);
+  if ((fieldRef.relations ?? []).length > 0) return undefined;
+  return presenceFollowsColumn(operand.name, fieldRef, context) ? undefined : { value: true };
 }
 
 /** Whether a NULL column means the key is absent, rather than sent as an explicit null. */

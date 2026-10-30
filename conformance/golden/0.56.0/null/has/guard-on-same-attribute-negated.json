@@ -1,0 +1,83 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h6",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "null/has/guard-on-same-attribute-negated",
+  "intent": "!(has(aOptionalString) && aOptionalString == \"set\"): the usual guard under a negation.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aOptionalString"
+                },
+                {
+                  "value": "set"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "a has() guard is dropped from the plan even under a negation",
+    "pdp": [
+      "0.56.0",
+      "0.57.0"
+    ],
+    "reason": "The planner drops has(aOptionalString) because the comparison reads the same attribute, so the plan is not(eq(aOptionalString, \"set\")). That is sound only in positive position: check() short-circuits to false where aOptionalString is absent and allows a2, a4, a8, c2 and e1, while the plan leaves the comparison unknown there and denies them. Found by fuzzing (fuzz/s43/0109, as a DENY)."
+  },
+  "request": {
+    "action": "null/has/guard-on-same-attribute-negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(has(R.attr.aOptionalString) && R.attr.aOptionalString == \"set\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a2, a4, a8, c2 and e1 lack aOptionalString, where the guard makes the conjunction false and check() allows them. The planner drops the guard, so the plan reads the missing attribute and denies them."
+}

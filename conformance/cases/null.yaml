@@ -145,6 +145,33 @@ cases:
   condition:
     match:
       expr: 'has(R.attr.owner) && R.attr.aBool == true'
+- id: 'null/has/explicit-null-attribute-in-disjunction'
+  tier: adversarial
+  intent: '(has(coOwner) || aBool == true) && aNumber > 3: a presence test on an explicit-null attribute as one arm of an OR.'
+  trap: 'has(coOwner) is true on every row, so the OR is true and aNumber > 3 alone decides. A translation that renders the always-true has() as an empty filter loses it inside the OR (Prisma drops an empty filter there) and denies the rows aBool does not admit.'
+  condition:
+    match:
+      expr: '(has(R.attr.coOwner) || R.attr.aBool == true) && R.attr.aNumber > 3'
+- id: 'null/has/explicit-null-attribute-negated-disjunction'
+  tier: adversarial
+  intent: '!(has(owner) || aBool == true) || aNumber == 5: the negation of an OR that a presence test on an explicit-null attribute makes always true.'
+  trap: 'has(owner) is true on every row, so the negated OR is false and only aNumber == 5 admits a row. A translation whose always-true has() drops out of the OR negates aBool == true alone and grants every row whose aBool is false.'
+  condition:
+    match:
+      expr: '!(has(R.attr.owner) || R.attr.aBool == true) || R.attr.aNumber == 5'
+- id: 'null/has/guard-on-element-field-negated'
+  tier: adversarial
+  intent: '!tags.exists(t, has(t.name) && t.name != "x"): a has() guard on a tag field under a negation.'
+  trap: 'b5 and e1 carry a tag with no name, where the guard makes the body false and check() allows them. The planner drops the guard, so the plan reads t.name on those tags and denies them.'
+  condition:
+    match:
+      expr: '!R.attr.tags.exists(t, has(t.name) && t.name != "x")'
+  plannerDivergence:
+    issue: 'a has() guard is dropped from the plan even under a negation'
+    pdp:
+    - 0.56.0
+    - 0.57.0
+    reason: 'The planner drops has(t.name) because the next conjunct reads t.name, so the plan is not(exists(tags, t.name != "x")). That is sound only in positive position: check() short-circuits to false on the nameless tags of b5 and e1 and allows them, while the plan errors there and denies them. Found by fuzzing (fuzz/s43/0085).'
 - id: 'null/has/guard-on-same-attribute'
   tier: core
   intent: 'has(aOptionalString) && aOptionalString == "set": the usual guard, which the planner leaves out of the plan.'
@@ -152,6 +179,19 @@ cases:
   condition:
     match:
       expr: 'has(R.attr.aOptionalString) && R.attr.aOptionalString == "set"'
+- id: 'null/has/guard-on-same-attribute-negated'
+  tier: adversarial
+  intent: '!(has(aOptionalString) && aOptionalString == "set"): the usual guard under a negation.'
+  trap: 'a2, a4, a8, c2 and e1 lack aOptionalString, where the guard makes the conjunction false and check() allows them. The planner drops the guard, so the plan reads the missing attribute and denies them.'
+  condition:
+    match:
+      expr: '!(has(R.attr.aOptionalString) && R.attr.aOptionalString == "set")'
+  plannerDivergence:
+    issue: 'a has() guard is dropped from the plan even under a negation'
+    pdp:
+    - 0.56.0
+    - 0.57.0
+    reason: 'The planner drops has(aOptionalString) because the comparison reads the same attribute, so the plan is not(eq(aOptionalString, "set")). That is sound only in positive position: check() short-circuits to false where aOptionalString is absent and allows a2, a4, a8, c2 and e1, while the plan leaves the comparison unknown there and denies them. Found by fuzzing (fuzz/s43/0109, as a DENY).'
 - id: 'null/has/missing-attribute'
   tier: extended
   intent: has() presence test over an optional attribute.

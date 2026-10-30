@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "null/has/explicit-null-attribute-negated-disjunction",
+  "intent": "!(has(owner) || aBool == true) || aNumber == 5: the negation of an OR that a presence test on an explicit-null attribute makes always true.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": 5
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/has/explicit-null-attribute-negated-disjunction",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(has(R.attr.owner) || R.attr.aBool == true) || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "has(owner) is true on every row, so the negated OR is false and only aNumber == 5 admits a row. A translation whose always-true has() drops out of the OR negates aBool == true alone and grants every row whose aBool is false."
+}

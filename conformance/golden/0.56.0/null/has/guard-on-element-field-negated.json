@@ -1,0 +1,113 @@
+{
+  "allowed": [
+    "a2",
+    "b1",
+    "b2",
+    "b3",
+    "b5",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "null/has/guard-on-element-field-negated",
+  "intent": "!tags.exists(t, has(t.name) && t.name != \"x\"): a has() guard on a tag field under a negation.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "value": "x"
+                            }
+                          ],
+                          "operator": "ne"
+                        }
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "a has() guard is dropped from the plan even under a negation",
+    "pdp": [
+      "0.56.0",
+      "0.57.0"
+    ],
+    "reason": "The planner drops has(t.name) because the next conjunct reads t.name, so the plan is not(exists(tags, t.name != \"x\")). That is sound only in positive position: check() short-circuits to false on the nameless tags of b5 and e1 and allows them, while the plan errors there and denies them. Found by fuzzing (fuzz/s43/0085)."
+  },
+  "request": {
+    "action": "null/has/guard-on-element-field-negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.tags.exists(t, has(t.name) && t.name != \"x\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "b5 and e1 carry a tag with no name, where the guard makes the body false and check() allows them. The planner drops the guard, so the plan reads t.name on those tags and denies them."
+}
