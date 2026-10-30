@@ -244,6 +244,14 @@
       "status": "unsupported",
       "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements; the translator refuses before constructing a filter."
     },
+    "conditional/ternary/index-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "Same index() refusal as collection/index/first-element-of-boolean-list: the then branch reads aBoolList[0]."
+    },
+    "conditional/ternary/missing-attribute-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "Same refusal as string/contains/field-to-field: the else branch is contains() with a column-valued needle, which would need per-row LIKE escaping Prisma filters cannot express."
+    },
     "hierarchy/descendent-of/bracket-in-path": {
       "status": "unsupported",
       "reason": "Hierarchy prefixes containing [ cannot be matched literally: Prisma emits LIKE without an ESCAPE clause, and [ opens a character class on SQL Server even when one is declared"

@@ -144,6 +144,10 @@
       "reason": "A relational collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member.",
       "status": "unsupported"
     },
+    "conditional/ternary/index-in-untaken-branch": {
+      "reason": "Same index() refusal as collection/index/first-element-of-boolean-list: the then branch reads aBoolList[0].",
+      "status": "unsupported"
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "in over the parent tests the keys of a map, and the parent is a to-one association, which the adapter refuses as a membership haystack: an EXISTS over it tests rows, and SQL has no way to enumerate which of a row's columns are non-NULL as the map's keys."

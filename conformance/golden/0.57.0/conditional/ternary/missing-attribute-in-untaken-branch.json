@@ -1,0 +1,85 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a7",
+    "b1",
+    "b2",
+    "b6",
+    "c1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/missing-attribute-in-untaken-branch",
+  "intent": "A ternary whose else branch reads aOptionalString, which is missing on rows that take the then branch.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aBool"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.obj.inner"
+                },
+                {
+                  "value": "same"
+                }
+              ],
+              "operator": "ne"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      },
+                      {
+                        "variable": "request.resource.attr.aOptionalString"
+                      }
+                    ],
+                    "operator": "contains"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          }
+        ],
+        "operator": "if"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/missing-attribute-in-untaken-branch",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.parent.aBool) ? (R.attr.obj.inner != \"same\") : (!R.attr.aString.contains(R.attr.aOptionalString))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL evaluates only the selected branch. Guarding aOptionalString across the whole ternary drops e1, whose parent selects the then branch. Found by fuzzing (fuzz/s41/0214, mongoose)."
+}

@@ -137,6 +137,19 @@ cases:
     pdp:
     - 0.56.0
     reason: 'Before 0.57.0 the planner folds has(t.name) to true, so the plan is exists(tags, true) and grants b5 and e1, whose only tags have no name. check() denies them. From 0.57.0 the plan carries the has().'
+- id: 'collection/exists/missing-field-in-empty-list-membership'
+  tier: adversarial
+  intent: 'A negated exists() whose body tests a tag field''s membership in an empty principal list.'
+  trap: 'b5, b6 and e1 carry a tag with no name, so t.name errors and check() denies them. The planner folds t.name in [] to false and drops the error.'
+  condition:
+    match:
+      expr: '!R.attr.tags.exists(t, t.name in P.attr.emptyTeams)'
+  plannerDivergence:
+    issue: 'membership in an empty list folds to false and drops an erroring needle'
+    pdp:
+    - 0.56.0
+    - 0.57.0
+    reason: 'The planner folds t.name in P.attr.emptyTeams to false, so the plan is not(exists(tags, false)) and allows every row. check() reads t.name on the nameless tags of b5, b6 and e1, errors, and denies them. Found by fuzzing (fuzz/s41/0109).'
 - id: 'collection/exists/map-keys'
   tier: adversarial
   intent: 'exists() over a map-valued attribute, which ranges over its keys (parent.exists(k, k == "inner")).'

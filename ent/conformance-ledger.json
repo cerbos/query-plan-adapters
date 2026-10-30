@@ -220,6 +220,10 @@
       "reason": "The mapped relation stores individual members, and cannot be resolved as one scalar comparison operand for whole-list equality.",
       "status": "unsupported"
     },
+    "conditional/ternary/index-in-untaken-branch": {
+      "reason": "Same index() refusal as collection/index/first-element-of-boolean-list: the then branch reads aBoolList[0].",
+      "status": "unsupported"
+    },
     "hierarchy/ancestor-of/empty-delimiter": {
       "reason": "An empty hierarchy delimiter is refused before the prefix membership is built.",
       "status": "unsupported"

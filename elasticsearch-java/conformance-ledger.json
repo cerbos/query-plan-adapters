@@ -489,6 +489,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
     },
+    "conditional/ternary/index-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "Same refusal as conditional/ternary/boolean-branches: Elasticsearch Query DSL has no conditional-value expression without scripts."
+    },
     "conditional/ternary/inside-all": {
       "status": "unsupported",
       "reason": "The positive all() is rejected before its body is examined, for the same reason as collection/all/empty-collection: Elasticsearch does not index an empty nested array, so all cannot distinguish an empty collection (true) from a missing one (CEL error). The conditional inside it would need scripts too, but the outer macro fails closed first"
@@ -500,6 +504,10 @@
     "conditional/ternary/missing-attribute-condition": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+    },
+    "conditional/ternary/missing-attribute-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "Same refusal as conditional/ternary/boolean-branches: Elasticsearch Query DSL has no conditional-value expression without scripts."
     },
     "conditional/ternary/negated": {
       "status": "unsupported",
