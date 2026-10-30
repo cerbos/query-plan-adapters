@@ -675,6 +675,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.exists(t, has(t.name))
+    # collection/exists/missing-field-in-empty-list-membership
+    - actions:
+        - collection/exists/missing-field-in-empty-list-membership
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.tags.exists(t, t.name in P.attr.emptyTeams)'
     # collection/exists/map-keys
     - actions:
         - collection/exists/map-keys
@@ -1638,6 +1647,15 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.tags.exists(t, (R.attr.aBool ? t.name : "zz") == "public")'
+    # conditional/ternary/index-in-untaken-branch
+    - actions:
+        - conditional/ternary/index-in-untaken-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(size(R.attr.tags) >= 1) ? (R.attr.aBoolList[0] != true) : (R.attr.aNumber < 21)'
     # conditional/ternary/missing-attribute-condition
     - actions:
         - conditional/ternary/missing-attribute-condition
@@ -1647,6 +1665,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aOptionalString != "x" ? R.attr.aNumber : 0) > 1'
+    # conditional/ternary/missing-attribute-in-untaken-branch
+    - actions:
+        - conditional/ternary/missing-attribute-in-untaken-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.parent.aBool) ? (R.attr.obj.inner != "same") : (!R.attr.aString.contains(R.attr.aOptionalString))'
     # conditional/ternary/negated
     - actions:
         - conditional/ternary/negated

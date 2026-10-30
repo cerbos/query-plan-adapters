@@ -200,6 +200,21 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
         "if aggregation expressions inside collection predicates are unsupported",
       );
     }
+    // CEL reads only the branch the condition selects, so each branch carries its own guards.
+    // A condition that errors fails both disjuncts, as it denies in CEL.
+    const [condition, whenTrue, whenFalse] = expression.operands;
+    if (expression.operands.length === 3 && condition && whenTrue && whenFalse) {
+      try {
+        return {
+          $or: [
+            { $and: [buildFilter(condition, ctx), buildFilter(whenTrue, ctx)] },
+            { $and: [translateNot([condition], ctx), buildFilter(whenFalse, ctx)] },
+          ],
+        };
+      } catch (error) {
+        if (!(error instanceof UnsupportedQueryPlanError)) throw error;
+      }
+    }
     return withEvaluationGuards(
       {
         $expr: buildAggregationExpressionFromExpression(expression, ctx.mapper),

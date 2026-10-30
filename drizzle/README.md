@@ -450,7 +450,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 30 / 30 |
 | extended | 96 / 102 |
-| adversarial | 329 / 360 |
+| adversarial | 331 / 363 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its

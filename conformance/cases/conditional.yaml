@@ -45,6 +45,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.exists(t, (R.attr.aBool ? t.name : "zz") == "public")'
+- id: 'conditional/ternary/index-in-untaken-branch'
+  tier: adversarial
+  intent: 'A ternary whose then branch indexes a list and whose else branch reads a nullable scalar.'
+  trap: 'CEL evaluates only the selected branch. Requiring a non-empty aBoolList and a present aNumber on every row drops rows that the other branch allows. Found by fuzzing (fuzz/s41/0439, mongoose).'
+  condition:
+    match:
+      expr: '(size(R.attr.tags) >= 1) ? (R.attr.aBoolList[0] != true) : (R.attr.aNumber < 21)'
 - id: 'conditional/ternary/missing-attribute-condition'
   tier: adversarial
   intent: A ternary whose condition compares an attribute that is missing on some rows.
@@ -52,6 +59,13 @@ cases:
   condition:
     match:
       expr: '(R.attr.aOptionalString != "x" ? R.attr.aNumber : 0) > 1'
+- id: 'conditional/ternary/missing-attribute-in-untaken-branch'
+  tier: adversarial
+  intent: 'A ternary whose else branch reads aOptionalString, which is missing on rows that take the then branch.'
+  trap: 'CEL evaluates only the selected branch. Guarding aOptionalString across the whole ternary drops e1, whose parent selects the then branch. Found by fuzzing (fuzz/s41/0214, mongoose).'
+  condition:
+    match:
+      expr: '(R.attr.parent.aBool) ? (R.attr.obj.inner != "same") : (!R.attr.aString.contains(R.attr.aOptionalString))'
 - id: conditional/ternary/negated
   tier: adversarial
   intent: 'A ternary comparison under negation (!((aBool ? aNumber : 0) > 1)).'

@@ -222,7 +222,8 @@ func missingCases(l *fuzzLegResults, cases []*fuzzCase, tags []string) string {
 }
 
 // suspectPlanner reports whether two or more legs translated the case, and every one that did
-// returned the same wrong rows.
+// got the same rows wrong. It compares the wrong rows rather than the rows returned, since a
+// store that cannot hold a seed (j4) expects a different set.
 func suspectPlanner(fails []legFailure, legs []*fuzzLegResults, pdp, id string) bool {
 	translated := 0
 	for _, l := range legs {
@@ -235,13 +236,32 @@ func suspectPlanner(fails []legFailure, legs []*fuzzLegResults, pdp, id string) 
 	if translated < 2 || len(fails) != translated {
 		return false
 	}
-	first := strings.Join(fails[0].r.Returned, ",")
+	first := wrongRows(fails[0].r)
 	for _, f := range fails {
-		if f.r.Verdict == verdictError || strings.Join(f.r.Returned, ",") != first {
+		if f.r.Verdict == verdictError || wrongRows(f.r) != first {
 			return false
 		}
 	}
 	return true
+}
+
+// wrongRows is the rows a leg returned that it should not have, then the rows it missed.
+func wrongRows(r fuzzCaseVerdict) string {
+	diff := func(a, b []string) []string {
+		in := map[string]bool{}
+		for _, id := range b {
+			in[id] = true
+		}
+		var out []string
+		for _, id := range a {
+			if !in[id] {
+				out = append(out, id)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	return strings.Join(diff(r.Returned, r.Expected), ",") + "|" + strings.Join(diff(r.Expected, r.Returned), ",")
 }
 
 func tableCell(s string) string {
