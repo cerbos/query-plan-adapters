@@ -684,6 +684,20 @@
       ],
       "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
     },
+    "null/has/explicit-null-attribute-in-disjunction": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
+    "null/has/explicit-null-attribute-negated-disjunction": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
     "null/in/literal-list-of-only-null": {
       "status": "unsupported",
       "reason": "The planner folds this to positive equality with null, which Elasticsearch cannot distinguish from a missing attribute without an indexed null-value sentinel"

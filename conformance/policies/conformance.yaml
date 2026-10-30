@@ -2411,6 +2411,33 @@ resourcePolicy:
       condition:
         match:
           expr: has(R.attr.owner) && R.attr.aBool == true
+    # null/has/explicit-null-attribute-in-disjunction
+    - actions:
+        - null/has/explicit-null-attribute-in-disjunction
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: (has(R.attr.coOwner) || R.attr.aBool == true) && R.attr.aNumber > 3
+    # null/has/explicit-null-attribute-negated-disjunction
+    - actions:
+        - null/has/explicit-null-attribute-negated-disjunction
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(has(R.attr.owner) || R.attr.aBool == true) || R.attr.aNumber == 5'
+    # null/has/guard-on-element-field-negated
+    - actions:
+        - null/has/guard-on-element-field-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.tags.exists(t, has(t.name) && t.name != "x")'
     # null/has/guard-on-same-attribute
     - actions:
         - null/has/guard-on-same-attribute
@@ -2420,6 +2447,15 @@ resourcePolicy:
       condition:
         match:
           expr: has(R.attr.aOptionalString) && R.attr.aOptionalString == "set"
+    # null/has/guard-on-same-attribute-negated
+    - actions:
+        - null/has/guard-on-same-attribute-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(has(R.attr.aOptionalString) && R.attr.aOptionalString == "set")'
     # null/has/missing-attribute
     - actions:
         - null/has/missing-attribute

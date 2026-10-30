@@ -524,6 +524,20 @@
       ],
       "reason": "has() on an attribute the mapping does not declare: the post-filter cannot tell whether a record carries it, so it refuses. The 0.56.0 planner folds the has() away, so that plan translates."
     },
+    "null/has/explicit-null-attribute-in-disjunction": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute the mapping does not declare: the post-filter cannot tell whether a record carries it, so it refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
+    "null/has/explicit-null-attribute-negated-disjunction": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute the mapping does not declare: the post-filter cannot tell whether a record carries it, so it refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
     "null/in/literal-list-of-only-null": {
       "status": "unsupported",
       "reason": "The planner folds membership in [null] to an equality against null; Chroma metadata has no null value, so the comparison cannot be represented. `allowPostFilter` does not lift it: `R.attr.owner` reaches `check()` as an explicit null on some rows, and Chroma metadata has no null, so the harness stores it nowhere, the mapping declares no key for it and the post-filter reads only declared keys."
