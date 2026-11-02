@@ -1,5 +1,8 @@
 {
   "adapter": "sequel",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as adversarial_number_list_elements rows, one per element, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
   "cases": {
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
@@ -109,6 +112,10 @@
       "status": "unsupported",
       "reason": "Positional access into a list of numbers, the same refusal as `collection/index/first-element-of-string-list`: `index` has no case in the translator's operator dispatch, so the walk falls through to the generic unsupported-operator refusal before the comparison around it is built. `aNumberList` is a one_to_many association mapped by member field, and an association mapping carries no element order, so `aNumberList[0]` names whichever row the engine returns first without an ORDER BY the plan does not carry. A caller whose element table has a position column, as the harness table does, can supply the override the message offers"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "A one_to_many association has no element order, so list indexing is refused, as in collection/index/first-element-of-object-list."
+    },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
       "reason": "Positional access into a scalar list. `index` has no case in the translator's operator dispatch at all, so the walk falls through to the generic unsupported-operator refusal rather than to a leaf-operand guard — which is why the message names the operator and offers an override. No case was written because row order in a SQL table is not defined without an ORDER BY the plan does not carry: `tagNames` is a one_to_many association, and `tagNames[0]` names whichever row the engine happens to return first. A caller whose table has a deterministic ordering column can express it faithfully, and the override the message offers is that escape hatch"
@@ -136,6 +143,10 @@
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "An association collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member."
+    },
+    "conditional/ternary/index-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "The then branch reads aBoolList[0], the same index refusal as collection/index/first-element-of-boolean-list. The translator walks both branches, so the refusal comes even when the condition never takes that branch."
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
