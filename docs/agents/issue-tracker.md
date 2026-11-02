@@ -33,6 +33,7 @@ plus one or more scope labels.
 | `pgx` | pgx / PostgreSQL (Go) |
 | `elasticsearch-java` | Elasticsearch (Java) |
 | `spring-data` | Spring Data JPA (Java) |
+| `efcore` | Entity Framework Core (.NET) |
 
 And one cross-cutting label:
 

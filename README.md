@@ -25,6 +25,7 @@ query, an Elasticsearch query, and so on) using a mapping you provide from Cerbo
 | Spring Data JPA | Java | Build from source (not yet on Maven Central) | [spring-data](spring-data/) |
 | Elasticsearch | Java | Build from source (not yet on Maven Central) | [elasticsearch-java](elasticsearch-java/) |
 | ActiveRecord | Ruby | Not released yet | [activerecord](activerecord/) |
+| Entity Framework Core | C# / .NET | Not released yet (`Cerbos.QueryPlan.EntityFrameworkCore` on NuGet once tagged) | [efcore](efcore/) |
 
 Each adapter's README starts with an install step and a quick-start snippet.
 

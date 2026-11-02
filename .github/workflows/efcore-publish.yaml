@@ -1,0 +1,60 @@
+name: EF Core Publish
+
+on:
+  push:
+    tags:
+      - efcore/v*
+
+defaults:
+  run:
+    shell: bash
+    working-directory: efcore
+
+permissions: {}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      contents: read
+      # Trusted publishing to NuGet, so no API key is stored in secrets.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: efcore/global.json
+
+      # The tag names the version; the project file must agree, or the package pushed is not the
+      # one tagged.
+      - name: Check the tag against the project version
+        run: |
+          version="$(dotnet msbuild src/Cerbos.QueryPlan.EntityFrameworkCore -getProperty:Version)"
+          [[ "efcore/v${version}" == "${GITHUB_REF_NAME}" ]] \
+            || { echo "tag ${GITHUB_REF_NAME} does not match project version ${version}" >&2; exit 1; }
+
+      - name: Pack
+        run: dotnet pack src/Cerbos.QueryPlan.EntityFrameworkCore -c Release -o "${RUNNER_TEMP}/nupkg"
+
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push
+        run: >-
+          dotnet nuget push "${RUNNER_TEMP}/nupkg/*.nupkg"
+          --api-key "${NUGET_API_KEY}"
+          --source https://api.nuget.org/v3/index.json
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
