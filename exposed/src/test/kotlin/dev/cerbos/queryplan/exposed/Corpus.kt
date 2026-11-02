@@ -105,12 +105,25 @@ internal object Corpus {
         fun appliesTo(tag: String): Boolean = pdp == null || tag in pdp
     }
 
-    private data class Ledger(val adapter: String, val cases: Map<String, LedgerEntry>)
+    /** [lacks] maps each store capability this store lacks to the reason. */
+    private data class Ledger(
+        val adapter: String,
+        val lacks: Map<String, String> = emptyMap(),
+        val cases: Map<String, LedgerEntry>,
+    )
 
-    fun ledger(): Map<String, LedgerEntry> {
+    private fun readLedger(): Ledger {
         val file = Path.of(System.getProperty("user.dir"), "conformance-ledger.json")
         val ledger = JSON.readValue(file.toFile(), Ledger::class.java)
         check(ledger.adapter == ADAPTER) { "$file is not the $ADAPTER ledger" }
-        return ledger.cases
+        return ledger
     }
+
+    fun ledger(): Map<String, LedgerEntry> = readLedger().cases
+
+    /**
+     * The store capabilities this store lacks. A seed requiring one is a resource the store cannot
+     * hold: it is not loaded, and its id is struck from every golden's `allowed`.
+     */
+    fun lacks(): Set<String> = readLedger().lacks.keys
 }

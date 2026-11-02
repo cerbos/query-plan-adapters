@@ -1,5 +1,8 @@
 {
   "adapter": "exposed",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as adversarial_number_list rows, one per element, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
   "cases": {
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
@@ -157,6 +160,10 @@
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "Cannot translate get-field(): it projects a member out of a single element, and a relation subquery has no single element to project from. The same refusal as collection/index/first-element-of-object-list."
+    },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
@@ -192,6 +199,10 @@
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "Whole-list inequality against a relation. tagNames is a related table, and a correlated subquery cannot be compared with a list value as one ordered whole"
+    },
+    "conditional/ternary/index-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "The then branch reads aBoolList[0], the same index() refusal as collection/index/first-element-of-boolean-list: the rows a relation subquery returns carry no CEL list order. The translator walks both branches, so the refusal comes even where the condition never takes that branch."
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",

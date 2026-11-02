@@ -69,9 +69,6 @@ class AdversarialConformanceTest {
         val parentSeedId: String?,
     )
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private data class SeedsFile(val seeds: List<Seed>)
-
     /** One seed's `derived-fields.json` entry. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     private data class Derived(
@@ -91,6 +88,9 @@ class AdversarialConformanceTest {
         private val LEDGER: Map<String, LedgerEntry> = Corpus.ledger()
 
         private lateinit var seeds: List<Seed>
+
+        /** The seeds this store cannot hold: each requires a capability the ledger lacks. */
+        private lateinit var unheld: Set<String>
         private lateinit var derived: Map<String, Derived>
         private var testStore: TestStore? = null
 
@@ -104,9 +104,12 @@ class AdversarialConformanceTest {
         @JvmStatic
         fun setUp() {
             val conformance = Corpus.conformanceDir()
-            seeds = Corpus.JSON.readValue(
-                conformance.resolve("seeds.json").toFile(), SeedsFile::class.java,
-            ).seeds
+            val lacks = Corpus.lacks()
+            val all = Corpus.JSON.readTree(conformance.resolve("seeds.json").toFile())["seeds"].toList()
+            unheld = all.filter { s -> s.path("requires").any { it.asText() in lacks } }
+                .map { it["id"].asText() }.toSet()
+            seeds = all.filter { it["id"].asText() !in unheld }
+                .map { Corpus.JSON.treeToValue(it, Seed::class.java) }
             derived = Corpus.JSON.readValue(
                 conformance.resolve("derived-fields.json").toFile(), DerivedFile::class.java,
             ).derived
@@ -293,7 +296,7 @@ class AdversarialConformanceTest {
             tally(tag, tier, "planner divergence")
             Assumptions.abort<Unit>("planner divergence: ${divergence["reason"]}")
         }
-        val allowed = golden["allowed"].map { it.asText() }.sorted()
+        val allowed = golden["allowed"].map { it.asText() }.filter { it !in unheld }.sorted()
 
         val entry = LEDGER[id]
         val status = if (entry != null && entry.appliesTo(tag)) entry.status else "pass"
