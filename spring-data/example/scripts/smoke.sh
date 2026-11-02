@@ -34,7 +34,8 @@ cleanup() {
 trap cleanup EXIT
 
 # The example resolves the adapter from mavenLocal, so publish the current source first.
-echo "==> gradlew -p .. publishToMavenLocal"
+echo "==> gradlew publishToMavenLocal (jpa core, then the adapter)"
+../../jpa/gradlew -p ../../jpa publishToMavenLocal --no-daemon
 ../gradlew -p .. publishToMavenLocal --no-daemon
 
 echo "==> docker compose up -d"

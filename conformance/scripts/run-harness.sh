@@ -16,7 +16,8 @@
 #   activerecord        sqlite postgres mysql    (ACTIVERECORD_VERSION / RUBY_VERSION pass through)
 #   ent, pgx            all                      (the Go harness starts its own containers)
 #   elasticsearch-java  elasticsearch elasticsearch-next
-#   spring-data         h2 postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM passes through)
+#   jpa                 h2 postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM passes through)
+#   spring-data         h2                       (ADAPTER_TEST_ORM passes through)
 #
 # Legs run one at a time on purpose: several harnesses at once overload a laptop into timeouts and
 # out-of-memory kills that read as failures. Docker is needed for every adapter but SQLite-only
@@ -52,7 +53,8 @@ stores_for() {
     sqlalchemy | ent | pgx) echo "all" ;;
     activerecord) echo "sqlite postgres mysql" ;;
     elasticsearch-java) echo "elasticsearch elasticsearch-next" ;;
-    spring-data) echo "h2 postgres mysql mysql-server-prep" ;;
+    jpa) echo "h2 postgres mysql mysql-server-prep" ;;
+    spring-data) echo "h2" ;;
     *) return 1 ;;
   esac
 }
@@ -170,10 +172,10 @@ run_leg() { # <adapter> <store>
     elasticsearch-java:elasticsearch-next)
       ELASTICSEARCH_IMAGE_FILE=ELASTICSEARCH_NEXT_IMAGE gradle "${adapter}" test --tests '*ElasticsearchAdversarialConformanceTest*' ;;
 
-    spring-data:h2) gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
-    spring-data:postgres | spring-data:mysql)
+    jpa:h2 | spring-data:h2) gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
+    jpa:postgres | jpa:mysql)
       ADAPTER_TEST_DB="${store}" gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
-    spring-data:mysql-server-prep)
+    jpa:mysql-server-prep)
       ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true \
         gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
 

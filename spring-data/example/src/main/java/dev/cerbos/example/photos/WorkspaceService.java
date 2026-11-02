@@ -5,7 +5,7 @@
 
 package dev.cerbos.example.photos;
 
-import dev.cerbos.queryplan.springdata.AttributeMapping;
+import dev.cerbos.queryplan.jpa.AttributeMapping;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.PlanResourcesResult;

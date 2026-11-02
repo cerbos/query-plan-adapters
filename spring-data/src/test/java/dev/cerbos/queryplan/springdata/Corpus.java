@@ -14,6 +14,8 @@ import com.google.protobuf.util.JsonFormat;
 
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
+import dev.cerbos.queryplan.jpa.AttributeMapping;
+import dev.cerbos.queryplan.jpa.NullAttributeRepresentation;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

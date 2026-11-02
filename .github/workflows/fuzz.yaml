@@ -104,7 +104,7 @@ jobs:
           go-version-file: ${{ matrix.adapter }}/go.mod
           cache-dependency-path: ${{ matrix.adapter }}/go.sum
       - name: Setup Java
-        if: matrix.adapter == 'spring-data' || matrix.adapter == 'elasticsearch-java'
+        if: contains(fromJSON('["jpa","spring-data","elasticsearch-java"]'), matrix.adapter)
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
