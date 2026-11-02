@@ -32,6 +32,7 @@ plus one or more scope labels.
 | `ent` | Ent (Go) |
 | `pgx` | pgx / PostgreSQL (Go) |
 | `elasticsearch-java` | Elasticsearch (Java) |
+| `jpa` | Jakarta Persistence / JPA Criteria (Java) |
 | `spring-data` | Spring Data JPA (Java) |
 
 And one cross-cutting label:

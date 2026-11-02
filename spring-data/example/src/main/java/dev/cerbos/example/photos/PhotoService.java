@@ -5,10 +5,10 @@
 
 package dev.cerbos.example.photos;
 
-import dev.cerbos.queryplan.springdata.AttributeMapping;
-import dev.cerbos.queryplan.springdata.NullAttributeRepresentation;
+import dev.cerbos.queryplan.jpa.AttributeMapping;
+import dev.cerbos.queryplan.jpa.JpaQueryPlanAdapter.Options;
+import dev.cerbos.queryplan.jpa.NullAttributeRepresentation;
 import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter;
-import dev.cerbos.queryplan.springdata.SpringDataQueryPlanAdapter.Options;
 import dev.cerbos.sdk.CerbosBlockingClient;
 import dev.cerbos.sdk.PlanResourcesResult;
 import dev.cerbos.sdk.builders.Resource;

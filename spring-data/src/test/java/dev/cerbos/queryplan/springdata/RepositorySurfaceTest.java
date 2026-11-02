@@ -6,6 +6,7 @@
 package dev.cerbos.queryplan.springdata;
 
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
+import dev.cerbos.queryplan.jpa.AttributeMapping;
 import dev.cerbos.queryplan.springdata.testmodel.NestedEmbeddable;
 import dev.cerbos.queryplan.springdata.testmodel.ResourceEntity;
 
