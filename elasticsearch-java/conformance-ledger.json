@@ -973,6 +973,10 @@
       "status": "unsupported",
       "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
     },
+    "size/equals/string-trailing-space": {
+      "status": "unsupported",
+      "reason": "Same refusal as size/greater-than/string-length: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+    },
     "size/greater-or-equal/fractional-threshold": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare collection counts against arbitrary thresholds without scripts"

@@ -3644,6 +3644,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(size(R.attr.aOptionalString) == dyn(1.5)) || R.attr.aNumber > 10'
+    # size/equals/string-trailing-space
+    - actions:
+        - size/equals/string-trailing-space
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) == 2
     # size/greater-or-equal/collection-at-least-one
     - actions:
         - size/greater-or-equal/collection-at-least-one
@@ -3959,6 +3968,15 @@ resourcePolicy:
       condition:
         match:
           expr: "R.attr.aString == \"héllo\U0001F680\""
+    # string/equals/trailing-space
+    - actions:
+        - string/equals/trailing-space
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString == "51" || R.attr.aString == "one " || R.attr.aString == "ab"
     # string/starts-with/bracket-in-needle
     - actions:
         - string/starts-with/bracket-in-needle

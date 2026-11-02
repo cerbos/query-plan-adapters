@@ -1,0 +1,58 @@
+{
+  "allowed": [
+    "f1",
+    "h3",
+    "i5",
+    "i7",
+    "i8"
+  ],
+  "degenerateReason": null,
+  "id": "size/equals/string-trailing-space",
+  "intent": "size() of a string ending in whitespace (i2 \"51 \", i8 \"\\t \") compared with 2.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 2
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/equals/string-trailing-space",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aString) == 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL counts every code point. SQL Server's LEN ignores trailing spaces, so it reads \"51 \" as 2 and over-grants i2, and \"\\t \" as 1 and under-grants i8."
+}
