@@ -18,7 +18,7 @@ version of the `mongo` gem your application already uses. The gem has **no runti
 ## Requirements
 
 - Ruby 3.2 or newer
-- MongoDB 7.0 or newer (CI runs the conformance suite against real 7.0 and 8.0 servers)
+- MongoDB 7.0 or newer (CI runs the conformance suite against real 7.0 and 9.0 servers)
 - The official `mongo` driver (2.x) in your application, and a Cerbos client to obtain a plan —
   the [Cerbos Ruby SDK](https://github.com/cerbos/cerbos-sdk-ruby) (`cerbos` gem)
 
@@ -199,7 +199,7 @@ because that access already denies a document without `x`.
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real MongoDB
-queries over the corpus's 43 seed documents on MongoDB 7.0 and 8.0, once through the Ruby driver
+queries over the corpus's 44 seed documents on MongoDB 7.0 and 9.0, once through the Ruby driver
 and once through `Cerbos::MongoDB::Mongoid.criteria` on typed Mongoid models. Passed cases on the
 current PDP, 0.57.0, identical on both servers and through both, where the total is every golden
 case in that tier:
