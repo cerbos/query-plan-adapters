@@ -42,7 +42,8 @@ cleanup() {
 trap cleanup EXIT
 
 # As in smoke.sh: publish the adapter to mavenLocal, and read the PDP port from Compose.
-echo "==> gradlew -p .. publishToMavenLocal"
+echo "==> gradlew publishToMavenLocal (jpa core, then the adapter)"
+../../jpa/gradlew -p ../../jpa publishToMavenLocal --no-daemon
 ../gradlew -p .. publishToMavenLocal --no-daemon
 
 echo "==> docker compose up -d"
