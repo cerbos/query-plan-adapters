@@ -109,6 +109,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Setup .NET
+        if: matrix.adapter == 'efcore'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: efcore/global.json
       - name: Setup PDM
         if: matrix.adapter == 'sqlalchemy'
         uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5

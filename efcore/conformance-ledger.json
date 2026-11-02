@@ -1,0 +1,419 @@
+{
+  "adapter": "efcore",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as NumberElement rows, a one-to-many navigation, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
+  "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "arithmetic/add/self-division-plus-constant-greater-than": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "arithmetic/add/self-division-plus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "arithmetic/divide/negated-self-division-equals": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "arithmetic/divide/negative-zero-divisor": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "arithmetic/divide/self-division-greater-than": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "arithmetic/divide/self-division-not-equals": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "% has no translation: CEL's % is integer-only, and every attribute number reaches CEL as a double, so a SQL modulus would answer what CEL rejects."
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "% has no translation: CEL's % is integer-only, and every attribute number reaches CEL as a double, so a SQL modulus would answer what CEL rejects."
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "status": "unsupported",
+      "reason": "% has no translation: CEL's % is integer-only, and every attribute number reaches CEL as a double, so a SQL modulus would answer what CEL rejects."
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "Division by a value read from the store has no translation: CEL divides by zero into an infinity of the zero's sign, which SQL cannot hold."
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "double() is translated only over a number: a SQL CAST of a string accepts spellings CEL rejects as malformed."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "double() is translated only over a number: a SQL CAST of a string accepts spellings CEL rejects as malformed."
+    },
+    "cast/int/double-truncation-bounds": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/int/malformed-string": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/int/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/int/negative-fraction": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/string/from-double": {
+      "status": "unsupported",
+      "reason": "string() is translated only over a string or a boolean: CEL's rendering of numbers and timestamps has no SQL spelling that agrees with it on every provider."
+    },
+    "cast/string/from-double-spellings": {
+      "status": "unsupported",
+      "reason": "string() is translated only over a string or a boolean: CEL's rendering of numbers and timestamps has no SQL spelling that agrees with it on every provider."
+    },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() is translated only over a string or a boolean: CEL's rendering of numbers and timestamps has no SQL spelling that agrees with it on every provider."
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() is translated only over a string or a boolean: CEL's rendering of numbers and timestamps has no SQL spelling that agrees with it on every provider."
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "int() has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() is translated only over a string or a boolean: CEL's rendering of numbers and timestamps has no SQL spelling that agrees with it on every provider."
+    },
+    "cast/timestamp/malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() over a string column has no translation: a malformed string must stay a CEL error, which no provider's cast reproduces. Map the column as a DateTime."
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() over a string column has no translation: a malformed string must stay a CEL error, which no provider's cast reproduces. Map the column as a DateTime."
+    },
+    "collection/concatenate/ternary-list-branches-equals-literal": {
+      "status": "unsupported",
+      "reason": "A ternary whose branches are not both booleans, or both scalars of one type, has no translation."
+    },
+    "collection/except/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "except() compares lists element by element, and the adapter has no list-difference translation for related rows."
+    },
+    "collection/except/equals-empty-list": {
+      "status": "unsupported",
+      "reason": "except() compares lists element by element, and the adapter has no list-difference translation for related rows."
+    },
+    "collection/except/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "except() compares lists element by element, and the adapter has no list-difference translation for related rows."
+    },
+    "collection/except/size-of-difference": {
+      "status": "unsupported",
+      "reason": "except() compares lists element by element, and the adapter has no list-difference translation for related rows."
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "A macro over a map-valued attribute ranges over its keys, and `parent` is a to-one relation: one joined row whose CEL keys are the columns that are not NULL. SQL has no form for that key set, so the attribute map maps only parent's fields and the bare variable is refused as unmapped."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as collection/exists/map-keys, under negation."
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "A two-variable exists() has no translation: a related table has no row order to bind an index to."
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "A two-variable exists() has no translation: a related table has no row order to bind an index to."
+    },
+    "collection/index/map-literal-by-attribute-key-under-or": {
+      "status": "unsupported",
+      "reason": "Indexing by a value read from the store has no translation."
+    },
+    "collection/index/map-literal-by-attribute-key-value-first": {
+      "status": "unsupported",
+      "reason": "Indexing by a value read from the store has no translation."
+    },
+    "collection/intersect/duplicates-in-shorter-list": {
+      "status": "unsupported",
+      "reason": "intersect() compares lists element by element, and the adapter has no list-difference translation for related rows."
+    },
+    "collection/intersect/equals-empty-list": {
+      "status": "unsupported",
+      "reason": "intersect() compares lists element by element, and the adapter has no list-difference translation for related rows."
+    },
+    "collection/is-subset/resource-list-of-literal-list": {
+      "status": "unsupported",
+      "reason": "isSubset() compares lists element by element, and the adapter has no list-difference translation for related rows."
+    },
+    "collection/map/equals-list-literal": {
+      "status": "unsupported",
+      "reason": "Comparing a whole list or object read from the store has no translation: related rows have no order or multiplicity a single comparison can read."
+    },
+    "collection/map/literal-in-mapped-upper-ascii": {
+      "status": "unsupported",
+      "reason": "upperAscii() has no translation: SQL UPPER and LOWER fold non-ASCII letters, which CEL leaves alone."
+    },
+    "comparison/equals/map-member-by-string-key": {
+      "status": "unsupported",
+      "reason": "R.attr.obj[\"inner\"] reads `obj` as a map value; the attribute map maps only obj.inner as a column, so the bare `obj` is refused as unmapped."
+    },
+    "comparison/equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Comparing a whole list or object read from the store has no translation: related rows have no order or multiplicity a single comparison can read."
+    },
+    "comparison/equals/whole-list-literal-order-and-multiplicity": {
+      "status": "unsupported",
+      "reason": "Comparing a whole list or object read from the store has no translation: related rows have no order or multiplicity a single comparison can read."
+    },
+    "comparison/greater-than/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "NaN and infinities have no translation: SQL Server stores neither, and no provider compares NaN as CEL does."
+    },
+    "comparison/greater-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "NaN and infinities have no translation: SQL Server stores neither, and no provider compares NaN as CEL does."
+    },
+    "comparison/less-or-equal/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "NaN and infinities have no translation: SQL Server stores neither, and no provider compares NaN as CEL does."
+    },
+    "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "NaN and infinities have no translation: SQL Server stores neither, and no provider compares NaN as CEL does."
+    },
+    "comparison/less-than/nan-from-ternary-value-first": {
+      "status": "unsupported",
+      "reason": "NaN and infinities have no translation: SQL Server stores neither, and no provider compares NaN as CEL does."
+    },
+    "comparison/not-equals/whole-list-literal": {
+      "status": "unsupported",
+      "reason": "Comparing a whole list or object read from the store has no translation: related rows have no order or multiplicity a single comparison can read."
+    },
+    "composition/derived-role/runtime-effective-derived-roles": {
+      "status": "unsupported",
+      "reason": "A ternary whose branches are not both booleans, or both scalars of one type, has no translation."
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "status": "unsupported",
+      "reason": "hierarchy() over a list of segments has no translation: it compares segment by segment, and the adapter translates only a delimited string."
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "status": "unsupported",
+      "reason": "hierarchy() over a list of segments has no translation: it compares segment by segment, and the adapter translates only a delimited string."
+    },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "`in` over a map tests its keys, and the to-one `parent` is one joined row whose keys are its non-NULL columns, which SQL has no form for; the bare variable is refused as unmapped."
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "Same refusal as membership/in/map-attribute-keys, under negation."
+    },
+    "membership/in/resource-list-plus-literal-list": {
+      "status": "unsupported",
+      "reason": "List concatenation over related rows has no translation."
+    },
+    "principal/except/size-after-removing-resource-value": {
+      "status": "unsupported",
+      "reason": "except() compares lists element by element, and the adapter has no list-difference translation for related rows."
+    },
+    "principal/filter/size-of-filtered-long-list": {
+      "status": "unsupported",
+      "reason": "filter() over a literal list has no translation."
+    },
+    "principal/map/membership-in-mapped-list": {
+      "status": "unsupported",
+      "reason": "map() over a literal list has no translation."
+    },
+    "regex/matches/anchored-prefix": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/bounded-repetition": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/brace-without-count-is-literal": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/case-fold-kelvin-and-long-s": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/case-insensitive-flag": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/compared-to-true": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/digit-class": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/dot-excludes-newline": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/dot-plus-excludes-empty-and-newline": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/end-anchor-before-final-newline": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/grouped-alternation": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/leading-zero-count-is-literal": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/literal-brace": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/lookahead-from-principal": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/lucene-reserved-characters-in-class": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/negated-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/posix-character-class": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/posix-class-and-range-bounded": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/top-level-alternation-prefix-or-suffix": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/top-level-alternation-single-characters": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/unanchored": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/unanchored-quantifiers": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/unbounded-count": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "regex/matches/whitespace-class": {
+      "status": "unsupported",
+      "reason": "matches() has no translation: CEL's RE2 semantics are not those of any provider's regular expressions, and SQLite and SQL Server before 2025 have none."
+    },
+    "relation/has/parent": {
+      "status": "unsupported",
+      "reason": "has() over the to-one `parent` itself tests whether the joined row exists, and the attribute map maps only parent's fields, not the hop: the bare variable is refused as unmapped.",
+      "pdp": [
+        "0.57.0"
+      ]
+    },
+    "string/upper-ascii/non-ascii-untouched": {
+      "status": "unsupported",
+      "reason": "upperAscii() has no translation: SQL UPPER and LOWER fold non-ASCII letters, which CEL leaves alone."
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "A timestamp column reaches CEL as an RFC 3339 string whose exact spelling the store does not keep, so comparing it as a string has no translation. Wrap it in timestamp()."
+    },
+    "timestamp/greater-than/time-since-duration": {
+      "status": "unsupported",
+      "reason": "Operator 'timeSince' has no translation."
+    },
+    "timestamp/less-than/attribute-plus-duration": {
+      "status": "unsupported",
+      "reason": "Timestamp arithmetic over a column has no translation."
+    },
+    "type-mismatch/equals/negated-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "string() is translated only over a string or a boolean: CEL's rendering of numbers and timestamps has no SQL spelling that agrees with it on every provider."
+    },
+    "type-mismatch/less-than/negated-nan-against-string-field": {
+      "status": "unsupported",
+      "reason": "NaN and infinities have no translation: SQL Server stores neither, and no provider compares NaN as CEL does."
+    },
+    "type-mismatch/less-than/number-field-against-mixed-ternary": {
+      "status": "unsupported",
+      "reason": "A ternary whose branches are not both booleans, or both scalars of one type, has no translation."
+    }
+  }
+}

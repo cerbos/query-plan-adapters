@@ -34,6 +34,7 @@ plus one or more scope labels.
 | `elasticsearch-java` | Elasticsearch (Java) |
 | `jpa` | Jakarta Persistence / JPA Criteria (Java) |
 | `spring-data` | Spring Data JPA (Java) |
+| `efcore` | Entity Framework Core (.NET) |
 
 And one cross-cutting label:
 

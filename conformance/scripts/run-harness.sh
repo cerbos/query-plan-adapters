@@ -18,6 +18,7 @@
 #   elasticsearch-java  elasticsearch elasticsearch-next
 #   jpa                 h2 postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM passes through)
 #   spring-data         h2                       (ADAPTER_TEST_ORM passes through)
+#   efcore              sqlite postgres sqlserver   (needs the .NET 10 SDK)
 #
 # Legs run one at a time on purpose: several harnesses at once overload a laptop into timeouts and
 # out-of-memory kills that read as failures. Docker is needed for every adapter but SQLite-only
@@ -55,6 +56,7 @@ stores_for() {
     elasticsearch-java) echo "elasticsearch elasticsearch-next" ;;
     jpa) echo "h2 postgres mysql mysql-server-prep" ;;
     spring-data) echo "h2" ;;
+    efcore) echo "sqlite postgres sqlserver" ;;
     *) return 1 ;;
   esac
 }
@@ -179,6 +181,10 @@ run_leg() { # <adapter> <store>
       ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true \
         gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
 
+    efcore:sqlite | efcore:postgres | efcore:sqlserver)
+      command -v dotnet >/dev/null 2>&1 || die "efcore needs the .NET 10 SDK on PATH"
+      ADAPTER_TEST_DB="${store}" dotnet test ;;
+
     *) die "no recipe for ${adapter} / ${store}" ;;
   esac
 }
@@ -207,7 +213,7 @@ run_adapter() { # <adapter> [store...]
 }
 
 case "${1:-}" in
-  "" | -h | --help) sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "" | -h | --help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
   --list) for adapter in $(roster); do printf '%-20s %s\n' "${adapter}" "$(stores_for "${adapter}" || echo '(not in this script)')"; done; exit 0 ;;
   --all)
     for adapter in $(roster); do

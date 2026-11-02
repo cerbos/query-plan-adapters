@@ -24,6 +24,13 @@ cases:
   condition:
     match:
       expr: '!(size(R.attr.aOptionalString) == dyn(1.5)) || R.attr.aNumber > 10'
+- id: 'size/equals/string-trailing-space'
+  tier: adversarial
+  intent: 'size() of a string ending in whitespace (i2 "51 ", i8 "\t ") compared with 2.'
+  trap: 'CEL counts every code point. SQL Server''s LEN ignores trailing spaces, so it reads "51 " as 2 and over-grants i2, and "\t " as 1 and under-grants i8.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) == 2'
 - id: 'size/greater-or-equal/collection-at-least-one'
   tier: core
   intent: 'A non-empty collection spelled size(tags) >= 1.'

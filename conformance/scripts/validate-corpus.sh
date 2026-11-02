@@ -88,13 +88,14 @@ done < <(find "${REPO_ROOT}" -mindepth 2 -maxdepth 2 -name conformance-ledger.js
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
   --include='*.java' --include='*.kts' --include='*.ts' --include='*.js' --include='*.json'
-  --include='Dockerfile' --include='*_IMAGE'
+  --include='*.cs' --include='*.csproj' --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib
   --exclude-dir=build --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin
   --exclude-dir=__pypackages__ --exclude-dir=.agents --exclude-dir=.out-of-scope
   --exclude-dir=dist --exclude-dir=.gems --exclude-dir=.bundle-path --exclude-dir=golden
+  --exclude-dir=obj --exclude-dir=packages
 )
 # `lib/` is build output on the TypeScript adapters but source on the Ruby gem, so Ruby gets its
 # own pass without that exclusion.
@@ -131,6 +132,7 @@ done
 IMAGE_REPOSITORIES=(
   "postgres" "mysql" "mongo" "chromadb/chroma"
   "docker.elastic.co/elasticsearch/elasticsearch" "ghcr.io/convex/convex-backend"
+  "mcr.microsoft.com/mssql/server"
 )
 : >"${TMP}/image-refs"
 for repository in "${IMAGE_REPOSITORIES[@]}"; do

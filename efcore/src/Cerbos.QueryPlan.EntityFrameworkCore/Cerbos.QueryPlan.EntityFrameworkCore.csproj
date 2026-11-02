@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Cerbos.QueryPlan.EntityFrameworkCore</PackageId>
+    <Version>0.1.0-alpha.1</Version>
+    <Authors>Cerbos</Authors>
+    <Copyright>Copyright 2021-2026 Zenauth Ltd.</Copyright>
+    <Description>Translates a Cerbos query plan into an Entity Framework Core predicate.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/cerbos/query-plan-adapters/tree/main/efcore</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/cerbos/query-plan-adapters</RepositoryUrl>
+    <PackageTags>cerbos;authorization;entity-framework-core;efcore;query-plan</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Cerbos.Sdk" Version="1.11.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cerbos.QueryPlan.EntityFrameworkCore.Tests" />
+  </ItemGroup>
+
+</Project>
