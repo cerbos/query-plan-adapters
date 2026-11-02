@@ -246,6 +246,17 @@ module Cerbos
             "then" => {"$gt" => [{"$size" => [collection]}, index]},
             "else" => false
           }}}
+        when "get-field"
+          # A field the element lacks is a missing-key error to CEL, and so is a stored null on a
+          # field the relation declares nullable; $getField yields missing or null, which a
+          # negated comparison would read as unequal.
+          input, field = operands
+          return nil unless input && field && variable?(field)
+
+          value = build_get_field(operands, mapper)
+          collection = (expression?(input) && input.operator == "index") ? input.operands[0] : nil
+          nullable = collection && variable?(collection) && mapper.nullable?("#{collection.name}.#{field.name}")
+          {"$expr" => nullable ? {"$ne" => [{"$ifNull" => [value, nil]}, nil]} : {"$ne" => [{"$type" => value}, "missing"]}}
         when "matches"
           input = operand_at(operands, 0, "matches operator requires an input operand")
           pattern = operands[1]

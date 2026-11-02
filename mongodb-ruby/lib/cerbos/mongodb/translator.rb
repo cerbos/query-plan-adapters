@@ -602,9 +602,15 @@ module Cerbos
               "fields its subdocument carries, and the adapter has no filter for a subdocument's field names"
           end
 
+          # A stored null list matches {$eq: null}, where `null in list` is an error to CEL.
+          comparison = if left.value.nil? && mapper.resolve_field(right.name).relation.nil?
+            {"$elemMatch" => {"$eq" => nil}}
+          else
+            {"$eq" => mapper.apply_value_parser(right.name, left.value)}
+          end
           return value_comparison(
             mapper, scope, right.name,
-            {"$eq" => mapper.apply_value_parser(right.name, left.value)},
+            comparison,
             left.value, "a null needle in a mapped-collection `in`"
           )
         end
@@ -755,12 +761,26 @@ module Cerbos
         relation = mapper.resolve_field(collection.name).relation
         raise UnsupportedError, "#{operator} operator requires a relation mapping" if relation.nil?
         raise to_one_macro_refusal(operator) unless relation.type == :many
+        return constant_quantifier(operator, relation.name, condition.value) if value?(condition)
 
         element = build(condition, mapper.scoped(collection.name, variable.name), Scope.new(variable.name))
         return {relation.name => {"$elemMatch" => element}} if operator == "exists"
 
         # "No element fails the condition", on a field that must be an array.
         {relation.name => {"$type" => "array", "$not" => {"$elemMatch" => {"$nor" => [element]}}}}
+      end
+
+      # A body the planner folded to a constant (`t.name in []` is false). The list must still be
+      # an array: CEL raises on a null or absent one.
+      def constant_quantifier(operator, path, body)
+        raise UnsupportedError, "A #{operator}() body that is a non-boolean constant is a CEL error" unless [true, false].include?(body)
+
+        case [operator, body]
+        when ["exists", true] then {path => {"$type" => "array", "$not" => {"$size" => 0}}}
+        when ["exists", false] then {path => {"$in" => []}}
+        when ["all", true] then {path => {"$type" => "array"}}
+        else {path => {"$size" => 0}}
+        end
       end
 
       # A macro over a reference mapped as a to-one relation. To CEL that attribute is a map, and a
