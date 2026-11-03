@@ -1,0 +1,131 @@
+{
+  "allowed": [
+    "a2",
+    "a4",
+    "a5",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "collection/filter/negated-literal-in-filtered-list",
+  "intent": "The negation of a literal in a resource list filtered by a predicate that reads aBool, which is missing on j3, whose list is empty.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "public"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tagNames"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "t"
+                                        },
+                                        {
+                                          "value": "p"
+                                        }
+                                      ],
+                                      "operator": "startsWith"
+                                    }
+                                  },
+                                  {
+                                    "variable": "request.resource.attr.aBool"
+                                  }
+                                ],
+                                "operator": "and"
+                              }
+                            },
+                            {
+                              "variable": "t"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "filter"
+                  }
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/filter/negated-literal-in-filtered-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(\"public\" in R.attr.tagNames.filter(t, t.startsWith(\"p\") && R.attr.aBool))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL never evaluates the filter body over an empty list, so j3 is allowed. Guarding the whole expression on aBool, or splitting on it, keeps j3 UNKNOWN and drops it. Found by fuzzing (fuzz/s53/0003, prisma)."
+}
