@@ -1,5 +1,5 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, not, or, sql } from "drizzle-orm";
+import { not, sql } from "drizzle-orm";
 import { is } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
@@ -16,7 +16,7 @@ import {
 } from "./arithmetic";
 import type { LeafComparisonOperator } from "./arithmetic";
 import { parseCelDoubleString } from "./conversion";
-import { buildFilterFromExpression } from "./filter";
+import { buildFilterFromExpression, guardedCase } from "./filter";
 import {
   buildIndexedComparison,
   indexedListEquality,
@@ -123,7 +123,7 @@ const inWireOrder = <T>(sideIsLeft: boolean, side: T, other: T): [T, T] =>
 
 /**
  * A comparison against a ternary, distributed over its branches: `(c ? a : b) op x` becomes
- * `(c AND a op x) OR (NOT c AND b op x)`. An UNKNOWN condition leaves both arms UNKNOWN.
+ * `CASE WHEN c THEN a op x WHEN NOT c THEN b op x END`, UNKNOWN when c is.
  */
 const buildTernaryComparison = (
   context: ComparisonContext,
@@ -150,14 +150,7 @@ const buildTernaryComparison = (
     );
   const thenFilter = compareBranch(thenOperand);
   const elseFilter = compareBranch(elseOperand);
-  const combined = or(
-    and(condition, thenFilter),
-    and(not(condition), elseFilter),
-  );
-  if (!combined) {
-    throw new UnsupportedQueryPlanError("Unable to combine ternary comparison conditions");
-  }
-  return combined;
+  return guardedCase(condition, thenFilter, elseFilter);
 };
 
 /**

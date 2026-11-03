@@ -185,6 +185,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber < -1'
+- id: 'comparison/less-than/negative-zero-against-zero'
+  tier: adversarial
+  intent: 'aDouble < 0.0, where i5 holds the double -0.0.'
+  trap: 'CEL holds -0.0 equal to 0.0, so i5 is denied. A store that orders -0.0 below 0.0, as Lucene does for a double field, returns i5.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble < 0.0'
 - id: 'comparison/less-than/value-first'
   tier: adversarial
   intent: Ordering with the literal on the left (1 < aNumber).
@@ -199,6 +206,13 @@ cases:
   condition:
     match:
       expr: '"one" != R.attr.aString'
+- id: 'comparison/not-equals/negative-zero-against-zero'
+  tier: adversarial
+  intent: 'aDouble != 0.0, where i5 holds the double -0.0.'
+  trap: 'CEL holds -0.0 equal to 0.0, so i5 is denied. A store that indexes -0.0 and 0.0 as distinct terms, as Lucene does for a double field, returns i5. Found by fuzzing (fuzz/s53/0257, elasticsearch-java).'
+  condition:
+    match:
+      expr: 'R.attr.aDouble != 0.0'
 - id: 'comparison/not-equals/whole-list-literal'
   tier: adversarial
   intent: 'Whole-list inequality between a list attribute and a one-element list literal (tagNames != ["public"]).'
