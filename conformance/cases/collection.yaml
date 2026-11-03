@@ -327,6 +327,13 @@ cases:
   condition:
     match:
       expr: '"public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool)'
+- id: 'collection/filter/negated-literal-in-filtered-list'
+  tier: adversarial
+  intent: 'The negation of a literal in a resource list filtered by a predicate that reads aBool, which is missing on j3, whose list is empty.'
+  trap: 'CEL never evaluates the filter body over an empty list, so j3 is allowed. Guarding the whole expression on aBool, or splitting on it, keeps j3 UNKNOWN and drops it. Found by fuzzing (fuzz/s53/0003, prisma).'
+  condition:
+    match:
+      expr: '!("public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool))'
 - id: 'collection/has-intersection/mapped-names-value-first'
   tier: adversarial
   intent: 'hasIntersection(["public", "other"], tags.map(t, t.name)): the literal list first, a projection second.'

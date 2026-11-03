@@ -253,6 +253,10 @@
       "status": "unsupported",
       "reason": "A filter() projection is a nested expression in an operand position, and the adapter refuses `literal in field` because Chroma's $in tests a field against a literal list, not the reverse. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "collection/filter/negated-literal-in-filtered-list": {
+      "status": "unsupported",
+      "reason": "A filter() projection is a nested expression in an operand position, and the adapter refuses `literal in field` because Chroma's $in tests a field against a literal list, not the reverse. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "collection/has-intersection/mapped-names-value-first": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
