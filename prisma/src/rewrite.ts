@@ -236,9 +236,9 @@ function parseLambdaMacro(expr: OperatorOperand):
  *   `exists(c, P(c)) && Q`. Valid in three-valued logic (AND distributes over the per-element
  *   OR), including the empty-collection case (both sides are FALSE).
  * - Case split (any collection op): a bare outer boolean reference Q in a boolean position
- *   becomes `(Q && op[Q:=true]) || (!Q && op[Q:=false]) || (Q && !Q)`. The contradiction arm
- *   keeps the whole expression UNKNOWN (not FALSE) when Q is NULL-derived, mirroring the
- *   guarded-ternary encoding.
+ *   becomes `(Q && op[Q:=true]) || (!Q && op[Q:=false]) || (Q && !Q && exists(c, true))`. The
+ *   contradiction arm keeps the whole expression UNKNOWN (not FALSE) when Q is NULL-derived and
+ *   the collection has elements, mirroring the guarded-ternary encoding.
  */
 export function hoistOuterScopeReferences(
   expr: PlanExpressionOperand,
@@ -308,8 +308,19 @@ export function hoistOuterScopeReferences(
         operator: "and",
         operands: [notQ, rebuild(substituteNamedOperand(body, outerRef, false))],
       },
-      // Contradiction arm: UNKNOWN when the reference is NULL-derived, never TRUE.
-      { operator: "and", operands: [q, notQ] },
+      // Contradiction arm: UNKNOWN when the reference is NULL-derived, never TRUE. CEL never
+      // evaluates the body over an empty collection, so there the arm is FALSE, not UNKNOWN.
+      {
+        operator: "and",
+        operands: [
+          q,
+          notQ,
+          {
+            operator: "exists",
+            operands: [collection, { operator: "lambda", operands: [{ value: true }, variable] }],
+          },
+        ],
+      },
     ];
     // all() over an empty collection never evaluates its body, so CEL holds it TRUE even when
     // the reference is missing; the arms above are all UNKNOWN on that row. `all(c, false)` is

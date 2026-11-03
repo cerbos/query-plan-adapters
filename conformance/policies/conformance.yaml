@@ -903,6 +903,15 @@ resourcePolicy:
       condition:
         match:
           expr: '"public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool)'
+    # collection/filter/negated-literal-in-filtered-list
+    - actions:
+        - collection/filter/negated-literal-in-filtered-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!("public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool))'
     # collection/has-intersection/mapped-names-value-first
     - actions:
         - collection/has-intersection/mapped-names-value-first
