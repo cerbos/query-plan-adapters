@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cerbos.QueryPlan.EntityFrameworkCore/Cerbos.QueryPlan.EntityFrameworkCore.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Cerbos.QueryPlan.EntityFrameworkCore.Tests/Cerbos.QueryPlan.EntityFrameworkCore.Tests.csproj" />
+  </Folder>
+</Solution>

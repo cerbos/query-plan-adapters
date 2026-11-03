@@ -7,10 +7,12 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Every adapter workflow runs `validate-corpus.sh` and its conformance harness **inside the same job as the regular tests**, and no test or harness job starts a PDP. Convex is the one exception to the single job, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen. On the TypeScript adapters the harness is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime. The other matrix dimensions divide into two kinds:
 
-- **The datastore is one.** Drizzle, Prisma and ActiveRecord run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
-- **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. Spring-data's ORM set (`baseline`, `next`), Exposed's (`baseline`, `floor`) and ActiveRecord's version (8.0, 7.1) cross with their store dimensions the same way, since each renders the SQL the store executes.
+- **The datastore is one.** Drizzle, Prisma and ActiveRecord run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), EF Core once per SQLite, PostgreSQL and SQL Server store, and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose equivalent, and it exists only on the baseline Node leg.
+- **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. jpa's ORM set (`baseline`, `next`), Exposed's (`baseline`, `floor`) and ActiveRecord's version (8.0, 7.1) cross with their store dimensions the same way, since each renders the SQL the store executes.
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. Two kinds of job start a PDP: each adapter's example job, through `demo/scripts/run-example.sh` (the `current` pin), and `conformance.yaml`, which starts both pinned PDPs to replan every case. That workflow runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
+
+`fuzz.yaml` is the one workflow that is neither PR-triggered nor scheduled: it runs only when someone starts it with `workflow_dispatch` ([ADR 0011](adr/0011-fuzzing-finds-cases-the-corpus-keeps-them.md)). Its record job starts both pinned PDPs, as `conformance.yaml` does, and records generated cases into an artifact; one replay job per store leg, listed by `run-harness.sh --list`, runs that adapter's harness with `QPA_FUZZ_DIR` set; the report job fails the run on any adapter failure and writes the report to the step summary. Give it no `pull_request` or `schedule` trigger: a run draws new cases every time, so it cannot gate a merge, and a scheduled run nobody reads only spends minutes. A new adapter needs no edit here, only its `run-harness.sh` leg and fuzz mode in its harness (conformance/README.md, "Fuzzing").
 
 Each adapter's example job stays inside that adapter's own workflow. `renovate.json` automerges non-major bumps, so an ORM bump arrives as one PR touching both the adapter manifest and the example's committed lockfile, and the example job on that PR is what blocks the automerge when the new ORM breaks real usage. A nightly or standalone example workflow silently restores that gap.
 
@@ -23,7 +25,13 @@ packaged example succeed. Adapter test workflows run directly on pull requests a
 `workflow_call` for releases, so a release runs the checks once. Keep the publish workflow
 filenames stable: npm trusted publishing is configured against them.
 
-Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems; `ent/v*` and `pgx/v*` are Go
-module tags resolved directly from the repository. `elasticsearch-java/v*`, `spring-data/v*` and `exposed/v*` only run that
-adapter's CI workflow: none of those builds configures a Maven Central release (all three are `publishToMavenLocal` only, and
-their `publishing` blocks say what wiring a release still needs), so no Maven Central publish is wired yet.
+Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` -> RubyGems, `efcore/v*` -> NuGet (trusted
+publishing, configured against `efcore-publish.yaml`, which checks the tag against the project's `<Version>`); `ent/v*` and `pgx/v*` are Go
+module tags resolved directly from the repository. `elasticsearch-java/v*`, `jpa/v*`, `spring-data/v*` and `exposed/v*` only run that adapter's CI
+workflow: none of those builds configures a Maven Central release (all are `publishToMavenLocal` only, and their `publishing` blocks
+say what wiring a release still needs), so no Maven Central publish is wired yet. `spring-data` depends on `cerbos-jpa` at the same
+version, so a release publishes `jpa` first.
+
+`spring-data` wraps `jpa` ([ADR 0013](adr/0013-spring-data-wraps-the-jpa-core.md)) and builds against it through `includeBuild("../jpa")`,
+so `spring-data.yaml` also triggers on `jpa/**`. The store legs run in `jpa.yaml` only: the SQL is the core's, and spring-data's
+harness runs on H2 to prove its `Specification` returns what the core's filter does.

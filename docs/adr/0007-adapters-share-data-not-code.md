@@ -8,6 +8,9 @@ The shared data is now the cases, the dataset, `pdp-versions.json` and the recor
 wire fixtures, `actions.json`, the declared-key guards and the golden expectations this ADR
 describes are gone.
 
+**Amended by [ADR 0013](0013-spring-data-wraps-the-jpa-core.md)** for spring-data, which depends on
+the jpa core's published artifact.
+
 ## Context
 
 `conformance/` is shared by every adapter: one hostile policy suite, one set of seed rows, one

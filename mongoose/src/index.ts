@@ -14,8 +14,8 @@ export type MapperConfig = {
   field?: string;
   /**
    * Treat a stored null as a missing Cerbos attribute and exclude it from comparisons. Left
-   * undeclared, it follows the call's `nullAttributeRepresentation`: `false` under `"explicit"`,
-   * `true` under `"omitted"`.
+   * undeclared, it follows the call's `nullAttributeRepresentation`: `true` under `"omitted"` (the
+   * default), `false` under `"explicit"`.
    */
   nullable?: boolean;
   valueParser?: (value: any) => any;
@@ -56,12 +56,16 @@ export type Mapper =
  * The planner emits the same `eq(attr, null)` node either way, so the plan cannot reveal which
  * convention is in use and the adapter has to be told.
  *
- * - `"explicit"` (default) — a NULL field is sent as an explicit `null` attribute. CEL compares
+ * - `"explicit"` — a NULL field is sent as an explicit `null` attribute. CEL compares
  *   `null == null`, so matching null selects exactly the documents `check()` allows.
- * - `"omitted"` — a NULL field sends no attribute at all. CEL then raises a missing-attribute
- *   error, which Cerbos treats as a deny, so a filter that *selects* null documents returns
+ * - `"omitted"` (default) — a NULL field sends no attribute at all. CEL then raises a
+ *   missing-attribute error, which Cerbos treats as a deny, so a filter that *selects* null documents returns
  *   documents the PDP denies. Null comparison operands are rejected instead of translated, and
  *   every mapper entry that does not declare `nullable` is treated as `nullable: true`.
+ *
+ * The default is the convention whose wrong guess fails closed: a caller that actually sends
+ * explicit nulls gets a refusal naming this option, never a filter returning documents the PDP
+ * denies (docs/adr/0011-denial-fails-closed-in-the-result.md).
  *
  * See https://github.com/cerbos/query-plan-adapters/issues/302 and cerbos/query-plan-adapters#493.
  */
@@ -72,15 +76,24 @@ export interface QueryPlanToMongooseArgs {
   mapper?: Mapper;
   /**
    * Which NULL-field representation the caller uses when building `check()` attributes.
-   * Defaults to `"explicit"`, preserving the historical null-matching translation.
+   * Defaults to `"omitted"`, which refuses every null comparison operand.
    */
   nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
-export interface QueryPlanToMongooseResult {
-  kind: PlanKind;
-  filters?: MongooseFilter;
-}
+/**
+ * Only a `CONDITIONAL` result carries `filters`, so a TypeScript caller cannot read one without
+ * narrowing on `kind` first: `ALWAYS_DENIED` has no filter to apply by mistake, and the compiler
+ * rejects the attempt (docs/adr/0011-denial-fails-closed-in-the-result.md).
+ */
+export type QueryPlanToMongooseResult =
+  | {
+      kind: PlanKind.ALWAYS_ALLOWED | PlanKind.ALWAYS_DENIED;
+    }
+  | {
+      kind: PlanKind.CONDITIONAL;
+      filters: MongooseFilter;
+    };
 
 /**
  * Converts a Cerbos query plan to a Mongoose filter
@@ -88,7 +101,7 @@ export interface QueryPlanToMongooseResult {
 export function queryPlanToMongoose({
   queryPlan,
   mapper = {},
-  nullAttributeRepresentation = "explicit",
+  nullAttributeRepresentation = "omitted",
 }: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
   const ctx: TranslateContext = {
     mapper:

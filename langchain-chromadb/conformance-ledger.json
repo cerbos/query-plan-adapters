@@ -301,6 +301,10 @@
       "status": "unsupported",
       "reason": "Same missing positional access as `collection/index/first-element-of-number-list`: the negation is pushed down to the comparison, which refuses the index() operand before choosing an inverted operator. `allowPostFilter` does not lift it: `R.attr.aNumberList` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "An operand is a computed expression, and a Chroma `Where` clause can only compare a metadata key with a literal. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
       "reason": "Same missing positional access as `collection/index/first-element-of-number-list`, over a string list: `$eq` on a list key and a dotted `key.N` both match nothing, and the index() node is refused as a nested expression before its comparison is examined. `allowPostFilter` does not lift it: `R.attr.tagNames` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -385,6 +389,10 @@
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "conditional/ternary/index-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "The condition is size(tags), and tags has no fieldNameMapper entry: Chroma's Where grammar has no count function, and a list or relation may not be stored on a record."
+    },
     "conditional/ternary/inside-all": {
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
@@ -392,6 +400,10 @@
     "conditional/ternary/inside-exists": {
       "status": "unsupported",
       "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, and every comparison operand must be a bare field or literal, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "conditional/ternary/negated-collection-condition": {
+      "status": "unsupported",
+      "reason": "The ternary's condition is an all() over tags: Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so the collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",
@@ -428,6 +440,10 @@
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "Chroma Where documents compare a metadata field against a literal only; there is no field-to-field operand, so a comparison of two metadata keys cannot be translated. `allowPostFilter` does not lift it: `R.attr.owner` reaches `check()` as an explicit null on some rows, and Chroma metadata has no null, so the harness stores it nowhere, the mapping declares no key for it and the post-filter reads only declared keys."
+    },
+    "membership/in/negated-literal-in-null-resource-list": {
+      "status": "unsupported",
+      "reason": "The negation of `membership/in/literal-in-resource-number-list`: value-first membership is refused when mirroring it whatever the polarity, because Chroma's $in and $nin test a field against a literal list, not the reverse. `allowPostFilter` does not lift it: `R.attr.aNumberList` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "membership/in/negated-literal-in-resource-list": {
       "status": "unsupported",
@@ -508,6 +524,20 @@
       ],
       "reason": "has() on an attribute the mapping does not declare: the post-filter cannot tell whether a record carries it, so it refuses. The 0.56.0 planner folds the has() away, so that plan translates."
     },
+    "null/has/explicit-null-attribute-in-disjunction": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute the mapping does not declare: the post-filter cannot tell whether a record carries it, so it refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
+    "null/has/explicit-null-attribute-negated-disjunction": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute the mapping does not declare: the post-filter cannot tell whether a record carries it, so it refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
     "null/in/literal-list-of-only-null": {
       "status": "unsupported",
       "reason": "The planner folds membership in [null] to an equality against null; Chroma metadata has no null value, so the comparison cannot be represented. `allowPostFilter` does not lift it: `R.attr.owner` reaches `check()` as an explicit null on some rows, and Chroma metadata has no null, so the harness stores it nowhere, the mapping declares no key for it and the post-filter reads only declared keys."
@@ -568,9 +598,17 @@
       "status": "unsupported",
       "reason": "Value-first form of `null/not-equals/null-literal`; the same $ne absent-key mismatch applies after the planner mirrors the operands. `allowPostFilter` does not lift it: `ne` compares a null literal, and Chroma metadata has no null, so a record cannot tell an explicit null attribute from a missing one."
     },
+    "principal/all/empty-list-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
+    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "Chroma metadata filters compare a field to a literal and cannot evaluate the computed expression this planner shape retains. `allowPostFilter` does not lift it: the post-filter has no evaluation for `except`."
+    },
+    "principal/exists/empty-list-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "Chroma's Where grammar has no quantifier over a list's elements and no relation or array-of-object model, so the plan's collection lambda cannot be translated. `allowPostFilter` does not lift it: `R.attr.tags` is a list, which the harness does not store as Chroma metadata (#475), so the mapping declares no key for it and the post-filter reads only declared keys."
     },
     "principal/exists/list-of-structs": {
       "status": "unsupported",
@@ -684,6 +722,10 @@
       "status": "unsupported",
       "reason": "Same optional-metadata $ne limitation as `relation/not-equals/one-hop-null-literal`, reached through De Morgan on the negated conjunction, which turns `parent.inner.aOptionalString == null` into `!= null`: `!= null` over the parent.inner chain key lowers to $ne, which a document missing that key satisfies. A missing hop and a present hop whose optional column is NULL are both stored as a missing key, so there is nothing for Chroma to distinguish them with"
     },
+    "relation/equals/negated-one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `relation/not-equals/one-hop-against-explicit-null-field`, under negation."
+    },
     "relation/equals/negated-one-hop-null-literal": {
       "status": "unsupported",
       "reason": "Same optional-metadata $ne limitation as `relation/not-equals/one-hop-null-literal`, reached through the negation pushed into `== null`: `!= null` over the parent chain key lowers to $ne, which a document missing that key satisfies. A missing hop and a present hop whose optional column is NULL are both stored as a missing key, so there is nothing for Chroma to distinguish them with"
@@ -716,6 +758,17 @@
       "status": "unsupported",
       "reason": "Chroma has no operator that intersects a list-valued metadata field with a literal list, so hasIntersection has no Where equivalent to negate; the adapter refuses to invert it. `allowPostFilter` does not lift it: `R.attr.mainCategory.subNames` is a list reached through a relation, which Chroma metadata has no model for, so the mapping declares no key for it and the post-filter reads only declared keys."
     },
+    "relation/has/negated-parent-attribute": {
+      "status": "unsupported",
+      "reason": "has(parent.aOptionalString) under a negation: Chroma metadata is flat, so a record without the parent.aOptionalString key cannot tell a missing parent, which CEL denies as an error under both polarities, from a parent without aOptionalString, which is false; the post-filter refuses a nested has() anywhere false and error would answer differently."
+    },
+    "relation/has/negated-two-hops-attribute": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has(parent.inner.aString) under a negation: Chroma metadata is flat, so a record without the parent.inner.aString key cannot tell a missing parent or parent.inner, which CEL denies as an error under both polarities, from a parent.inner without aString, which is false; the post-filter refuses a nested has() anywhere false and error would answer differently. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
     "relation/has/parent": {
       "status": "unsupported",
       "reason": "has() on a relation: Chroma records carry no relations, so the mapping does not declare it and the post-filter refuses."
@@ -735,6 +788,10 @@
     "relation/not-equals/negated-two-hops-null-literal": {
       "status": "unsupported",
       "reason": "Chroma metadata holds only finite numbers, strings and booleans, so a null comparison operand is refused (the negation pushed into `!= null` makes it `== null`): a missing parent or inner hop and a present one whose optional column is NULL are both a missing chain key, which cannot be told apart from a stored null"
+    },
+    "relation/not-equals/one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "owner has no fieldNameMapper entry in the harness, so the post-filter cannot read it and the translation is refused."
     },
     "relation/not-equals/one-hop-null-literal": {
       "status": "unsupported",

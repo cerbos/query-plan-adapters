@@ -69,6 +69,7 @@ export function compilePostFilter(
     fields,
     bindings: new Map(),
     parent: "eq",
+    falseDenies: true,
   });
   return (metadata) =>
     compiled.run({ metadata: metadata ?? {}, bindings: {} }) === true;
@@ -120,6 +121,12 @@ interface Context {
   bindings: ReadonlyMap<string, StaticType>;
   /** The operator enclosing the operand being compiled, which a refusal of a leaf reports. */
   parent: string;
+  /**
+   * Whether the operand being compiled decides the record only through `&&` and `||` up to the
+   * root, where answering `false` for a CEL error denies it all the same. A negation, a ternary's
+   * condition or an operator's operand tells the two apart.
+   */
+  falseDenies: boolean;
 }
 
 const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
@@ -154,10 +161,36 @@ function compile(operand: PlanExpressionOperand, ctx: Context): Compiled {
       `Unsupported operator ${operand.operator}: the post-filter has no evaluation for it`,
     );
   }
+  if (operand.operator === "has" && !ctx.falseDenies) {
+    refuseNestedPresence(operand.operands);
+  }
   return compiler(operand.operands, {
     ...ctx,
     parent: operand.operator,
+    falseDenies:
+      ctx.falseDenies && (operand.operator === "and" || operand.operator === "or"),
   });
+}
+
+/**
+ * `has(parent.x)` through a missing `parent` is an error CEL denies under both polarities, and
+ * `false` only when `parent` is present without `x`. A record's metadata is flat, so a missing
+ * `parent.x` key cannot tell the two apart. Where `false` denies anyway the answer is exact;
+ * anywhere else, as under `!`, it would select every record without a parent.
+ */
+function refuseNestedPresence(operands: PlanExpressionOperand[]): void {
+  const [operand] = operands;
+  if (
+    operand !== undefined &&
+    isVariable(operand) &&
+    operand.name.startsWith("request.resource.attr.") &&
+    operand.name.substring("request.resource.attr.".length).includes(".")
+  ) {
+    throw new UnsupportedOperatorError(
+      "has",
+      `has(${operand.name}) outside a plain conjunction or disjunction: flat metadata cannot tell a missing enclosing attribute, which is an error, from a missing ${operand.name.substring(operand.name.lastIndexOf(".") + 1)}, which is false`,
+    );
+  }
 }
 
 /**

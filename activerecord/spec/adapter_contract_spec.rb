@@ -48,10 +48,25 @@ RSpec.describe Cerbos::ActiveRecord do
     )
   }.freeze
 
-  def translate(plan, model: AdvResource, attributes: ATTRS, **options)
+  # Under `:explicit`, the convention most of these vary from. The adapter's own default is
+  # pinned under "the default null representation".
+  def translate(plan, model: AdvResource, attributes: ATTRS, null_attribute_representation: :explicit, **options)
     described_class.query_plan_to_relation(
-      plan: plan, model: model, attributes: attributes, **options
+      plan: plan, model: model, attributes: attributes,
+      null_attribute_representation: null_attribute_representation, **options
     )
+  end
+
+  describe "the default null representation" do
+    # The default is the convention whose wrong guess is a refusal rather than an over-grant
+    # (docs/adr/0011-denial-fails-closed-in-the-result.md).
+    it "is :omitted, so a null constant is refused" do
+      plan = conditional(expression("in", variable("request.resource.attr.aString"), value(["a", nil])))
+      expect {
+        described_class.query_plan_to_relation(plan: plan, model: AdvResource, attributes: ATTRS)
+      }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError, /the default is :omitted/)
+      expect(translate(plan)).to be_a(ActiveRecord::Relation)
+    end
   end
 
   describe "plan kinds" do
@@ -282,7 +297,8 @@ RSpec.describe Cerbos::ActiveRecord do
         plan: conditional(expression("in", value(nil),
           expression("list", variable("s")))),
         model: EdgeDocument,
-        attributes: {"s" => field("title")}
+        attributes: {"s" => field("title")},
+        null_attribute_representation: :explicit
       )
       expect(relation.to_sql).to include('"title" IS NULL')
     end

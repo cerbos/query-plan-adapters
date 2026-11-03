@@ -31,7 +31,8 @@ export const assertNullOperandTranslatable = (
       `Cannot translate ${context} under nullAttributeRepresentation "omitted": a NULL field ` +
         "sends no attribute, so Cerbos evaluates the comparison as a missing-attribute error " +
         "(deny) while a null-selecting filter would return those documents. Send NULL fields " +
-        'as explicit nulls and use "explicit", or keep this shape out of the policy.',
+        'as explicit nulls and pass nullAttributeRepresentation "explicit" (the default is ' +
+        '"omitted"), or keep this shape out of the policy.',
     );
   }
 };

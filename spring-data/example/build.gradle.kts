@@ -22,9 +22,13 @@ tasks.withType<JavaCompile> {
 }
 
 repositories {
-    // mavenLocal serves only the adapter, so a stale ~/.m2 cannot shadow any other dependency.
+    // mavenLocal serves only the adapter and the jpa core it wraps, so a stale ~/.m2 cannot shadow
+    // any other dependency.
     mavenLocal {
-        content { includeModule("dev.cerbos", "cerbos-spring-data") }
+        content {
+            includeModule("dev.cerbos", "cerbos-spring-data")
+            includeModule("dev.cerbos", "cerbos-jpa")
+        }
     }
     mavenCentral()
 }
@@ -34,7 +38,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     runtimeOnly("com.h2database:h2")
 
-    // Run `../gradlew -p .. publishToMavenLocal` first (the scripts do). `isChanging` because every
+    // Run `../gradlew -p ../../jpa publishToMavenLocal` and `../gradlew -p .. publishToMavenLocal`
+    // first (the scripts do). The adapter's POM brings cerbos-jpa. `isChanging` because every
     // publish overwrites the same version; see cacheChangingModulesFor below.
     implementation("dev.cerbos:cerbos-spring-data:0.1.0-alpha.1") { isChanging = true }
     // The adapter puts the SDK at runtime scope, and this app calls `cerbos.plan(...)` directly.

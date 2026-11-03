@@ -22,10 +22,12 @@ query, an Elasticsearch query, and so on) using a mapping you provide from Cerbo
 | SQLAlchemy | Python | `pip install cerbos-sqlalchemy` | [sqlalchemy](sqlalchemy/) |
 | Ent | Go | `go get github.com/cerbos/query-plan-adapters/ent` | [ent](ent/) |
 | pgx / PostgreSQL | Go | `go get github.com/cerbos/query-plan-adapters/pgx` | [pgx](pgx/) |
+| JPA (Hibernate, Quarkus, Jakarta EE, Micronaut) | Java | Build from source (not yet on Maven Central) | [jpa](jpa/) |
 | Spring Data JPA | Java | Build from source (not yet on Maven Central) | [spring-data](spring-data/) |
 | Elasticsearch | Java | Build from source (not yet on Maven Central) | [elasticsearch-java](elasticsearch-java/) |
 | Exposed (alpha) | Kotlin | Build from source (not yet on Maven Central) | [exposed](exposed/) |
 | ActiveRecord | Ruby | Not released yet | [activerecord](activerecord/) |
+| Entity Framework Core | C# / .NET | Not released yet (`Cerbos.QueryPlan.EntityFrameworkCore` on NuGet once tagged) | [efcore](efcore/) |
 
 Each adapter's README starts with an install step and a quick-start snippet.
 

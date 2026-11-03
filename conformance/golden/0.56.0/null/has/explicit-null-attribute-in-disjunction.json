@@ -1,0 +1,80 @@
+{
+  "allowed": [
+    "a1",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "null/has/explicit-null-attribute-in-disjunction",
+  "intent": "(has(coOwner) || aBool == true) && aNumber > 3: a presence test on an explicit-null attribute as one arm of an OR.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumber"
+          },
+          {
+            "value": 3
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/has/explicit-null-attribute-in-disjunction",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(has(R.attr.coOwner) || R.attr.aBool == true) && R.attr.aNumber > 3"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "has(coOwner) is true on every row, so the OR is true and aNumber > 3 alone decides. A translation that renders the always-true has() as an empty filter loses it inside the OR (Prisma drops an empty filter there) and denies the rows aBool does not admit."
+}

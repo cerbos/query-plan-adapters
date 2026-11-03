@@ -20,6 +20,7 @@ import org.testcontainers.elasticsearch.ElasticsearchContainer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.DynamicContainer.dynamicContainer;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
@@ -93,6 +95,9 @@ class ElasticsearchAdversarialConformanceTest {
     /** Passed / total per PDP tag and tier, printed once the run ends. */
     private static final Map<String, int[]> TALLY = new TreeMap<>();
 
+    /** Every fuzz case's verdict, written once the run ends (conformance/README.md, "Fuzzing"). */
+    private static final List<Corpus.FuzzVerdict> FUZZ_RESULTS = Collections.synchronizedList(new ArrayList<>());
+
     @BeforeAll
     static void setUp() throws Exception {
         elasticsearch = new ElasticsearchContainer(ElasticsearchTestImage.IMAGE)
@@ -108,6 +113,9 @@ class ElasticsearchAdversarialConformanceTest {
     static void tearDown() {
         TALLY.forEach((key, counts) ->
                 System.out.printf("conformance %s: %d / %d pass%n", key, counts[0], counts[1]));
+        // run-harness.sh names the leg, since the Elasticsearch image is the store dimension here.
+        Corpus.writeFuzzResults("elasticsearch-java",
+                System.getenv().getOrDefault("QPA_HARNESS_STORE", "elasticsearch"), FUZZ_RESULTS);
         if (elasticsearch != null) elasticsearch.stop();
     }
 
@@ -116,6 +124,7 @@ class ElasticsearchAdversarialConformanceTest {
     @TestFactory
     Stream<DynamicNode> conformance() {
         DynamicNode ledger = dynamicTest("every ledger entry is well formed", () -> {
+            Assumptions.assumeFalse(Corpus.fuzzing(), "a fuzz run is judged without the ledger");
             List<String> malformed = new ArrayList<>();
             Corpus.LEDGER.forEach((id, entry) -> {
                 if (!"unsupported".equals(entry.status()) && !"divergent".equals(entry.status())) {
@@ -138,6 +147,7 @@ class ElasticsearchAdversarialConformanceTest {
             List<Golden> goldens = Corpus.goldens(tag);
             List<DynamicNode> tests = new ArrayList<>();
             tests.add(dynamicTest("has a golden file for every case in the ledger", () -> {
+                Assumptions.assumeFalse(Corpus.fuzzing(), "a fuzz run is judged without the ledger");
                 TreeSet<String> stale = new TreeSet<>(Corpus.LEDGER.keySet());
                 goldens.forEach(golden -> stale.remove(golden.id()));
                 assertEquals(new TreeSet<String>(), stale, "ledger entries with no golden file");
@@ -154,6 +164,13 @@ class ElasticsearchAdversarialConformanceTest {
         tally[1]++;
         Assumptions.assumeFalse(golden.skipped(tag), "planner divergence");
         List<String> allowed = golden.allowed().stream().sorted().toList();
+        if (Corpus.fuzzing()) {
+            Corpus.FuzzVerdict verdict = Corpus.fuzzVerdict(golden.pdp(), golden.id(), allowed, () -> ids(golden),
+                    UnsupportedPlanShapeException.class::isInstance);
+            FUZZ_RESULTS.add(verdict);
+            assertTrue(verdict.ok(), verdict::toString);
+            return;
+        }
         LedgerEntry entry = Corpus.ledgerEntry(golden.id(), tag);
         String status = entry == null ? null : entry.status();
         if (status == null) {

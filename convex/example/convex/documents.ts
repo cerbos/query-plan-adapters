@@ -47,10 +47,15 @@ type Predicate = (q: FilterBuilder<Documents>) => Expression<boolean>;
  * `region` and `archived` are deliberately absent: they are the application's own fields, never
  * referenced by demo/policies/document.yaml, and composing them with the adapter's filter is
  * shape 5.
+ *
+ * `nullable: false` says the field is stored on every document and never null, which the schema
+ * guarantees. Left undeclared, an entry takes the call's null convention, `"omitted"` by default,
+ * and a field that may be missing has to be decided by the post-filter, which this example does
+ * not opt in to (docs/adr/0011-denial-fails-closed-in-the-result.md).
  */
 const MAPPER: Mapper = {
-  "request.resource.attr.ownerId": { field: "ownerId" },
-  "request.resource.attr.public": { field: "public" },
+  "request.resource.attr.ownerId": { field: "ownerId", nullable: false },
+  "request.resource.attr.public": { field: "public", nullable: false },
 };
 
 /** The application's OWN predicate, passed in by the application. Declared in demo/seeds.json. */
@@ -67,11 +72,26 @@ type ApplicationFilter = Infer<typeof applicationFilterValidator>;
  * express — and the adapter throwing is how that should arrive, rather than as documents read
  * before the whole authorization predicate has run.
  */
-const translate = (queryPlan: unknown) =>
-  queryPlanToConvex<FilterBuilder<Documents>, Expression<boolean>>({
+const translate = (
+  queryPlan: unknown,
+): { kind: PlanKind; filter: Predicate | undefined } => {
+  const result = queryPlanToConvex<
+    FilterBuilder<Documents>,
+    Expression<boolean>
+  >({
     queryPlan: queryPlan as PlanResourcesResponse,
     mapper: MAPPER,
   });
+  // Only a conditional result carries a filter, and only `path: "db"` carries one that is the
+  // whole condition. Without the opt-in the adapter throws rather than return any other path, so
+  // this throw is unreachable — and a fall-through to `undefined` here would read as "no filter".
+  if (result.kind !== PlanKind.CONDITIONAL)
+    return { kind: result.kind, filter: undefined };
+  if (result.path !== "db") {
+    throw new Error(`a "${result.path}" result without allowPostFilter`);
+  }
+  return { kind: result.kind, filter: result.filter };
+};
 
 /**
  * Usage shape 5, and the reason this example is worth running: the adapter's filter and the

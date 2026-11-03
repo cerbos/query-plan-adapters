@@ -161,12 +161,10 @@ type Filter = Where | undefined | "denied";
 /**
  * The three plan kinds, mapped onto what Chroma's query methods accept.
  *
- * `ALWAYS_ALLOWED` needs the one line of translation in this file. The adapter returns
- * `filters: {}` for it — an empty clause, which is a faithful spelling of "no constraint" — but
- * Chroma's own validator rejects `{}` outright: `Expected 'where' to have exactly one operator,
- * but got 0`. So the caller drops the empty clause instead of forwarding it, both here and inside
- * `conjoin` below. Getting this wrong is not a silent over-grant; it is a loud `ChromaValueError`
- * on the first unconditional plan the application meets.
+ * `ALWAYS_ALLOWED` carries no filter, as no unconditional kind does, so it maps to `undefined`.
+ * Chroma's own validator rejects an empty clause `{}` outright (`Expected 'where' to have exactly
+ * one operator, but got 0`), so the caller must not invent one either, here or inside `conjoin`
+ * below.
  *
  * There is no `default` arm. The three cases are every `PlanKind`, so a fourth would fail to
  * compile here rather than reaching a runtime branch nothing exercises.
@@ -191,9 +189,9 @@ function toFilter(result: QueryPlanToChromaDBResult): Filter {
 
 /**
  * The adapter's filter ANDed with the application's own. Chroma composes with `$and` over a list
- * of clauses, so this is one object literal — except that the list must not contain the empty
- * clause an unconditional plan produces, which is the whole reason `undefined` is handled first
- * rather than being wrapped like any other operand.
+ * of clauses, so this is one object literal — except that an unconditional allow has no clause to
+ * put in the list, which is the whole reason `undefined` is handled first rather than being wrapped
+ * like any other operand.
  */
 function conjoin(
   adapterFilter: Where | undefined,

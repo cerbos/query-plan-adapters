@@ -307,13 +307,13 @@ fi
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
   --include='*.java' --include='*.kt' --include='*.kts' --include='*.ts' --include='*.js'
-  --include='*.json' --include='Dockerfile' --include='*_IMAGE'
+  --include='*.json' --include='*.cs' --include='*.csproj' --include='Dockerfile' --include='*_IMAGE'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=lib --exclude-dir=build
   --exclude-dir=.venv --exclude-dir=.gradle --exclude-dir=bin --exclude-dir=dist
   --exclude-dir=generated --exclude-dir=__pypackages__
-  --exclude-dir=.gems --exclude-dir=.bundle-path
+  --exclude-dir=.gems --exclude-dir=.bundle-path --exclude-dir=obj --exclude-dir=packages
 )
 
 # `lib/` is BUILD OUTPUT on the TypeScript adapters and SOURCE on the Ruby gem, so one

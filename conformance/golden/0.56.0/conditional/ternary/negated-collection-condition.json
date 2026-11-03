@@ -1,0 +1,104 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "a7",
+    "b2",
+    "b4",
+    "c2",
+    "d2",
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/negated-collection-condition",
+  "intent": "A negated boolean ternary whose condition is an all() over a nullable element field.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "t.name"
+                                  },
+                                  {
+                                    "value": "other"
+                                  }
+                                ],
+                                "operator": "ne"
+                              }
+                            },
+                            {
+                              "variable": "t"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "all"
+                  }
+                },
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 5
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/negated-collection-condition",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.tags.all(t, t.name != \"other\") ? R.attr.aBool : R.attr.aNumber > 5)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "all() over a NULL element name is an error, so the ternary errors and denies under both polarities (b5, b6, e1); a NOT over the guarded-branch disjunction turns that error into a match."
+}

@@ -77,13 +77,20 @@ func testMapper() cerbospgx.Mapper {
 
 func translate(t *testing.T, cond *operand, opts ...cerbospgx.Option) (cerbospgx.Result, error) {
 	t.Helper()
-	return cerbospgx.Translate(conditional(cond), "resource", testMapper(), opts...)
+	return cerbospgx.Translate(conditional(cond), "resource", testMapper(), explicitUnlessSaid(opts)...)
+}
+
+// explicitUnlessSaid runs a translation under NullExplicit, the convention most of these tests
+// vary from, unless opts declares one. The adapter's own default is pinned by
+// TestTheDefaultNullRepresentationIsOmitted.
+func explicitUnlessSaid(opts []cerbospgx.Option) []cerbospgx.Option {
+	return append([]cerbospgx.Option{cerbospgx.WithNullRepresentation(cerbospgx.NullExplicit)}, opts...)
 }
 
 // translateWith translates a plan against a mapper and requires it to succeed.
 func translateWith(t *testing.T, mapper cerbospgx.Mapper, cond *operand) cerbospgx.Result {
 	t.Helper()
-	result, err := cerbospgx.Translate(conditional(cond), "resource", mapper)
+	result, err := cerbospgx.Translate(conditional(cond), "resource", mapper, explicitUnlessSaid(nil)...)
 	require.NoError(t, err)
 	return result
 }
@@ -156,13 +163,15 @@ func TestMalformedPlansReturnErrors(t *testing.T) {
 }
 
 // TestNilConditionIsNotAnAllow pins the fail-closed direction of a filter with no condition: it
-// must never widen into "no filter", which would return every row.
+// must never widen into "no filter", which would return every row. No PDP sends a plan without a
+// filter, so no case can.
 func TestNilConditionIsNotAnAllow(t *testing.T) {
 	t.Parallel()
 
 	result, err := cerbospgx.Translate(&responsev1.PlanResourcesResponse{}, "resource", testMapper())
 	require.NoError(t, err)
 	require.Equal(t, cerbospgx.KindAlwaysDenied, result.Kind)
+	require.Equal(t, "FALSE", result.Where)
 }
 
 func TestPlanKinds(t *testing.T) {
@@ -851,4 +860,21 @@ func TestOmittedRelatedMembershipNeedlePreservesMissing(t *testing.T) {
 	result := translateWith(t, mapper, cond)
 	query := result.Where
 	require.Contains(t, query, `IS NOT NULL) THEN (NOT (CASE`, "a missing related needle must remain UNKNOWN even for an empty collection")
+}
+
+// TestTheDefaultNullRepresentationIsOmitted pins the call-level default, which no case can vary:
+// it is the convention whose wrong guess is a refusal rather than an over-grant (ADR 0011).
+func TestTheDefaultNullRepresentationIsOmitted(t *testing.T) {
+	t.Parallel()
+
+	unset := cerbospgx.MapperMap{"request.resource.attr.owner": {Column: "owner"}}
+	nullIn := expr("in", variable("request.resource.attr.owner"), val(t, []any{"a", nil}))
+
+	_, err := cerbospgx.Translate(conditional(nullIn), "resource", unset)
+	require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
+	require.Contains(t, err.Error(), "the default is NullOmitted")
+
+	_, err = cerbospgx.Translate(conditional(nullIn), "resource", unset,
+		cerbospgx.WithNullRepresentation(cerbospgx.NullExplicit))
+	require.NoError(t, err)
 }

@@ -43,10 +43,10 @@ references them; nothing is `required: true` because the demo policy emits no `$
 
 The plan kinds map onto Chroma as `type Filter = Where | undefined | "denied"`:
 
-- `ALWAYS_ALLOWED` comes back as `filters: {}`, which Chroma's validator rejects
-  (`ChromaValueError: Expected 'where' to have exactly one operator, but got 0`). The example maps
-  it to `undefined` and omits `where`; `conjoin` likewise returns the application's clause alone
-  rather than `{ $and: [{}, applicationFilter] }`, which is rejected for the same reason.
+- `ALWAYS_ALLOWED` carries no filter. The example maps it to `undefined` and omits `where`, and
+  `conjoin` returns the application's clause alone: `{}` is not a stand-in, because Chroma's
+  validator rejects it (`ChromaValueError: Expected 'where' to have exactly one operator, but got
+  0`), alone or inside `{ $and: [{}, applicationFilter] }`.
 - `ALWAYS_DENIED` is a string sentinel, not a second `undefined`: a denial read as "no constraint"
   would return the whole collection.
 

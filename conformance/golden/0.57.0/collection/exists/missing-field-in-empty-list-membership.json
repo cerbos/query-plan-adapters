@@ -1,0 +1,111 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/missing-field-in-empty-list-membership",
+  "intent": "A negated exists() whose body tests a tag field's membership in an empty principal list.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": false
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "membership in an empty list folds to false and drops an erroring needle",
+    "pdp": [
+      "0.56.0",
+      "0.57.0"
+    ],
+    "reason": "The planner folds t.name in P.attr.emptyTeams to false, so the plan is not(exists(tags, false)) and allows every row. check() reads t.name on the nameless tags of b5, b6 and e1, errors, and denies them. Found by fuzzing (fuzz/s41/0109)."
+  },
+  "request": {
+    "action": "collection/exists/missing-field-in-empty-list-membership",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.tags.exists(t, t.name in P.attr.emptyTeams)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "b5, b6 and e1 carry a tag with no name, so t.name errors and check() denies them. The planner folds t.name in [] to false and drops the error."
+}

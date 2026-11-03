@@ -13,7 +13,7 @@ would have called, and it is already small.
 
 A runner that every harness depends on — imported or over a process protocol — makes the corpus
 a component rather than data. It adds a versioned API, a build/CI edge and a blast radius across
-four toolchains, which ADR 0007 ("Adapters share data, not code") rejects. The per-adapter corpus
+every toolchain, which ADR 0007 ("Adapters share data, not code") rejects. The per-adapter corpus
 loaders are duplicated deliberately, and a drift check between them is also ruled out.
 
 What would change the calculation: a class of harness bug that recorded goldens, the stale-ledger

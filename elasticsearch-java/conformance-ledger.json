@@ -389,6 +389,10 @@
       "status": "unsupported",
       "reason": "Same positional read as collection/index/first-element-of-number-list under negation: the index operand is refused at the same site whatever the polarity, so a must_not over an any-position match is never emitted"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "Elasticsearch indexes an array as an unordered set of terms, so a positional read (tags[0].name) has no Query DSL form."
+    },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
       "reason": "A positional read of an array field has no Query DSL form: a terms query matches ANY element, which is a different predicate, and the adapter refuses the computed operand rather than substituting it"
@@ -485,6 +489,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
     },
+    "conditional/ternary/index-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "Same refusal as conditional/ternary/boolean-branches: Elasticsearch Query DSL has no conditional-value expression without scripts."
+    },
     "conditional/ternary/inside-all": {
       "status": "unsupported",
       "reason": "The positive all() is rejected before its body is examined, for the same reason as collection/all/empty-collection: Elasticsearch does not index an empty nested array, so all cannot distinguish an empty collection (true) from a missing one (CEL error). The conditional inside it would need scripts too, but the outer macro fails closed first"
@@ -497,6 +505,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
     },
+    "conditional/ternary/missing-attribute-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "Same refusal as conditional/ternary/boolean-branches: Elasticsearch Query DSL has no conditional-value expression without scripts."
+    },
     "conditional/ternary/negated": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
@@ -504,6 +516,10 @@
     "conditional/ternary/negated-branch-on-relation": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression for selecting the constant or parent attribute without scripts; the translator refuses the ternary leaf."
+    },
+    "conditional/ternary/negated-collection-condition": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
     },
     "conditional/ternary/negated-missing-attribute-condition": {
       "status": "unsupported",
@@ -597,6 +613,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot test negated membership of one document field in another without scripts"
     },
+    "membership/in/negated-literal-in-null-resource-list": {
+      "status": "unsupported",
+      "reason": "A bool must_not over the collection would also match j4, whose aNumberList is null: Elasticsearch indexes no value for a null field or an empty array, so it cannot tell that document from one holding [], and negated membership in a document collection is refused."
+    },
     "membership/in/negated-literal-in-resource-list": {
       "status": "unsupported",
       "reason": "Negated membership in a document collection: bool.must_not of a term on tagNames matches a document whose tagNames is missing (CEL error), and Elasticsearch does not index an empty array, so the two cannot be told apart"
@@ -664,6 +684,20 @@
       ],
       "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
     },
+    "null/has/explicit-null-attribute-in-disjunction": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
+    "null/has/explicit-null-attribute-negated-disjunction": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
     "null/in/literal-list-of-only-null": {
       "status": "unsupported",
       "reason": "The planner folds this to positive equality with null, which Elasticsearch cannot distinguish from a missing attribute without an indexed null-value sentinel"
@@ -707,6 +741,10 @@
     "null/not-equals/field-to-field-mixed-null-conventions": {
       "status": "unsupported",
       "reason": "The Query DSL cannot compare two document fields without scripts."
+    },
+    "principal/all/empty-list-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "all cannot distinguish a missing collection from an empty collection in Elasticsearch, so the macro is refused before its folded body is read"
     },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
@@ -820,6 +858,18 @@
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a positive all over a chained collection cannot distinguish an absent to-one parent (CEL error, denies) from an empty collection (vacuously true)"
     },
+    "relation/equals/negated-one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `relation/not-equals/one-hop-against-explicit-null-field`, under negation."
+    },
+    "relation/equals/negated-one-hop-against-two-hops": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "relation/equals/one-hop-against-two-hops": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
     "relation/equals/one-hop-null-literal": {
       "status": "unsupported",
       "reason": "`parent.aOptionalString == null` is a null-selecting comparison. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
@@ -840,6 +890,17 @@
       "status": "unsupported",
       "reason": "Same missing-versus-empty ambiguity as relation/in/negated-to-one-chain, reached through hasIntersection over the same operand"
     },
+    "relation/has/negated-parent-attribute": {
+      "status": "unsupported",
+      "reason": "!has() on a field of the parent object: a missing parent is an error CEL denies under both polarities, and Elasticsearch has no exists query that finds an object whose fields are all null, so a missing parent and a parent without the field can be the same document; the adapter refuses."
+    },
+    "relation/has/negated-two-hops-attribute": {
+      "status": "unsupported",
+      "pdp": [
+        "0.57.0"
+      ],
+      "reason": "!has() on a field two objects down (parent.inner.aString): a missing parent or parent.inner is an error CEL denies under both polarities, and Elasticsearch has no exists query that finds an object whose fields are all null, so a missing object and one without the field can be the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+    },
     "relation/has/parent": {
       "status": "unsupported",
       "reason": "has() on the parent object: Elasticsearch has no exists query that finds an object whose fields are all null, so a present parent and a missing one can be the same document; the adapter refuses."
@@ -855,6 +916,10 @@
     "relation/not-equals/negated-two-hops-null-literal": {
       "status": "unsupported",
       "reason": "`parent.inner.aOptionalString == null` is a null-selecting comparison once the negation is pushed into `!= null`. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
+    },
+    "relation/not-equals/one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts, so the parent field against owner is refused, as in `comparison/equals/field-to-field`."
     },
     "relation/or/negated-one-hop-not-null-or-negated-root-attribute": {
       "status": "unsupported",
@@ -876,9 +941,21 @@
       "status": "unsupported",
       "reason": "Same missing-versus-empty ambiguity as relation/size/zero-to-one-chain, reached through the negated positive-count spelling rather than the direct zero-count one"
     },
+    "relation/size/non-empty-string-one-hop": {
+      "status": "unsupported",
+      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+    },
     "relation/size/non-negative-to-one-chain": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL expresses only emptiness checks over nested collections, not arbitrary count thresholds, so a >= 0 threshold — which is TRUE exactly when the to-one parent exists — has no equivalent"
+    },
+    "relation/size/string-length-one-hop": {
+      "status": "unsupported",
+      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+    },
+    "relation/size/string-length-two-hops": {
+      "status": "unsupported",
+      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
     },
     "relation/size/zero-to-one-chain": {
       "status": "unsupported",
@@ -895,6 +972,10 @@
     "size/equals/negated-fractional-threshold-on-missing-attribute": {
       "status": "unsupported",
       "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
+    },
+    "size/equals/string-trailing-space": {
+      "status": "unsupported",
+      "reason": "Same refusal as size/greater-than/string-length: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
     },
     "size/greater-or-equal/fractional-threshold": {
       "status": "unsupported",
