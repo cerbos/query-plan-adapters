@@ -1,0 +1,94 @@
+name: EF Core Test
+
+on:
+  pull_request:
+    paths:
+      - "efcore/**"
+      - "conformance/**"
+      - "demo/**"
+      - ".github/workflows/efcore.yaml"
+      # No script, harness or build reads Markdown, except the package README, which only
+      # `dotnet pack` reads and the example job packs. A negation must come after every pattern it
+      # narrows.
+      - "!**/*.md"
+      - "efcore/README.md"
+  push:
+    tags:
+      - efcore/v*
+
+# A newer push to the same pull request makes this run's result moot, so cancel it rather than
+# let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
+concurrency:
+  group: efcore-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+    working-directory: efcore
+
+permissions: {}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  # The conformance suite replays the recorded golden plans of both pinned PDPs (conformance/golden/)
+  # and needs no PDP (docs/ci.md). Each store is its own leg: SQL Server and PostgreSQL run in
+  # containers Testcontainers starts from SQLSERVER_IMAGE and POSTGRES_IMAGE.
+  test:
+    permissions:
+      contents: read
+    strategy:
+      # Each store leg is a separate finding.
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgres, sqlserver]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: efcore/global.json
+
+      - name: Conformance suite (${{ matrix.database }})
+        run: dotnet test
+        env:
+          ADAPTER_TEST_DB: ${{ matrix.database }}
+
+  # The example packs the adapter, restores that .nupkg and composes the predicate with paging and
+  # an application filter, which the suite above does not. See
+  # docs/adr/0002-examples-install-the-packed-artifact.md.
+  example:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Check the PDP pin in the demo compose file before running against it.
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: efcore/global.json
+
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh efcore

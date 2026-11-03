@@ -73,10 +73,12 @@ const (
 // https://github.com/cerbos/query-plan-adapters/issues/302.
 const (
 	// NullExplicit — a NULL column is sent to check() as an explicit null attribute. IS NULL
-	// then selects exactly the rows check() allows. This is the default.
+	// then selects exactly the rows check() allows.
 	NullExplicit = queryplan.NullExplicit
 	// NullOmitted — a NULL column sends no attribute, so CEL raises a missing-attribute error
-	// (a deny) and a NULL-selecting filter would over-grant. Null operands are rejected.
+	// (a deny) and a NULL-selecting filter would over-grant. Null operands are rejected. This is
+	// the default: its wrong guess is a refusal, where NullExplicit's is an over-grant
+	// (docs/adr/0011-denial-fails-closed-in-the-result.md).
 	NullOmitted = queryplan.NullOmitted
 )
 
@@ -103,23 +105,29 @@ const (
 type PlanKind int
 
 const (
-	// KindAlwaysDenied means no row is accessible; the caller should skip the query entirely.
+	// KindAlwaysDenied means no row is accessible. Where is FALSE; the caller may skip the query
+	// entirely.
 	KindAlwaysDenied PlanKind = iota
-	// KindAlwaysAllowed means every row is accessible; the caller should apply no filter.
+	// KindAlwaysAllowed means every row is accessible. Where is TRUE.
 	KindAlwaysAllowed
-	// KindConditional means Where and Args carry the filter to apply.
+	// KindConditional means Where and Args carry the translated condition.
 	KindConditional
 )
 
 // Result is a translated plan.
 type Result struct {
-	// Where is the filter to apply, set only for KindConditional: a PostgreSQL boolean expression
-	// whose placeholders are numbered from $1, or from $n+1 under WithPlaceholderOffset(n).
+	// Where is the filter to apply, for every Kind: a PostgreSQL boolean expression whose
+	// placeholders are numbered from $1, or from $n+1 under WithPlaceholderOffset(n). It is never
+	// empty on a successful translation, so a caller that splices it without switching on Kind
+	// still gets exactly the rows the PDP allows
+	// (docs/adr/0011-denial-fails-closed-in-the-result.md).
 	Where string
 	// Args binds Where's placeholders, in order.
 	Args []any
 	Kind PlanKind
 }
+
+var alwaysDenied = Result{Kind: KindAlwaysDenied, Where: "FALSE"}
 
 // ErrUnsupported wraps every shape this adapter refuses to translate, so callers can distinguish
 // "the policy asks for something PostgreSQL cannot express" from a mapping or transport error.
@@ -134,7 +142,7 @@ type options struct {
 type Option func(*options)
 
 // WithNullRepresentation declares how the caller represents a NULL column in the attributes it
-// sends to check(). Defaults to NullExplicit.
+// sends to check(). Defaults to NullOmitted.
 func WithNullRepresentation(rep NullRepresentation) Option {
 	return func(o *options) { o.nullRepresentation = rep }
 }
@@ -161,21 +169,21 @@ func Translate(plan *responsev1.PlanResourcesResponse, table string, mapper Mapp
 		return Result{}, fmt.Errorf("cerbospgx: mapper is required")
 	}
 
-	cfg := options{}
+	cfg := options{nullRepresentation: NullOmitted}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	filter := plan.GetFilter()
 	if filter == nil {
-		return Result{Kind: KindAlwaysDenied}, nil
+		return alwaysDenied, nil
 	}
 
 	switch filter.GetKind() {
 	case enginev1.PlanResourcesFilter_KIND_ALWAYS_DENIED:
-		return Result{Kind: KindAlwaysDenied}, nil
+		return alwaysDenied, nil
 	case enginev1.PlanResourcesFilter_KIND_ALWAYS_ALLOWED:
-		return Result{Kind: KindAlwaysAllowed}, nil
+		return Result{Kind: KindAlwaysAllowed, Where: "TRUE"}, nil
 	case enginev1.PlanResourcesFilter_KIND_CONDITIONAL:
 	default:
 		return Result{}, fmt.Errorf("cerbospgx: unrecognised filter kind %s", filter.GetKind())

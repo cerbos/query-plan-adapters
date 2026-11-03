@@ -616,6 +616,22 @@ const buildSizeExpression = (
     const leading = resolved.relations.slice(0, -1);
     const tableName = resolveTableName(primary.table, operand.name);
     const chainWhere = chainCorrelation(primary, leading, operand.name, options);
+    // A chain ending in a to-ONE hop names a scalar of that hop's row, and size() of it is a
+    // string length: counting the row made `size(parent.aString)` 1 for every row with a parent.
+    // No hop row, or a NULL column, leaves the subquery NULL, the missing-path error CEL denies.
+    if (primary.type === "one") {
+      const scalarColumn = columnForOperand(operand, mapper);
+      if (scalarColumn && scalarColumn.dataType !== "string") return sql`null`;
+      const length = characterLength([scalarColumn])(
+        buildColumnExpression(resolved.mapping, operand.name),
+      );
+      return requireLeadingHops(
+        leading,
+        sql`(select ${length} from ${sql.identifier(tableName)} where ${chainWhere})`,
+        operand.name,
+        options,
+      );
+    }
     // An absent to-one parent must count as UNKNOWN, not 0: `size(chain) == 0` and
     // `size(chain) >= 0` are both TRUE over an empty count and would return every
     // parentless row (#309).

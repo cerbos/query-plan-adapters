@@ -87,9 +87,8 @@ async function translate(
   return queryPlanToDrizzle({
     queryPlan: await planOf(golden(id), options.now),
     mapper: options.mapper ?? MAPPERS[store],
-    ...(options.nullAttributeRepresentation
-      ? { nullAttributeRepresentation: options.nullAttributeRepresentation }
-      : {}),
+    // Varied explicitly below; the adapter's own default is pinned under "nullAttributeRepresentation".
+    nullAttributeRepresentation: options.nullAttributeRepresentation ?? "explicit",
   });
 }
 
@@ -270,6 +269,16 @@ describe("nullAttributeRepresentation", () => {
   // missing-attribute error — under both polarities — where the explicit filter returns exactly
   // those rows (#302). Omitted is recognisable by that guard: NULL, never a match.
   const OMITTED_GUARD = "is null then null else";
+
+  test("unset: the default is omitted", async () => {
+    // The default is the convention whose wrong guess fails closed (ADR 0011).
+    const result = queryPlanToDrizzle({
+      queryPlan: await planOf(golden(NULL_EQ_MISSING)),
+      mapper: UNDECLARED,
+    });
+    if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
+    expect(render("postgresql", result.filter).sql).toContain(OMITTED_GUARD);
+  });
 
   // #308. A per-attribute declaration overrides the call-level option in both directions.
   test("a per-attribute declaration overrides the call-level option", async () => {

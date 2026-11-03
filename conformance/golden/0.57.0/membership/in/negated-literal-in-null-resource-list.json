@@ -1,0 +1,92 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "membership/in/negated-literal-in-null-resource-list",
+  "intent": "Negated membership of a literal in a number list attribute that one row (j4) sends as null.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": 2
+                },
+                {
+                  "variable": "request.resource.attr.aNumberList"
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "membership/in/negated-literal-in-null-resource-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(2 in R.attr.aNumberList)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "`2 in null` has no overload, so CEL errors and denies j4 under both polarities; negating the membership with a store NOT (a $nor, a NOT EXISTS over no elements) is true for a null or absent list and over-grants it."
+}

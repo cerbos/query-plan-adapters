@@ -10,6 +10,7 @@ import type { TranslationContext } from "./mapping";
 import { isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
 import { substituteLambdaVariable } from "./rewrite";
+import { constantPresence } from "./presence";
 import { presence } from "./types";
 
 /** The iteration variable of a macro this module builds; no policy can spell the name. */
@@ -26,6 +27,7 @@ export function rewriteFunctionCalls(
     operands: expr.operands.map((operand) => rewriteFunctionCalls(operand, context)),
   };
   return (
+    constantPresence(node, context) ??
     memberRead(node, context) ??
     emptinessComparison(node) ??
     subsetTest(node) ??

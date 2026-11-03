@@ -48,6 +48,13 @@ cases:
   condition:
     match:
       expr: 2 in R.attr.aNumberList
+- id: 'membership/in/negated-literal-in-null-resource-list'
+  tier: adversarial
+  intent: 'Negated membership of a literal in a number list attribute that one row (j4) sends as null.'
+  trap: '`2 in null` has no overload, so CEL errors and denies j4 under both polarities; negating the membership with a store NOT (a $nor, a NOT EXISTS over no elements) is true for a null or absent list and over-grants it.'
+  condition:
+    match:
+      expr: '!(2 in R.attr.aNumberList)'
 - id: 'membership/in/map-attribute-keys'
   tier: adversarial
   intent: 'A string literal in the map-valued parent attribute, which tests its keys ("inner" in parent).'

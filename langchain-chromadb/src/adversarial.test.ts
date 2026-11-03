@@ -16,8 +16,13 @@ import {
   planOf,
   readCorpusJson,
   readGoldens,
+  assertFuzzVerdict,
+  FUZZ_DIR,
+  fuzzThrown,
+  fuzzVerdict,
+  writeFuzzResults,
 } from "./corpus";
-import type { Golden } from "./corpus";
+import type { FuzzVerdict, Golden } from "./corpus";
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -182,23 +187,49 @@ async function translate(golden: Golden) {
 
 async function selectAllowed(golden: Golden): Promise<string[]> {
   const result = await translate(golden);
-  if (result.kind === PlanKind.ALWAYS_DENIED) return [];
-  const rows = await collection!.get({
-    where: result.kind === PlanKind.CONDITIONAL ? result.filters : undefined,
-    include: ["metadatas"],
-  });
+  if (result.kind !== PlanKind.CONDITIONAL) {
+    return result.kind === PlanKind.ALWAYS_DENIED
+      ? []
+      : (await collection!.get()).ids.sort();
+  }
+  if (!("postFilter" in result)) {
+    return (await collection!.get({ where: result.filters })).ids.sort();
+  }
   const { postFilter } = result;
   // The post-filter is part of the authorization predicate: it is applied to every record the
-  // `where` returned, exactly as a caller must.
-  return rows.ids
-    .filter((_id, index) => !postFilter || postFilter(rows.metadatas[index]))
+  // prefilter returned, exactly as a caller must. Its prefilter only narrows, so the post-filter
+  // alone over every record has to agree.
+  const narrowed = await collection!.get({
+    where: result.prefilter,
+    include: ["metadatas"],
+  });
+  const ids = narrowed.ids
+    .filter((_id, index) => postFilter(narrowed.metadatas[index]))
     .sort();
+  if (result.prefilter !== undefined) {
+    const every = await collection!.get({ include: ["metadatas"] });
+    const alone = every.ids
+      .filter((_id, index) => postFilter(every.metadatas[index]))
+      .sort();
+    expect(alone).toEqual(ids);
+  }
+  return ids;
 }
 
 const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
+const fuzzResults: FuzzVerdict[] = [];
+
+/** A fuzz case judged on this store (conformance/README.md, "Fuzzing"). */
+async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+  try {
+    return fuzzVerdict(golden, golden.allowed, await selectAllowed(golden));
+  } catch (error) {
+    return fuzzThrown(golden, error, UnsupportedOperatorError);
+  }
+}
 const skipped: Record<string, Record<string, number>> = {};
 
 beforeAll(async () => {
@@ -218,6 +249,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (collection) await chroma.deleteCollection({ name: COLLECTION_NAME });
+  writeFuzzResults("langchain-chromadb", "chroma", fuzzResults);
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
     return `${tag}: ${tiers
@@ -232,7 +264,7 @@ afterAll(async () => {
 });
 
 describe("conformance (chromadb)", () => {
-  test("the ledger names no case without a golden file", () => {
+  (FUZZ_DIR ? test.skip : test)("the ledger names no case without a golden file", () => {
     const ids = new Set(
       TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)),
     );
@@ -283,6 +315,12 @@ describe("conformance (chromadb)", () => {
     test.each(cases.map((golden) => [golden.id, golden] as const))(
       `${tag} %s`,
       async (_id, golden) => {
+        if (FUZZ_DIR) {
+          const verdict = await fuzzReplay(golden);
+          fuzzResults.push(verdict);
+          assertFuzzVerdict(verdict);
+          return;
+        }
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
           await expect(translate(golden)).rejects.toThrow(

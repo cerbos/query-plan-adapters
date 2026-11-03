@@ -90,7 +90,7 @@ class Translator:
         overrides: dict[str, Callable[[Any, Any], Any]],
         null_conventions: dict[str, NullAttributeRepresentation],
         declared_collections: dict[str, CollectionColumn],
-        null_fallback: NullAttributeRepresentation = "explicit",
+        null_fallback: NullAttributeRepresentation = "omitted",
     ) -> None:
         self._attr_map = attr_map
         # No None values: an operator is overridden exactly when it is a key here.
@@ -140,6 +140,10 @@ class Translator:
     def _apply(self, operator: str, left: Any, right: Any) -> Any:
         """Lower one operator with the caller's override, else the default."""
         override = self._overrides.get(operator)
+        if operator == "lambda" and isinstance(left, bool):
+            # The planner folds a lambda body it can decide to a bare value: `t.name in []`
+            # arrives as `false`, and the macro around the body needs a SQL expression.
+            left = true() if left else false()
         if override is not None:
             return override(left, right)
         default = OPERATOR_FNS.get(operator)
@@ -756,14 +760,21 @@ class Translator:
         ``has(parent.x)`` on a parentless row denies under both polarities, while a
         mapped expression for ``parent.x`` is NULL there and its negation selects the row.
         The attribute map cannot say whether a mapped prefix can be absent, so a reference
-        below one is refused unless an ``operator_override_fns`` entry for ``has`` answers it.
+        below one, at any depth, is refused unless an ``operator_override_fns`` entry for
+        ``has`` answers it: ``parent.inner`` need not be mapped for ``has(parent.inner.x)``
+        to select through a missing ``parent``.
         """
         (operand,) = operands if len(operands) == 1 else (None,)
         if not isinstance(operand, Variable):
             raise UnsupportedPlanError("has requires exactly one attribute reference")
         name = operand.name
-        prefix = name.rsplit(".", 1)[0]
-        if prefix.startswith("request.") and prefix in self._attr_map:
+        segments = name.split(".")
+        prefixes = [".".join(segments[:end]) for end in range(len(segments) - 1, 0, -1)]
+        prefix = next(
+            (p for p in prefixes if p.startswith("request.") and p in self._attr_map),
+            None,
+        )
+        if prefix is not None:
             raise UnsupportedPlanError(
                 f"Cannot translate has({name}): {prefix} is itself mapped, so it can be "
                 "absent, and a has() through a missing parent is an error CEL denies under "

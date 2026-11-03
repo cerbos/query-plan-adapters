@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a2",
+    "b1",
+    "b6",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/negated-one-hop-against-two-hops",
+  "intent": "The negated cross-depth comparison (!(parent.aBool == parent.inner.aBool)).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aBool"
+                },
+                {
+                  "variable": "request.resource.attr.parent.inner.aBool"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/negated-one-hop-against-two-hops",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(R.attr.parent.aBool == R.attr.parent.inner.aBool)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a2, b1, b6 and f1 differ; the rows with a parent but no inner are missing-attribute errors that deny, so a negation that does not require the inner hop over-grants a3, a7, a9, b2, c1 and d1."
+}

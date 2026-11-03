@@ -1,5 +1,8 @@
 {
   "adapter": "prisma",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as AdversarialNumberListElement rows, a one-to-many relation, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
   "cases": {
     "arithmetic/add/int-beside-double-field": {
       "status": "unsupported",
@@ -205,6 +208,10 @@
       "status": "unsupported",
       "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "status": "unsupported",
+      "reason": "List indexing under negation (!(tags[0].name == \"public\")): a Prisma relation filter (some/every/none) has no positional element access."
+    },
     "collection/index/negated-first-element-of-string-list": {
       "status": "unsupported",
       "reason": "Indexing a scalar list needs a positional read of an array column, which Prisma's filter API cannot express. The refusal arrives one node earlier than collection/index/first-element-of-object-list's, because there is no get-field projection wrapping this index"
@@ -236,6 +243,14 @@
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements; the translator refuses before constructing a filter."
+    },
+    "conditional/ternary/index-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "Same index() refusal as collection/index/first-element-of-boolean-list: the then branch reads aBoolList[0]."
+    },
+    "conditional/ternary/missing-attribute-in-untaken-branch": {
+      "status": "unsupported",
+      "reason": "Same refusal as string/contains/field-to-field: the else branch is contains() with a column-valued needle, which would need per-row LIKE escaping Prisma filters cannot express."
     },
     "hierarchy/descendent-of/bracket-in-path": {
       "status": "unsupported",
@@ -324,6 +339,22 @@
     "regex/matches/whitespace-class": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and \\s* anchored at both ends (a string made only of RE2 whitespace) has no LIKE spelling: LIKE has no character classes, so the translator refuses the \\s escape"
+    },
+    "relation/equals/negated-one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `relation/not-equals/one-hop-against-explicit-null-field`, under negation."
+    },
+    "relation/equals/negated-one-hop-against-two-hops": {
+      "status": "unsupported",
+      "reason": "Prisma field references only work between fields of the same model; `parent.aBool` and `parent.inner.aBool` are columns of two different models, so the adapter throws"
+    },
+    "relation/equals/one-hop-against-two-hops": {
+      "status": "unsupported",
+      "reason": "Prisma field references only work between fields of the same model; `parent.aBool` and `parent.inner.aBool` are columns of two different models, so the adapter throws"
+    },
+    "relation/not-equals/one-hop-against-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Prisma field references only compare fields of the same model, so a parent field against a root field is refused."
     },
     "size/equals/filtered-collection": {
       "status": "unsupported",

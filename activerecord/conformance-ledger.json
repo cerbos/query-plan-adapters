@@ -1,5 +1,8 @@
 {
   "adapter": "activerecord",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as adversarial_number_list_elements rows, a has_many association, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
   "cases": {
     "arithmetic/divide/field-by-field": {
       "reason": "The denominator is a DIFFERENT column, so it may be zero on a row where the numerator is not. CEL divides to a signed Infinity and IEEE-754 keeps the sign of the zero; SQL cannot tell -0.0 from 0.0, and a NULLIF guard collapses both to NULL. The sign of the Infinity decides which side of an order comparison the row falls on, so no guard recovers it and the adapter refuses. A constant denominator, or a column divided by itself, stays translatable",
@@ -109,6 +112,10 @@
       "reason": "Positional access into a list of numbers, the same refusal as `collection/index/first-element-of-string-list`: `index` has no case in the translator's operator dispatch, so the walk falls through to the generic unsupported-operator refusal before the comparison around it is built. `aNumberList` is a has_many association mapped by member field, and a relation mapping carries no element order, so `aNumberList[0]` names whichever row the engine returns first without an ORDER BY the plan does not carry. A caller whose element table has a position column, as the harness table does, can supply the override the message offers",
       "status": "unsupported"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "reason": "A has_many relation has no element order, so list indexing is refused.",
+      "status": "unsupported"
+    },
     "collection/index/negated-first-element-of-string-list": {
       "reason": "Positional access into a scalar list. `index` has no case in the translator's operator dispatch at all, so the walk falls through to the generic unsupported-operator refusal rather than to a leaf-operand guard — which is why the message names the operator and offers an override. No case was written because row order in a SQL relation is not defined without an ORDER BY the plan does not carry: `tagNames` is a has_many association, and `tagNames[0]` names whichever row the engine happens to return first. A caller whose table has a deterministic ordering column can express it faithfully, and the override the message offers is that escape hatch",
       "status": "unsupported"
@@ -135,6 +142,10 @@
     },
     "comparison/not-equals/whole-list-literal": {
       "reason": "A relational collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member.",
+      "status": "unsupported"
+    },
+    "conditional/ternary/index-in-untaken-branch": {
+      "reason": "Same index() refusal as collection/index/first-element-of-boolean-list: the then branch reads aBoolList[0].",
       "status": "unsupported"
     },
     "membership/in/map-attribute-keys": {

@@ -85,7 +85,14 @@ func testMapper() cerbosent.Mapper {
 
 func translate(t *testing.T, cond *operand, opts ...cerbosent.Option) (cerbosent.Result, error) {
 	t.Helper()
-	return cerbosent.Translate(conditional(cond), "resource", testMapper(), opts...)
+	return cerbosent.Translate(conditional(cond), "resource", testMapper(), explicitUnlessSaid(opts)...)
+}
+
+// explicitUnlessSaid runs a translation under NullExplicit, the convention most of these tests
+// vary from, unless opts declares one. The adapter's own default is pinned by
+// TestTheDefaultNullRepresentationIsOmitted.
+func explicitUnlessSaid(opts []cerbosent.Option) []cerbosent.Option {
+	return append([]cerbosent.Option{cerbosent.WithNullRepresentation(cerbosent.NullExplicit)}, opts...)
 }
 
 // renderWhere renders a predicate through ent's builder and returns just the WHERE fragment.
@@ -112,7 +119,7 @@ func renderWhere(t *testing.T, d string, predicate *entsql.Predicate) (string, [
 func whereFor(t *testing.T, d string, mapper cerbosent.Mapper, cond *operand, opts ...cerbosent.Option) (string, []any) {
 	t.Helper()
 
-	result, err := cerbosent.Translate(conditional(cond), "resource", mapper, append(opts, cerbosent.WithDialect(d))...)
+	result, err := cerbosent.Translate(conditional(cond), "resource", mapper, append(explicitUnlessSaid(opts), cerbosent.WithDialect(d))...)
 	require.NoError(t, err)
 	require.Equal(t, cerbosent.KindConditional, result.Kind)
 	return renderWhere(t, d, result.Predicate)
@@ -188,14 +195,16 @@ func TestMalformedPlansReturnErrors(t *testing.T) {
 }
 
 // TestNilConditionIsNotAnAllow pins the fail-closed direction of a filter with no condition: it
-// must never widen into "no filter", which would return every row.
+// must never widen into "no filter", which would return every row. No PDP sends a plan without a
+// filter, so no case can.
 func TestNilConditionIsNotAnAllow(t *testing.T) {
 	t.Parallel()
 
 	result, err := cerbosent.Translate(&responsev1.PlanResourcesResponse{}, "resource", testMapper())
 	require.NoError(t, err)
 	require.Equal(t, cerbosent.KindAlwaysDenied, result.Kind)
-	require.Nil(t, result.Predicate)
+	where, _ := renderWhere(t, dialect.SQLite, result.Predicate)
+	require.Equal(t, "FALSE", where)
 }
 
 // TestUnrecognisedFilterKindIsRejected covers the remaining wire value: an unset kind is neither of
@@ -842,4 +851,21 @@ func TestDialectValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTheDefaultNullRepresentationIsOmitted pins the call-level default, which no case can vary:
+// it is the convention whose wrong guess is a refusal rather than an over-grant (ADR 0011).
+func TestTheDefaultNullRepresentationIsOmitted(t *testing.T) {
+	t.Parallel()
+
+	unset := cerbosent.MapperMap{"request.resource.attr.owner": {Column: "owner"}}
+	nullIn := expr("in", variable("request.resource.attr.owner"), val(t, []any{"a", nil}))
+
+	_, err := cerbosent.Translate(conditional(nullIn), "resource", unset)
+	require.ErrorIs(t, err, cerbosent.ErrUnsupported)
+	require.Contains(t, err.Error(), "the default is NullOmitted")
+
+	_, err = cerbosent.Translate(conditional(nullIn), "resource", unset,
+		cerbosent.WithNullRepresentation(cerbosent.NullExplicit))
+	require.NoError(t, err)
 }

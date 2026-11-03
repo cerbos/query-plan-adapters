@@ -45,30 +45,48 @@ export const executePlan = query({
     const translated = queryPlanToConvex<
       FilterBuilder<DataModel["adversarial"]>,
       Expression<boolean>
-    >({ queryPlan, mapper: MAPPER, allowPostFilter: true });
+    >({
+      queryPlan,
+      mapper: MAPPER,
+      allowPostFilter: true,
+      // Every field the dataset omits when NULL is declared `nullable`; `owner` and the lists are
+      // sent as explicit nulls, which is the call-level convention this mapping runs under.
+      nullAttributeRepresentation: "explicit",
+    });
 
     // Reported alongside the ids so the harness can say how much of the corpus Convex's own
     // filter engine decided, rather than the adapter's in-memory post-filter.
     const execution = executionPathOf(translated);
-    if (translated.kind === PlanKind.ALWAYS_DENIED)
-      return { ids: [], execution };
 
-    let queryBuilder = ctx.db.query("adversarial");
-    if (
-      translated.kind === PlanKind.CONDITIONAL &&
-      translated.path !== "post"
-    ) {
-      queryBuilder = queryBuilder.filter(translated.filter);
+    const all = () => ctx.db.query("adversarial");
+    const idsOf = (docs: { id: string }[]) => docs.map((doc) => doc.id).sort();
+    if (translated.kind !== PlanKind.CONDITIONAL) {
+      return translated.kind === PlanKind.ALWAYS_DENIED
+        ? { ids: [], execution }
+        : { ids: idsOf(await all().collect()), execution };
     }
-    const docs = await queryBuilder.collect();
-    const ids = docs
-      .filter((doc) =>
-        translated.kind === PlanKind.CONDITIONAL && translated.path !== "db"
-          ? translated.postFilter({ ...doc })
-          : true,
-      )
-      .map((doc) => doc.id)
-      .sort();
+    if (translated.path === "db") {
+      return {
+        ids: idsOf(await all().filter(translated.filter).collect()),
+        execution,
+      };
+    }
+    const { postFilter } = translated;
+    const candidates = await (
+      translated.path === "split" ? all().filter(translated.prefilter) : all()
+    ).collect();
+    const ids = idsOf(candidates.filter((doc) => postFilter({ ...doc })));
+    // The prefilter only narrows: the post-filter alone, over every document, must agree.
+    if (translated.path === "split") {
+      const alone = idsOf(
+        (await all().collect()).filter((doc) => postFilter({ ...doc })),
+      );
+      if (JSON.stringify(alone) !== JSON.stringify(ids)) {
+        throw new Error(
+          `postFilter alone selected ${JSON.stringify(alone)}, with its prefilter ${JSON.stringify(ids)}`,
+        );
+      }
+    }
     return { ids, execution };
   },
 });

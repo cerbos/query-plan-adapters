@@ -113,11 +113,15 @@ export type Mapper =
  * The planner emits the same `eq(attr, null)` node either way, so the plan cannot reveal which
  * convention is in use and the adapter has to be told.
  *
- * - `"explicit"` (default) — a NULL column is sent as an explicit `null` attribute. CEL compares
+ * - `"explicit"` — a NULL column is sent as an explicit `null` attribute. CEL compares
  *   `null == null`, so `IS NULL` selects exactly the rows `check()` allows.
- * - `"omitted"` — a NULL column sends no attribute at all. CEL then raises a missing-attribute
- *   error, which Cerbos treats as a deny, so a filter that *selects* NULL rows returns rows the
+ * - `"omitted"` (default) — a NULL column sends no attribute at all. CEL then raises a
+ *   missing-attribute error, which Cerbos treats as a deny, so a filter that *selects* NULL rows returns rows the
  *   PDP denies. A null comparison operand is never translated into a NULL-selecting filter.
+ *
+ * The default is the convention whose wrong guess fails closed: a caller that actually sends
+ * explicit nulls loses the NULL rows, never gains rows the PDP denies
+ * (docs/adr/0011-denial-fails-closed-in-the-result.md).
  *
  * See https://github.com/cerbos/query-plan-adapters/issues/302.
  */
@@ -134,7 +138,7 @@ export interface QueryPlanToPrismaArgs {
   model?: string;
   /**
    * Which NULL-column representation the caller uses when building `check()` attributes.
-   * Defaults to `"explicit"`, preserving the historical `IS NULL` translation.
+   * Defaults to `"omitted"`, which never selects NULL rows for an undeclared attribute.
    */
   nullAttributeRepresentation?: NullAttributeRepresentation;
 }
@@ -155,7 +159,7 @@ export function queryPlanToPrisma({
   queryPlan,
   mapper = {},
   model,
-  nullAttributeRepresentation = "explicit",
+  nullAttributeRepresentation = "omitted",
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
   const context: TranslationContext = {
     mapper,

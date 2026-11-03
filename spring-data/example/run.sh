@@ -16,9 +16,10 @@ REPO_ROOT="$(cd "${ADAPTER_DIR}/.." && pwd)"
 
 cd "${EXAMPLE_DIR}"
 
-# 1. Install the adapter into mavenLocal. The example resolves it as a Maven coordinate
-#    (docs/adr/0002-examples-install-the-packed-artifact.md).
-echo "==> gradlew publishToMavenLocal (dev.cerbos:cerbos-spring-data)" >&2
+# 1. Install the jpa core and the adapter into mavenLocal. The example resolves them as Maven
+#    coordinates (docs/adr/0002-examples-install-the-packed-artifact.md).
+echo "==> gradlew publishToMavenLocal (dev.cerbos:cerbos-jpa, dev.cerbos:cerbos-spring-data)" >&2
+"${REPO_ROOT}/jpa/gradlew" -p "${REPO_ROOT}/jpa" publishToMavenLocal --no-daemon >&2
 "${ADAPTER_DIR}/gradlew" -p "${ADAPTER_DIR}" publishToMavenLocal --no-daemon >&2
 
 # 2. The example must not ship inside any adapter jar (ADR 0002).

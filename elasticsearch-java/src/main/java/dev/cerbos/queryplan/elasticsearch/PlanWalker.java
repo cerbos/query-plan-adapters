@@ -10,6 +10,7 @@ import static dev.cerbos.queryplan.elasticsearch.Refusals.malformed;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.ternaryUnsupported;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.unsupported;
 
+import com.google.protobuf.Value;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Options;
@@ -54,6 +55,13 @@ final class PlanWalker {
                 String field = scope.field(operand.getVariable());
                 yield leaf.operatorOrDefault("eq").apply(field, polarity.holds());
             }
+            // The planner folds a lambda body it can decide to a bare value: `t.name in []` arrives
+            // as `false`. A boolean holds or fails for every document alike; any other value where
+            // CEL needs a boolean is a no-overload error, which denies under both polarities.
+            case VALUE -> operand.getValue().getKindCase() == Value.KindCase.BOOL_VALUE
+                    && operand.getValue().getBoolValue() == polarity.holds()
+                    ? Queries.matchAll()
+                    : Queries.matchNone();
             default -> throw malformed("Unexpected operand type: " + operand.getNodeCase());
         };
     }

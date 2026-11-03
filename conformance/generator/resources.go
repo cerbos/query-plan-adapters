@@ -16,10 +16,21 @@ import (
 var (
 	seedKeys     = []string{"id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList", "tags", "subCategoryNames", "parentSeedId"}
 	seedNoteKey  = "note"
+	requiresKey  = "requires"
 	tagKeys      = []string{"id", "name"}
 	derivedKeys  = []string{"createdBy", "aDouble", "createdAt", "updatedAt", "scope", "labels"}
 	principalKey = []string{"id", "roles", "attr"}
 )
+
+// storeCapabilities are what a seed may require of a store beyond holding its attributes. A seed
+// that requires one is a resource some stores cannot hold at all: a harness whose ledger lacks the
+// capability does not load the seed and drops its id from every allowed set (README.md, "The
+// harness contract").
+var storeCapabilities = map[string]bool{
+	// A list attribute sent as null, kept apart from []. A store that holds a list as child rows
+	// keeps both as zero rows (#548).
+	"null-list": true,
+}
 
 // Dataset is the corpus as the PDP sees it: the principal verbatim, and one check() resource
 // per seed, in seeds.json order.
@@ -82,7 +93,7 @@ func loadDataset(conformanceDir string) (*Dataset, error) {
 
 	byID := map[string]map[string]any{}
 	for i, seed := range seedsFile.Seeds {
-		if err := assertKeys(fmt.Sprintf("seeds.json seeds[%d]", i), keysOf(seed), seedKeys, []string{seedNoteKey}); err != nil {
+		if err := assertKeys(fmt.Sprintf("seeds.json seeds[%d]", i), keysOf(seed), seedKeys, []string{seedNoteKey, requiresKey}); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -92,6 +103,9 @@ func loadDataset(conformanceDir string) (*Dataset, error) {
 			}
 		}
 		id := seed["id"].(string)
+		if err := checkRequires(id, seed[requiresKey]); err != nil {
+			errs = append(errs, err)
+		}
 		if _, dup := byID[id]; dup {
 			errs = append(errs, fmt.Errorf("seeds.json: duplicate seed id %q", id))
 		}
@@ -107,6 +121,13 @@ func loadDataset(conformanceDir string) (*Dataset, error) {
 	}
 	if len(derivedFile.Derived) != len(byID) {
 		errs = append(errs, errors.New("derived-fields.json must carry exactly one entry for each seed id"))
+	}
+	// A harness that does not load a seed must not find a row missing from anything it does load.
+	for _, seed := range seedsFile.Seeds {
+		pid, _ := seed["parentSeedId"].(string)
+		if p, ok := byID[pid]; ok && p[requiresKey] != nil {
+			errs = append(errs, fmt.Errorf("seeds.json: %q names parent %q, which requires %v: a harness that does not load the parent would lose the child's relation", seed["id"], pid, p[requiresKey]))
+		}
 	}
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
@@ -249,6 +270,26 @@ func relationAttr(seed map[string]any) map[string]any {
 	setUnlessNull(a, "aNumber", seed["aNumber"])
 	setUnlessNull(a, "aOptionalString", seed["aOptionalString"])
 	return a
+}
+
+// checkRequires accepts an absent requires, or a non-empty list of distinct known capabilities.
+func checkRequires(id string, v any) error {
+	if v == nil {
+		return nil
+	}
+	caps, ok := v.([]any)
+	if !ok || len(caps) == 0 {
+		return fmt.Errorf("seeds.json: %q: requires must be a non-empty list of store capabilities", id)
+	}
+	seen := map[any]bool{}
+	for _, c := range caps {
+		name, _ := c.(string)
+		if !storeCapabilities[name] || seen[c] {
+			return fmt.Errorf("seeds.json: %q: requires %v names an unknown or repeated capability (known: %v)", id, caps, sortedKeys(storeCapabilities))
+		}
+		seen[c] = true
+	}
+	return nil
 }
 
 func setUnlessNull(m map[string]any, k string, v any) {
