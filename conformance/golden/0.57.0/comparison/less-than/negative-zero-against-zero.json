@@ -1,0 +1,50 @@
+{
+  "allowed": [
+    "a1",
+    "a5",
+    "b3",
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-than/negative-zero-against-zero",
+  "intent": "aDouble < 0.0, where i5 holds the double -0.0.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aDouble"
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/negative-zero-against-zero",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aDouble < 0.0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL holds -0.0 equal to 0.0, so i5 is denied. A store that orders -0.0 below 0.0, as Lucene does for a double field, returns i5."
+}

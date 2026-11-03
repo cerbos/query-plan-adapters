@@ -1371,6 +1371,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber < -1
+    # comparison/less-than/negative-zero-against-zero
+    - actions:
+        - comparison/less-than/negative-zero-against-zero
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble < 0.0
     # comparison/less-than/value-first
     - actions:
         - comparison/less-than/value-first
@@ -1389,6 +1398,15 @@ resourcePolicy:
       condition:
         match:
           expr: '"one" != R.attr.aString'
+    # comparison/not-equals/negative-zero-against-zero
+    - actions:
+        - comparison/not-equals/negative-zero-against-zero
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble != 0.0
     # comparison/not-equals/whole-list-literal
     - actions:
         - comparison/not-equals/whole-list-literal
