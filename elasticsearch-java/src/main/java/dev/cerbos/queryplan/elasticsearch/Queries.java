@@ -18,11 +18,11 @@ final class Queries {
 
     /** Default translation of each leaf operator. A caller's override replaces an entry. */
     static final Map<String, OperatorFunction> DEFAULT_OPERATORS = Map.ofEntries(
-            Map.entry("eq", Queries::term),
-            Map.entry("lt", (field, value) -> range(field, "lt", value)),
-            Map.entry("gt", (field, value) -> range(field, "gt", value)),
-            Map.entry("le", (field, value) -> range(field, "lte", value)),
-            Map.entry("ge", (field, value) -> range(field, "gte", value)),
+            Map.entry("eq", (field, value) -> isZero(value) ? zero(field) : term(field, value)),
+            Map.entry("lt", (field, value) -> range(field, "lt", isZero(value) ? -0.0 : value)),
+            Map.entry("gt", (field, value) -> range(field, "gt", isZero(value) ? 0.0 : value)),
+            Map.entry("le", (field, value) -> range(field, "lte", isZero(value) ? 0.0 : value)),
+            Map.entry("ge", (field, value) -> range(field, "gte", isZero(value) ? -0.0 : value)),
             Map.entry("in", Queries::terms),
             Map.entry("contains", (field, value) -> wildcard(field, "*" + escapeWildcard(value) + "*")),
             Map.entry("startsWith", Queries::prefix),
@@ -36,7 +36,26 @@ final class Queries {
 
     /** A {@code terms} query; a scalar operand is read as a one-element list. */
     static Map<String, Object> terms(String field, Object value) {
-        return Map.of("terms", Map.of(field, value instanceof List<?> list ? list : List.of(value)));
+        List<?> values = value instanceof List<?> list ? list : List.of(value);
+        if (values.stream().noneMatch(Queries::isZero)) {
+            return Map.of("terms", Map.of(field, values));
+        }
+        List<?> nonZero = values.stream().filter(element -> !isZero(element)).toList();
+        return nonZero.isEmpty()
+                ? zero(field)
+                : boolShould(List.of(Map.of("terms", Map.of(field, nonZero)), zero(field)));
+    }
+
+    /**
+     * A double field indexes -0.0 and 0.0 as distinct points, so a term query for one misses the
+     * other and a range bound at zero takes or leaves -0.0 by sign. CEL holds them equal.
+     */
+    private static boolean isZero(Object value) {
+        return value instanceof Number number && number.doubleValue() == 0.0;
+    }
+
+    private static Map<String, Object> zero(String field) {
+        return Map.of("range", Map.of(field, Map.of("gte", -0.0, "lte", 0.0)));
     }
 
     static Map<String, Object> prefix(String field, Object value) {

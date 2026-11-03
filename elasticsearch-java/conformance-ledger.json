@@ -353,6 +353,10 @@
       "status": "unsupported",
       "reason": "filter() over the flat tagNames array evaluates its predicate per element, and errors on a null element, which Elasticsearch does not index; a flat keyword array has no per-element query scope, so the filtered list is a computed operand the Query DSL cannot build without scripts"
     },
+    "collection/filter/negated-literal-in-filtered-list": {
+      "status": "unsupported",
+      "reason": "filter() over the flat tagNames array evaluates its predicate per element, and errors on a null element, which Elasticsearch does not index; a flat keyword array has no per-element query scope, so the filtered list is a computed operand the Query DSL cannot build without scripts"
+    },
     "collection/has-intersection/negated-mapped-names": {
       "status": "unsupported",
       "reason": "Negated hasIntersection over the map() projection of the nested tags path: a bool.must_not of the nested query matches a document whose tags are missing (CEL error), and Elasticsearch does not index an empty nested array, so the two cannot be told apart"
@@ -526,6 +530,10 @@
       "reason": "Elasticsearch Query DSL cannot preserve CEL null/error semantics through a negated conditional value without scripts"
     },
     "conditional/ternary/nested-in-both-branches": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
+    },
+    "conditional/ternary/nested-in-condition": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
     },
