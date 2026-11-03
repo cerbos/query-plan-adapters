@@ -18,11 +18,12 @@
 #   elasticsearch-java  elasticsearch elasticsearch-next
 #   jpa                 h2 postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM passes through)
 #   spring-data         h2                       (ADAPTER_TEST_ORM passes through)
+#   exposed             h2 sqlite postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM: baseline, floor)
 #   efcore              sqlite postgres sqlserver   (needs the .NET 10 SDK)
 #
 # Legs run one at a time on purpose: several harnesses at once overload a laptop into timeouts and
 # out-of-memory kills that read as failures. Docker is needed for every adapter but SQLite-only
-# legs. Without a JDK on PATH the Java adapters run Gradle in eclipse-temurin:21-jdk.
+# legs. Without a JDK on PATH the JVM adapters run Gradle in eclipse-temurin:21-jdk.
 #
 # Caches (Gradle, pytest's basetemp) go under QPA_CACHE_DIR, default ~/.cache/query-plan-adapters,
 # not /tmp, which is often a small tmpfs.
@@ -34,7 +35,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CACHE_DIR="${QPA_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/query-plan-adapters}"
-# The JDK the Java adapters build in when none is on PATH. A toolchain, not a service the harness
+# The JDK the JVM adapters build in when none is on PATH. A toolchain, not a service the harness
 # talks to, so it is pinned here rather than in an <adapter>/*_IMAGE file.
 TEMURIN_IMAGE="eclipse-temurin:21-jdk@sha256:3e3c176ffed168beb42c607be9bc1639b466cf00261a0fb04425562c9d0c5c2b"
 mkdir -p "${CACHE_DIR}"
@@ -56,6 +57,7 @@ stores_for() {
     elasticsearch-java) echo "elasticsearch elasticsearch-next" ;;
     jpa) echo "h2 postgres mysql mysql-server-prep" ;;
     spring-data) echo "h2" ;;
+    exposed) echo "h2 sqlite postgres mysql mysql-server-prep" ;;
     efcore) echo "sqlite postgres sqlserver" ;;
     *) return 1 ;;
   esac
@@ -181,6 +183,13 @@ run_leg() { # <adapter> <store>
       ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true \
         gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
 
+    exposed:h2) gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
+    exposed:sqlite | exposed:postgres | exposed:mysql)
+      ADAPTER_TEST_DB="${store}" gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
+    exposed:mysql-server-prep)
+      ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true \
+        gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
+
     efcore:sqlite | efcore:postgres | efcore:sqlserver)
       command -v dotnet >/dev/null 2>&1 || die "efcore needs the .NET 10 SDK on PATH"
       ADAPTER_TEST_DB="${store}" dotnet test ;;
@@ -213,7 +222,7 @@ run_adapter() { # <adapter> [store...]
 }
 
 case "${1:-}" in
-  "" | -h | --help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "" | -h | --help) sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
   --list) for adapter in $(roster); do printf '%-20s %s\n' "${adapter}" "$(stores_for "${adapter}" || echo '(not in this script)')"; done; exit 0 ;;
   --all)
     for adapter in $(roster); do

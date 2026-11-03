@@ -8,9 +8,10 @@ check.
 - TypeScript: 2-space indent, camelCase functions, PascalCase types, ESM-friendly. Match the
   surrounding file: no formatter enforces this.
 - Java: 4-space indent, Java 17+; model closed sets with sealed interfaces and pattern matching.
+- Kotlin: 4-space indent, explicit API mode, Kotlin 2.2 language level.
 - Python: `pdm run format` and `pdm run lint` (isort and ruff) own the style, and CI runs both.
 - Tests sit beside the code: `*.test.ts` in `src/` (TypeScript), `tests/test_*.py` (Python),
-  `src/test/` (Java).
+  `src/test/` (Java, Kotlin).
 
 ## Refusals
 
@@ -54,7 +55,8 @@ Three kinds of material live only there, and they are not equal:
   over the whole dataset.
 - **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/src/corpus.ts`,
   `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, the Java
-  `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**,
+  `Corpus.java` files, `exposed/src/test/kotlin/dev/cerbos/queryplan/exposed/Corpus.kt`,
+  `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**,
   so every adapter stays standalone: a loader fix lands in each copy that needs it. Flag a diff that
   extracts a shared loader or adds a drift check between the copies. The vendored Go *translator*
   trees follow the opposite rule: byte-identical. See
