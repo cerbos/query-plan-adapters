@@ -43,8 +43,8 @@ import (
 // answerable from the repository alone. conformance/scripts/validate-corpus.sh asserts every
 // service image reference in the repository carries both halves.
 const (
-	postgresImage = "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
-	mysqlImage    = "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb"
+	postgresImage = "postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b"
+	mysqlImage    = "mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69"
 )
 
 const (
@@ -709,23 +709,23 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 		return entry, ok
 	})
 
-	result, err := cerbosent.Translate(plan, resourceTable, recording, cerbosent.WithDialect(s.target.dialect))
+	// Every column the dataset omits when NULL is declared NullConventionOmitted in the mapping. The
+	// call-level option covers what is left, list elements and principal-side literals, which the
+	// dataset sends as values; the adapter's own default is pinned in translate_test.go.
+	result, err := cerbosent.Translate(plan, resourceTable, recording,
+		cerbosent.WithDialect(s.target.dialect), cerbosent.WithNullRepresentation(cerbosent.NullExplicit))
 	if len(unmapped) > 0 {
 		return nil, fmt.Errorf("the harness mapping has no entry for %s (a harness defect, not a refusal)", strings.Join(unmapped, ", "))
 	}
 	if err != nil {
 		return nil, err
 	}
-	if result.Kind == cerbosent.KindAlwaysDenied {
-		return []string{}, nil
-	}
-
 	// The outer FROM holds only the resource table — every relation is reached through a
-	// correlated subquery — so an unqualified `id` is unambiguous here.
-	selector := entsql.Dialect(s.target.dialect).Select("id").From(entsql.Table(resourceTable))
-	if result.Kind == cerbosent.KindConditional {
-		selector.Where(result.Predicate)
-	}
+	// correlated subquery — so an unqualified `id` is unambiguous here. The predicate is applied
+	// without switching on Kind, as a caller that skips the switch would: every kind's Predicate
+	// must return exactly the rows the PDP allows on its own (ADR 0011).
+	selector := entsql.Dialect(s.target.dialect).Select("id").From(entsql.Table(resourceTable)).
+		Where(result.Predicate)
 
 	// Query() runs the predicate's closure — the second write pass. Translate already surfaced a
 	// render error from its own probe pass, so a failure here is one only this pass can reach, and
@@ -764,6 +764,8 @@ func TestAdversarialConformance(t *testing.T) {
 	for _, tgt := range targets() {
 		t.Run(tgt.name, func(t *testing.T) {
 			s := openStore(t, tgt, corpus)
+			var fuzzResults []FuzzVerdict
+			defer func() { writeFuzzResults(t, "ent", tgt.name, fuzzResults) }()
 			for _, tag := range corpus.Tags {
 				t.Run(tag, func(t *testing.T) {
 					// passed[tier] and total[tier] feed the summary logged at the end.
@@ -778,6 +780,12 @@ func TestAdversarialConformance(t *testing.T) {
 								t.Skip("plannerDivergence: the recorded plan and check() disagree under this PDP")
 							}
 							ids, err := s.filteredIDs(t.Context(), mapper, golden)
+							if fuzzDir != "" {
+								v := fuzzVerdict(golden, ids, err, cerbosent.ErrUnsupported)
+								fuzzResults = append(fuzzResults, v)
+								require.True(t, v.OK(), "%+v", v)
+								return
+							}
 							switch {
 							case !listed:
 								require.NoError(t, err)

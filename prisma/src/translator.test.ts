@@ -42,9 +42,8 @@ async function translate(
     queryPlan: await planFor(id),
     mapper: options.mapper ?? MAPPER,
     model: MODEL,
-    ...(options.nullAttributeRepresentation
-      ? { nullAttributeRepresentation: options.nullAttributeRepresentation }
-      : {}),
+    // Varied explicitly below; the adapter's own default is pinned under "nullAttributeRepresentation".
+    nullAttributeRepresentation: options.nullAttributeRepresentation ?? "explicit",
   });
 }
 
@@ -117,7 +116,14 @@ describe("nullAttributeRepresentation", () => {
   const MISSING = "null/equals/null-literal-on-missing-attribute";
   const NEVER = { kind: PlanKind.CONDITIONAL, filters: { NOT: { aOptionalString: { startsWith: "" } } } };
 
-  test("explicit (the default): == null is an IS NULL filter", async () => {
+  test("unset: the default is omitted, so == null selects no row", async () => {
+    // The default is the convention whose wrong guess fails closed (ADR 0011).
+    expect(
+      queryPlanToPrisma({ queryPlan: await planFor(MISSING), mapper: UNDECLARED, model: MODEL })
+    ).toEqual(NEVER);
+  });
+
+  test("explicit: == null is an IS NULL filter", async () => {
     expect(await translate(MISSING, { mapper: UNDECLARED })).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
       filters: { aOptionalString: { equals: null } },

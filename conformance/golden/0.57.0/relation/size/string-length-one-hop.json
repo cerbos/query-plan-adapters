@@ -1,0 +1,56 @@
+{
+  "allowed": [
+    "a7",
+    "b1",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/size/string-length-one-hop",
+  "intent": "size(parent.aString) <= 3: the length of a string reached through the to-one parent.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aString"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 3
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/size/string-length-one-hop",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.parent.aString) <= 3"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "size() of a scalar behind a to-one hop is a string length, not a count of the hop's rows: counting the parent row makes the size 1 and returns every row with a parent."
+}

@@ -44,7 +44,8 @@ starts).
 Or by hand:
 
 ```bash
-# terminal 1: install the adapter, start this example's PDP (ports 23592/23593)
+# terminal 1: install the jpa core and the adapter, start this example's PDP (ports 23592/23593)
+../../jpa/gradlew -p ../../jpa publishToMavenLocal
 ../gradlew -p .. publishToMavenLocal
 docker compose up -d
 
@@ -223,8 +224,8 @@ Two fixed findings only show on real MySQL/SQL Server, not H2, so they are cover
 
 `dev.cerbos:cerbos-spring-data` resolves from **mavenLocal as a real Maven coordinate**, so its POM
 and Gradle module metadata are exercised ([ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md)).
-`run.sh`, `smoke.sh` and `smoke-edge-cases.sh` each run `../gradlew -p .. publishToMavenLocal`
-themselves. It is not a composite build (`includeBuild("..")`), which would substitute the source
+Its POM brings `dev.cerbos:cerbos-jpa`, the translator it wraps, from mavenLocal too. `run.sh`,
+`smoke.sh` and `smoke-edge-cases.sh` each publish both, the core first. It is not a composite build (`includeBuild("..")`), which would substitute the source
 tree and skip the published metadata. Two consequences:
 
 - The example declares `cerbos-sdk-java` itself, because the adapter publishes the SDK at

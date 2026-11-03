@@ -16,9 +16,14 @@
 RSpec.describe "conformance" do
   before { ConformanceStore.establish! }
 
+  # Every column the dataset omits when NULL declares `null_representation: :omitted` in the
+  # mapping. The call-level value covers what is left, list elements and principal-side literals,
+  # which the dataset sends as values; the adapter's own default is pinned in
+  # adapter_contract_spec.rb.
   def ids(plan)
     Cerbos::ActiveRecord.query_plan_to_relation(
-      plan: plan, model: AdvResource, attributes: CorpusAttributes::ATTRIBUTES
+      plan: plan, model: AdvResource, attributes: CorpusAttributes::ATTRIBUTES,
+      null_attribute_representation: :explicit
     ).pluck(:id).sort
   end
 
@@ -37,6 +42,7 @@ RSpec.describe "conformance" do
   ConformanceCorpus::PDP_TAGS.each do |tag|
     describe "PDP #{tag}" do
       it "has a golden file for every case in the ledger" do
+        skip "a fuzz run is judged without the ledger" if ConformanceCorpus::FUZZ_DIR
         recorded = ConformanceCorpus.goldens(tag).map { |golden| golden.fetch("id") }
         expect(ConformanceCorpus::LEDGER.keys - recorded).to be_empty
       end
@@ -47,6 +53,13 @@ RSpec.describe "conformance" do
 
           plan = ConformanceCorpus.sdk_plan(golden)
           allowed = golden.fetch("allowed").sort
+
+          if ConformanceCorpus::FUZZ_DIR
+            verdict = ConformanceCorpus.fuzz_verdict(golden, allowed) { ids(plan) }
+            ConformanceCorpus.fuzz_results << verdict
+            expect(%w[match refused]).to include(verdict.fetch("verdict")), verdict.to_s
+            next
+          end
 
           case ConformanceCorpus.ledger_entry(golden.fetch("id"), tag)&.fetch("status")
           when nil then expect(ids(plan)).to eq(allowed)

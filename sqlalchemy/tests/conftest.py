@@ -177,6 +177,15 @@ def modern_resource_table():
     return ModernResource
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """Writes the harness's fuzz verdicts, when it replayed a fuzz run."""
+    harness = sys.modules.get("test_adversarial_conformance")
+    if harness is not None and harness.FUZZ_RESULTS:
+        from corpus import write_fuzz_results
+
+        write_fuzz_results("sqlalchemy", harness.FUZZ_RESULTS)
+
+
 def pytest_terminal_summary(terminalreporter):
     """Per-tier outcomes of the conformance harness, when it ran."""
     harness = sys.modules.get("test_adversarial_conformance")

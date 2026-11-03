@@ -70,10 +70,9 @@ The application's parameters sit next to its own columns and can use the plain f
 - **`assertOffsetIsLoadBearing`** is the negative control that keeps shape 5 from passing vacuously.
   It rebuilds the composed statement without the offset and requires that `checkPlaceholders`
   rejects it and that executing it anyway does not return the correct rows.
-- **`assertDenialCannotBeSpliced`** splices a denied plan's empty fragment into the composed
-  statement (`… WHERE (archived = $1 AND region = $2) AND `) and requires PostgreSQL to reject it
-  with `syntax error at end of input` and return no rows. A caller who ignores `Kind` gets a hard
-  failure, not the application's own rows.
+- **`assertDenialSplicesToNoRows`** splices a denied plan's `FALSE` into the composed statement
+  (`… WHERE (archived = $1 AND region = $2) AND (FALSE)`) and requires it to return no rows. A
+  caller who ignores `Kind` still gets the denial, not the application's own rows.
 
 These two controls are the only code that bypasses `checkPlaceholders`.
 
@@ -86,15 +85,14 @@ type error), so it is documented, here and in
 [the adapter's README](../README.md#composing-the-fragment-with-your-own-predicates), rather than
 asserted.
 
-### `KindAlwaysDenied` carries no fragment, and shape 5 depends on that
+### `KindAlwaysDenied` runs no query, and its `FALSE` covers a caller who forgets
 
-`Translate` returns `Where` and `Args` for `KindConditional` only; for a denial the caller runs no
-query (the switch in the [adapter's README](../README.md#quick-start)). As in
-[`ent/example/`](../../ent/example/README.md), the application's predicate has nothing to be ANDed
-with and cannot resurrect a denied row, so shape 5 asserts `KIND_ALWAYS_DENIED` with no ids while the
-application predicate is in place. The adapter never renders `WHERE false` for a denial, so the
-composed-over-denied statement is not executed; `assertDenialCannotBeSpliced` covers the mistake
-instead.
+For a denial the caller runs no query (the switch in the
+[adapter's README](../README.md#quick-start)). As in [`ent/example/`](../../ent/example/README.md),
+the application's predicate has nothing to be ANDed with and cannot resurrect a denied row, so
+shape 5 asserts `KIND_ALWAYS_DENIED` with no ids while the application predicate is in place. A
+caller who skips the switch splices the denial's `Where`, which is `FALSE`;
+`assertDenialSplicesToNoRows` runs exactly that mistake and requires no rows.
 
 ### The attribute map
 

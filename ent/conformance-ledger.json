@@ -1,5 +1,8 @@
 {
   "adapter": "ent",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as element rows in a child table, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
   "cases": {
     "arithmetic/add/int-beside-double-field": {
       "reason": "int() cannot be lowered to a SQL CAST, which reads a numeric prefix where CEL requires the whole string and rounds where CEL truncates, so the int + double sum over it (a CEL no-such-overload error) is never reached.",
@@ -177,6 +180,10 @@
       "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (an array or JSON column).",
       "status": "unsupported"
     },
+    "collection/index/negated-first-element-of-object-list": {
+      "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from.",
+      "status": "unsupported"
+    },
     "collection/index/negated-first-element-of-string-list": {
       "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (an array or JSON column).",
       "status": "unsupported"
@@ -211,6 +218,10 @@
     },
     "comparison/not-equals/whole-list-literal": {
       "reason": "The mapped relation stores individual members, and cannot be resolved as one scalar comparison operand for whole-list equality.",
+      "status": "unsupported"
+    },
+    "conditional/ternary/index-in-untaken-branch": {
+      "reason": "Same index() refusal as collection/index/first-element-of-boolean-list: the then branch reads aBoolList[0].",
       "status": "unsupported"
     },
     "hierarchy/ancestor-of/empty-delimiter": {

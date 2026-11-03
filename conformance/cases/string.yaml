@@ -143,6 +143,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString == "héllo🚀"'
+- id: 'string/equals/trailing-space'
+  tier: adversarial
+  intent: 'String equality where the column or the literal differs only by trailing spaces (i2 "51 " against "51", a1 "one" against "one ").'
+  trap: 'CEL equality is exact. SQL Server''s = pads the shorter side with spaces under every collation, so it matches "51 " to "51" and "one" to "one " and over-grants i2 and a1.'
+  condition:
+    match:
+      expr: 'R.attr.aString == "51" || R.attr.aString == "one " || R.attr.aString == "ab"'
 - id: 'string/starts-with/bracket-in-needle'
   tier: adversarial
   intent: 'startsWith with a needle containing square brackets ("[SEC]").'

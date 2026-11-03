@@ -11,6 +11,10 @@ import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core"
 
 import { queryPlanToPrisma, PlanKind, UnsupportedQueryPlanError } from ".";
 import {
+  assertFuzzVerdict,
+  FUZZ_DIR,
+  fuzzThrown,
+  fuzzVerdict,
   MAPPER,
   MODEL,
   pdpTags,
@@ -18,8 +22,9 @@ import {
   readCorpusJson,
   readGolden,
   readGoldens,
+  writeFuzzResults,
 } from "./corpus";
-import type { Golden } from "./corpus";
+import type { FuzzVerdict, Golden } from "./corpus";
 import { prisma } from "./test-setup.adversarial";
 
 /**
@@ -55,6 +60,8 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  /** The store capabilities the row needs (conformance/README.md, "The harness contract"). */
+  requires?: string[];
 }
 
 interface DerivedEntry {
@@ -66,7 +73,27 @@ interface DerivedEntry {
   labels: (string | null)[];
 }
 
-const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+// A seed requiring a capability the ledger's `lacks` names is a resource this store cannot hold:
+// it is not loaded, and its id is struck from every allowed set.
+const LACKS = Object.keys(
+  (
+    JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "conformance-ledger.json"), "utf8")
+    ) as { lacks?: Record<string, string> }
+  ).lacks ?? {}
+);
+const UNHELD = new Set(
+  (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds
+    .filter((seed) => seed.requires?.some((capability) => LACKS.includes(capability)))
+    .map((seed) => seed.id)
+);
+const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds.filter(
+  (seed) => !UNHELD.has(seed.id)
+);
+
+function held(allowed: string[]): string[] {
+  return allowed.filter((id) => !UNHELD.has(id));
+}
 const DERIVED = (
   readCorpusJson("derived-fields.json") as { derived: Record<string, DerivedEntry> }
 ).derived;
@@ -232,8 +259,19 @@ async function selectIds(where: object): Promise<string[]> {
   return rows.map((row) => row.id).sort();
 }
 
+// Every attribute the dataset omits when NULL is declared `omitted` in MAPPER. The call-level
+// option covers what is left, the list and relation elements, which the dataset sends as values;
+// the adapter's own default is pinned in translator.test.ts.
+const translatePlan = (queryPlan: PlanResourcesResponse) =>
+  queryPlanToPrisma({
+    queryPlan,
+    mapper: MAPPER,
+    model: MODEL,
+    nullAttributeRepresentation: "explicit",
+  });
+
 async function selectAllowed(queryPlan: PlanResourcesResponse): Promise<string[]> {
-  const result = queryPlanToPrisma({ queryPlan, mapper: MAPPER, model: MODEL });
+  const result = translatePlan(queryPlan);
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
   return selectIds(result.kind === PlanKind.CONDITIONAL ? result.filters : {});
 }
@@ -264,6 +302,16 @@ const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
+const fuzzResults: FuzzVerdict[] = [];
+
+/** A fuzz case judged on this store (conformance/README.md, "Fuzzing"). */
+async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+  try {
+    return fuzzVerdict(golden, held(golden.allowed).sort(), await selectAllowed(await planOf(golden)));
+  } catch (error) {
+    return fuzzThrown(golden, error, UnsupportedQueryPlanError);
+  }
+}
 
 beforeAll(async () => {
   // CEL string matching is case-sensitive, and this adapter lowers contains/startsWith/endsWith to
@@ -277,6 +325,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.$disconnect();
+  writeFuzzResults("prisma", `${STORE_NAME}-v${process.env["PRISMA_VERSION"] ?? "7"}`, fuzzResults);
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
     const skipped = GOLDENS.get(tag)!.filter((golden) => golden.plannerDivergence !== null);
@@ -339,7 +388,7 @@ describe(`conformance (${STORE_NAME})`, () => {
     }
   });
 
-  test("the ledger names no case without a golden file", () => {
+  (FUZZ_DIR ? test.skip : test)("the ledger names no case without a golden file", () => {
     const ids = new Set(TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)));
     expect(Object.keys(LEDGER).filter((id) => !ids.has(id))).toEqual([]);
   });
@@ -363,17 +412,21 @@ describe(`conformance (${STORE_NAME})`, () => {
     test.each(cases.map((golden) => [golden.id, golden] as const))(
       `${tag} %s`,
       async (_id, golden) => {
+        if (FUZZ_DIR) {
+          const verdict = await fuzzReplay(golden);
+          fuzzResults.push(verdict);
+          assertFuzzVerdict(verdict);
+          return;
+        }
         const entry = ledgerEntry(golden, tag);
         const queryPlan = await planOf(golden);
         if (entry?.status === "unsupported") {
-          expect(() =>
-            queryPlanToPrisma({ queryPlan, mapper: MAPPER, model: MODEL })
-          ).toThrow(UnsupportedQueryPlanError);
+          expect(() => translatePlan(queryPlan)).toThrow(UnsupportedQueryPlanError);
           return;
         }
         // Both sides sorted the same way, so a divergent entry cannot pass on ordering alone.
         const ids = await selectAllowed(queryPlan);
-        const allowed = [...golden.allowed].sort();
+        const allowed = held(golden.allowed).sort();
         if (entry?.status === "divergent") {
           expect(ids).not.toEqual(allowed);
           return;
@@ -397,7 +450,7 @@ describe(`conformance (${STORE_NAME})`, () => {
 // recorded check() decision from a golden file, never a hand-computed row list.
 
 describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
-  const allowedFor = (id: string) => readGolden(TAGS[0]!, id).allowed;
+  const allowedFor = (id: string) => held(readGolden(TAGS[0]!, id).allowed);
 
   async function synthetic(condition: PlanExpressionOperand): Promise<string[]> {
     const queryPlan: PlanResourcesResponse = {

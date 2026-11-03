@@ -12,6 +12,7 @@ import { PlanKind, queryPlanToMongoose, UnsupportedQueryPlanError } from ".";
 import type {
   Mapper,
   MapperConfig,
+  MongooseFilter,
   NullAttributeRepresentation,
   QueryPlanToMongooseResult,
 } from ".";
@@ -44,13 +45,22 @@ function translatePlan(
   queryPlan: PlanResourcesResponse,
   options: TranslateOptions = {},
 ): QueryPlanToMongooseResult {
+  // The conformance mapping's convention, as the harness passes it; the adapter's own default is
+  // pinned in "nullAttributeRepresentation" below.
   return queryPlanToMongoose({
     queryPlan,
     mapper: options.mapper ?? MAPPER,
-    ...(options.nullAttributeRepresentation
-      ? { nullAttributeRepresentation: options.nullAttributeRepresentation }
-      : {}),
+    nullAttributeRepresentation:
+      options.nullAttributeRepresentation ?? "explicit",
   });
+}
+
+/** A conditional result's filter: the union has none to read on any other kind. */
+function filtersOf(result: QueryPlanToMongooseResult): MongooseFilter {
+  if (result.kind !== PlanKind.CONDITIONAL) {
+    throw new Error(`translated to ${result.kind}, not a filter`);
+  }
+  return result.filters;
 }
 
 async function translate(
@@ -107,6 +117,16 @@ describe("nullAttributeRepresentation", () => {
   // Mongoose expresses it twice over: per attribute with the `nullable` mapper flag (which the
   // conformance mapping declares, so the harness replays that case under it), and globally with
   // this switch, which is the default for every entry that declares no `nullable` (#493).
+  test("unset: the default is omitted, so the plan is refused", async () => {
+    // The default is the convention whose wrong guess fails closed (ADR 0011).
+    const queryPlan = await planFor(
+      "null/equals/null-literal-on-missing-attribute",
+    );
+    expect(() => queryPlanToMongoose({ queryPlan, mapper: MAPPER })).toThrow(
+      'the default is "omitted"',
+    );
+  });
+
   test("omitted: the same plan is refused rather than translated", async () => {
     // A NULL field sends no attribute, so check() denies on a missing-attribute error while a
     // null-selecting filter would return exactly those documents (#302).
@@ -334,12 +354,12 @@ describe("omitted: an undeclared entry is nullable", () => {
     async (id, field) => {
       const mapper = undeclared(field);
       expect(
-        topLevelConjuncts((await translate(id, { mapper })).filters),
+        topLevelConjuncts(filtersOf(await translate(id, { mapper }))),
       ).not.toContainEqual({
         [field]: { $ne: null },
       });
       expect(
-        topLevelConjuncts((await omitted(id, mapper)).filters),
+        topLevelConjuncts(filtersOf(await omitted(id, mapper))),
       ).toContainEqual({
         [field]: { $ne: null },
       });
@@ -356,9 +376,9 @@ describe("omitted: an undeclared entry is nullable", () => {
   ])("%s guards %s outside the negation", async (id, field) => {
     const mapper = undeclared(field);
     expect(
-      JSON.stringify((await translate(id, { mapper })).filters),
+      JSON.stringify(filtersOf(await translate(id, { mapper }))),
     ).not.toContain(guard(field));
-    expect(JSON.stringify((await omitted(id, mapper)).filters)).toContain(
+    expect(JSON.stringify(filtersOf(await omitted(id, mapper)))).toContain(
       guard(field),
     );
   });
@@ -377,8 +397,8 @@ describe("omitted: an undeclared entry is nullable", () => {
   test("a relation's element field takes the default too", async () => {
     const id = "collection/exists/scalar-list-equals";
     const guard = JSON.stringify({ name: { $ne: null } });
-    expect(JSON.stringify((await translate(id)).filters)).not.toContain(guard);
-    expect(JSON.stringify((await omitted(id)).filters)).toContain(guard);
+    expect(JSON.stringify(filtersOf(await translate(id)))).not.toContain(guard);
+    expect(JSON.stringify(filtersOf(await omitted(id)))).toContain(guard);
   });
 
   // `nullable: false` is the per-entry opt-out: it asserts the field is always stored.
@@ -417,10 +437,9 @@ describe("timestamp literals", () => {
   // Its counterpart: only the precision differs.
   test("the same plan at millisecond precision translates", async () => {
     const result = await at("2026-08-11T09:13:39.123Z");
-    expect(result.kind).toBe(PlanKind.CONDITIONAL);
     // The comparison operand is the instant, guarded so that a field that is not a date and not an RFC 3339 string converts to
     // null, and null loses every comparison rather than matching one.
-    expect(JSON.stringify(result.filters)).toContain(
+    expect(JSON.stringify(filtersOf(result))).toContain(
       '"2026-08-11T09:13:39.123Z"',
     );
   });
@@ -688,18 +707,5 @@ describe("plans the planner cannot produce", () => {
         mapper: MAPPER,
       }),
     ).toThrow("exists over a literal collection requires a list value");
-  });
-});
-
-// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). No seed stores a list as null or omits it,
-// so no case can witness a negated membership over one: whether the corpus should carry such a
-// row is #548. CEL denies `!(2 in null)`, where a bare `$nor` over the membership matches a null
-// or absent array (#534). Delete this when a case carrying a null-list row lands.
-describe("a negated membership over a native array field", () => {
-  test("Corpus gap. requires the list to be stored as an array, outside the $nor", async () => {
-    const { filters } = await translate("null/in/negated-null-literal-in-number-list");
-    expect(filters).toMatchObject({
-      $and: expect.arrayContaining([{ aNumberList: { $type: "array" } }]),
-    });
   });
 });

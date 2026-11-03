@@ -675,6 +675,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.exists(t, has(t.name))
+    # collection/exists/missing-field-in-empty-list-membership
+    - actions:
+        - collection/exists/missing-field-in-empty-list-membership
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.tags.exists(t, t.name in P.attr.emptyTeams)'
     # collection/exists/map-keys
     - actions:
         - collection/exists/map-keys
@@ -984,6 +993,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames[0.5] == "public" || R.attr.aNumber == 5
+    # collection/index/negated-first-element-of-object-list
+    - actions:
+        - collection/index/negated-first-element-of-object-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.tags[0].name == "public")'
     # collection/index/map-literal-by-attribute-key
     - actions:
         - collection/index/map-literal-by-attribute-key
@@ -1629,6 +1647,15 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.tags.exists(t, (R.attr.aBool ? t.name : "zz") == "public")'
+    # conditional/ternary/index-in-untaken-branch
+    - actions:
+        - conditional/ternary/index-in-untaken-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(size(R.attr.tags) >= 1) ? (R.attr.aBoolList[0] != true) : (R.attr.aNumber < 21)'
     # conditional/ternary/missing-attribute-condition
     - actions:
         - conditional/ternary/missing-attribute-condition
@@ -1638,6 +1665,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aOptionalString != "x" ? R.attr.aNumber : 0) > 1'
+    # conditional/ternary/missing-attribute-in-untaken-branch
+    - actions:
+        - conditional/ternary/missing-attribute-in-untaken-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.parent.aBool) ? (R.attr.obj.inner != "same") : (!R.attr.aString.contains(R.attr.aOptionalString))'
     # conditional/ternary/negated
     - actions:
         - conditional/ternary/negated
@@ -1656,6 +1692,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aBool ? "one" : R.attr.parent.aOptionalString) == "set")'
+    # conditional/ternary/negated-collection-condition
+    - actions:
+        - conditional/ternary/negated-collection-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.tags.all(t, t.name != "other") ? R.attr.aBool : R.attr.aNumber > 5)'
     # conditional/ternary/negated-missing-attribute-condition
     - actions:
         - conditional/ternary/negated-missing-attribute-condition
@@ -2091,6 +2136,15 @@ resourcePolicy:
       condition:
         match:
           expr: 2 in R.attr.aNumberList
+    # membership/in/negated-literal-in-null-resource-list
+    - actions:
+        - membership/in/negated-literal-in-null-resource-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(2 in R.attr.aNumberList)'
     # membership/in/map-attribute-keys
     - actions:
         - membership/in/map-attribute-keys
@@ -2357,6 +2411,33 @@ resourcePolicy:
       condition:
         match:
           expr: has(R.attr.owner) && R.attr.aBool == true
+    # null/has/explicit-null-attribute-in-disjunction
+    - actions:
+        - null/has/explicit-null-attribute-in-disjunction
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: (has(R.attr.coOwner) || R.attr.aBool == true) && R.attr.aNumber > 3
+    # null/has/explicit-null-attribute-negated-disjunction
+    - actions:
+        - null/has/explicit-null-attribute-negated-disjunction
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(has(R.attr.owner) || R.attr.aBool == true) || R.attr.aNumber == 5'
+    # null/has/guard-on-element-field-negated
+    - actions:
+        - null/has/guard-on-element-field-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.tags.exists(t, has(t.name) && t.name != "x")'
     # null/has/guard-on-same-attribute
     - actions:
         - null/has/guard-on-same-attribute
@@ -2366,6 +2447,15 @@ resourcePolicy:
       condition:
         match:
           expr: has(R.attr.aOptionalString) && R.attr.aOptionalString == "set"
+    # null/has/guard-on-same-attribute-negated
+    - actions:
+        - null/has/guard-on-same-attribute-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(has(R.attr.aOptionalString) && R.attr.aOptionalString == "set")'
     # null/has/missing-attribute
     - actions:
         - null/has/missing-attribute
@@ -2573,6 +2663,15 @@ resourcePolicy:
       condition:
         match:
           expr: (P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))
+    # principal/all/empty-list-in-lambda-body
+    - actions:
+        - principal/all/empty-list-in-lambda-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.all(t, t.name in P.attr.emptyTeams)
     # principal/all/long-list
     - actions:
         - principal/all/long-list
@@ -2645,6 +2744,15 @@ resourcePolicy:
       condition:
         match:
           expr: (P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))
+    # principal/exists/empty-list-in-lambda-body
+    - actions:
+        - principal/exists/empty-list-in-lambda-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, t.name in P.attr.emptyTeams) || R.attr.aNumber == 5
     # principal/exists/list-of-structs
     - actions:
         - principal/exists/list-of-structs
@@ -3086,6 +3194,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.aString.contains("done")
+    # relation/ends-with/negated-one-hop-missing-leaf
+    - actions:
+        - relation/ends-with/negated-one-hop-missing-leaf
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.parent.aOptionalString.endsWith("ror")'
     # relation/equals/negated-one-hop
     - actions:
         - relation/equals/negated-one-hop
@@ -3095,6 +3212,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.aString == "One")'
+    # relation/equals/negated-one-hop-against-explicit-null-field
+    - actions:
+        - relation/equals/negated-one-hop-against-explicit-null-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aOptionalString == R.attr.owner)'
+    # relation/equals/negated-one-hop-against-two-hops
+    - actions:
+        - relation/equals/negated-one-hop-against-two-hops
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aBool == R.attr.parent.inner.aBool)'
     # relation/equals/negated-one-hop-null-literal
     - actions:
         - relation/equals/negated-one-hop-null-literal
@@ -3113,6 +3248,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.inner.aOptionalString == null)'
+    # relation/equals/one-hop-against-two-hops
+    - actions:
+        - relation/equals/one-hop-against-two-hops
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aBool == R.attr.parent.inner.aBool
     # relation/equals/one-hop-null-literal
     - actions:
         - relation/equals/one-hop-null-literal
@@ -3212,6 +3356,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!hasIntersection(R.attr.mainCategory.subNames, ["finance"])'
+    # relation/has/negated-parent-attribute
+    - actions:
+        - relation/has/negated-parent-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!has(R.attr.parent.aOptionalString)'
+    # relation/has/negated-two-hops-attribute
+    - actions:
+        - relation/has/negated-two-hops-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!has(R.attr.parent.inner.aString)'
     # relation/has/parent
     - actions:
         - relation/has/parent
@@ -3284,6 +3446,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.parent.inner.aOptionalString != null)'
+    # relation/not-equals/one-hop-against-explicit-null-field
+    - actions:
+        - relation/not-equals/one-hop-against-explicit-null-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aOptionalString != R.attr.owner
     # relation/not-equals/one-hop-null-literal
     - actions:
         - relation/not-equals/one-hop-null-literal
@@ -3374,6 +3545,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) > 0
+    # relation/size/non-empty-string-one-hop
+    - actions:
+        - relation/size/non-empty-string-one-hop
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.parent.aString) > 0
     # relation/size/non-negative-to-one-chain
     - actions:
         - relation/size/non-negative-to-one-chain
@@ -3383,6 +3563,24 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) >= 0
+    # relation/size/string-length-one-hop
+    - actions:
+        - relation/size/string-length-one-hop
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.parent.aString) <= 3
+    # relation/size/string-length-two-hops
+    - actions:
+        - relation/size/string-length-two-hops
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.parent.inner.aString) <= 7
     # relation/size/zero-to-one-chain
     - actions:
         - relation/size/zero-to-one-chain
@@ -3392,6 +3590,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) == 0
+    # relation/starts-with/negated-two-hops-missing-leaf
+    - actions:
+        - relation/starts-with/negated-two-hops-missing-leaf
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.parent.inner.aOptionalString.startsWith("x")'
     # relation/starts-with/two-hops
     - actions:
         - relation/starts-with/two-hops
@@ -3437,6 +3644,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(size(R.attr.aOptionalString) == dyn(1.5)) || R.attr.aNumber > 10'
+    # size/equals/string-trailing-space
+    - actions:
+        - size/equals/string-trailing-space
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) == 2
     # size/greater-or-equal/collection-at-least-one
     - actions:
         - size/greater-or-equal/collection-at-least-one
@@ -3752,6 +3968,15 @@ resourcePolicy:
       condition:
         match:
           expr: "R.attr.aString == \"héllo\U0001F680\""
+    # string/equals/trailing-space
+    - actions:
+        - string/equals/trailing-space
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString == "51" || R.attr.aString == "one " || R.attr.aString == "ab"
     # string/starts-with/bracket-in-needle
     - actions:
         - string/starts-with/bracket-in-needle

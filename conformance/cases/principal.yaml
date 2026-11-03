@@ -13,6 +13,13 @@ cases:
   degenerate:
     oracle: total
     reason: 'P.attr.emptyTeams is an empty list, so all() over it is true for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
+- id: 'principal/all/empty-list-in-lambda-body'
+  tier: adversarial
+  intent: 'all() over the resource tags whose body tests membership in an empty principal list (tags.all(t, t.name in P.attr.emptyTeams)).'
+  trap: 'The planner folds the body to the constant false, so all() holds only for rows with no tags. An adapter that expects an expression as the lambda body crashes on the bare value. Found by fuzzing (fuzz/s23/0144).'
+  condition:
+    match:
+      expr: 'R.attr.tags.all(t, t.name in P.attr.emptyTeams)'
 - id: 'principal/all/long-list'
   tier: adversarial
   intent: 'all() with != over an 11-element principal list, sent by the planner as a value list.'
@@ -75,6 +82,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'P.attr.emptyTeams is an empty list, so exists() over it is false for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
+- id: 'principal/exists/empty-list-in-lambda-body'
+  tier: adversarial
+  intent: 'exists() over the resource tags with a body the planner folds to false, OR''d with aNumber == 5.'
+  trap: 'The exists() is false for every row, so only a1 is allowed, through aNumber == 5. An adapter that expects an expression as the lambda body crashes on the bare value. Found by fuzzing (fuzz/s23/0144).'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, t.name in P.attr.emptyTeams) || R.attr.aNumber == 5'
 - id: 'principal/exists/list-of-structs'
   tier: extended
   intent: 'exists() over 11 principal structs comparing each struct''s name with a resource attribute.'

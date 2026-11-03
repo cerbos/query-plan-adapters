@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "spring-data/**"
+      # The build includes ../jpa (ADR 0013), so a change to the core runs these suites too.
+      - "jpa/**"
       - "conformance/**"
       - "demo/**"
       - ".github/workflows/spring-data.yaml"
@@ -29,7 +31,8 @@ permissions: {}
 
 jobs:
   # All suites run here on H2, including the conformance suite, which replays the recorded golden
-  # plans of both pinned PDPs (conformance/golden/) and needs no PDP (docs/ci.md).
+  # plans of both pinned PDPs (conformance/golden/) and needs no PDP (docs/ci.md). The store legs
+  # run in jpa.yaml: the SQL is the jpa core's (ADR 0013).
   test:
     permissions:
       contents: read
@@ -82,71 +85,6 @@ jobs:
             **/build/reports/
             **/build/test-results/
 
-  # AdversarialConformanceTest on a real database, for dialect behaviour H2
-  # cannot show, such as MySQL collation (README.md "Database collation requirements"). MySQL runs
-  # with client-side and with server-side prepared statements (README.md "MySQL: keeping arithmetic
-  # IEEE-faithful"). Every store leg runs under both ORM sets: Hibernate renders the SQL each store
-  # executes, so a leg one ORM set skips is a store that ORM set does not cover.
-  test-database:
-    permissions:
-      contents: read
-    strategy:
-      # Each store leg is a separate finding.
-      fail-fast: false
-      matrix:
-        # ORM version sets declared in build.gradle.kts. `next` is Hibernate 7 / Spring Data JPA 4.
-        orm: [baseline, next]
-        database: [postgres, mysql]
-        server-prep-stmts: [""]
-        # Each entry changes server-prep-stmts, so it adds a MySQL leg rather than altering one:
-        # six legs in all.
-        include:
-          - orm: baseline
-            database: mysql
-            server-prep-stmts: "true"
-          - orm: next
-            database: mysql
-            server-prep-stmts: "true"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Validate conformance corpus
-        run: ../conformance/scripts/validate-corpus.sh
-
-      - name: Setup JDK
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        with:
-          distribution: temurin
-          java-version: "17"
-          # Must match the key warm-caches.yaml writes on main.
-          cache: gradle
-          cache-dependency-path: |
-            spring-data/**/*.gradle*
-            spring-data/**/gradle-wrapper.properties
-
-      - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-
-      # Only AdversarialConformanceTest reads ADAPTER_TEST_DB; the `test` job runs the other suites.
-      - name: Conformance suite (${{ matrix.database }}, ${{ matrix.orm }})
-        run: ./gradlew test --tests '*AdversarialConformanceTest' --no-daemon
-        env:
-          ADAPTER_TEST_ORM: ${{ matrix.orm }}
-          ADAPTER_TEST_DB: ${{ matrix.database }}
-          ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS: ${{ matrix.server-prep-stmts || '' }}
-
-      - name: Store reports
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: "Reports for ${{ matrix.database }} (${{ matrix.orm }})${{ matrix.server-prep-stmts && ' (server prepared statements)' || '' }}"
-          path: |-
-            **/build/reports/
-            **/build/test-results/
-
   # The example installs the published artifact and exercises pagination and Specification
   # composition, which no suite above does. See docs/adr/0002-examples-install-the-packed-artifact.md.
   # It runs two programs: the demo-domain one and the photo-sharing app with its smoke scripts.
@@ -182,9 +120,11 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      # The example resolves the adapter from mavenLocal.
-      - name: Publish the adapter to mavenLocal
-        run: ./gradlew publishToMavenLocal --no-daemon
+      # The example resolves the adapter, and the jpa core its POM names, from mavenLocal.
+      - name: Publish the jpa core and the adapter to mavenLocal
+        run: |
+          ../jpa/gradlew -p ../jpa publishToMavenLocal --no-daemon
+          ./gradlew publishToMavenLocal --no-daemon
 
       - name: Build example
         run: ./gradlew -p example build --no-daemon

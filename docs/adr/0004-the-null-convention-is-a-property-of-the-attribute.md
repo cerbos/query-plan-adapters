@@ -1,7 +1,8 @@
 # The NULL convention is a property of the attribute, not of the call
 
 Accepted. Implementation tracked in
-[#308](https://github.com/cerbos/query-plan-adapters/issues/308).
+[#308](https://github.com/cerbos/query-plan-adapters/issues/308). The call-level default is
+superseded by [ADR 0011](0011-denial-fails-closed-in-the-result.md), which makes it `omitted`.
 
 ## Context
 

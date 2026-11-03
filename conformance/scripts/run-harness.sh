@@ -17,7 +17,9 @@
 #   sequel              sqlite postgres mysql    (SEQUEL_VERSION / RUBY_VERSION pass through)
 #   ent, pgx            all                      (the Go harness starts its own containers)
 #   elasticsearch-java  elasticsearch elasticsearch-next
-#   spring-data         h2 postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM passes through)
+#   jpa                 h2 postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM passes through)
+#   spring-data         h2                       (ADAPTER_TEST_ORM passes through)
+#   efcore              sqlite postgres sqlserver   (needs the .NET 10 SDK)
 #
 # Legs run one at a time on purpose: several harnesses at once overload a laptop into timeouts and
 # out-of-memory kills that read as failures. Docker is needed for every adapter but SQLite-only
@@ -25,6 +27,9 @@
 #
 # Caches (Gradle, pytest's basetemp) go under QPA_CACHE_DIR, default ~/.cache/query-plan-adapters,
 # not /tmp, which is often a small tmpfs.
+#
+# With QPA_FUZZ_DIR set to an absolute path, every harness replays that fuzz run instead of the
+# corpus and writes its verdicts to QPA_FUZZ_DIR/results/ (conformance/README.md, "Fuzzing").
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,7 +55,9 @@ stores_for() {
     sqlalchemy | ent | pgx) echo "all" ;;
     activerecord | sequel) echo "sqlite postgres mysql" ;;
     elasticsearch-java) echo "elasticsearch elasticsearch-next" ;;
-    spring-data) echo "h2 postgres mysql mysql-server-prep" ;;
+    jpa) echo "h2 postgres mysql mysql-server-prep" ;;
+    spring-data) echo "h2" ;;
+    efcore) echo "sqlite postgres sqlserver" ;;
     *) return 1 ;;
   esac
 }
@@ -84,9 +91,11 @@ gradle() { # <adapter> <gradle args...>, with the environment passed through
   mkdir -p "${home}"
   local env_args=()
   for var in ELASTICSEARCH_IMAGE_FILE ADAPTER_TEST_ORM ADAPTER_TEST_DB ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS \
-    ADAPTER_TEST_POSTGRES_INITDB_ARGS ADAPTER_TEST_MYSQL_COLLATION; do
+    ADAPTER_TEST_POSTGRES_INITDB_ARGS ADAPTER_TEST_MYSQL_COLLATION QPA_FUZZ_DIR QPA_HARNESS_STORE; do
     [[ -n "${!var:-}" ]] && env_args+=(-e "${var}=${!var}")
   done
+  # A fuzz run is recorded outside the repository, so the container needs it mounted too.
+  [[ -n "${QPA_FUZZ_DIR:-}" ]] && env_args+=(-v "${QPA_FUZZ_DIR}:${QPA_FUZZ_DIR}")
   docker run --rm --network host --user "$(id -u):$(id -g)" \
     --group-add "$(stat -c %g /var/run/docker.sock)" \
     -e HOME=/tmp/home -e GRADLE_USER_HOME=/gradle "${env_args[@]}" \
@@ -98,6 +107,8 @@ gradle() { # <adapter> <gradle args...>, with the environment passed through
 run_leg() { # <adapter> <store>
   local adapter="$1" store="$2"
   cd "${REPO_ROOT}/${adapter}" || return 1
+  # The leg's name, for a harness whose fuzz results file cannot tell its store from the inside.
+  export QPA_HARNESS_STORE="${store}"
   case "${adapter}:${store}" in
     drizzle:sqlite) npm_ready && npm run test:adversarial ;;
     drizzle:postgres | drizzle:mysql) npm_ready && npm run "test:adversarial:${store}" ;;
@@ -165,12 +176,16 @@ run_leg() { # <adapter> <store>
     elasticsearch-java:elasticsearch-next)
       ELASTICSEARCH_IMAGE_FILE=ELASTICSEARCH_NEXT_IMAGE gradle "${adapter}" test --tests '*ElasticsearchAdversarialConformanceTest*' ;;
 
-    spring-data:h2) gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
-    spring-data:postgres | spring-data:mysql)
+    jpa:h2 | spring-data:h2) gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
+    jpa:postgres | jpa:mysql)
       ADAPTER_TEST_DB="${store}" gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
-    spring-data:mysql-server-prep)
+    jpa:mysql-server-prep)
       ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true \
         gradle "${adapter}" test --tests '*AdversarialConformanceTest' ;;
+
+    efcore:sqlite | efcore:postgres | efcore:sqlserver)
+      command -v dotnet >/dev/null 2>&1 || die "efcore needs the .NET 10 SDK on PATH"
+      ADAPTER_TEST_DB="${store}" dotnet test ;;
 
     *) die "no recipe for ${adapter} / ${store}" ;;
   esac
@@ -200,7 +215,7 @@ run_adapter() { # <adapter> [store...]
 }
 
 case "${1:-}" in
-  "" | -h | --help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "" | -h | --help) sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
   --list) for adapter in $(roster); do printf '%-20s %s\n' "${adapter}" "$(stores_for "${adapter}" || echo '(not in this script)')"; done; exit 0 ;;
   --all)
     for adapter in $(roster); do

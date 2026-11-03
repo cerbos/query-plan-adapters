@@ -16,10 +16,15 @@ import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import mysql from "mysql2/promise";
 import { Pool } from "pg";
 
+import type { PlanResourcesResponse } from "@cerbos/core";
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
 import type { Mapper, MapperEntry } from ".";
 import {
+  assertFuzzVerdict,
   buildMapper,
+  FUZZ_DIR,
+  fuzzThrown,
+  fuzzVerdict,
   mysqlSchema,
   pdpTags,
   planOf,
@@ -27,8 +32,9 @@ import {
   readCorpusJson,
   readGoldens,
   sqliteSchema,
+  writeFuzzResults,
 } from "./corpus";
-import type { Golden } from "./corpus";
+import type { FuzzVerdict, Golden } from "./corpus";
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -411,7 +417,7 @@ function sqliteStore(): AdversarialStore {
  * repository carries both halves.
  */
 const POSTGRES_IMAGE =
-  "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
+  "postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b";
 
 /**
  * How the PostgreSQL leg's database is initialised: `--lc-collate=C`, a byte-order collation.
@@ -561,23 +567,24 @@ function postgresStore(): AdversarialStore {
       // The same list three ways: jsonb (the shared mapper), plain json, and a native array
       // rebased to a ZERO lower bound, so a raw `[index + 1]` would read the wrong element and
       // only the positional JSON conversion the adapter emits reads the right one. A JSON null
-      // element becomes a SQL NULL element, which `to_jsonb` turns back into a JSON null.
+      // element becomes a SQL NULL element, which `to_jsonb` turns back into a JSON null. A NULL
+      // list stays NULL rather than becoming an empty array, so it keeps its null semantics (#549).
       await db.execute(sql`update adversarial_resources set
         tag_names_plain_json = tag_names_json::json,
         tag_names_array = case when jsonb_array_length(tag_names_json) > 0 then
           ('[0:' || (jsonb_array_length(tag_names_json) - 1) || ']=' ||
             array(select jsonb_array_elements_text(tag_names_json))::text)::text[]
-          else array[]::text[] end,
+          when tag_names_json is not null then array[]::text[] end,
         a_number_list_plain_json = a_number_list_json::json,
         a_number_list_array = case when jsonb_array_length(a_number_list_json) > 0 then
           ('[0:' || (jsonb_array_length(a_number_list_json) - 1) || ']=' ||
             array(select jsonb_array_elements_text(a_number_list_json))::text)::integer[]
-          else array[]::integer[] end,
+          when a_number_list_json is not null then array[]::integer[] end,
         a_bool_list_plain_json = a_bool_list_json::json,
         a_bool_list_array = case when jsonb_array_length(a_bool_list_json) > 0 then
           ('[0:' || (jsonb_array_length(a_bool_list_json) - 1) || ']=' ||
             array(select jsonb_array_elements_text(a_bool_list_json))::text)::boolean[]
-          else array[]::boolean[] end`);
+          when a_bool_list_json is not null then array[]::boolean[] end`);
       await db.insert(parents).values(rows.parents);
       await db.insert(inners).values(rows.inners);
       await db.insert(tags).values(rows.tags);
@@ -613,7 +620,7 @@ function postgresStore(): AdversarialStore {
  * server, pinned by tag AND digest for the same reason the PostgreSQL image is.
  */
 const MYSQL_IMAGE =
-  "mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb";
+  "mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69";
 
 /**
  * The collation this leg runs the whole corpus under, set on the SERVER so that the database the
@@ -921,8 +928,14 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 
 // -- the replay -----------------------------------------------------------------------------------
 
+// Every column the dataset omits when NULL is declared `omitted` in the mapping. The call-level
+// option covers what is left, list elements and principal-side literals, which the dataset sends as
+// values; the adapter's own default is pinned in translator.test.ts.
+const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) =>
+  queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "explicit" });
+
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
-  const result = queryPlanToDrizzle({ queryPlan: await planOf(golden), mapper });
+  const result = translatePlan(await planOf(golden), mapper);
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
   return store.selectIds(result.kind === PlanKind.CONDITIONAL ? result.filter : undefined);
 }
@@ -930,16 +943,34 @@ async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> 
 /** Cases whose plan reads one of the ordered lists, replayed under every storage on PostgreSQL. */
 const LIST_REFERENCE = /"request\.resource\.attr\.(tagNames|aNumberList|aBoolList)"/;
 
+/** A fuzz case replayed under every mapper a corpus case would be; the first failure is its verdict. */
+async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+  const mappers = LIST_REFERENCE.test(JSON.stringify(golden.plan))
+    ? [MAPPER, ...(store.indexMappers ?? [])]
+    : [MAPPER];
+  const verdicts: FuzzVerdict[] = [];
+  for (const mapper of mappers) {
+    try {
+      verdicts.push(fuzzVerdict(golden, golden.allowed, await selectAllowed(golden, mapper)));
+    } catch (error) {
+      verdicts.push(fuzzThrown(golden, error, UnsupportedQueryPlanError));
+    }
+  }
+  return verdicts.find((v) => v.verdict !== "match" && v.verdict !== "refused") ?? verdicts[0]!;
+}
+
 const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
 const skipped: Record<string, number> = {};
+const fuzzResults: FuzzVerdict[] = [];
 
 beforeAll(() => store.start(), STORE_STARTUP_TIMEOUT_MS);
 
 afterAll(async () => {
   await store.stop();
+  writeFuzzResults("drizzle", STORE_NAME, fuzzResults);
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
     return `${tag}: ${tiers.map((tier) => `${tier} ${passed[tag]?.[tier] ?? 0}/${totals[tag]?.[tier]}`).join(", ")} (${skipped[tag] ?? 0} planner divergence skipped)`;
@@ -970,7 +1001,7 @@ describe(`conformance (${STORE_NAME})`, () => {
     },
   );
 
-  test("the ledger names no case without a golden file", () => {
+  (FUZZ_DIR ? test.skip : test)("the ledger names no case without a golden file", () => {
     const ids = new Set(TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)));
     expect(Object.keys(LEDGER).filter((id) => !ids.has(id))).toEqual([]);
   });
@@ -985,10 +1016,16 @@ describe(`conformance (${STORE_NAME})`, () => {
       async (_id, golden) => {
         // A golden filed under the wrong tag directory would be replayed against the wrong ledger scope.
         expect(golden.pdp).toBe(tag);
+        if (FUZZ_DIR) {
+          const verdict = await fuzzReplay(golden);
+          fuzzResults.push(verdict);
+          assertFuzzVerdict(verdict);
+          return;
+        }
         const entry = ledgerEntry(golden, tag);
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);
-          expect(() => queryPlanToDrizzle({ queryPlan, mapper: MAPPER })).toThrow(
+          expect(() => translatePlan(queryPlan, MAPPER)).toThrow(
             UnsupportedQueryPlanError,
           );
           return;
