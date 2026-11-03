@@ -233,6 +233,10 @@
       "status": "unsupported",
       "reason": "Membership in a filter() result is the element match tags.exists(t, t == \"public\" && <predicate>), and the predicate reads the root document's aBool; $elemMatch rebases every path onto the element, and the only route back to a root field is $expr, which MongoDB rejects below the top level ('$expr can only be applied to the top-level document')"
     },
+    "collection/filter/negated-literal-in-filtered-list": {
+      "status": "unsupported",
+      "reason": "The negation of a filter() membership is NOT over a collection macro whose predicate reads the root document's aBool; $nor over $elemMatch matches a document whose aBool is missing on a non-empty list, where CEL errors and denies, so the adapter refuses NOT over collection macros"
+    },
     "collection/index/fractional-position": {
       "status": "unsupported",
       "reason": "MongoDB array indexing does not preserve CEL errors for a negative or fractional index, so the translator accepts only non-negative integer constants."

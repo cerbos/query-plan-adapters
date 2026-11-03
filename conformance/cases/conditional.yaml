@@ -94,6 +94,13 @@ cases:
   condition:
     match:
       expr: '!((R.attr.aOptionalString != "x" ? R.attr.aNumber : 0.0) > 1.0)'
+- id: 'conditional/ternary/nested-in-condition'
+  tier: adversarial
+  intent: 'A ternary whose condition is a boolean ternary over aBool, which is missing on j3.'
+  trap: 'Writing a boolean ternary as (c AND a) OR (NOT c AND b) yields FALSE, not UNKNOWN, when c is UNKNOWN, so the outer else guard takes j3. Found by fuzzing (fuzz/s53/0111, drizzle).'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0) ? R.attr.aNumber > 100 : R.attr.aNumber > 0'
 - id: 'conditional/ternary/nested-in-both-branches'
   tier: extended
   intent: 'A ternary whose both branches are ternaries, compared with a threshold.'

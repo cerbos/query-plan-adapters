@@ -583,8 +583,6 @@ const buildTernaryFilter = (
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
-  // An UNKNOWN condition leaves BOTH arms UNKNOWN — excluded under either polarity —
-  // matching the CEL error → deny.
   if (operands.length !== 3) {
     throw new UnsupportedQueryPlanError("'if' operator requires exactly three operands");
   }
@@ -605,12 +603,15 @@ const buildTernaryFilter = (
     options,
     negated,
   );
-  const combined = or(and(cond, thenFilter), and(not(cond), elseFilter));
-  if (!combined) {
-    throw new UnsupportedQueryPlanError("'if' operator produced an empty filter");
-  }
-  return combined;
+  return guardedCase(cond, thenFilter, elseFilter);
 };
+
+/**
+ * `cond ? then : else` as two guarded WHEN arms. An UNKNOWN condition matches neither and yields
+ * NULL, so a NOT or an enclosing ternary's else guard over the result cannot turn it TRUE.
+ */
+export const guardedCase = (cond: SQL, thenFilter: SQL, elseFilter: SQL): SQL =>
+  sql`(case when ${cond} then ${thenFilter} when not (${cond}) then ${elseFilter} end)`;
 
 /**
  * Build a boolean filter from a plan operand, tracking negation polarity instead of
