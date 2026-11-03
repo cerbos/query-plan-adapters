@@ -529,6 +529,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
     },
+    "conditional/ternary/nested-in-condition": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
+    },
     "conditional/ternary/nested-in-then-branch": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"

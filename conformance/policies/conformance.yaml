@@ -1710,6 +1710,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aOptionalString != "x" ? R.attr.aNumber : 0.0) > 1.0)'
+    # conditional/ternary/nested-in-condition
+    - actions:
+        - conditional/ternary/nested-in-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0) ? R.attr.aNumber > 100 : R.attr.aNumber > 0'
     # conditional/ternary/nested-in-both-branches
     - actions:
         - conditional/ternary/nested-in-both-branches
