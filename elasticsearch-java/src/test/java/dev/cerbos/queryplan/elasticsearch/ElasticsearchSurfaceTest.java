@@ -510,10 +510,11 @@ class ElasticsearchSurfaceTest {
     /**
      * {@code exists} matches an indexed empty string, so {@code size(aString) > 0} lowered to
      * {@code exists} would return a row CEL rejects. This shows the result when a caller wrongly
-     * declares {@code aString} a collection; undeclared, the adapter refuses.
+     * declares {@code aString} a collection; declared a string, the adapter excludes the term for
+     * the empty string, which Elasticsearch indexes; undeclared, it refuses.
      */
     @Test
-    void existsMatchesAnIndexedEmptyStringWhichIsWhySizeOverAnUndeclaredFieldIsRefused()
+    void anIndexedEmptyStringIsWhySizeOverAStringExcludesItAndOverAnUndeclaredFieldIsRefused()
             throws Exception {
         Map<String, Object> presence = clauseFor(nonEmpty(A_STRING),
                 STRING_OPTIONS.withCollectionFields(Set.of("aString")));
@@ -523,10 +524,14 @@ class ElasticsearchSurfaceTest {
         assertEquals(List.of("string-empty", "string-value"),
                 search(SEMANTIC_SAFETY_INDEX, inScenario("string", presence)));
 
-        // Undeclared, the same size() is refused, as are the corpus's size() cases over
-        // scalar fields.
+        // Declared a string, the clause excludes the empty string too.
+        assertEquals(List.of("string-value"),
+                search(SEMANTIC_SAFETY_INDEX, inScenario("string", clauseFor(nonEmpty(A_STRING), STRING_OPTIONS))));
+
+        // Undeclared, the same size() is refused, as is a corpus size() case that needs a length.
         assertRefusedAsLedgered("size/greater-than/string-length", UnsupportedPlanShapeException.class);
-        assertRefused(nonEmpty(A_STRING), STRING_OPTIONS, UnsupportedPlanShapeException.class,
+        assertRefused(nonEmpty(A_STRING), STRING_OPTIONS.withScalarTypes(Map.of()),
+                UnsupportedPlanShapeException.class,
                 "size() over a field not declared as a collection");
     }
 
