@@ -141,6 +141,7 @@ tags := &cerbospgx.Relation{
     Table:        "contact_tag",
     SourceColumn: "id",         // column on the parent row
     TargetColumn: "contact_id", // matching column on contact_tag
+    Position:     "position",   // optional: each element's zero-based position, for tags[0]
     Field:        &cerbospgx.Entry{Column: "name"},                     // scalar elements
     Fields:       map[string]cerbospgx.Entry{"name": {Column: "name"}}, // object elements (t.name)
 }
@@ -161,6 +162,12 @@ flattened chain such as `R.attr.mainCategory.subCategories` joins its intermedia
 subquery while only the resource row correlates outwards. Those subqueries read the mapped table
 bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
 [Mapping hazards](#mapping-hazards)).
+
+A related table has no row order, so `R.attr.tags[0]` and an ordered list equality
+(`R.attr.tagNames == ["a", "b"]`) need `Position`: the column holding each element's zero-based
+position for its parent, `0, 1, 2, …` with no gaps. `list[k]` then reads the element row at `k`,
+and a position past the end, negative or fractional is CEL's error: UNKNOWN, so the row is
+excluded under both polarities. Without `Position` those shapes are refused.
 
 ### Declaring value types
 
@@ -272,8 +279,8 @@ PDP's goldens (0.55.0) are replayed too.
 | Tier | Passed / total (PDP 0.57.0) |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 87 / 102 |
-| adversarial | 313 / 375 |
+| extended | 97 / 102 |
+| adversarial | 334 / 375 |
 
 The total is every golden case in the tier for PDP 0.57.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
@@ -439,6 +446,14 @@ tags := &cerbospgx.Relation{
 - `!("x" in R.attr.list)` over a relation whose element is declared `NullConventionExplicit` keeps
   a row whose list holds a null and no `"x"`: CEL's `"x" == null` is false, where SQL's `=` was
   UNKNOWN and dropped the row (`membership/in/negated-literal-in-resource-list`).
+- Newly translated, each proved by the corpus: `list[k]` and `list[k].field` over a relation
+  declaring `Position`, as the element row at that position; `R.attr.list == [v1, …]` (and `!=`),
+  also over `map(t, t.f)` and `except(list, [...])` compared with at most one element, as the size
+  and the elements at each position; `exists_one()`, `filter()` inside `size()`, and `map()` over
+  a literal list (the planner's spelling of a principal list past its unrolling threshold), as the
+  strict count of their bodies; `size(except(a, b))` and `size(intersect(a, b))` for a stored list
+  against a literal list; and a list in boolean position (`R.attr.tags.filter(t, …)` as a
+  condition), which CEL rejects on every row and so is UNKNOWN.
 - Newly translated, each proved by the corpus: a ternary yielding a list, lifted above the
   comparison or membership it feeds; `+` between list literals, and `x in R.attr.list + [...]`
   as a disjunction of memberships; `x in [e1, …]` and `exists()`/`all()` over a list of computed

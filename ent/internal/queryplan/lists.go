@@ -362,13 +362,13 @@ func membershipInList(needle value, l listValue) (Expr, error) {
 }
 
 // foldListConstructorMacro folds exists()/all() over `list(e1, …)` into the flat combination of
-// its bodies, each with the lambda variable bound to one element expression, UNKNOWN unless the
-// whole list evaluates.
+// its bodies, and exists_one() into their strict count, each with the lambda variable bound to one
+// element expression, UNKNOWN unless the whole list evaluates.
 func (b *builder) foldListConstructorMacro(operator string, l listValue, lambda *node, m Mapper, negated bool) (Expr, error) {
 	if !foldable[operator] {
 		return nil, fmt.Errorf(
-			"%s over a list() of computed elements is not supported; only exists() and all() can "+
-				"be folded into a flat filter", operator,
+			"%s over a list() of computed elements is not supported; only exists(), all() and "+
+				"exists_one() can be folded into a flat filter", operator,
 		)
 	}
 	body, variable, err := lambdaParts(lambda, operator)
@@ -381,11 +381,14 @@ func (b *builder) foldListConstructorMacro(operator string, l listValue, lambda 
 		if err != nil {
 			return nil, err
 		}
-		p, err := b.predicate(substituted, m, negated)
+		p, err := b.predicate(substituted, m, negated && operator != "exists_one")
 		if err != nil {
 			return nil, err
 		}
 		parts = append(parts, p)
+	}
+	if operator == "exists_one" {
+		return negate(l.whenDefined(strictlyOne(parts)), negated), nil
 	}
 	if (operator == "exists") != negated {
 		return l.whenDefined(or(parts...)), nil

@@ -118,9 +118,11 @@ var lambdaBinding = map[string]bool{
 }
 
 // Collection macros that fold into a flat boolean combination of their per-element bodies when the
-// collection is a literal value list. exists_one/filter/map have no such flattening and fail
-// closed instead.
-var foldable = map[string]bool{"exists": true, "all": true}
+// collection is a literal value list; exists_one folds into a strict count of them (strictlyOne).
+var foldable = map[string]bool{"exists": true, "all": true, "exists_one": true}
+
+// Operators that yield a list rather than a boolean, so are a type error in boolean position.
+var collectionValued = map[string]bool{"filter": true, "map": true, "except": true, "intersect": true}
 
 // predicate lowers a node in boolean position. negated is threaded down rather than wrapped
 // around the result so that collection macros can push the polarity through the macro itself:
@@ -177,6 +179,12 @@ func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 		return b.ternaryPredicate(n, m, negated)
 	}
 
+	if collectionValued[n.operator] {
+		// A list in boolean position is a CEL type error, which denies the row under both
+		// polarities; it is one UNKNOWN, as the planner's `||` and `&&` absorb it.
+		return Lit{V: nil}, nil
+	}
+
 	if lambdaBinding[n.operator] {
 		return b.collectionMacro(n, m, negated)
 	}
@@ -194,6 +202,25 @@ func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 
 	case "hasIntersection":
 		return b.hasIntersection(n, m, negated)
+
+	case "index", "get-field":
+		// A boolean element read by position, `R.attr.aBoolList[0]` as a conjunct.
+		v, err := b.value(n, m)
+		if err != nil {
+			return nil, err
+		}
+		if p, ok := v.(positionalElement); ok {
+			if kind := scalarKind(p.element); kind != "" && kind != "bool" {
+				// A non-boolean element in boolean position is a CEL type error.
+				return Lit{V: nil}, nil
+			}
+			return negate(p.decided(p.element), negated), nil
+		}
+		e, err := asExpr(v)
+		if err != nil {
+			return nil, err
+		}
+		return negate(e, negated), nil
 
 	case "isSubset":
 		return b.isSubset(n, m, negated)
@@ -249,6 +276,12 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 		return b.ternaryPredicate(lifted, m, negated)
 	}
 	if rewritten, ok := emptyListComparison(n); ok {
+		return b.predicate(rewritten, m, negated)
+	}
+	if rewritten, ok, err := wholeListEquality(n, m); err != nil || ok {
+		if err != nil {
+			return nil, err
+		}
 		return b.predicate(rewritten, m, negated)
 	}
 	if cmpOp, ok := comparisonOps[n.operator]; ok {
@@ -709,7 +742,7 @@ func (b *builder) foldValueListMacro(operator string, elements any, lambda *node
 		if err != nil {
 			return nil, err
 		}
-		p, err := b.predicate(substituted, m, negated)
+		p, err := b.predicate(substituted, m, negated && operator != "exists_one")
 		if err != nil {
 			return nil, err
 		}
@@ -718,7 +751,11 @@ func (b *builder) foldValueListMacro(operator string, elements any, lambda *node
 
 	// exists() is a disjunction of its bodies and all() a conjunction, swapped under negation
 	// (De Morgan). An empty list needs no special case: or() and and() over no parts are CEL's
-	// identities, so exists() matches nothing and all() matches everything.
+	// identities, so exists() matches nothing and all() matches everything. exists_one() is a
+	// strict count, so its bodies are built unnegated and the count is negated whole.
+	if operator == "exists_one" {
+		return negate(strictlyOne(parts), negated), nil
+	}
 	if (operator == "exists") != negated {
 		return or(parts...), nil
 	}
@@ -732,6 +769,24 @@ func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error)
 	}
 
 	left, right := n.operands[0], n.operands[1]
+
+	// A list() of constant elements — a map literal reaches the plan that way — is a literal.
+	for i, side := range []*node{left, right} {
+		if !side.isExpr() || side.operator != "list" {
+			continue
+		}
+		v, err := b.listConstructor(side, m)
+		if err != nil {
+			return nil, err
+		}
+		if constant, ok := v.([]any); ok {
+			if i == 0 {
+				left = valueNode(constant)
+			} else {
+				right = valueNode(constant)
+			}
+		}
+	}
 
 	// One side must be a literal list for this to become a flat filter; the other may be a
 	// relation-backed collection.
@@ -909,7 +964,7 @@ func (b *builder) value(n *node, m Mapper) (value, error) {
 	case "size":
 		return b.size(n, m)
 
-	case "index":
+	case "index", "get-field":
 		return b.index(n, m)
 
 	case "list":
@@ -948,9 +1003,25 @@ func (b *builder) value(n *node, m Mapper) (value, error) {
 		}
 		return timeSince(n.operands[0], v)
 
+	case "except", "intersect":
+		// Consumed by size() (differenceSize) and by the comparisons lists.go rewrites; anywhere
+		// else the difference or intersection is a list in a scalar position.
+		return nil, fmt.Errorf(
+			"'%s' produces a collection rather than a plain value; it translates inside size(), "+
+				"compared with an empty list, or (except) compared with a one-element list", n.operator,
+		)
+
 	case "filter", "map":
-		// Neither produces a boolean, so both are held back until the operator that consumes
-		// them — size() for filter, hasIntersection() for map — can give them meaning.
+		// Over a literal list both fold element by element. Over a relation neither produces a
+		// boolean, so both are held back until the operator that consumes them — size() for
+		// filter, hasIntersection() for map — can give them meaning.
+		if len(n.operands) == binaryOperands && n.operands[0].isValue() {
+			elements, ok := n.operands[0].value.([]any)
+			if !ok {
+				return nil, fmt.Errorf("'%s' over a literal collection requires a list value", n.operator)
+			}
+			return b.foldLiteralProjection(n, elements, n.operands[1], m)
+		}
 		return b.deferredCollection(n, m)
 
 	case "timestamp":
@@ -1064,23 +1135,26 @@ func isSymbolic(v value) bool {
 
 // index lowers `m["key"]` for a map attribute m and a constant string key, as the member
 // `m.key` the mapper declares: CEL reads a map member the same way through either spelling, and
-// a missing key is the same error. Every other index is refused: a list position has no lowering,
-// since a related table has no row order, and a map literal indexed by an attribute has no SQL
-// lookup.
+// a missing key is the same error. A constant position into a relation declaring Position, bare
+// or with a field selected (`get-field`), is a positional read. Every other index is refused: a
+// map literal indexed by an attribute has no SQL lookup.
 func (b *builder) index(n *node, m Mapper) (value, error) {
 	if len(n.operands) != binaryOperands {
-		return nil, fmt.Errorf("'index' requires exactly two operands")
+		return nil, fmt.Errorf("'%s' requires exactly two operands", n.operator)
+	}
+	if rel, parent, k, field, ok := positionalRead(n, m); ok {
+		return b.positional(rel, parent, k, field)
 	}
 	container, key := n.operands[0], n.operands[1]
-	if container.isVariable() && key.isValue() {
+	if n.operator == "index" && container.isVariable() && key.isValue() {
 		if k, ok := key.value.(string); ok && k != "" && !strings.Contains(k, ".") {
 			return b.resolveVariable(container.variable+"."+k, m)
 		}
 	}
 	return nil, errors.New(
 		"index() translates only a constant string key into a map attribute whose member is " +
-			"mapped: a list position has no lowering, since a related table has no row order, " +
-			"and a map literal indexed by an attribute has no SQL lookup",
+			"mapped, or a constant position into a list relation declaring Position: a map " +
+			"literal indexed by an attribute has no SQL lookup",
 	)
 }
 
@@ -1090,6 +1164,13 @@ func (b *builder) size(n *node, m Mapper) (value, error) {
 		return nil, fmt.Errorf("'size' requires exactly one operand")
 	}
 	operand := n.operands[0]
+
+	if operand.isExpr() && operand.operator == "except" {
+		return b.differenceSize(operand, m)
+	}
+	if operand.isExpr() && operand.operator == "intersect" {
+		return b.intersectionSize(operand, m)
+	}
 
 	if operand.isVariable() {
 		if entry, ok := m.Resolve(operand.variable); ok && entry.Relation != nil {
@@ -1125,6 +1206,13 @@ func (b *builder) size(n *node, m Mapper) (value, error) {
 	}
 	if list, ok := v.([]any); ok {
 		return float64(len(list)), nil
+	}
+	if counted, ok := v.(countedList); ok {
+		return counted.size, nil
+	}
+	if l, ok := v.(listValue); ok {
+		// Building the list evaluates every element, so the size is UNKNOWN unless all do.
+		return l.whenDefined(Lit{V: float64(len(l.elements))}), nil
 	}
 	e, err := asExpr(v)
 	if err != nil {
@@ -1220,7 +1308,7 @@ func numericArith(op ArithOp, lv, rv value) (value, error) {
 // scalar read through a to-one hop — as opposed to a computed value such as size().
 func isAttribute(v value) bool {
 	switch t := v.(type) {
-	case Column:
+	case Column, positionalElement:
 		return true
 	case Subquery:
 		return t.Kind == SubqueryScalar

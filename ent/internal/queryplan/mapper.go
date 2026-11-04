@@ -32,6 +32,12 @@ type Relation struct {
 	// for a direct relation and non-empty for a flattened chain such as
 	// `mainCategory.subCategories`, which reaches the resource through its category table.
 	Via []Hop
+	// Position names the column on Table holding each element's zero-based position in the
+	// list, for a collection whose order the application keeps. It is what `list[k]` and an
+	// ordered list equality read. Left empty, the relation has no order and those shapes are
+	// refused: a related table has no row order of its own. Declaring it asserts the positions
+	// of one parent's elements are 0, 1, 2, … with no gaps.
+	Position string
 	// SubqueryFilter is the predicate the application itself applies when it reads Table — a
 	// soft-delete flag, a tenant column, a subtype discriminator, whatever narrows the rows that
 	// became the resource attributes.
