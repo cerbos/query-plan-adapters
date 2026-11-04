@@ -3,7 +3,7 @@
 
 import type { PlanExpressionOperand } from "@cerbos/core";
 
-import { assertStringField, buildFieldFilter } from "./fields";
+import { assertStringField, buildFieldFilter, buildPrefixFilter } from "./fields";
 import type { PrismaFilter } from "./index";
 import { isResolvedFieldReference, resolveFieldReference } from "./mapping";
 import type { ResolvedFieldReference, TranslationContext } from "./mapping";
@@ -363,12 +363,14 @@ function alternativeFilter(
   const likeText = tokens
     .map((token) => ("char" in token ? token.char : "any" in token ? "_" : "%"))
     .join("");
+  // A prefix is matched as a range, so it needs no escaping (see buildPrefixFilter).
+  if (literal !== undefined && begin) return buildPrefixFilter(fieldRef, literal);
   const literals = tokens.flatMap((token) => ("char" in token ? [token.char] : []));
   if (literals.some((char) => LIKE_METACHARACTERS.test(char))) {
     refuse(pattern, "a literal LIKE metacharacter (%, _ or \\), which Prisma does not escape");
   }
   if (literal !== undefined) {
-    return buildFieldFilter(fieldRef, begin ? "startsWith" : end ? "endsWith" : "contains", literal);
+    return buildFieldFilter(fieldRef, end ? "endsWith" : "contains", literal);
   }
   if (!begin || !end) {
     refuse(pattern, "a wildcard in a pattern not anchored at both ends");

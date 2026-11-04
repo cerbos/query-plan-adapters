@@ -4,6 +4,8 @@
 
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
 
+import { ARITHMETIC_OPERATORS } from "./evaluate";
+import { literalValue } from "./literals";
 import { enterLambdaScope, lookupMapping, resolveFieldReference } from "./mapping";
 import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import type { MapperConfig } from "./index";
@@ -281,7 +283,8 @@ function unwrapBooleanComparison(expr: OperatorOperand): PlanExpressionOperand |
  * `string(column) == "lit"` and `int(column) == k` (and their `!=` forms), solved for the column
  * the cast wraps: a Prisma filter has no cast, but these conversions are invertible.
  *
- * - `string(b)` of a boolean is `"true"` or `"false"`.
+ * - `string(b)` of a boolean is `"true"` or `"false"`, for a column or any boolean-valued
+ *   expression (see renderedBooleanComparison).
  * - `string(d)` of a number is cel-go's shortest `%g` rendering, so exactly one double prints as a
  *   given literal — or none does, and the comparison is settled like any type mismatch.
  * - `int(d)` truncates toward zero, and raises an error outside (-2^63, 2^63). A threshold is a
@@ -310,13 +313,29 @@ function rewriteCastComparison(
     return undefined;
   }
   const column = cast.operands[0]!;
+  const value = literal.value;
+  if (cast.operator === "string" && typeof value === "string" && !isNamedOperand(column)) {
+    if (isBooleanValued(column, context)) {
+      return renderedBooleanComparison(column, value, operator);
+    }
+    // string(int(x)) renders the int in plain decimal, so the comparison is int(x) == k for the
+    // one k that renders as the literal, solved below on the next pass. A literal no int renders
+    // as, or one past 2^53, is left alone: the int's overflow error has no bound an Int column
+    // accepts.
+    const rendered = isOperatorOperand(column) && column.operator === "int" ? Number(value) : NaN;
+    return /^(0|-?[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(rendered)
+      ? { operator, operands: [column, { value: rendered }] }
+      : undefined;
+  }
   if (!isNamedOperand(column)) return undefined;
   const fieldRef = resolveFieldReference(column.name, context);
-  if (fieldRef.relations?.length || fieldRef.nullAttributeRepresentation === "explicit") {
+  if (fieldRef.nullAttributeRepresentation === "explicit") return undefined;
+  const type = scalarType(fieldRef);
+  // A column reached through a to-one relation is solved for only as a boolean rendering: the
+  // comparison it becomes is one the translator already guards through the hop.
+  if (fieldRef.relations?.length && (cast.operator !== "string" || type !== "boolean")) {
     return undefined;
   }
-  const type = scalarType(fieldRef);
-  const value = literal.value;
   const compare = (op: string, v: Value): PlanExpressionOperand => ({
     operator: op,
     operands: [column, { value: v }],
@@ -356,6 +375,43 @@ function rewriteCastComparison(
     return operator === "eq" ? range : { operator: "not", operands: [range] };
   }
   return undefined;
+}
+
+/**
+ * `string(b) == "lit"` (and `!=`) over a boolean-valued expression `b`: CEL renders a boolean as
+ * `"true"` or `"false"`, so the comparison is `b`, `!b`, or for any other literal false wherever
+ * `b` evaluates, and an error wherever `b` is one — which `b && !b` is, exactly.
+ */
+function renderedBooleanComparison(
+  expression: PlanExpressionOperand,
+  literal: string,
+  operator: string
+): PlanExpressionOperand {
+  const negated: PlanExpressionOperand = { operator: "not", operands: [expression] };
+  const holds: PlanExpressionOperand =
+    literal === "true"
+      ? expression
+      : literal === "false"
+        ? negated
+        : { operator: "and", operands: [expression, negated] };
+  return operator === "eq" ? holds : { operator: "not", operands: [holds] };
+}
+
+/**
+ * Whether `expr` is a boolean, or an error, on every row: a boolean operator, a boolean literal,
+ * a boolean column, or a ternary whose arms both are.
+ */
+function isBooleanValued(expr: PlanExpressionOperand, context: TranslationContext): boolean {
+  if (isValueOperand(expr)) return typeof expr.value === "boolean";
+  if (isNamedOperand(expr)) {
+    return scalarType(resolveFieldReference(expr.name, context)) === "boolean";
+  }
+  if (BOOLEAN_OPERATORS.has(expr.operator)) return true;
+  return (
+    expr.operator === "if" &&
+    expr.operands.length === 3 &&
+    expr.operands.slice(1).every((arm) => isBooleanValued(arm, context))
+  );
 }
 
 /**
@@ -753,14 +809,23 @@ function definite(
 ): Outcomes {
   const missing: PlanExpressionOperand[] = [];
   let unknowable = false;
-  for (const operand of operands) {
-    if (!isNamedOperand(operand)) continue;
+  const visit = (operand: PlanExpressionOperand): void => {
+    if (literalValue(operand) !== undefined) return;
+    // Arithmetic raises the error of any column it reads; another expression's errors are not
+    // known here, so its leaf is left as it stands.
+    if (isOperatorOperand(operand)) {
+      if (ARITHMETIC_OPERATORS.has(operand.operator)) operand.operands.forEach(visit);
+      else unknowable = true;
+      return;
+    }
+    if (!isNamedOperand(operand)) return;
     const fieldRef = resolveFieldReference(operand.name, context);
-    if (!mayBeMissing(fieldRef)) continue;
+    if (!mayBeMissing(fieldRef)) return;
     const test = presence(operand, fieldRef);
     if (test === undefined) unknowable = true;
     else missing.push(test);
-  }
+  };
+  operands.forEach(visit);
   return {
     [value ? "true" : "false"]: true,
     error: unknowable || missing.length > 0,
@@ -903,6 +968,7 @@ function operandType(
 ): KnownType | undefined {
   const literal = literalType(operand);
   if (literal !== undefined) return { type: literal, mayBeMissing: false };
+  if (isOperatorOperand(operand)) return arithmeticType(operand, context);
   if (!isNamedOperand(operand)) return undefined;
   const fieldRef = resolveFieldReference(operand.name, context);
   const type = scalarType(fieldRef);
@@ -910,6 +976,24 @@ function operandType(
   // A relation-backed reference that is not a to-one scalar is a collection, not a scalar.
   if (fieldRef.relations?.some((relation) => relation.type !== "one")) return undefined;
   return { type, mayBeMissing: mayBeMissing(fieldRef) };
+}
+
+/**
+ * The type of `a + b`, `a - b`, `a * b` or `a / b` when both operands are known numbers, or of
+ * `a + b` when both are strings: the result's type, missing when either operand is. Any other
+ * pairing is left unknown, as a no-overload error is only certain of the typed ones.
+ */
+function arithmeticType(
+  expr: OperatorOperand,
+  context: TranslationContext
+): KnownType | undefined {
+  if (!ARITHMETIC_OPERATORS.has(expr.operator) || expr.operands.length !== 2) return undefined;
+  const [left, right] = expr.operands.map((operand) => operandType(operand, context));
+  if (left === undefined || right === undefined || left.type !== right.type) return undefined;
+  if (left.type !== "number" && (left.type !== "string" || expr.operator !== "add")) {
+    return undefined;
+  }
+  return { type: left.type, mayBeMissing: left.mayBeMissing || right.mayBeMissing };
 }
 
 function scalarFieldType(
