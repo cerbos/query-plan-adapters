@@ -199,11 +199,7 @@ func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 		return b.isSubset(n, m, negated)
 
 	case "matches":
-		return nil, fmt.Errorf(
-			"unsupported operator: matches. CEL's regex dialect (RE2) is not the dialect any SQL " +
-				"engine implements, so a translated pattern would accept or reject different strings " +
-				"than the PDP",
-		)
+		return b.matches(n, m, negated)
 
 	case "lambda":
 		return nil, fmt.Errorf("lambda expression outside a collection macro")
@@ -417,9 +413,6 @@ func elementColumn(alias string, field *Entry) Column {
 // be true. SQL equality never matches two NULLs, so the both-null case is spelled out — and only
 // when the needle is itself a column, since a literal null needle collapses to a plain IS NULL.
 func (b *builder) elementMatches(element Column, needle value, nullSafe bool) (Expr, error) {
-	if _, list := needle.([]any); list {
-		return nil, fmt.Errorf("membership with a list-valued element cannot be represented by scalar SQL equality")
-	}
 	if needle == nil {
 		return IsNull{X: element}, nil
 	}
@@ -746,14 +739,19 @@ func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error)
 	if !left.isValue() {
 		listNode, otherNode = right, left
 	}
-	if !listNode.isValue() {
+	// A list() of constants folds to a literal list too.
+	if !listNode.isValue() && (!listNode.isExpr() || listNode.operator != "list") {
 		return nil, fmt.Errorf(
 			"hasIntersection between two stored collections requires a set-valued join that SQL " +
 				"cannot express as a row filter; one side must be a literal list",
 		)
 	}
 
-	list, ok := listNode.value.([]any)
+	listValue, err := b.value(listNode, m)
+	if err != nil {
+		return nil, err
+	}
+	list, ok := listValue.([]any)
 	if !ok {
 		return nil, fmt.Errorf("hasIntersection requires a list value")
 	}

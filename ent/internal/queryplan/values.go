@@ -546,9 +546,6 @@ func applyComparison(op CmpOp, l, r value) (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := assertNoMixedNullConventions(op, lExpr, rExpr); err != nil {
-		return nil, err
-	}
 	if definite, ok := definiteEquality(op, lExpr, rExpr); ok {
 		return definite, nil
 	}
@@ -643,17 +640,10 @@ func definiteEquality(op CmpOp, l, r Expr) (Expr, bool) {
 	if !lExplicit && !rExplicit {
 		return nil, false
 	}
-	// Mixing the two conventions across two columns has no faithful rendering, so it is refused
-	// by the caller rather than answered here.
-	if _, lIsColumn := l.(Column); lIsColumn {
-		if _, rIsColumn := r.(Column); rIsColumn && (!lExplicit || !rExplicit) {
-			return nil, false
-		}
-	}
 	// The undeclared side, when it is not a constant, can be NULL because an attribute is missing:
-	// a column of a to-one hop read as a scalar subquery, or a call or arithmetic over an omitted
-	// column. That NULL is a CEL error, so it must stay UNKNOWN rather than reach the definite
-	// expansion below, which answers it as if it were a value.
+	// a column on the omitted convention, a column of a to-one hop read as a scalar subquery, or a
+	// call or arithmetic over an omitted column. That NULL is a CEL error, so it must stay UNKNOWN
+	// rather than reach the definite expansion below, which answers it as if it were a value.
 	var missable Expr
 	if !lExplicit && !isConstantExpr(l) {
 		missable = l
@@ -693,31 +683,6 @@ func isConstantExpr(e Expr) bool {
 	default:
 		return false
 	}
-}
-
-// assertNoMixedNullConventions refuses an equality between two columns where only ONE declares
-// the explicit-null convention.
-//
-// The declared side needs a definite answer for its NULL — CEL holds a null VALUE there. The
-// undeclared side needs UNKNOWN for its NULL — that is a missing attribute, which CEL denies under
-// BOTH polarities. A definite predicate returns rows the PDP refuses; a plain one drops rows the
-// PDP allows. Neither is the decision, so the shape is refused rather than answered in a direction.
-func assertNoMixedNullConventions(op CmpOp, l, r Expr) error {
-	if op != OpEq && op != OpNe {
-		return nil
-	}
-	lCol, lIsColumn := l.(Column)
-	rCol, rIsColumn := r.(Column)
-	if !lIsColumn || !rIsColumn || lCol.ExplicitNull == rCol.ExplicitNull {
-		return nil
-	}
-	return fmt.Errorf(
-		"cannot compare %q and %q under mixed null conventions: one declares the explicit-null "+
-			"convention and the other does not, so the omitted side is UNKNOWN for a NULL column "+
-			"while the declared side is definite, and no single predicate is both. Declare "+
-			"NullConvention on both mapper entries, or on neither",
-		lCol.Name, rCol.Name,
-	)
 }
 
 func explicitNullColumn(e Expr) (Expr, bool) {
@@ -861,8 +826,8 @@ func newHierarchy(v, delimiter value) (hierarchyValue, error) {
 	d := "."
 	if delimiter != nil {
 		s, ok := delimiter.(string)
-		if !ok || s == "" {
-			return hierarchyValue{}, fmt.Errorf("hierarchy() delimiter must be a non-empty string")
+		if !ok {
+			return hierarchyValue{}, fmt.Errorf("hierarchy() delimiter must be a string constant")
 		}
 		d = s
 	}
@@ -882,6 +847,10 @@ func matchingHierarchies(l, r value) (hierarchyValue, hierarchyValue, error) {
 }
 
 // ancestorOf is true when `ancestor` is a strict prefix of `descendent` at a delimiter boundary.
+//
+// Cerbos splits a path with strings.Split, so the empty delimiter makes one segment per character
+// and the empty path zero segments: an ancestor is then any strict character prefix, the empty
+// string included, and a path is never its own ancestor.
 func ancestorOf(l, r value) (Expr, error) {
 	ancestor, descendent, err := matchingHierarchies(l, r)
 	if err != nil {
@@ -894,6 +863,9 @@ func ancestorOf(l, r value) (Expr, error) {
 
 	switch {
 	case aIsStr && dIsStr:
+		if delim == "" {
+			return BoolConst{V: strings.HasPrefix(dStr, aStr) && dStr != aStr}, nil
+		}
 		return BoolConst{V: strings.HasPrefix(dStr, aStr+delim)}, nil
 
 	case dIsStr:
@@ -901,13 +873,25 @@ func ancestorOf(l, r value) (Expr, error) {
 		// This is exact and avoids a LIKE against a column-valued pattern.
 		parts := strings.Split(dStr, delim)
 		prefixes := make([]any, 0, len(parts))
-		for i := 1; i < len(parts); i++ {
+		first := 1
+		if delim == "" {
+			first = 0
+		}
+		for i := first; i < len(parts); i++ {
 			prefixes = append(prefixes, strings.Join(parts[:i], delim))
 		}
 		return membership(ancestor.value, prefixes)
 
 	case aIsStr:
-		return stringMatch(descendent.value, aStr+delim, false, true)
+		prefixed, err := stringMatch(descendent.value, aStr+delim, false, true)
+		if err != nil || delim != "" {
+			return prefixed, err
+		}
+		dExpr, err := asExpr(descendent.value)
+		if err != nil {
+			return nil, err
+		}
+		return and(prefixed, Cmp{Op: OpNe, L: dExpr, R: Lit{V: aStr}}), nil
 
 	default:
 		return nil, fmt.Errorf("hierarchy comparison between two columns is not supported")
