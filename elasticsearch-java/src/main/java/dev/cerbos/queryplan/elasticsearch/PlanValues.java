@@ -12,6 +12,7 @@ import com.google.protobuf.Value;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -89,6 +90,24 @@ final class PlanValues {
         if (value instanceof Map<?, ?> map) {
             map.values().forEach(PlanValues::rejectNonFinite);
         }
+    }
+
+    /**
+     * Elasticsearch reads a date that omits its fraction as the whole second at an upper bound
+     * ({@code lte}, {@code gt}, a term), so {@code …00Z} matches {@code …00.123Z}. Every bound
+     * spells all three millisecond digits, the precision a {@code date} field stores.
+     */
+    private static final DateTimeFormatter MILLISECOND_INSTANT =
+            DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
+
+    static String millisecondInstant(Instant instant) {
+        return MILLISECOND_INSTANT.format(instant);
+    }
+
+    static String canonicalTimestampLiteral(Object value) {
+        validateTimestampLiteral(value);
+        return millisecondInstant(
+                OffsetDateTime.parse((String) value, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant());
     }
 
     static void validateTimestampLiteral(Object value) {
