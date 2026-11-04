@@ -1,3 +1,5 @@
+import { RE2JS, RE2JSException } from "re2js";
+
 import { UnsupportedQueryPlanError } from "./errors";
 
 /** Escapes every regex metacharacter so the value matches itself literally. */
@@ -447,10 +449,19 @@ const emitNode = (node: Node): string => {
  * literals and literal escapes, `.`, `^` and `$` (as `\z`, since PCRE2's `$` also matches before
  * a final newline), the ASCII classes `\d` `\D` `\w` `\W`, bracket classes with ranges and POSIX
  * names, groups, alternation, the `*` `+` `?` quantifiers and counted repetition as Go reads it,
- * and a leading `(?i)`. A pattern Go's parser rejects is reported as `invalid`; anything else
- * outside the subset is refused.
+ * and a leading `(?i)`. A pattern RE2 rejects is reported as `invalid`; anything else outside
+ * the subset is refused.
  */
 export const lowerRe2PatternForMongo = (pattern: string): Re2Lowering => {
+  // re2js, a port of RE2, decides validity: whatever it rejects, CEL rejects. The parser below
+  // only translates what it accepts, so a rule it misreads can refuse a pattern, never lower one
+  // Go would not compile.
+  try {
+    RE2JS.compile(pattern);
+  } catch (error) {
+    if (!(error instanceof RE2JSException)) throw error;
+    return { invalid: error.message };
+  }
   const caseInsensitive = pattern.startsWith("(?i)");
   const body = caseInsensitive ? pattern.slice(4) : pattern;
   try {
@@ -459,7 +470,9 @@ export const lowerRe2PatternForMongo = (pattern: string): Re2Lowering => {
     return { pattern: `${caseInsensitive ? "(?i)" : ""}${emit(alternatives)}` };
   } catch (error) {
     if (error instanceof InvalidRe2Pattern) {
-      return { invalid: error.message };
+      throw new UnsupportedQueryPlanError(
+        `matches pattern is outside the supported common RE2/PCRE2 subset (${error.message})`,
+      );
     }
     throw error;
   }

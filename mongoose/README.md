@@ -259,10 +259,12 @@ per-attribute way to declare the omitted convention.
   escaped metacharacters, `.`, `^` and `$` (`$` becomes PCRE2's absolute end anchor so MongoDB
   cannot match before a trailing newline, as RE2 would not), `\d` `\D` `\w` `\W`, bracket
   classes with ranges and POSIX names, groups, alternation, `*` `+` `?` and counted repetition as
-  Go reads it (a brace that is not a count is a literal), and a leading `(?i)`. A pattern Go's
-  parser rejects (a backreference, lookaround, a count past 1000, a nested count past the shared
-  budget, an inverted range) is a CEL error and matches nothing under either polarity; `\s`
-  (PCRE2's includes a vertical tab) and everything else outside the subset fail closed.
+  Go reads it (a brace that is not a count is a literal), and a leading `(?i)`. Validity is
+  decided by [re2js](https://github.com/le0pard/re2js), a port of RE2: a pattern it rejects (a
+  backreference, lookaround, a count past 1000, a nested count past the shared budget, an inverted
+  range) is a CEL error and matches nothing under either polarity, and only a pattern it accepts
+  is translated; `\s` (PCRE2's includes a vertical tab) and everything else outside the subset
+  fail closed.
 
 ## Supported operators
 
