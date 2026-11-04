@@ -2,13 +2,11 @@
 
 ## Unreleased
 
-- `postFilter` evaluates `matches()` with the adapter's own RE2 matcher, following Go's
-  `regexp/syntax`, in place of the literal, anchor and trailing `.*` subset. Every pattern RE2
-  accepts is matched as RE2 matches it, bar a Unicode class (`\p{...}`) and `(?i)` over a
-  non-ASCII character, which still throw `UnsupportedQueryPlanError`. A pattern RE2 rejects (a
-  lookaround, a backreference, a repetition past its budget of 1000) is CEL's evaluation error on
-  every row, as it is in the PDP, where it used to throw at translation. The 21 `regex/*` cases the
-  ledger listed now pass.
+- `postFilter` evaluates `matches()` with [re2js](https://github.com/le0pard/re2js), a port of
+  RE2 and a new dependency, in place of the literal, anchor and trailing `.*` subset. Every pattern
+  is matched as the PDP matches it. A pattern RE2 rejects (a lookaround, a backreference, a
+  repetition past its budget of 1000) is CEL's evaluation error on every row, as it is in the PDP,
+  where it used to throw at translation. The 21 `regex/*` cases the ledger listed now pass.
 
 - **Breaking:** a `path: "split"` result carries `prefilter` and `postFilter`, and `postFilter`
   evaluates the whole condition. It used to carry the pushable conjuncts as `filter`, so a caller

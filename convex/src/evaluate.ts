@@ -652,8 +652,7 @@ const validateDivision = ({ operands }: PlanExpression): void => {
   }
 };
 
-// A pattern RE2 rejects passes: CEL raises on every row, which the evaluator reproduces. A pattern
-// the matcher has no tables for is refused here, by `compileRe2`, before a filter exists.
+// A pattern RE2 rejects passes: CEL raises on every row, which the evaluator reproduces.
 const validatePattern = ({ operands }: PlanExpression): void => {
   const pattern = operands[1];
   if (!pattern || !isValue(pattern) || typeof pattern.value !== "string") {

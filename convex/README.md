@@ -236,7 +236,7 @@ Evaluated in JavaScript (`postFilter`, needs `allowPostFilter: true`):
 | String functions | `upperAscii` | Folds the ASCII letters only, as CEL does |
 | Time | `timeSince`, timestamp ± duration, duration ± duration, timestamp - timestamp | `timeSince` reads the clock when `postFilter` runs; an overflow or a timestamp outside 0001–9999 is an error |
 | Conditional | `if` | Evaluates only the selected branch |
-| Pattern | `matches` | A constant pattern, matched by the adapter's own RE2 matcher (Go's `regexp/syntax` rules: `.` excludes only `\n`, `$` is the absolute end, `\s` and `\d` are ASCII, `(?i)` folds as RE2 does, counted repetitions keep RE2's budget of 1000) rather than JavaScript's RegExp. A pattern RE2 rejects (lookaround, a backreference, `a**`) is CEL's evaluation error on every row, as it is in the PDP. Linear-time, so no ReDoS. A Unicode class (`\p{...}`), `(?i)` over a non-ASCII character, and a pattern that is not a constant throw |
+| Pattern | `matches` | A constant pattern, evaluated by [re2js](https://github.com/le0pard/re2js), a port of RE2, so it means what it means to the PDP: no lookaround or backreferences, a repeat count of at most 1000, `$` at the absolute end, `.` excluding only `\n`, `(?i)` by Unicode simple case folding, and linear time. A pattern RE2 rejects is CEL's evaluation error on every row, as it is in the PDP. A pattern that is not a constant throws |
 | Hierarchy | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Segment-wise, as Cerbos's hierarchy type compares: the delimiter only splits the input, and `hierarchy([...])` takes the segments from a list |
 
 ### What throws
@@ -267,8 +267,7 @@ It is raised, before any filter exists, when:
   `set-field` appears outside one;
 - a lambda is malformed, or `filter()`/`map()` declares two variables;
 - `filter()`/`map()` sits in a boolean position;
-- a `matches` pattern is not a constant, names a Unicode class (`\p{...}`), or folds a non-ASCII
-  character under `(?i)`;
+- a `matches` pattern is not a constant string;
 - a constant zero divisor whose sign JSON discards, or a division used as another division's
   denominator;
 - `nullAttributeRepresentation: "omitted"` and the plan has a null comparison operand.

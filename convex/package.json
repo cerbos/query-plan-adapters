@@ -66,6 +66,9 @@
     "ts-node": "^10.4.0",
     "typescript": "^6.0.0"
   },
+  "dependencies": {
+    "re2js": "^2.9.1"
+  },
   "peerDependencies": {
     "@cerbos/core": "^0.32.0 || ^0.33.0"
   }
