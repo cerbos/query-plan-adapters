@@ -49,8 +49,8 @@ from sqlalchemy import (
     select,
     true,
 )
-from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import declarative_base
 
 from cerbos_sqlalchemy import CollectionColumn, UnsupportedPlanError, require_hops
@@ -346,8 +346,20 @@ _COLLECTION_JSON = JSON(none_as_null=True).with_variant(
 _COLLECTION_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(String), "postgresql")
 _NUMBER_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Integer), "postgresql")
 _BOOL_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Boolean), "postgresql")
-# MySQL's DATETIME defaults to whole seconds, which would store a5 on the literal it passes.
-_TIMESTAMP = DateTime(timezone=True).with_variant(MYSQL_DATETIME(fsp=6), "mysql")
+
+
+# MySQL's DATETIME defaults to whole seconds, which would store a5 on the literal it passes. A
+# subclass, not with_variant: SQLAlchemy 1.4's Variant is not a DateTime to the adapter.
+class _Timestamp(DateTime):
+    pass
+
+
+@compiles(_Timestamp, "mysql")
+def _mysql_timestamp(type_, compiler, **kw):
+    return "DATETIME(6)"
+
+
+_TIMESTAMP = _Timestamp(timezone=True)
 
 
 class AdvResource(AdvBase):
