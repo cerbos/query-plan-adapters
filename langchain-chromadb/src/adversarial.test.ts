@@ -50,6 +50,10 @@ interface Seed {
   aString: string | null;
   aNumber: number | null;
   aOptionalString: string | null;
+  aNumberList: (number | null)[] | null;
+  aBoolList: (boolean | null)[] | null;
+  tags: { id: string; name: string | null }[];
+  subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
 }
@@ -60,6 +64,7 @@ interface DerivedEntry {
   updatedAt: string | null;
   createdBy: string | null;
   scope: string | null;
+  labels: (string | null)[];
 }
 
 const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
@@ -83,11 +88,12 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
 // -- the store: one Chroma record per seed, scalars as metadata -----------------------------------
 //
 // Chroma metadata holds only finite numbers, strings and booleans. A NULL column therefore writes
-// no key at all, which is the missing-attribute convention `resources.json` records for it. List
-// and object attributes (`tags`, `aNumberList`, `categories`, …) are not stored (#475), and neither
-// are `owner` and `coOwner`, which `resources.json` sends as an explicit null on some rows — a null
-// Chroma cannot hold. The mapping names none of them, so every shape that reads one is refused
-// during translation: by the pushdown, and by the post-filter, which reads declared keys only.
+// no key at all, which is the missing-attribute convention `resources.json` records for it. The
+// attributes that convention cannot hold — the lists (empty, null-bearing, of objects, or null
+// themselves, as j4's `aNumberList`), `categories`, `mainCategory`, and `owner` and `coOwner`,
+// which `resources.json` sends as an explicit null on some rows — are stored as JSON text under
+// keys the mapping declares `valueType: "json"`, built as `checkAttr` in the generator builds the
+// resource (conformance/generator/resources.go), so the record read back is the resource.
 
 function metadataFor(seed: Seed): Metadata {
   const derived = DERIVED[seed.id];
@@ -139,6 +145,48 @@ function metadataFor(seed: Seed): Metadata {
       if (value !== null) metadata[`${prefix}.${key}`] = value;
     }
   }
+  // A NULL tag name or label name is a missing element attribute. A seed with subCategoryNames
+  // owns one category holding every name as a subcategory.
+  const tags = seed.tags.map(({ id, name }) => (name === null ? { id } : { id, name }));
+  const labels = derived.labels.map((name) => (name === null ? {} : { name }));
+  const subCategories = seed.subCategoryNames.map((name) => ({ name, labels }));
+  const json: [string, unknown][] = [
+    ["owner", seed.aOptionalString],
+    ["coOwner", derived.scope],
+    ["tagNames", seed.tags.map(({ name }) => name)],
+    ["aNumberList", seed.aNumberList],
+    ["aBoolList", seed.aBoolList],
+    ["tags", tags],
+    ["categories", subCategories.length === 0 ? [] : [{ name: "business", subCategories }]],
+    ["obj", seed.aString === null ? {} : { inner: seed.aString }],
+  ];
+  if (seed.subCategoryNames.length > 0) {
+    json.push([
+      "mainCategory",
+      {
+        name: "business",
+        subCategories: seed.subCategoryNames.map((name) => ({ name })),
+        subNames: seed.subCategoryNames,
+      },
+    ]);
+  }
+  // The to-one chain whole, for the shapes that read `parent` itself (its keys, its presence).
+  const relationAttr = (level: Seed): Record<string, unknown> =>
+    Object.fromEntries(
+      (["aBool", "aString", "aNumber", "aOptionalString"] as const)
+        .filter((key) => level[key] !== null)
+        .map((key) => [key, level[key]]),
+    );
+  if (parent !== undefined) {
+    const inner = parentSeedOf(parent);
+    json.push([
+      "parent",
+      inner === undefined
+        ? relationAttr(parent)
+        : { ...relationAttr(parent), inner: relationAttr(inner) },
+    ]);
+  }
+  for (const [key, value] of json) metadata[key] = JSON.stringify(value);
   return metadata;
 }
 

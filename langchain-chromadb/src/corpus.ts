@@ -354,10 +354,10 @@ export async function planOf(
  * seed — a missing attribute in `resources.json`, and no metadata key here — so each stays
  * optional. An inequality over one is refused unless the key's declared type (`valueType:
  * "boolean"`, `numericType: "integer"`) spells it without `$ne`, as it does for the booleans and
- * the integers. Attributes the mapping does not name (`owner`,
- * `coOwner`, the lists and relations) are not stored by the harness, so no case this adapter
- * translates reads them: the pushdown refuses every such shape, and the post-filter refuses any
- * reference the mapping does not declare.
+ * the integers. The attributes no scalar key can hold (`owner`, `coOwner`, the lists, `categories`,
+ * `mainCategory`, and `parent` and `obj` read whole) are stored as JSON text and declared
+ * `valueType: "json"`, so only the post-filter reads them. The mapping names every attribute the
+ * corpus reads: the post-filter refuses any reference the mapping does not declare.
  */
 export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
   {
@@ -428,6 +428,21 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     "request.resource.attr.parent.inner.aOptionalString": {
       field: "parent.inner.aOptionalString",
     },
+    // The attributes Chroma metadata cannot hold as the PDP sees them — lists (empty, with null
+    // elements, of objects), maps, and the explicit nulls `owner`, `coOwner` and the lists send —
+    // stored as JSON text under one key each. No `Where` clause reads them; the post-filter parses
+    // them, and a reference below one (`mainCategory.subCategories`) resolves through its prefix.
+    // `obj` is also read whole, by the map macro cases, beside its flattened `obj.inner`.
+    "request.resource.attr.owner": { field: "owner", valueType: "json" },
+    "request.resource.attr.coOwner": { field: "coOwner", valueType: "json" },
+    "request.resource.attr.tagNames": { field: "tagNames", valueType: "json" },
+    "request.resource.attr.aNumberList": { field: "aNumberList", valueType: "json" },
+    "request.resource.attr.aBoolList": { field: "aBoolList", valueType: "json" },
+    "request.resource.attr.tags": { field: "tags", valueType: "json" },
+    "request.resource.attr.categories": { field: "categories", valueType: "json" },
+    "request.resource.attr.mainCategory": { field: "mainCategory", valueType: "json" },
+    "request.resource.attr.parent": { field: "parent", valueType: "json" },
+    "request.resource.attr.obj": { field: "obj", valueType: "json" },
   };
 
 /**

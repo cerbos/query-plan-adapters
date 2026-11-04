@@ -21,8 +21,13 @@ export interface FieldNameMapperConfig {
   field: string;
   required?: boolean;
   numericType?: "integer" | "float";
-  /** Every value stored under the key is a boolean. Mutually exclusive with `numericType`. */
-  valueType?: "boolean";
+  /**
+   * `"boolean"`: every value stored under the key is a boolean. `"json"`: the key holds the
+   * attribute as a JSON document in a string (a list, a map, a null or a scalar), which only the
+   * post-filter reads; a reference below the attribute (`R.attr.doc.field`) resolves through it.
+   * Mutually exclusive with `numericType`.
+   */
+  valueType?: "boolean" | "json";
 }
 
 type FieldNameMapperValue = string | FieldNameMapperConfig;
@@ -164,13 +169,24 @@ function postFilterFields(
   fieldNameMapper: FieldMapper,
   resolveField: FieldResolver,
 ): PostFilterFields {
+  const declared = (reference: string): boolean =>
+    typeof fieldNameMapper === "function"
+      ? Boolean(fieldNameMapper(reference))
+      : Object.prototype.hasOwnProperty.call(fieldNameMapper, reference);
   return {
     isMapped: (reference) =>
-      typeof fieldNameMapper === "function"
-        ? Boolean(fieldNameMapper(reference))
-        : Object.prototype.hasOwnProperty.call(fieldNameMapper, reference),
+      declared(reference) || resolveField(reference).jsonPath !== undefined,
     metadataKey: (reference) => resolveField(reference).name,
     isBoolean: (reference) => resolveField(reference).valueType === "boolean",
+    jsonPath: (reference) => resolveField(reference).jsonPath,
+    jsonPresence: (reference) => {
+      const field = resolveField(reference);
+      const viaJson =
+        field.jsonPath !== undefined ? field : resolveField.throughJson(reference);
+      return viaJson?.jsonPath === undefined
+        ? undefined
+        : { key: viaJson.name, path: viaJson.jsonPath };
+    },
   };
 }
 
@@ -337,11 +353,20 @@ function requireLiteralList(value: unknown, operator: string): ChromaLiteral[] {
 type ResolvedField = {
   name: string;
   numericType?: "integer" | "float";
-  valueType?: "boolean";
+  valueType?: "boolean" | "json";
   required: boolean;
+  /**
+   * Set for a key declared `valueType: "json"`: the path from the document the key holds to the
+   * referenced value, empty when the reference is the attribute itself.
+   */
+  jsonPath?: string[];
 };
 
-type FieldResolver = (key: string) => ResolvedField;
+interface FieldResolver {
+  (key: string): ResolvedField;
+  /** The reference read through a `valueType: "json"` prefix alone, whatever its own entry says. */
+  throughJson: (key: string) => ResolvedField | undefined;
+}
 
 // Fields default to optional: Chroma's $ne/$nin match records where the metadata key is absent,
 // while Cerbos denies on a missing attribute. Without an explicit `required: true` assertion from
@@ -349,11 +374,15 @@ type FieldResolver = (key: string) => ResolvedField;
 // rejected rather than allowed to over-grant — unless the key's declared type gives the inequality
 // a spelling that needs no `$ne` (`inequalityWithoutNe`).
 function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
-  return (key) => {
-    const mapped =
-      typeof fieldNameMapper === "function"
-        ? fieldNameMapper(key)
-        : fieldNameMapper[key];
+  const lookup = (key: string): FieldNameMapperValue | undefined =>
+    typeof fieldNameMapper === "function"
+      ? fieldNameMapper(key)
+      : fieldNameMapper[key];
+  const resolve = (
+    key: string,
+    mapped: FieldNameMapperValue | undefined,
+    jsonPath?: string[],
+  ): ResolvedField => {
     const field: ResolvedField =
       typeof mapped === "string"
         ? { name: mapped, required: false }
@@ -368,7 +397,11 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
     if (!field.name) {
       throw Error("Field name is required");
     }
-    if (field.valueType !== undefined && field.valueType !== "boolean") {
+    if (
+      field.valueType !== undefined &&
+      field.valueType !== "boolean" &&
+      field.valueType !== "json"
+    ) {
       throw Error(
         `Unknown valueType ${JSON.stringify(field.valueType)} for field ${field.name}`,
       );
@@ -378,8 +411,27 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
         `Field ${field.name} cannot declare both valueType and numericType`,
       );
     }
+    if (field.valueType === "json") field.jsonPath = jsonPath ?? [];
     return field;
   };
+  // A reference below an attribute declared `valueType: "json"` is read out of its document.
+  const throughJson = (key: string): ResolvedField | undefined => {
+    for (let dot = key.lastIndexOf("."); dot !== -1; dot = key.lastIndexOf(".", dot - 1)) {
+      const prefix = lookup(key.substring(0, dot));
+      if (typeof prefix === "object" && prefix.valueType === "json") {
+        return resolve(key, prefix, key.substring(dot + 1).split("."));
+      }
+    }
+    return undefined;
+  };
+  return Object.assign(
+    (key: string): ResolvedField => {
+      const mapped = lookup(key);
+      if (mapped !== undefined) return resolve(key, mapped);
+      return throughJson(key) ?? resolve(key, undefined);
+    },
+    { throughJson },
+  );
 }
 
 /**
@@ -515,6 +567,12 @@ function compare(field: ResolvedField, operator: string, value: unknown): Where 
   const comparison = COMPARISONS.get(operator);
   if (!comparison) {
     throw unsupported(operator);
+  }
+  if (field.valueType === "json") {
+    throw new UnsupportedOperatorError(
+      operator,
+      `${operator} compares ${field.name}, a key declared valueType: "json": a Where clause would compare the JSON text, not the value it encodes`,
+    );
   }
   // A literal Chroma cannot hold (a null, a list) is left to the `$ne` path, which refuses it.
   if (operator === "ne" && isChromaLiteral(value)) {
