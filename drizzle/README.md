@@ -149,6 +149,32 @@ The subquery reads the table **bare**. If your own reads of that table filter it
 tenant, subtype), declare the same predicate as [`subqueryFilter`](#declaring-the-applications-own-predicate).
 See [Mapping hazards](#mapping-hazards).
 
+A relation has no order. To translate a read that needs one — a constant positional access
+(`R.attr.tags[0].name == "public"`) or an ordered list equality (`R.attr.tags.map(t, t.id) ==
+["a", "b"]`, `R.attr.tagNames.except(["x"]) == ["y"]`) — declare the column that holds each row's
+zero-based index in the list you send to Cerbos, unique per source row and contiguous from 0:
+
+```ts
+relation: {
+  type: "many",
+  table: resourceTags,
+  sourceColumn: resources.id,
+  targetColumn: resourceTags.resourceId,
+  position: resourceTags.position,
+  fields: { id: resourceTags.id, name: resourceTags.name },
+}
+```
+
+A positional read becomes a scalar subquery over the row at that position, NULL — an error, denied
+under both polarities — when no row holds it, and compared with a string, number or boolean constant
+through the column's own encoder; a constant of another type equals no field. An ordered equality
+counts the rows and matches each rank (`row_number()` over `position`, among the rows `except()`
+keeps) against the literal's element at that rank. A NULL field is a missing element attribute, so
+the row stays excluded under both polarities; one declared `nullAttributeRepresentation:
+"explicit"` compares as CEL's null value. Only a column of the relation's own table can be read
+this way, not a transform or a further hop, and a scalar list with a declared `indexable` column
+still reads that column by position.
+
 ### Collections
 
 - `hasIntersection(map(R.attr.tags, t, t.name), ["a"])` becomes `column IN (...)` over the mapped
@@ -255,7 +281,8 @@ const mapper = {
   becomes an UNKNOWN condition.
 - Throws: dynamic indexes, object-field projection (`get-field`), ordered comparisons,
   indexes nested inside other value expressions, a mapping with a `transform`, and undeclared
-  storage (a related table does not define list order).
+  storage (a related table defines no list order unless its relation declares
+  [`position`](#relations)).
 - Refused array types: numeric, bigint, temporal and custom decoders (their application values can
   differ from SQL), and floating-point arrays (PostgreSQL serializes NaN/infinity elements as JSON
   strings).
@@ -415,7 +442,7 @@ strings, or a receiver that is not a mapped string column.
 | String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation), `upperAscii()` (26 `REPLACE`s, so only ASCII letters fold), `matches()` (see below) |
 | Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
 | Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, `isSubset`, `except` / `intersect` compared with `[]`, membership (including in `map()`, `filter()` and `L + [...]`) |
-| Other | arithmetic, ternaries (including a list ternary compared with or searched for a constant), hierarchy operations, typed timestamps and constant `duration()` shifts, `timeSince()`, index access (including a constant map indexed by an attribute, and `R.attr.m["key"]`), `string()` over a boolean or text column, `string()` of a number compared for equality with a string |
+| Other | arithmetic, ternaries (including a list ternary compared with or searched for a constant), hierarchy operations, typed timestamps and constant `duration()` shifts, `timeSince()`, index access (including a constant map indexed by an attribute, and `R.attr.m["key"]`), `string()` over a boolean (a column, a predicate, a ternary, or a boolean read through a to-one relation) or text column compared with a string, `string()` of a number, an `int()` or a `size()` compared for equality with a string, a field of a positioned relation's row read by constant index (`R.attr.tags[0].name`) compared with a constant, and `map()` or `except()` over a positioned relation compared for equality with a list literal |
 
 Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
 filter. It is exported and extends `Error`, so existing `catch` blocks keep working:
@@ -449,8 +476,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 96 / 102 |
-| adversarial | 341 / 375 |
+| extended | 99 / 102 |
+| adversarial | 348 / 375 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -520,6 +547,20 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- A relation may declare [`position`](#relations), the column holding each row's zero-based
+  index in the list sent to Cerbos. With it, `R.attr.tags[0].name == "public"` (a `get-field` over
+  a constant index, which used to throw), `R.attr.tags.map(t, t.id) == ["a", "b"]` and
+  `R.attr.tagNames.except(["x"]) == ["y"]` translate: the first as a scalar subquery over the row
+  at that position, the others as CEL's ordered list equality over the rows ranked by `position`.
+  A relation without the declaration throws as before.
+- `string()` of a boolean-valued expression (`string(R.attr.aNumber > 3) == "true"`,
+  `string(R.attr.parent.aBool) != "true"`, a ternary with boolean arms) and `string()` of an
+  `int()` or `size()` (`string(int(R.attr.aDouble)) == "1000000"`) compared with `==` / `!=`
+  against a string now translate instead of throwing. Neither renders the value: a boolean is
+  translated in condition position, in the polarity the literal and the comparison call for, so a
+  missing attribute, an absent parent or an erroring arm stays denied under both polarities; an int
+  compares with the int the literal spells, so `"1000000"` matches `int()` of `1e6` where the
+  double's own rendering is `"1e+06"`. A literal no int spells still throws.
 - **Breaking:** `nullAttributeRepresentation` defaults to `"omitted"`, where it defaulted to
   `"explicit"`. A caller that sends explicit nulls and set nothing now gets `x == null` matching no
   row where it rendered `IS NULL`, and a refusal for a null operand over a `transform`, function
