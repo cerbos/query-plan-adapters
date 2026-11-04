@@ -77,14 +77,16 @@ const isEvaluatedByPipeline = (value: unknown): boolean => {
   return false;
 };
 
-type CelScalarType = "number" | "string" | "boolean" | "timestamp" | "duration";
+/** `number` is a double, or a numeric constant whose int or double type the plan does not carry;
+ * `int` is the result of `int()`. */
+type CelScalarType = "number" | "int" | "string" | "boolean" | "timestamp" | "duration";
 
 /**
  * The CEL type `operand` evaluates to, as far as the plan settles it: a constant's own, a field's
  * declared `valueType`, and the result type of an operator that has one. `mixed` is a ternary
  * whose branches have different types; undefined is a type the plan does not carry.
  */
-const celScalarType = (
+export const celScalarType = (
   operand: PlanExpressionOperand,
   mapper: Mapper,
 ): CelScalarType | "mixed" | undefined => {
@@ -139,13 +141,25 @@ const celScalarType = (
     case "string":
       return "string";
     case "if": {
+      const [, thenOperand, elseOperand] = operand.operands;
       const [, thenType, elseType] = operand.operands.map((op) =>
         celScalarType(op, mapper),
       );
       if (thenType === "mixed" || elseType === "mixed") return "mixed";
       if (thenType === undefined || elseType === undefined) return undefined;
+      // CEL gives both branches one type, so a numeric constant beside an int branch is an int.
+      if (thenType === "int" && elseType === "number" && elseOperand && isValue(elseOperand)) {
+        return "int";
+      }
+      if (elseType === "int" && thenType === "number" && thenOperand && isValue(thenOperand)) {
+        return "int";
+      }
       return thenType === elseType ? thenType : "mixed";
     }
+    case "int":
+      return "int";
+    case "double":
+      return "number";
     case "eq":
     case "ne":
     case "lt":
@@ -187,8 +201,73 @@ export const isUnorderable = (
         "them by BSON type instead",
     );
   }
-  return leftType !== undefined && rightType !== undefined && leftType !== rightType;
+  const numeric = (type: CelScalarType | undefined) => type === "number" || type === "int";
+  return (
+    leftType !== undefined &&
+    rightType !== undefined &&
+    leftType !== rightType &&
+    !(numeric(leftType) && numeric(rightType))
+  );
 };
+
+/**
+ * Whether an operand is certainly a double to CEL: an attribute number, or arithmetic over one.
+ * A numeric constant is not, since the plan drops whether it was written as an int or a double.
+ */
+const isDoubleTyped = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
+  if (isVariable(operand)) {
+    return celScalarType(operand, mapper) === "number";
+  }
+  if (!isExpression(operand)) {
+    return false;
+  }
+  switch (operand.operator) {
+    case "double":
+      return true;
+    case "add":
+    case "sub":
+    case "mult":
+    case "div":
+      return operand.operands.some((op) => isDoubleTyped(op, mapper));
+    case "if":
+      return operand.operands.slice(1).some((op) => isDoubleTyped(op, mapper));
+    default:
+      return false;
+  }
+};
+
+/**
+ * Arithmetic over an `int()`: CEL has no overload between an int and a double, so beside an
+ * attribute number the operation is an error on every document, which `null` under the
+ * not-null guard denies. Beside an int or a numeric constant it is refused: the constant may
+ * have been written as a double, which the plan does not say, and int overflow and division
+ * are not lowered.
+ */
+const intArithmetic = (
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+): unknown | undefined => {
+  if (!operands.some((op) => celScalarType(op, mapper) === "int")) {
+    return undefined;
+  }
+  if (operands.some((op) => isDoubleTyped(op, mapper))) {
+    return { $literal: null };
+  }
+  throw new UnsupportedQueryPlanError(
+    `${operator} over an int() is translated only beside an attribute number, where CEL has no ` +
+      "int and double overload: a numeric constant may have been written as a double, which " +
+      "the plan does not say",
+  );
+};
+
+const intArithmeticGuard = (
+  expression: PlanExpression,
+  mapper: Mapper,
+): MongooseFilter | undefined =>
+  expression.operands.some((op) => celScalarType(op, mapper) === "int")
+    ? notNullGuard(expression, mapper)
+    : undefined;
 
 type AggregationOperator = {
   build: (expression: PlanExpression, mapper: Mapper) => unknown;
@@ -316,10 +395,18 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
   and: variadic("$and"),
   or: variadic("$or"),
   sub: {
-    build: variadic("$subtract").build,
-    guard: (expression, mapper) => timestampRangeGuard(expression, mapper),
+    build: (expression, mapper) =>
+      intArithmetic("sub", expression.operands, mapper) ??
+      variadic("$subtract").build(expression, mapper),
+    guard: (expression, mapper) =>
+      intArithmeticGuard(expression, mapper) ?? timestampRangeGuard(expression, mapper),
   },
-  mult: variadic("$multiply"),
+  mult: {
+    build: (expression, mapper) =>
+      intArithmetic("mult", expression.operands, mapper) ??
+      variadic("$multiply").build(expression, mapper),
+    guard: intArithmeticGuard,
+  },
   // CEL's `%` is integer-only: it has no double overload, and every number a resource attribute
   // carries reaches CEL as a double, so `R.attr.x % 2` is a no-such-overload error that denies
   // the row under either polarity, where `$mod` computes a floating remainder. The one int this
@@ -327,6 +414,10 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
   // `$mod` turns into an aborted query, so the divisor must be a non-zero integer constant.
   mod: {
     build: ({ operands }, mapper) => {
+      const int = intArithmetic("mod", operands, mapper);
+      if (int !== undefined) {
+        return int;
+      }
       const [dividend, divisor] = operands;
       if (
         !dividend ||
@@ -353,6 +444,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
         $mod: operands.map((op) => buildAggregationExpression(op, mapper)),
       };
     },
+    guard: intArithmeticGuard,
   },
   // CEL overloads `+` on strings, and MongoDB does not: `$add` accepts numeric and date types
   // only and the server rejects the whole query at execution time rather than returning no
@@ -367,6 +459,10 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
     build: ({ operands }, mapper) => {
       const built = () =>
         operands.map((op) => buildAggregationExpression(op, mapper));
+      const int = intArithmetic("add", operands, mapper);
+      if (int !== undefined) {
+        return int;
+      }
       if (operands.some((op) => isValue(op) && typeof op.value === "string")) {
         return { $concat: built() };
       }
@@ -384,15 +480,40 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
         }
         return { $concatArrays: built() };
       }
-      // Only two bare field paths reveal nothing. A nested expression keeps the numeric reading
-      // it has always had — the divisions and ternaries that reach here are numeric by
-      // construction, and narrowing them would refuse shapes this adapter already answers.
+      // Between bare field paths the mapper's declared types decide, and where they do not,
+      // the stored values do, per document: two strings concatenate, two numbers add, and any
+      // other pair is CEL's no-such-overload error, a null here that the guard denies. A nested
+      // expression keeps the numeric reading it has always had — the divisions and ternaries
+      // that reach here are numeric by construction.
       if (operands.every(isVariable)) {
-        throw new UnsupportedQueryPlanError(
-          "Cannot tell numeric addition from string concatenation in '+' between two fields: " +
-            "CEL overloads '+' on strings and the query plan carries no field types, so neither " +
-            "$add nor $concat can be chosen",
-        );
+        const types = operands.map((op) => celScalarType(op, mapper));
+        if (types.every((type) => type === "string")) {
+          return { $concat: built() };
+        }
+        if (types.every((type) => type === "number")) {
+          return { $add: built() };
+        }
+        if (types.some((type) => type !== undefined && type !== "string" && type !== "number")) {
+          throw new UnsupportedQueryPlanError(
+            "'+' between two fields is translated only over strings and numbers",
+          );
+        }
+        const paths = built();
+        return {
+          $switch: {
+            branches: [
+              {
+                case: { $and: paths.map((path) => ({ $eq: [{ $type: path }, "string"] })) },
+                then: { $concat: paths },
+              },
+              {
+                case: { $and: paths.map((path) => ({ $isNumber: path })) },
+                then: { $add: paths },
+              },
+            ],
+            default: null,
+          },
+        };
       }
       // A nested concatenation (`a + "_" + b` is `(a + "_") + b`) carries its string type up
       // even though no operand of THIS `+` is a constant.
@@ -404,10 +525,19 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
       return { $add: built() };
     },
     // timestamp + duration leaves CEL's timestamp range as an error, where `$add` carries on.
-    guard: (expression, mapper) => timestampRangeGuard(expression, mapper),
+    guard: (expression, mapper) =>
+      intArithmeticGuard(expression, mapper) ??
+      (expression.operands.every(isVariable) &&
+      !expression.operands.every((op) => celScalarType(op, mapper) !== undefined)
+        ? notNullGuard(expression, mapper)
+        : timestampRangeGuard(expression, mapper)),
   },
   div: {
     build: ({ operands }, mapper) => {
+      const int = intArithmetic("div", operands, mapper);
+      if (int !== undefined) {
+        return int;
+      }
       const denominator = operands[1];
       if (
         !denominator ||
@@ -423,6 +553,7 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
         $divide: operands.map((op) => buildAggregationExpression(op, mapper)),
       };
     },
+    guard: intArithmeticGuard,
   },
   not: {
     build: ({ operands }, mapper) => {
@@ -439,6 +570,12 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
       if (!operand) {
         throw new UnsupportedQueryPlanError("string conversion requires an operand");
       }
+      const input = buildAggregationExpression(operand, mapper);
+      // An int renders in plain decimal, as `$toString` spells a long; a ternary's int branch
+      // types the constant in the other.
+      if (celScalarType(operand, mapper) === "int") {
+        return { $toString: input };
+      }
       if (rendersUntypedIntegralConstant(operand)) {
         throw new UnsupportedQueryPlanError(
           "string() over an integral constant whose int or double type the plan does not carry: " +
@@ -446,7 +583,6 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
             "ships both as the same bare number",
         );
       }
-      const input = buildAggregationExpression(operand, mapper);
       return {
         $switch: {
           branches: [
@@ -473,8 +609,97 @@ const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
   // no safer: CEL truncates toward zero while $convert to "long" ROUNDS, so int(-0.6) is
   // 0 to CEL and -1 here. Nothing in the plan says what type the field holds, so no
   // conversion is faithful for every document (cerbos/query-plan-adapters#311).
-  double: { build: refuseNumericConversion, guard: notNullGuard },
-  int: { build: refuseNumericConversion, guard: notNullGuard },
+  double: {
+    build: ({ operands }, mapper) => {
+      const operand = operands[0];
+      if (!operand) {
+        throw new UnsupportedQueryPlanError("double conversion requires an operand");
+      }
+      const input = buildAggregationExpression(operand, mapper);
+      return {
+        $switch: {
+          branches: [
+            {
+              case: { $isNumber: input },
+              then: { $toDouble: input },
+            },
+            {
+              case: {
+                $and: [
+                  { $eq: [{ $type: input }, "string"] },
+                  { $regexMatch: { input, regex: CEL_DOUBLE_STRING_PATTERN } },
+                ],
+              },
+              then: {
+                $convert: {
+                  input: { $replaceAll: { input, find: "_", replacement: "" } },
+                  to: "double",
+                  onError: null,
+                  onNull: null,
+                },
+              },
+            },
+          ],
+          default: null,
+        },
+      };
+    },
+    guard: notNullGuard,
+  },
+  int: {
+    build: ({ operands }, mapper) => {
+      const operand = operands[0];
+      if (!operand) {
+        throw new UnsupportedQueryPlanError("int conversion requires an operand");
+      }
+      const type = celScalarType(operand, mapper);
+      if (type === "int") {
+        return buildAggregationExpression(operand, mapper);
+      }
+      if (type !== undefined && type !== "number" && type !== "string") {
+        throw new UnsupportedQueryPlanError(`int() over a ${type} is not translated`);
+      }
+      const input = buildAggregationExpression(operand, mapper);
+      return {
+        $switch: {
+          branches: [
+            {
+              // Truncation toward zero, within the range CEL converts; NaN orders below every
+              // number here and fails the lower bound as CEL's error does.
+              case: {
+                $and: [
+                  { $isNumber: input },
+                  { $gt: [input, MIN_CEL_INT_DOUBLE] },
+                  { $lt: [input, MAX_CEL_INT_DOUBLE] },
+                ],
+              },
+              then: {
+                $convert: { input: { $trunc: input }, to: "long", onError: null, onNull: null },
+              },
+            },
+            {
+              case: {
+                $and: [
+                  { $eq: [{ $type: input }, "string"] },
+                  { $regexMatch: { input, regex: CEL_INT_STRING_PATTERN } },
+                ],
+              },
+              then: {
+                $convert: {
+                  input: { $ltrim: { input, chars: "+" } },
+                  to: "long",
+                  onError: null,
+                  onNull: null,
+                },
+              },
+            },
+          ],
+          default: null,
+        },
+      };
+    },
+    guard: notNullGuard,
+  },
   if: {
     build: ({ operands }, mapper) => {
       const [ifOp, thenOp, elseOp] = operands;
@@ -890,10 +1115,56 @@ export const buildEvaluationGuards = (
     return [];
   }
   const guard = aggregationOperator(operand.operator)?.guard?.(operand, mapper);
-  const nested = operand.operands.flatMap((child) =>
-    buildEvaluationGuards(child, mapper),
-  );
+  const nested =
+    scopedBranchGuards(operand, mapper) ??
+    operand.operands.flatMap((child) => buildEvaluationGuards(child, mapper));
   return guard ? [guard, ...nested] : nested;
+};
+
+/**
+ * The guards of a ternary: CEL reads only the branch the condition selects, so each branch's
+ * guards hold under that condition alone, as one `$cond`. Undefined for any other expression,
+ * or a branch guard that is not an aggregation expression.
+ */
+const scopedBranchGuards = (
+  operand: PlanExpression,
+  mapper: Mapper,
+): MongooseFilter[] | undefined => {
+  const [condition, whenTrue, whenFalse] = operand.operands;
+  if (operand.operator !== "if" || !condition || !whenTrue || !whenFalse) {
+    return undefined;
+  }
+  const asExpression = (guards: MongooseFilter[]): unknown[] | undefined => {
+    const expressions = guards.map((guard) =>
+      Object.keys(guard).length === 1 ? guard["$expr"] : undefined,
+    );
+    return expressions.every((expression) => expression !== undefined)
+      ? expressions
+      : undefined;
+  };
+  const thenGuards = asExpression(buildEvaluationGuards(whenTrue, mapper));
+  const elseGuards = asExpression(buildEvaluationGuards(whenFalse, mapper));
+  if (thenGuards === undefined || elseGuards === undefined) {
+    return undefined;
+  }
+  const conditionGuards = buildEvaluationGuards(condition, mapper);
+  if (thenGuards.length === 0 && elseGuards.length === 0) {
+    return conditionGuards;
+  }
+  const all = (expressions: unknown[]): unknown =>
+    expressions.length === 0 ? true : { $and: expressions };
+  return [
+    ...conditionGuards,
+    {
+      $expr: {
+        $cond: [
+          buildAggregationExpression(condition, mapper),
+          all(thenGuards),
+          all(elseGuards),
+        ],
+      },
+    },
+  ];
 };
 
 /** A plan operator that maps one-to-one onto a variadic aggregation operator. */
@@ -959,13 +1230,24 @@ function rendersUntypedIntegralConstant(operand: PlanExpressionOperand): boolean
   return operand.operands.slice(1).some(rendersUntypedIntegralConstant);
 }
 
-function refuseNumericConversion({ operator }: PlanExpression): never {
-  throw new UnsupportedQueryPlanError(
-    `'${operator}()' cannot be translated: $convert parses a numeric prefix where CEL ` +
-      "requires the whole string and raises otherwise, and rounds where CEL truncates " +
-      "toward zero",
-  );
-}
+/**
+ * The strings CEL's `int()` reads, Go's `strconv.ParseInt` in base 10: an optional sign and
+ * decimal digits, the whole string. The `+` is trimmed before `$convert`, and a value past
+ * int64 is `$convert`'s error, null.
+ */
+const CEL_INT_STRING_PATTERN = "^[+-]?[0-9]+\\z";
+
+/**
+ * The strings CEL's `double()` reads, Go's `strconv.ParseFloat`: a decimal with an optional
+ * fraction and exponent, underscores allowed between digits (removed before `$convert`). Its
+ * hexadecimal form and the words "inf", "infinity" and "nan" are left to null, which denies.
+ */
+const CEL_DOUBLE_STRING_PATTERN =
+  "^[+-]?(?:[0-9](?:_?[0-9])*(?:\\.(?:[0-9](?:_?[0-9])*)?)?|\\.[0-9](?:_?[0-9])*)(?:[eE][+-]?[0-9](?:_?[0-9])*)?\\z";
+
+/** CEL converts a double to an int strictly inside int64's range (`doubleToInt64Checked`). */
+const MIN_CEL_INT_DOUBLE = -9223372036854775808;
+const MAX_CEL_INT_DOUBLE = 9223372036854775808;
 
 /** `contains`/`startsWith`/`endsWith` over two strings; null (an error to CEL) otherwise. */
 function buildStringPredicate(

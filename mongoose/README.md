@@ -149,8 +149,10 @@ does not depend on how many values the principal holds.
 
 Each element is substituted into the lambda body (`t` → the element, `t.name` → its field) and the
 results combine with `$or` (`exists`) or `$and` (`all`). An empty collection emits
-`{ $expr: false }` for `exists` and `{ $expr: true }` for `all`. `exists_one`, `filter`, `map` and
-`except` over a literal list throw, as does a `t.path` the element does not carry.
+`{ $expr: false }` for `exists` and `{ $expr: true }` for `all`. `exists_one` is "one element's body
+holds and every other's does not", each body negated with its own guards, so duplicates count twice
+and an element the body cannot evaluate denies the document. `filter`, `map` and `except` over a
+literal list throw, as does a `t.path` the element does not carry.
 
 ### Mapper functions
 
@@ -238,16 +240,29 @@ per-attribute way to declare the omitted convention.
 ## Timestamps and conversions
 
 - **Timestamps** accept BSON dates or RFC 3339 strings with at most 3 fractional-second digits, in
-  CEL's range `0001-01-01T00:00:00Z` to `9999-12-31T23:59:59.999Z`. Higher-precision or
-  out-of-range values fail closed rather than being truncated.
+  CEL's range `0001-01-01T00:00:00Z` to `9999-12-31T23:59:59.999Z`. An out-of-range value fails
+  closed. A literal finer than a millisecond, which the planner folds `now() - duration("24h")`
+  into, is compared as an ordering against the millisecond beside it that keeps the answer
+  (`< t` is `< the next millisecond`); it equals no stored date, and anywhere else it fails closed.
 - A bare comparison of two `dateTime` fields throws, because MongoDB no longer holds the original
   strings CEL compares. Use `timestamp(...)` on both operands when the policy compares instants.
 - **Conversions** fail closed when the stored BSON type is not a CEL-compatible source or parsing
-  fails, and stay denied under negation. `double`/`int` accept strings and numbers, not booleans;
-  `int` rejects BSON dates. `string` accepts strings, booleans and numbers.
-- **`matches`** supports literals, `.`, `*`, `+`, `?`, leading `^`, terminal `$` and escaped
-  metacharacters; anything else fails closed. A terminal `$` becomes PCRE2's absolute end anchor so
-  MongoDB cannot match before a trailing newline, as RE2 would not.
+  fails, and stay denied under negation. `int` truncates a number toward zero within int64's range
+  and reads a string the way Go's `strconv.ParseInt` does (an optional sign and decimal digits,
+  nothing else); `double` reads a string as `strconv.ParseFloat` does, without its hexadecimal,
+  `inf` and `nan` spellings, which deny. Neither accepts booleans or dates. `string` accepts
+  strings, booleans and numbers, and renders an `int()` in plain decimal. Arithmetic over an
+  `int()` is translated only beside an attribute number, where CEL has no overload and every
+  document is denied; beside a constant the plan cannot say whether the constant was an int, so
+  it throws.
+- **`matches`** translates the subset Go's RE2 and MongoDB's PCRE2 read identically: literals and
+  escaped metacharacters, `.`, `^` and `$` (`$` becomes PCRE2's absolute end anchor so MongoDB
+  cannot match before a trailing newline, as RE2 would not), `\d` `\D` `\w` `\W`, bracket
+  classes with ranges and POSIX names, groups, alternation, `*` `+` `?` and counted repetition as
+  Go reads it (a brace that is not a count is a literal), and a leading `(?i)`. A pattern Go's
+  parser rejects (a backreference, lookaround, a count past 1000, a nested count past the shared
+  budget, an inverted range) is a CEL error and matches nothing under either polarity; `\s`
+  (PCRE2's includes a vertical tab) and everything else outside the subset fail closed.
 
 ## Supported operators
 
@@ -299,13 +314,14 @@ reads that attribute as a map and ranges over its keys, which no filter can iter
 - Shapes `$elemMatch` or `$expr` cannot express faithfully: `exists_one`, aggregation expressions or
   outer-document references inside a collection predicate, nested collection counts, correlated
   variable-in-variable membership, unsafe division or non-finite arithmetic, `%` over anything but `size()` or by anything but a
-  non-zero integer constant, negated collection
+  non-zero integer constant, arithmetic between an `int()` and a constant, negated collection
   macros, a negation over a nullable field that some path through it can leave unread (one side of
   `&&` or `||`, a ternary branch, a lambda body) or that sits on a to-many relation, a negated
   membership whose list CEL may not evaluate, or that sits inside a collection predicate,
-  whole-list equality (including over a `map()` projection), list-valued membership needles, and
-  `+` between two field paths ([`conformance-ledger.json`](conformance-ledger.json) lists every
-  refused corpus case with its reason).
+  whole-list equality (including over a `map()` projection), and list-valued membership needles
+  ([`conformance-ledger.json`](conformance-ledger.json) lists every refused corpus case with its
+  reason). `+` between two field paths concatenates two stored strings and adds two stored
+  numbers, decided per document; any other pair is CEL's missing overload and denies.
 
 ## Conformance contract
 
@@ -317,8 +333,8 @@ queries over the corpus's 44 seed documents on MongoDB 7 and 8. Passed cases on 
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 66 / 102 |
-| adversarial | 249 / 375 |
+| extended | 74 / 102 |
+| adversarial | 279 / 375 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases.
@@ -382,6 +398,12 @@ asserts that, since five of the rows below depend on it.
 
 ## Behaviour changes
 
+- Shapes that threw `UnsupportedQueryPlanError` now translate, each proved by the corpus: `matches`
+  over the wider RE2/PCRE2 subset above, with a pattern Go's regexp rejects matching nothing;
+  `int()` and `double()`; `string()` of an `int()`; a timestamp literal finer than a millisecond
+  under an ordering; `exists_one` over a literal list; a macro whose body the planner folded to a
+  constant; and `+` between two field paths. Arithmetic between an `int()` and an attribute number
+  translates as CEL's missing overload, which denies every document.
 - **Breaking:** `QueryPlanToMongooseResult` is a union on `kind`, and `ALWAYS_ALLOWED` and
   `ALWAYS_DENIED` carry no `filters` field. A caller that passed `result.filters` to `find()`
   without switching on `kind` got every document on a denial, because `find(undefined)` matches

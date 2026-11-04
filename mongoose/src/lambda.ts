@@ -119,10 +119,10 @@ export const foldLiteralCollection = (
   lambda: PlanExpressionOperand,
   translate: (body: PlanExpressionOperand) => MongooseFilter,
 ): MongooseFilter => {
-  if (operator !== "exists" && operator !== "all") {
+  if (operator !== "exists" && operator !== "all" && operator !== "exists_one") {
     throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection value is not supported. ` +
-        "Only exists() and all() can be folded into a flat filter.",
+        "Only exists(), exists_one() and all() can be folded into a flat filter.",
     );
   }
 
@@ -168,9 +168,25 @@ export const foldLiteralCollection = (
   // `translate` carries the enclosing collection scope through unchanged: a fold
   // nested inside another macro's lambda must keep rejecting outer-document
   // references exactly as the equivalent or/and chain would.
-  const filters = elements.map((element) =>
-    translate(substituteLambdaVariable(body, variable.name, element)),
+  const bodies = elements.map((element) =>
+    substituteLambdaVariable(body, variable.name, element),
   );
+  if (operator === "exists_one") {
+    // "Exactly one element matches" is "some element matches and every other does not",
+    // duplicates included. An element whose body errors makes CEL's count an error, and each
+    // disjunct reads every body once, under one polarity or the other, so the negation's guards
+    // deny that document in all of them.
+    const filters = bodies.map((positive, index) => {
+      const others = bodies
+        .filter((_, otherIndex) => otherIndex !== index)
+        .map((negative) => translate({ operator: "not", operands: [negative] }));
+      return others.length === 0
+        ? translate(positive)
+        : { $and: [translate(positive), ...others] };
+    });
+    return filters.length === 1 ? filters[0]! : { $or: filters };
+  }
+  const filters = bodies.map(translate);
 
   return operator === "exists" ? { $or: filters } : { $and: filters };
 };
