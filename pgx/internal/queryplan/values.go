@@ -377,6 +377,9 @@ func compare(op CmpOp, l, r value) (Expr, error) {
 	if cv, ok := r.(condValue); ok {
 		return distribute(op, cv, l, false)
 	}
+	if out, ok, err := positionalComparison(op, l, r); err != nil || ok {
+		return out, err
+	}
 	return compareLeaf(op, l, r)
 }
 
@@ -699,6 +702,13 @@ func membership(x, values value) (Expr, error) {
 	if _, list := x.([]any); list {
 		return nil, fmt.Errorf("membership with a list-valued element cannot be represented by scalar SQL IN")
 	}
+	if p, ok := x.(positionalElement); ok {
+		body, err := membership(p.element, values)
+		if err != nil {
+			return nil, err
+		}
+		return p.decided(body), nil
+	}
 	members, ok := values.([]any)
 	if !ok {
 		members = []any{values}
@@ -711,13 +721,20 @@ func membership(x, values value) (Expr, error) {
 
 	// CEL's equality is heterogeneous: a member whose type differs from x's declared type is
 	// unequal to it, where SQL would coerce ('2' onto a numeric column, 'true' onto a boolean
-	// one) and match. Such a member can never witness the membership, so it is dropped.
+	// one) and match. Such a member can never witness the membership, so it is dropped. A list
+	// or map member never equals a scalar x whatever its declared type, and has no parameter to
+	// bind anyway.
 	xKind := scalarKind(x)
 	nonNull := make([]Expr, 0, len(members))
 	hasNull, dropped := false, false
 	for _, m := range members {
 		if m == nil {
 			hasNull = true
+			continue
+		}
+		switch m.(type) {
+		case []any, map[string]any:
+			dropped = true
 			continue
 		}
 		if kind := scalarKind(m); xKind != "" && kind != "" && kind != xKind {
@@ -966,6 +983,10 @@ func asExpr(v value) (Expr, error) {
 		return nil, fmt.Errorf("hierarchy() value used outside a hierarchy operator")
 	case numberText:
 		return nil, errNumberText
+	case positionalElement:
+		return t.scalar(), nil
+	case countedList:
+		return nil, errors.New("filter() over a literal list produces a collection rather than a plain value; it only translates inside size()")
 	case deferredCollection:
 		// A filter()/map() reaching a plain VALUE position: `map(tags, t.id) == [...]` compares
 		// the projection itself rather than feeding it to size() or hasIntersection(). Without

@@ -44,6 +44,12 @@
 - `!("x" in R.attr.list)` over a relation whose element is declared `NullConventionExplicit` keeps
   a row whose list holds a null and no `"x"`: CEL's `"x" == null` is false, where SQL's `=` was
   UNKNOWN and dropped the row (`membership/in/negated-literal-in-resource-list`).
+- `Relation.Position` names the column holding each element's zero-based position. With it,
+  `list[k]`, `list[k].field` and an ordered whole-list equality (`R.attr.list == ["a", "b"]`, also
+  over `map()` and `except()`) translate; a position past the end, negative or fractional is UNKNOWN,
+  as CEL's error. Newly translated too: `exists_one()`, `filter()` inside `size()` and `map()` over a
+  literal list, as strict counts of their bodies; `size(except(a, b))` and `size(intersect(a, b))`
+  for a stored list against a literal list; and a list in boolean position, which is UNKNOWN.
 - Newly translated, each proved by the corpus: a ternary yielding a list, lifted above the
   comparison or membership it feeds; `+` between list literals, and `x in R.attr.list + [...]`
   as a disjunction of memberships; `x in [e1, …]` and `exists()`/`all()` over a list of computed

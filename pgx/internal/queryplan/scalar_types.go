@@ -21,6 +21,8 @@ func scalarKind(v value) string {
 		if typed.Kind == SubqueryScalar {
 			return scalarKind(typed.Select)
 		}
+	case positionalElement:
+		return scalarKind(typed.element)
 	case Column:
 		switch typed.Type {
 		case ValueString:
