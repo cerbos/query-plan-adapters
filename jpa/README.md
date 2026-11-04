@@ -220,7 +220,7 @@ three exception types, all extending `IllegalArgumentException`:
 
 | Exception | Meaning | What to do |
 |---|---|---|
-| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — a regex `LIKE` cannot spell, casts, list index without a declared position field, `mod` outside `int()` of an `Integer` column, `except()` outside `size()` and short list equality, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
+| `UnsupportedPlanShapeException` | Well-formed plan the Criteria API cannot express faithfully — a regex `LIKE` cannot spell, casts, list index without a declared position field, `int()` arithmetic that may overflow int64, `except()` outside `size()` and short list equality, macros nested past the depth bound | Rewrite the policy, register an `OperatorFunction` where [Not yet supported](#not-yet-supported) says one reaches, or use per-row `check()` |
 | `UnmappedAttributeException` | The mapping doesn't cover the plan — unmapped variable, `Relation` where a scalar is needed (or vice versa), a temporal column type that doesn't pin an instant | Change the mapping |
 | `MalformedPlanException` | The plan breaks the planner's wire contract — wrong arity, lambda without a variable, conditional plan without a condition | Hand-built plan, or an upstream bug to report |
 
@@ -249,7 +249,8 @@ The signature is `Predicate apply(CriteriaBuilder cb, Expression<?> field, Objec
 is consulted only where the adapter has resolved a `(field, value)` pair for a top-level operator:
 
 - **Reached:** `eq`/`ne`/`lt`/`gt`/`le`/`ge` (value-first forms under the mirrored name; `add`-folded,
-  null-RHS and arithmetic-vs-constant forms included), `string()` over a boolean column (receives the
+  null-RHS and arithmetic-vs-constant forms included, the constant a `Double`, or a `Long` under
+  `int()`), `string()` over a boolean column (receives the
   column and a `Boolean`) or a string column (the column and the `String`), `contains`/`startsWith`/`endsWith` with a **column** receiver, scalar
   `in`, a bare boolean attribute (as `eq`), unknown leaf operators such as `matches`, and timestamp
   comparisons (value is the parsed `java.time.Instant`, including for column types the default
@@ -436,12 +437,12 @@ consulted.
 
 | Construct | Example CEL | Overridable | Notes |
 |---|---|---|---|
-| `mod` other than over `int()` of an `Integer` column | `int(R.attr.aDouble) % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so a bare `R.attr.x % 2` denies every row, and `int()` over a double truncates where SQL `CAST` rounds |
+| `int()` arithmetic whose result may overflow int64, or over a `String` column | `int(R.attr.a) * int(R.attr.b) > 1`, `int(R.attr.aString) + 1 > 1` | no | CEL errors on an int64 overflow; the adapter guards the overflow a constant operand can cause and refuses the rest. `int(R.attr.x) / 2`, `%` and `+ - *` over `Integer`, `Long` and `Double` columns translate, truncating toward zero as CEL does. A bare `R.attr.x % 2` or `int(R.attr.x) + R.attr.d` is a CEL type error on every row, translated as UNKNOWN (denies), not refused |
 | Regex match `LIKE` cannot spell exactly | `R.attr.aString.matches("^[^x]+")`, `matches("a.b")` | yes (`matches`) | No portable RE2 predicate; override per dialect (`regexp_like`, `~`, `REGEXP`) if its regex means the same as RE2 for your patterns |
 | Ordering a string against a literal holding a character at or above U+D800 | `R.attr.s < "h\u00e9llo\uFFFD"` | yes | CEL orders strings by code point; H2 compares UTF-16 code units, which put a surrogate pair before U+E000–U+FFFF |
 | `exists_one` over a map-valued attribute, or a macro over one with a key mapped as a `relation` | `R.attr.parent.exists_one(k, k == "inner")` | no | Only `exists` and `all` fold over the mapped keys ([Map-valued attributes](#map-valued-attributes)); a relation's rows cannot say whether the caller sent the key |
 | List indexing without a declared order | `R.attr.tags[0] == "x"` | no | JPA collections are unordered; declare `withPositionField(...)` on the relation |
-| Type casts (`double()`, `timestamp()` over a string, `int()` other than over a `Double`/`Integer`/`String` column compared with a number, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
+| Type casts (`double()`, `timestamp()` over a string, `int()` other than over a `Double`/`Integer`/`String` column compared with a number or in arithmetic, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column, over `int(column)`, or over a boolean expression; `string()` of a bare whole-number literal, including a ternary branch no other branch types) | `double(R.attr.aString) > 0`, `string(R.attr.aBool ? 1000000 : 0) == "1000000"` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours, and the plan does not say whether a whole literal is the int `1000000` or the double `1e+06` |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
 | Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in other arithmetic | no | Only `timestamp(field)`, shifted by a constant duration or under `timeSince()`, vs a constant is translated |
@@ -463,10 +464,10 @@ total but not as passed:
 | --- | --- |
 | core | 30 / 30 |
 | extended | 98 / 102 |
-| adversarial | 340 / 375 |
+| adversarial | 353 / 375 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 39 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 16 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the plan reads an attribute the mapping does not declare) rather than emit a filter. On 0.57.0,
 three extended cases and four adversarial cases are planner divergences the corpus skips:
@@ -485,6 +486,10 @@ Other guarantees:
 
 - CEL type errors and missing-attribute errors survive negation. Numeric fields are never coerced to
   strings, and NaN ordering stays unknown rather than becoming a negatable false.
+- An int beside a double in arithmetic (`int(R.attr.a) + R.attr.d`), and `%` over a double, are CEL
+  no-overload errors on every row: the comparison is UNKNOWN under both polarities, so the rows are
+  denied rather than computed. Int-typed arithmetic truncates and errors as CEL's does (a zero
+  divisor, an int64 overflow).
 - Constant NaN ordering follows Cerbos 0.55: an unordered comparison is false, so its negation is
   true (in 0.54 it was an error and stayed denied under negation).
 - Bare comparisons between temporal columns throw: the database compares instants while CEL compares

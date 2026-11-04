@@ -13,6 +13,7 @@ import jakarta.persistence.criteria.Predicate;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -39,9 +40,14 @@ final class TernaryTranslator {
      * {@code cmp(b, other)}. Runs on the raw operands, before any mirroring. Nested ternaries
      * and a ternary on the other side are handled by the recursion. {@code cmp} is a comparison
      * or {@code in}, and the ternary may sit under list or string {@code +}
-     * ({@code ["a"] + (c ? ["b"] : []) == [...]}): {@code +} evaluates both operands, so
-     * substituting a branch in place keeps CEL's meaning. A substituted constant
-     * {@code add(list, list)} is folded ({@link PlanLiterals#fold}).
+     * ({@code ["a"] + (c ? ["b"] : []) == [...]}) or under a {@code string()}, {@code int()} or
+     * {@code double()} cast: each evaluates its operands, so substituting a branch in place
+     * keeps CEL's meaning. A substituted constant {@code add(list, list)} is folded
+     * ({@link PlanLiterals#fold}).
+     *
+     * <p>CEL gives both branches one type, so a number literal branch beside an int-typed or
+     * double-typed one is substituted as {@code int(literal)} or {@code double(literal)}: the
+     * wire plan carries the literal untyped, and {@code string()} renders the two differently.
      *
      * @return the rewritten predicate, or {@code null} if this comparison has no ternary
      */
@@ -59,7 +65,7 @@ final class TernaryTranslator {
             List<Operand> ifOps = at(operands.get(idx), path).getExpression().getOperandsList();
             return translateTernary(ifOps, branch -> {
                 Operand substituted = PlanLiterals.fold(
-                        replaceAt(operands.get(at), path, 0, branch));
+                        replaceAt(operands.get(at), path, 0, typedBranch(branch, ifOps, scope)));
                 return walker.traverseExpression(
                         substituteOperand(op, operands, at, substituted), scope);
             }, scope);
@@ -68,15 +74,39 @@ final class TernaryTranslator {
     }
 
     /**
+     * {@code branch} as {@code int(branch)} or {@code double(branch)} when it is a whole number
+     * literal and the other branch is typed; otherwise {@code branch} itself.
+     */
+    private static Operand typedBranch(Operand branch, List<Operand> ifOps, Scope scope) {
+        if (branch.getNodeCase() != Operand.NodeCase.VALUE
+                || IntArithmetic.typeOf(branch, scope) != IntArithmetic.CelType.LITERAL) {
+            return branch;
+        }
+        Operand other = ifOps.get(branch == ifOps.get(1) ? 2 : 1);
+        IntArithmetic.CelType type = IntArithmetic.typeOf(other, scope);
+        if (type != IntArithmetic.CelType.INT && type != IntArithmetic.CelType.DOUBLE) {
+            return branch;
+        }
+        return Operand.newBuilder().setExpression(PlanResourcesFilter.Expression.newBuilder()
+                .setOperator(type == IntArithmetic.CelType.INT ? "int" : "double")
+                .addOperands(branch)).build();
+    }
+
+    private static final Set<String> UNARY_CASTS = Set.of("string", "int", "double");
+
+    /**
      * The operand indices from {@code o} down to the first {@code if} that is {@code o} or is
-     * reached from it through {@code add} only; {@code null} when there is none.
+     * reached from it through {@code add} and unary casts only; {@code null} when there is
+     * none.
      */
     private static List<Integer> ternaryUnderAdd(Operand o) {
         if (isIfExpression(o)) {
             return List.of();
         }
         if (o.getNodeCase() == Operand.NodeCase.EXPRESSION
-                && "add".equals(o.getExpression().getOperator())) {
+                && ("add".equals(o.getExpression().getOperator())
+                        || (UNARY_CASTS.contains(o.getExpression().getOperator())
+                                && o.getExpression().getOperandsCount() == 1))) {
             for (int i = 0; i < o.getExpression().getOperandsCount(); i++) {
                 List<Integer> below = ternaryUnderAdd(o.getExpression().getOperands(i));
                 if (below != null) {
