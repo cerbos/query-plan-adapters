@@ -4,41 +4,13 @@
     "null-list": "The harness stores aNumberList as NumberListElementEntity rows, a one-to-many association, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
   },
   "cases": {
-    "arithmetic/add/int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "int() is solved only against a constant (int(column) == literal), never inside arithmetic, so int(aNumber) + aDouble is refused; CEL has no int + double overload and errors on every row, which a JPA sum over the two columns would answer with a number."
-    },
-    "arithmetic/add/negated-int-beside-double-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as arithmetic/add/int-beside-double-field, under negation: int() inside arithmetic has no JPA Criteria form, and the missing int + double overload is an error a JPA sum could not reproduce."
-    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A column divisor that may hold a signed zero: CEL divides a non-zero dividend by -0.0 into -Infinity and by 0.0 into +Infinity, and SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
     },
-    "arithmetic/divide/int-truncates": {
-      "status": "unsupported",
-      "reason": "int() is solved only against a constant (int(column) == literal), never inside arithmetic: CEL int division truncates toward zero, and a JPA division over the column has neither int() nor that truncation, so int(aNumber) / 2 is refused."
-    },
-    "arithmetic/divide/int-truncates-toward-zero": {
-      "status": "unsupported",
-      "reason": "Same refusal as arithmetic/divide/int-truncates: int() inside arithmetic has no JPA Criteria form that truncates toward zero as CEL int division does."
-    },
-    "arithmetic/divide/negated-int-truncates": {
-      "status": "unsupported",
-      "reason": "Same refusal as arithmetic/divide/int-truncates, under negation: int() inside arithmetic has no JPA Criteria form that truncates toward zero as CEL int division does."
-    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The divisor aDouble / aNumber is zero with the sign of aDouble's zero, and CEL's quotient is an infinity of that sign; SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
-    },
-    "arithmetic/modulo/column-divisor-negative-and-zero": {
-      "status": "unsupported",
-      "reason": "SQL MOD matches CEL's truncating % only between int() of an Integer column and an integral constant; a divisor that is itself arithmetic (int(aNumber) - 5) has no faithful int() lowering, since CAST rounds where CEL truncates toward zero."
-    },
-    "arithmetic/modulo/negated-double-operand": {
-      "status": "unsupported",
-      "reason": "CEL % has no double overload, so aNumber % 2 is an error on every row; the adapter lowers % only between int() of an Integer column and an integral constant and refuses the rest rather than let a store modulo turn the error into a negatable value."
     },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
@@ -56,14 +28,6 @@
       "status": "unsupported",
       "reason": "The plan carries the int literal as a double, which at 2^53 and beyond no longer pins a single integer, so int() compared with such a bound is refused rather than compared through double arithmetic."
     },
-    "cast/string/from-int-beyond-double-precision": {
-      "status": "unsupported",
-      "reason": "string() is solved only over a mapped attribute compared with a constant. string(int(column)) nests a conversion JPA Criteria cannot spell: int() parses the whole string exactly to int64, and string() renders the int in plain decimal."
-    },
-    "cast/string/from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "string() is solved only over a mapped attribute compared with a constant. string(int(column)) nests a conversion JPA Criteria cannot spell: int() truncates the double toward zero, and string() renders the int in plain decimal (\"1000000\", not the double's \"1e+06\")."
-    },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",
       "reason": "string() is lowered only over a mapped column, not over a ternary; here the branches are int literals the plan ships as bare numbers, so CEL's \"1000000\" and a double's \"1e+06\" could not be told apart even if it were."
@@ -71,22 +35,6 @@
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() of a double compared with \"-0\": SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds, and the stores print it without the sign), so the rendering CEL gives -0.0 cannot be told from 0.0."
-    },
-    "cast/string/from-ternary-with-int-branch": {
-      "status": "unsupported",
-      "reason": "string() is lowered only over a mapped column, not over a ternary, and int() is solved only against a constant, so string(aBool ? int(aDouble) : 1000000) is refused."
-    },
-    "cast/string/negated-from-boolean-expression": {
-      "status": "unsupported",
-      "reason": "string() is solved only over a mapped attribute compared with a constant. A boolean-valued comparison is not an attribute, and JPA Criteria has no boolean-to-text conversion that renders CEL's \"true\"/\"false\" on every store."
-    },
-    "cast/string/negated-from-boolean-ternary": {
-      "status": "unsupported",
-      "reason": "string() is solved only over a mapped attribute compared with a constant. A ternary is not an attribute, and JPA Criteria has no boolean-to-text conversion that renders CEL's \"true\"/\"false\" on every store."
-    },
-    "cast/string/negated-from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "Same refusal as cast/string/from-int-past-exponent-threshold, under negation: string(int(column)) has no JPA Criteria form."
     },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",

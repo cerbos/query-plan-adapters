@@ -53,7 +53,7 @@ final class PlanWalker {
         ChainSubqueries subqueries = new ChainSubqueries(cb, tri, selectInvocation);
         this.ternary = new TernaryTranslator(cb, tri, this);
         this.comparisons = new ComparisonTranslator(cb, tri, leaf, ternary,
-                new SizeTranslator(cb, tri, this, subqueries));
+                new SizeTranslator(cb, tri, this, subqueries), this);
         this.presence = new PresenceTranslator(cb, tri, options.nullAttributeRepresentation());
         this.objects = new ObjectAttributeTranslator(cb, tri, presence, this);
         this.membership = new MembershipTranslator(cb, tri, leaf, subqueries, objects);
