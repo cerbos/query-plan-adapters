@@ -136,6 +136,7 @@ module Cerbos
         "double" => Operator.new(1, ->(value) { cast_to_double(value) }),
         "int" => Operator.new(1, ->(value) { cast_to_int(value) }),
         "list" => Operator.new(nil, ->(*values) { values }),
+        "index" => Operator.new(2, ->(container, key) { list_element(container, key) }),
         "set-field" => Operator.new(2, ->(key, value) { map_entry(key, value) }),
         "struct" => Operator.new(nil, ->(*entries) { map_literal(entries) }),
         "hierarchy" => Operator.new(1..2, ->(value, delimiter = nil) { hierarchy(value, delimiter) }),
@@ -236,6 +237,7 @@ module Cerbos
         @omitted_attributes = {}.compare_by_identity
         @now = nil
         @cel_errors = {}.compare_by_identity
+        @position_guards = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
         model.where(predicate(normalised.condition, environment))
       end
@@ -360,6 +362,7 @@ module Cerbos
         when "if" then ternary(operands, environment)
         when "exists", "all", "exists_one", "filter", "map" then macro(operator, operands, environment)
         when "index" then index_access(operands, environment)
+        when "get-field" then field_access(operands, environment)
         when "has" then presence(operands, environment)
         when "lambda"
           raise InvalidPlanError, "lambda outside a collection macro"
@@ -389,9 +392,8 @@ module Cerbos
 
         # A bare boolean column is valid CEL, but `where` rejects a bare column and PostgreSQL
         # wants a boolean expression. `= TRUE` gives the same result, NULL included.
-        return ArelSupport.comparison("eq", value, true) if column_type(value) == :boolean
-
-        ArelSupport.to_predicate(value)
+        predicate = (column_type(value) == :boolean) ? ArelSupport.comparison("eq", value, true) : ArelSupport.to_predicate(value)
+        guard_positions([value], predicate)
       end
 
       # --- structural operators -------------------------------------------------------
@@ -425,8 +427,8 @@ module Cerbos
         end
 
         condition = predicate(operands[0], environment)
-        then_value = evaluate(operands[1], environment)
-        else_value = evaluate(operands[2], environment)
+        then_value = positioned_arm(evaluate(operands[1], environment))
+        else_value = positioned_arm(evaluate(operands[2], environment))
 
         reject_double_text("if", then_value)
         reject_double_text("if", else_value)
@@ -528,7 +530,43 @@ module Cerbos
         values.each { |value| reject_double_text(operator, value) } if override || !%w[eq ne].include?(operator)
         plain = override ? override.call(*values) : dispatch(operator, values)
 
-        with_null_conventions(operator, values, plain, overridden: !override.nil?)
+        guard_positions(values, with_null_conventions(operator, values, plain, overridden: !override.nil?))
+      end
+
+      # A list element read by position carries a guard: the position is in range, and the hops
+      # to the list exist. Out of range is a CEL error, so every operator over the element is
+      # UNKNOWN there, as `CASE WHEN <in range> THEN <result> END`, with no ELSE. The guard is
+      # applied around the operator, not to the element: a NULL element is a null value that
+      # `== null` and `!=` answer definitely, which an unguarded NULL past the end would mimic.
+      def guard_positions(values, result)
+        guards = values.filter_map { |value| @position_guards[value] if ArelSupport.arel_node?(value) }
+        return result if guards.empty? || result.nil? || cel_error?(result)
+
+        unless ArelSupport.arel_node?(result) || result == true || result == false
+          raise UnsupportedOperatorError,
+            "A list element read by position can only reach an operator with a scalar " \
+            "result, got #{describe(result)}"
+        end
+
+        carry_types(result, ArelSupport.case_node([[ArelSupport.and_node(guards), result]]))
+      end
+
+      # A ternary arm read by position takes its guard here: the branches CASE would hide it.
+      # The arm loses the element's null convention, so a NULL element is UNKNOWN there, which
+      # denies as the error would, where CEL compares the null value.
+      def positioned_arm(value)
+        return value unless ArelSupport.arel_node?(value) && @position_guards.key?(value)
+
+        guard_positions([value], value)
+      end
+
+      # The types recorded for one node, carried to the node that replaces it. Never a null
+      # convention: the replacement is NULL where the original errors.
+      def carry_types(from, to)
+        @column_types[to] = @column_types[from] if @column_types.key?(from)
+        @cel_types[to] = @cel_types[from] if @cel_types.key?(from)
+        @timestamp_operands[to] = true if @timestamp_operands.key?(from)
+        to
       end
 
       def dispatch(operator, values)
@@ -622,7 +660,8 @@ module Cerbos
           value.is_a?(Values::ConcatenatedList) ||
           value.is_a?(Values::SetOperation) ||
           value.is_a?(Values::ConstantList) ||
-          value.is_a?(Values::ConstantProjection)
+          value.is_a?(Values::ConstantProjection) ||
+          value.is_a?(Values::IndexedElement)
       end
 
       # A value that may be NaN or Infinity, kept out of SQL until a comparison resolves it.
@@ -668,6 +707,7 @@ module Cerbos
         when Values::Hierarchy then "a hierarchy"
         when Values::DoubleText then "string() of a double"
         when Values::ConcatenatedList then "a concatenation of a relation"
+        when Values::IndexedElement then "an element of a relation of structs"
         when Values::SetOperation then "#{value.kind}() of a relation"
         when Values::Duration then "a duration"
         when Values::TimeSince then "timeSince()"

@@ -99,7 +99,7 @@ Errors, all subclasses of `Cerbos::ActiveRecord::Error`:
 | --- | --- |
 | `UnmappedAttributeError` | A plan variable is missing from the map, or used where its mapping cannot go (e.g. a relation where a column is needed) |
 | `UnsupportedOperatorError` | An operator or operand shape has no exact SQL translation |
-| `InvalidPlanError` | The plan is malformed, or holds a literal the adapter cannot represent (a nanosecond timestamp, a hierarchy delimiter that is not a string) |
+| `InvalidPlanError` | The plan is malformed, or holds a literal the adapter cannot represent (a hierarchy delimiter that is not a string) |
 | `UnsupportedAssociationError` | An attribute maps to an association the adapter cannot turn into a correlated subquery |
 
 ## Mapping attributes
@@ -139,6 +139,15 @@ Cerbos::ActiveRecord.relation(
   values: `"urgent" in R.attr.tags` compares `tag.name`.
 - `fields` maps member names used inside macro bodies: `R.attr.tags.exists(t, t.name == "x")`.
   An entry can itself be a `relation`, for multi-hop chains:
+- `order_field` names the column whose ascending order is the list's element order. Without it
+  a relation has no order, and every shape that reads one raises: `R.attr.tags[0]`,
+  `R.attr.tags == ["a", "b"]`, `R.attr.tags.map(t, t.id) == [...]`, and a two-variable macro
+  (`R.attr.tags.exists(i, t, ...)`). With it, `tags[0]` is the row at `OFFSET 0` of the
+  subquery ordered by that column, `tags[0].name` reads a `fields` column of that row, and
+  the comparison around the element is `UNKNOWN` where the position is past the end, as CEL's
+  out-of-range error is, so `!(tags[1] == "x")` returns no one-element row. A negative or
+  fractional position is that error on every row. Two rows with the same order value have no
+  defined order, as they have none in the application's list.
 
 ```ruby
 "request.resource.attr.categories" => Cerbos::ActiveRecord.relation(:categories, fields: {
@@ -371,21 +380,41 @@ database, and plain correlated predicates for model-to-model comparisons. `inter
 and `isSubset` over a relation of scalar members become `EXISTS` and `COUNT` subqueries; `in` over a
 list built with `+`, `filter()` or `map()` tests each part; a duration (`timeSince()`,
 `timestamp(x) + duration(...)`) moves onto the constant side, as `x < now - d`; and `upperAscii()`
-replaces each ASCII letter on its own, since SQL `UPPER` also folds `é`. What raises (the
-full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)):
+replaces each ASCII letter on its own, since SQL `UPPER` also folds `é`.
+
+Three shapes need a word on how they stay exact:
+
+- **A list read by position** (`order_field`, above): `tags[0]`, `tags == [...]`,
+  `tags.map(t, t.id) == [...]`, `tagNames.except([...]) == [...]` and `tags.exists(i, t, ...)`.
+  Whole-list equality is the same length and the element at each position equal to the literal's,
+  as CEL compares lists: `["public", "public"]` does not match `["public"]`, and
+  `["private", "public"]` does not match `["public", "private"]`. A null element equals only a
+  `null` in the literal; a literal of another type than the column equals no element.
+- **`int()` over a string column.** CEL reads the whole string as Go's `strconv.ParseInt` does,
+  or errors: `"+051"` is 51, `"51 "`, `"1e3"` and `"9223372036854775808"` are errors. The cast
+  is reached only where the spelling (an optional sign and ASCII digits, nothing else) and the
+  magnitude (at most 19 digits, the 19-digit ones at most `2^63 - 1`, or `2^63` with a minus)
+  pass, and the `CASE` is `NULL` elsewhere, the error. SQLite and PostgreSQL check the spelling
+  with `TRIM`, MySQL with an anchored `REGEXP` (`\A[+-]?[0-9]+\z`). The result is an int, so
+  `int(R.attr.s) == 9007199254740992` binds the literal as an integer and `i6`'s `2^53 + 1`
+  stays unequal on MySQL, which compares a `BIGINT` with a double literal as doubles.
+- **A `now()` literal.** The planner folds `now() - duration("24h")` to an instant with
+  nanosecond precision, and ActiveRecord binds a `Time` at microseconds. Every supported store
+  keeps at most six fractional digits, so a column's instant is on the microsecond grid, and an
+  ordering against the literal is the same ordering against the grid point on the right side
+  of it: `col < t` is `col < ceil(t)` and `col <= t` is `col <= floor(t)`. Equality with an
+  instant off the grid is false on every row that holds a value, and a missing one stays the
+  error.
+
+What raises (the full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)):
 
 | Case | Why the adapter raises |
 | --- | --- |
-| `timestamp/less-than/relative-window`, `timestamp/greater-than/relative-window-value-first`, `collection/exists/relative-window-in-body` | The planner emits a nanosecond `now()` literal; ActiveRecord binds `Time` at microseconds, so the query would compare a different instant. |
 | `arithmetic/divide/field-by-field` | Division by another column. The sign of a zero denominator decides ±Infinity, and SQL cannot tell `-0.0` from `0.0`. Dividing a value by itself, or by a constant, is fine. |
-| `collection/index/first-element-of-object-list` | `tags[0]` needs row order, which a relation does not have (falls through to the generic unsupported-operator refusal). Use an operator override if you have an ordering column. |
 | `cast/timestamp/malformed-string` | `timestamp()` on a text column would order by text, not by instant. Map a `datetime` column. |
-| `cast/int/malformed-string`, `cast/double/malformed-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS INTEGER)` is `1` on SQLite). |
-| `cast/string/from-int-beyond-double-precision` | `string()` over `int()` of a string column: the `int()` is refused for the reason above. |
+| `cast/double/malformed-string` | CEL parses the whole string or errors; SQL reads leading digits (`CAST('1junk' AS REAL)` is `1.0` on SQLite), and a double's spellings (`1e3`, `.5`, `Inf`) have no portable check. `int()` over a string column is translated: see below. |
 | `collection/exists/map-keys`, `collection/exists/negated-map-keys` | A macro over the to-one `parent` ranges over a map's keys. A to-one association is not a collection, and SQL cannot list which of a row's columns are non-NULL as keys. |
-| `collection/index/first-element-of-string-list`, `collection/index/first-element-of-number-list`, `collection/index/negated-first-element-of-number-list`, `collection/index/first-element-of-boolean-list`, `collection/index/negated-first-element-of-boolean-list`, `type-mismatch/equals/boolean-list-element-against-number-literal`, `type-mismatch/equals/number-list-element-against-boolean-literal` | Positional access into a relation mapped by member field — no row order, as with `collection/index/first-element-of-object-list`. The last two compare a boolean with `1` / a number with `true`, which CEL answers false; SQLite stores booleans as 1 and would match. |
-| `collection/map/equals-list-literal` | A `map()` projection compared with `==` to a literal list; a correlated subquery has no order to compare element-wise. |
-| `collection/exists/two-variable-index-and-element`, `collection/exists/two-variable-map-key-and-value` | A two-variable comprehension binds each element's position, or each map key. A relation's rows have no position, and SQL cannot list a row's columns as keys. |
+| `collection/exists/two-variable-map-key-and-value` | A two-variable comprehension over a map binds each key beside its value, and SQL cannot list a row's columns as keys. Over a relation with `order_field` the first variable binds the element's position. |
 | `cast/string/from-negative-zero-double` | `string()` over a double is compared as the number its literal spells in CEL (`"1e+06"` is `1000000.0`), since SQL spells doubles differently. `"-0"` and `"0"` are refused: SQL cannot tell `-0.0` from `0.0`. |
 
 The adapter also raises on an `and`/`or` with no operands and on any operator with the wrong
@@ -405,8 +434,8 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 91 / 102 |
-| adversarial | 333 / 375 |
+| extended | 99 / 102 |
+| adversarial | 353 / 375 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

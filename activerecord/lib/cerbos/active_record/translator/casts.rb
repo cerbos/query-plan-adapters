@@ -32,13 +32,42 @@ module Cerbos
               "number than the exact value does. Map a double column, or give an operator " \
               "override."
           end
+          return int_of_string(value) if STRING_COLUMN_TYPES.include?(type)
 
           raise UnsupportedOperatorError,
-            "int() applied to a #{type.inspect} column: CEL reads the WHOLE " \
-            "string or makes an error, and Cerbos then denies the row, but SQL reads the digits " \
-            "at the front and gives a number, so the filter would keep the row. Compare the " \
-            "column directly, or give an operator override."
+            "int() applied to #{type.nil? ? describe(value) : "a #{type.inspect} column"}: only " \
+            "a whole-number, double or string column is translated"
         end
+
+        # CEL's int() of a string reads the whole string as Go's `strconv.ParseInt` does, or
+        # errors: an optional sign, ASCII digits, and a value within int64. A SQL CAST reads the
+        # leading digits of "1junk", trims "51 ", goes through a double for "1e3", and saturates or
+        # wraps past int64, so the CAST is reached only where the spelling and the magnitude pass,
+        # and the CASE is NULL (the error, UNKNOWN) elsewhere. The magnitude is checked on the
+        # digits as text: fewer than 19 are in range, and 19 compare against the bound of the
+        # sign, which is a digit-by-digit order for digits of one length under any collation.
+        def int_of_string(value)
+          digits = dialect.integer_digits(value)
+          length = ArelSupport.function("LENGTH", [digits])
+          bound = ArelSupport.case_node(
+            [[ArelSupport.comparison("eq", ArelSupport.function("SUBSTR", [value, 1, 1]), "-"), INT64_MIN_MAGNITUDE]],
+            else_value: INT64_MAX_MAGNITUDE
+          )
+          in_range = ArelSupport.or_node([
+            ArelSupport.comparison("lt", length, INT64_MAX_MAGNITUDE.length),
+            ArelSupport.and_node([
+              ArelSupport.comparison("eq", length, INT64_MAX_MAGNITUDE.length),
+              ArelSupport.comparison("le", digits, bound)
+            ])
+          ])
+          whole = ArelSupport.case_node(
+            [[ArelSupport.and_node([dialect.integer_text(value), in_range]), cast(value, dialect.int_type)]]
+          )
+          record_cel_type(whole, :int)
+        end
+
+        INT64_MAX_MAGNITUDE = (2**63 - 1).to_s
+        INT64_MIN_MAGNITUDE = (2**63).to_s
 
         # CEL's int() of a double truncates toward zero, and errors when the double is NaN, an
         # Infinity, or outside (-2^63, 2^63): cel-go's range check rejects both bounds

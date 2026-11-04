@@ -22,6 +22,14 @@ module Cerbos
 
       module_function
 
+      # True if a bound Time keeps the instant: no sub-microsecond precision.
+      #
+      # @param time [Time]
+      # @return [Boolean]
+      def bindable?(time)
+        (time.subsec * 10**MAX_SUBSECOND_DIGITS).denominator == 1
+      end
+
       # @param literal [String] an RFC-3339 instant from the plan
       # @return [Time] in UTC, at the literal's full precision. {.assert_bindable} refuses the
       #   instant if it reaches SQL with more precision than a bound Time keeps.
@@ -48,7 +56,7 @@ module Cerbos
       # @return [void]
       # @private
       def assert_bindable(time)
-        return if (time.subsec * 1_000_000).denominator == 1
+        return if bindable?(time)
 
         raise UnsupportedOperatorError,
           "Timestamp literal #{time.iso8601(9).inspect} carries sub-microsecond precision, which " \

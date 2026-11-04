@@ -6,6 +6,18 @@
 
 ### Added
 
+- `order_field:` on `Cerbos::ActiveRecord.relation`, the column whose ascending order is the list's element order. It gives a translation to the shapes that read one, each of which raised `Cerbos::ActiveRecord::UnsupportedOperatorError` before:
+
+  - `R.attr.tags[0]` and `R.attr.tags[0].name`, as the row at that `OFFSET` of the ordered subquery. The operator around the element is `UNKNOWN` where the position is past the end, as CEL's out-of-range error is, so `!(tags[1] == "x")` returns no one-element row; a negative or fractional position is that error on every row.
+  - `R.attr.tags == [...]`, `R.attr.tags.map(t, t.id) == [...]` and `R.attr.tagNames.except([...]) == [...]`, as the same length and the element at each position equal to the literal's.
+  - A two-variable macro, `R.attr.tags.exists(i, t, ...)`, binding the element's position.
+
+  Without `order_field` these shapes still raise.
+
+- `int()` over a string column, as a `CASE` that casts only where the string is spelled as Go's `strconv.ParseInt` reads it (an optional sign and ASCII digits, within int64) and is `NULL`, the error, elsewhere. It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. A whole literal beside an int is bound as an integer, so `int(R.attr.s) == 9007199254740992` stays exact on MySQL.
+
+- A timestamp literal with sub-microsecond precision, such as the instant the planner folds `now() - duration("24h")` to, compared with a temporal column. It previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. Every supported store keeps at most six fractional digits, so the literal is moved to the microsecond grid point that keeps the ordering exact; equality with an instant off the grid is false where the column holds a value.
+
 - `has()`, which Cerbos 0.57.0 keeps in the plan as a `has` operator. It translates from the attribute's null convention: `IS NOT NULL` under `omitted`, true under `explicit`, and the related row's existence for a `relation`. A presence test over a collection relation raises a `Cerbos::ActiveRecord::Error`.
 
 - `Cerbos::ActiveRecord.query_plan_to_relation` to translate a Cerbos `PlanResources` response into an `ActiveRecord::Relation`, with `Cerbos::ActiveRecord.field` and `Cerbos::ActiveRecord.relation` to map plan attributes onto the model ([#370](https://github.com/cerbos/query-plan-adapters/pull/370))
@@ -30,7 +42,7 @@
   - `timeSince(timestamp(col))` against a duration, and `timestamp(col) ± duration(...)` against a timestamp literal, by moving the duration onto the constant side (`col < now - d`). `now` is the translation's clock, read once per plan.
   - `index` into a map literal by a string attribute, as a `CASE` with no `ELSE`, so a missing key is UNKNOWN like CEL's error; and `R.attr.m["key"]` by a constant key, which reads the mapping of `R.attr.m.key`.
 
-  A two-variable comprehension (`exists(i, v, ...)`) raises `Cerbos::ActiveRecord::UnsupportedOperatorError`: a relation's rows have no position, and SQL cannot list a row's columns as map keys.
+  A two-variable comprehension (`exists(i, v, ...)`) raises `Cerbos::ActiveRecord::UnsupportedOperatorError` unless the relation declares `order_field` (above); over a map it still raises, since SQL cannot list a row's columns as map keys.
 
 - `contains`, `startsWith`, `endsWith` and `size()` over a number or a boolean (a numeric or boolean column, a computed number or boolean, or a constant), translated as SQL `NULL` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 

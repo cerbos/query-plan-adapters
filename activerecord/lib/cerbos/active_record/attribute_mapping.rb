@@ -75,19 +75,25 @@ module Cerbos
       #
       # Make one with {Cerbos::ActiveRecord.relation}.
       #
+      # `order_field` is the column whose ascending order is the list's element order, so
+      # `R.attr.tags[0]`, `R.attr.tags == [...]` and two-variable macros can be translated.
+      # Without it a relation has no element order, and those shapes are refused.
+      #
       # @attr association [Symbol] the association name.
       # @attr member_field [String, nil] the column for a bare element value.
       # @attr fields [Hash{String => Field, Relation}] the member mappings for lambda bodies.
-      Relation = Struct.new(:association, :member_field, :fields) do
+      # @attr order_field [String, nil] the column that orders the elements.
+      Relation = Struct.new(:association, :member_field, :fields, :order_field) do
         # Specify a collection mapping.
         #
         # @param association [String, Symbol] the association name.
         # @param member_field [String, Symbol, nil] the column for a bare element value.
         # @param fields [Hash{String, Symbol => Field, Relation}] the member mappings for lambda
         #   bodies.
+        # @param order_field [String, Symbol, nil] the column that orders the elements.
         #
         # @raise [ArgumentError] when `association` is `nil` or a `fields` value is not a mapping.
-        def initialize(association:, member_field: nil, fields: {})
+        def initialize(association:, member_field: nil, fields: {}, order_field: nil)
           raise ArgumentError, "association is required" if association.nil?
 
           fields.each do |name, mapping|
@@ -99,7 +105,8 @@ module Cerbos
           super(
             association: association.to_sym,
             member_field: member_field&.to_s,
-            fields: fields.transform_keys(&:to_s).freeze
+            fields: fields.transform_keys(&:to_s).freeze,
+            order_field: order_field&.to_s
           )
         end
       end
@@ -132,6 +139,8 @@ module Cerbos
     # @param member_field [String, Symbol, nil] the column for a bare element value.
     # @param fields [Hash{String => AttributeMapping::Field, AttributeMapping::Relation}]
     #   the member mappings for lambda bodies.
+    # @param order_field [String, Symbol, nil] the column whose ascending order is the list's
+    #   element order. Needed for `tags[0]`, whole-list equality and two-variable macros.
     #
     # @return [AttributeMapping::Relation]
     #
@@ -142,14 +151,19 @@ module Cerbos
     #     :tags, member_field: "name", fields: {"name" => Cerbos::ActiveRecord.field("name")}
     #   )
     #
+    # @example An ordered list, so `R.attr.tags[0]` can be translated
+    #   Cerbos::ActiveRecord.relation(:tags, member_field: "name", order_field: "position")
+    #
     # @example A chain through a parent
     #   Cerbos::ActiveRecord.relation(:categories, fields: {
     #     "subCategories" => Cerbos::ActiveRecord.relation(:sub_categories, fields: {
     #       "name" => Cerbos::ActiveRecord.field("name")
     #     })
     #   })
-    def self.relation(association, member_field: nil, fields: {})
-      AttributeMapping::Relation.new(association: association, member_field: member_field, fields: fields)
+    def self.relation(association, member_field: nil, fields: {}, order_field: nil)
+      AttributeMapping::Relation.new(
+        association: association, member_field: member_field, fields: fields, order_field: order_field
+      )
     end
   end
 end
