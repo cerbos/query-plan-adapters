@@ -224,18 +224,6 @@
       "reason": "Same index() refusal as collection/index/first-element-of-boolean-list: the then branch reads aBoolList[0].",
       "status": "unsupported"
     },
-    "hierarchy/ancestor-of/empty-delimiter": {
-      "reason": "An empty hierarchy delimiter is refused before the prefix membership is built.",
-      "status": "unsupported"
-    },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "reason": "An empty hierarchy delimiter is refused before the prefix LIKE is built.",
-      "status": "unsupported"
-    },
-    "hierarchy/overlaps/empty-delimiter": {
-      "reason": "An empty hierarchy delimiter is refused before the prefix LIKE is built.",
-      "status": "unsupported"
-    },
     "hierarchy/overlaps/path-built-from-identifier": {
       "reason": "hierarchy() over a list of segments has no lowering: it compares segment by segment, and the translator lowers only a delimited string.",
       "status": "unsupported"
@@ -250,10 +238,6 @@
     },
     "membership/in/negated-map-attribute-keys": {
       "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
-      "status": "unsupported"
-    },
-    "null/not-equals/field-to-field-mixed-null-conventions": {
-      "reason": "A field-to-field comparison between columns declared under different null conventions has no single SQL NULL reading, so it is refused.",
       "status": "unsupported"
     },
     "principal/except/size-after-removing-resource-value": {
@@ -276,106 +260,6 @@
       "reason": "This macro has no value-list lowering; only exists/all can use the translator’s literal-list fold.",
       "status": "unsupported"
     },
-    "regex/matches/anchored-prefix": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
-    "regex/matches/bounded-repetition": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/brace-without-count-is-literal": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
-    "regex/matches/case-fold-kelvin-and-long-s": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
-    "regex/matches/case-insensitive-flag": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/compared-to-true": {
-      "reason": "Regex matches() has no lowering: CEL uses RE2 and SQL regex dialects do not preserve its matching/error semantics, including through boolean equality.",
-      "status": "unsupported"
-    },
-    "regex/matches/digit-class": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/dot-excludes-newline": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/dot-plus-excludes-empty-and-newline": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "reason": "Regex matches() has no lowering: CEL uses RE2 and SQL regex dialects do not preserve its matching/error semantics, including through boolean equality.",
-      "status": "unsupported"
-    },
-    "regex/matches/grouped-alternation": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/leading-zero-count-is-literal": {
-      "status": "unsupported",
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics."
-    },
-    "regex/matches/literal-brace": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/lookahead-from-principal": {
-      "reason": "Regex matches() has no lowering: CEL uses RE2 and SQL regex dialects do not preserve its matching/error semantics, including through boolean equality.",
-      "status": "unsupported"
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/negated-invalid-patterns-from-principal": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
-    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
-      "status": "unsupported",
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics."
-    },
-    "regex/matches/posix-character-class": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/posix-class-and-range-bounded": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/unanchored": {
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics.",
-      "status": "unsupported"
-    },
-    "regex/matches/unanchored-quantifiers": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
-    "regex/matches/unbounded-count": {
-      "status": "unsupported",
-      "reason": "The translator has no matches lowering: the SQL engines do not share CEL RE2 semantics."
-    },
-    "regex/matches/whitespace-class": {
-      "reason": "matches() has no lowering: CEL's RE2 dialect is not PostgreSQL's regex dialect.",
-      "status": "unsupported"
-    },
     "timestamp/equals/field-to-field-without-conversion": {
       "reason": "Native timestamp storage discards the original RFC 3339 spelling, so instant equality cannot reproduce CEL string equality without timestamp() wrappers.",
       "status": "unsupported"
@@ -386,26 +270,6 @@
     },
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "reason": "The translator's `index` reads only a constant string key of a mapped map attribute, and a list position has no lowering: a related table has no row order to read a position from, and the mapper has no ordered column kind (PostgreSQL array or jsonb).",
-      "status": "unsupported"
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "reason": "A struct constructor is not a scalar SQL operand and has no lowering in this translator.",
-      "status": "unsupported"
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "reason": "A struct constructor is not a scalar SQL operand and has no lowering in this translator.",
-      "status": "unsupported"
-    },
-    "type-mismatch/has-intersection/resource-string-list-against-map-element": {
-      "reason": "hasIntersection() lowers only against a literal list, and here the other side is a list() of computed elements, which SQL cannot hold as a set.",
-      "status": "unsupported"
-    },
-    "type-mismatch/in/list-literal-in-resource-string-list": {
-      "reason": "A nested list element cannot be bound as a scalar member of this relation.",
-      "status": "unsupported"
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "reason": "A struct constructor is not a scalar SQL operand and has no lowering in this translator.",
       "status": "unsupported"
     }
   }

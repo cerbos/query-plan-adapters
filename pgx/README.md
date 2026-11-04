@@ -272,8 +272,8 @@ PDP's goldens (0.55.0) are replayed too.
 | Tier | Passed / total (PDP 0.57.0) |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 79 / 102 |
-| adversarial | 287 / 375 |
+| extended | 87 / 102 |
+| adversarial | 313 / 375 |
 
 The total is every golden case in the tier for PDP 0.57.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
@@ -344,6 +344,26 @@ tags := &cerbospgx.Relation{
 
 ## Behaviour changes
 
+- Newly translated, each proved by the corpus: `matches()` with a constant pattern. The pattern
+  is parsed with Go's `regexp/syntax`, the parser CEL matches with, so what is valid and what it
+  means are exactly CEL's, and it is lowered only when what it matches can be said with the
+  predicates the adapter already emits exactly: a finite set of literals under anchors (`IN`, or
+  escaped `LIKE` prefix, suffix and substring tests), every character from a small set
+  (`^[ab]+$`, a `REPLACE` per character), a run of non-newline characters (`^.+$`, `^.{8,}$`) and
+  a prefix and suffix around one (`^a.*b$`). RE2's `(?i)` folds as RE2 does (`k` matches KELVIN
+  SIGN), a pattern RE2 rejects is UNKNOWN, as CEL's evaluation error is, and any other pattern
+  (a negated class, a word boundary, `(?s)`, `(?m)`) fails closed with `ErrUnsupported`. No
+  pattern reaches PostgreSQL's own regex engine, whose dialect is not RE2. Also newly translated:
+  `hierarchy(x, "")`, whose empty delimiter makes one segment per character; `==`/`!=` between a
+  column declared `NullConventionExplicit` and one on the omitted convention, UNKNOWN where the
+  omitted side is NULL and definite otherwise; a map literal compared with a column declared
+  `ValueString`, `ValueNumber` or `ValueBool`, unequal wherever the column is present; and a list or
+  map literal as the needle of `in` or an element of `hasIntersection()` against a relation whose
+  element type is declared, which no stored scalar equals (`regex/matches/*`,
+  `hierarchy/*/empty-delimiter`, `null/not-equals/field-to-field-mixed-null-conventions`,
+  `type-mismatch/*/string-field-against-map-literal*`,
+  `type-mismatch/in/list-literal-in-resource-string-list`,
+  `type-mismatch/has-intersection/resource-string-list-against-map-element`).
 - **Breaking:** `Result.Where` is never empty. It is `FALSE` for `KindAlwaysDenied`, where it was
   empty and a builder that skips an empty `WHERE` returned every row, and `TRUE` for
   `KindAlwaysAllowed` ([#494](https://github.com/cerbos/query-plan-adapters/issues/494),
