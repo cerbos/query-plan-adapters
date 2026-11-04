@@ -415,7 +415,7 @@ strings, or a receiver that is not a mapped string column.
 | String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation), `upperAscii()` (26 `REPLACE`s, so only ASCII letters fold), `matches()` (see below) |
 | Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
 | Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, `isSubset`, `except` / `intersect` compared with `[]`, membership (including in `map()`, `filter()` and `L + [...]`) |
-| Other | arithmetic, ternaries (including a list ternary compared with or searched for a constant), hierarchy operations, typed timestamps and constant `duration()` shifts, `timeSince()`, index access (including a constant map indexed by an attribute, and `R.attr.m["key"]`), `string()` over a boolean or text column, `string()` of a number compared for equality with a string |
+| Other | arithmetic, ternaries (including a list ternary compared with or searched for a constant), hierarchy operations, typed timestamps and constant `duration()` shifts, `timeSince()`, index access (including a constant map indexed by an attribute, and `R.attr.m["key"]`), `string()` over a boolean (a column, a predicate, a ternary, or a boolean read through a to-one relation) or text column compared with a string, `string()` of a number, an `int()` or a `size()` compared for equality with a string |
 
 Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
 filter. It is exported and extends `Error`, so existing `catch` blocks keep working:
@@ -450,7 +450,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 30 / 30 |
 | extended | 96 / 102 |
-| adversarial | 341 / 375 |
+| adversarial | 347 / 375 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -520,6 +520,14 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- `string()` of a boolean-valued expression (`string(R.attr.aNumber > 3) == "true"`,
+  `string(R.attr.parent.aBool) != "true"`, a ternary with boolean arms) and `string()` of an
+  `int()` or `size()` (`string(int(R.attr.aDouble)) == "1000000"`) compared with `==` / `!=`
+  against a string now translate instead of throwing. Neither renders the value: a boolean is
+  translated in condition position, in the polarity the literal and the comparison call for, so a
+  missing attribute, an absent parent or an erroring arm stays denied under both polarities; an int
+  compares with the int the literal spells, so `"1000000"` matches `int()` of `1e6` where the
+  double's own rendering is `"1e+06"`. A literal no int spells still throws.
 - **Breaking:** `nullAttributeRepresentation` defaults to `"omitted"`, where it defaulted to
   `"explicit"`. A caller that sends explicit nulls and set nothing now gets `x == null` matching no
   row where it rendered `IS NULL`, and a refusal for a null operand over a `transform`, function

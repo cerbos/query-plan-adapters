@@ -104,6 +104,113 @@ const BOOLEAN_VALUED_OPERATORS = new Set([
 const isBooleanValued = (operand: PlanExpressionOperand): operand is ExpressionOperand =>
   isExpressionOperand(operand) && BOOLEAN_VALUED_OPERATORS.has(operand.operator);
 
+const LEAF_COMPARISON_OPERATORS = new Set(["eq", "ne", "lt", "le", "gt", "ge"]);
+
+/**
+ * Whether `operand` is a boolean wherever CEL evaluates it: a boolean literal or column, a
+ * predicate, a logical connective, or a ternary whose two arms are.
+ */
+const isBooleanExpression = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
+  if (isValueOperand(operand)) return typeof operand.value === "boolean";
+  if (isNameOperand(operand)) return columnForOperand(operand, mapper)?.dataType === "boolean";
+  if (!isExpressionOperand(operand)) return false;
+  const { operator, operands } = operand;
+  if (
+    isBooleanValued(operand) ||
+    LEAF_COMPARISON_OPERATORS.has(operator) ||
+    operator === "and" ||
+    operator === "or" ||
+    operator === "not"
+  ) {
+    return true;
+  }
+  return (
+    operator === "if" &&
+    operands.length === 3 &&
+    isBooleanExpression(operands[1]!, mapper) &&
+    isBooleanExpression(operands[2]!, mapper)
+  );
+};
+
+/**
+ * Whether `operand` is a CEL int wherever it evaluates: an `int()` conversion, a `size()`, or a
+ * ternary with such an arm. CEL types a ternary's two arms alike, so a bare integral number
+ * literal on the other arm is an int as well; alone it is the plan's untyped number, which may be
+ * the double CEL renders `1e+06`.
+ */
+const isIntExpression = (operand: PlanExpressionOperand): boolean => {
+  if (!isExpressionOperand(operand)) return false;
+  const { operator, operands } = operand;
+  if ((operator === "int" || operator === "size") && operands.length === 1) return true;
+  if (operator !== "if" || operands.length !== 3) return false;
+  const arms = [operands[1]!, operands[2]!];
+  const integral = (arm: PlanExpressionOperand) =>
+    isIntExpression(arm) ||
+    (isValueOperand(arm) && typeof arm.value === "number" && Number.isSafeInteger(arm.value));
+  return arms.some(isIntExpression) && arms.every(integral);
+};
+
+/** The int whose CEL rendering is exactly `text`, within the range the checked int() compares. */
+const intRenderedAs = (text: string): number | undefined => {
+  if (!/^-?(0|[1-9][0-9]*)$/.test(text)) return undefined;
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : undefined;
+};
+
+/**
+ * `string(x) == "lit"` / `!=` where `x` is a boolean or an int, lowered without rendering `x` at
+ * all: CEL spells a boolean `true` / `false` and an int in plain decimal, so the comparison holds
+ * exactly when `x` is the one value the literal spells, and raises wherever `x` does.
+ *
+ * A boolean `x` is translated in condition position, in whichever polarity the literal and the
+ * comparison call for; that handles a boolean read through a to-one hop, a predicate and a ternary
+ * alike, each with its own error semantics. A literal no boolean spells makes the comparison false
+ * wherever `x` evaluates and an error elsewhere, so it is UNKNOWN unless `x` or `!x` holds.
+ *
+ * An int `x` compares with the int the literal spells; `int()` keeps its checked lowering, and a
+ * literal no int spells is refused rather than guessed at.
+ */
+const buildRenderedComparison = (
+  context: ComparisonContext,
+  left: PlanExpressionOperand,
+  right: PlanExpressionOperand,
+): SQL | undefined => {
+  const { operator, mapper, options, negated } = context;
+  const [conversion, literal] = isStringConversion(left) ? [left, right] : [right, left];
+  if (
+    !isStringConversion(conversion) ||
+    !isExpressionOperand(conversion) ||
+    conversion.operands.length !== 1 ||
+    !isValueOperand(literal) ||
+    typeof literal.value !== "string"
+  ) {
+    return undefined;
+  }
+  const inner = conversion.operands[0]!;
+  const holdsWhenEqual = (operator === "eq") !== negated;
+  if (isBooleanExpression(inner, mapper)) {
+    if (literal.value === "true" || literal.value === "false") {
+      const spelled = literal.value === "true";
+      return buildFilterFromExpression(inner, mapper, options, spelled !== holdsWhenEqual);
+    }
+    const definite = sql`(${buildFilterFromExpression(inner, mapper, options, false)} or ${
+      buildFilterFromExpression(inner, mapper, options, true)
+    })`;
+    return holdsWhenEqual ? sql`(case when ${definite} then ${constantCondition(false)} end)` : definite;
+  }
+  if (isIntExpression(inner)) {
+    const value = intRenderedAs(literal.value);
+    if (value === undefined) {
+      throw new UnsupportedQueryPlanError(
+        `Cannot translate string() of an int compared with "${literal.value}": no int renders as ` +
+          "that text, and the adapter has no SQL form for whether the int evaluates at all",
+      );
+    }
+    return buildComparisonFilter(operator, inner, { value }, mapper, options, negated);
+  }
+  return undefined;
+};
+
 // Mirror map for value-first comparisons: the planner preserves source order, so
 // `3 <= R.attr.aNumber` arrives as le(value, variable) and must become `aNumber >= 3`,
 // never `aNumber <= 3` (see cerbos/query-plan-adapters#258/#259 for the same bug class
@@ -710,6 +817,11 @@ export const buildComparisonFilter = (
       options,
       negated,
     );
+  }
+
+  if (operator === "eq" || operator === "ne") {
+    const rendered = buildRenderedComparison(context, left, right);
+    if (rendered !== undefined) return rendered;
   }
 
   // `pred == true` is `pred`, and `pred == false` is `!pred` — an error stays an error under
