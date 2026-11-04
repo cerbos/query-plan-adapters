@@ -56,6 +56,7 @@ import {
   UNKNOWN_CONDITION,
   withPolarity,
 } from "./predicates";
+import { buildOrderedListEquality, buildPositionedComparison } from "./ordered";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
 import {
   buildCheckedIntComparison,
@@ -822,7 +823,11 @@ export const buildComparisonFilter = (
   if (operator === "eq" || operator === "ne") {
     const rendered = buildRenderedComparison(context, left, right);
     if (rendered !== undefined) return rendered;
+    const ordered = buildOrderedListEquality(operator, left, right, mapper, options, negated);
+    if (ordered !== undefined) return ordered;
   }
+  const positioned = buildPositionedComparison(operator, left, right, mapper, options, negated);
+  if (positioned !== undefined) return positioned;
 
   // `pred == true` is `pred`, and `pred == false` is `!pred` — an error stays an error under
   // both — so the predicate is translated in condition position with the polarity folded in.

@@ -49,10 +49,6 @@
       "status": "unsupported",
       "reason": "'timestamp' field 'request.resource.attr.createdBy' requires a mapping with valueType: \"timestamp\"."
     },
-    "collection/except/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: except."
-    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. A relation subquery iterates rows, not attribute names, so a macro over a to-one relation is refused."
@@ -69,21 +65,9 @@
       "status": "unsupported",
       "reason": "A two-variable comprehension binds an element's position in the list, or a map's key, as well as its value. The adapter evaluates a macro as a correlated subquery whose one variable is the element row (a JSON array element, or a related row), and neither a JSON array element's index nor an attribute name of the row is a column it reads, so a two-variable macro is refused."
     },
-    "collection/index/first-element-of-object-list": {
-      "status": "unsupported",
-      "reason": "List indexing (tags[0].name): Unsupported value-expression operator: get-field."
-    },
-    "collection/index/negated-first-element-of-object-list": {
-      "status": "unsupported",
-      "reason": "List indexing under negation (!(tags[0].name == \"public\")): Unsupported value-expression operator: get-field."
-    },
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
       "reason": "size(intersect(L, K)): Cerbos's intersect() keeps the duplicates of whichever list is shorter, so the size depends on comparing the stored list's length with the literal's on every row before counting matches. The adapter has no SQL form for that comparison, so it refuses the shape instead of counting a set."
-    },
-    "collection/map/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "map() translates only inside hasIntersection, where the projection becomes the inner column of an EXISTS. Comparing the ordered projection itself to a literal list has no SQL form the adapter builds."
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",

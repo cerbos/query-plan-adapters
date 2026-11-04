@@ -129,6 +129,7 @@ interface ResourceRow {
 interface TagRow {
   tagId: string;
   name: string | null;
+  position: number;
   resourceId: string;
 }
 
@@ -230,9 +231,9 @@ function seedRows(): SeedRows {
         });
       }
     }
-    for (const tag of seed.tags) {
-      rows.tags.push({ tagId: tag.id, name: tag.name, resourceId: seed.id });
-    }
+    seed.tags.forEach((tag, position) => {
+      rows.tags.push({ tagId: tag.id, name: tag.name, position, resourceId: seed.id });
+    });
     // One category holding every subcategory name (conformance/README.md, "The dataset").
     const categoryId = `${seed.id}-cat`;
     if (seed.subCategoryNames.length > 0) {
@@ -359,6 +360,7 @@ function sqliteStore(): AdversarialStore {
         CREATE TABLE adversarial_tags (
           tag_id TEXT PRIMARY KEY,
           name TEXT,
+          position INTEGER NOT NULL,
           resource_id TEXT NOT NULL
         );
         CREATE TABLE adversarial_categories (
@@ -543,6 +545,7 @@ function postgresStore(): AdversarialStore {
         CREATE TABLE adversarial_tags (
           tag_id       text PRIMARY KEY,
           name         text,
+          position     integer NOT NULL,
           resource_id  text NOT NULL REFERENCES adversarial_resources(id)
         );
         CREATE TABLE adversarial_categories (
@@ -752,6 +755,7 @@ function mysqlStore(): AdversarialStore {
     `CREATE TABLE adversarial_tags (
        tag_id       varchar(64) PRIMARY KEY,
        name         varchar(255),
+       position     int NOT NULL,
        resource_id  varchar(64) NOT NULL REFERENCES adversarial_resources(id)
      )`,
     `CREATE TABLE adversarial_categories (
