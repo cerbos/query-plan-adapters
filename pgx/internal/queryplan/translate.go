@@ -740,7 +740,7 @@ func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error)
 		listNode, otherNode = right, left
 	}
 	// A list() of constants folds to a literal list too.
-	if !listNode.isValue() && !(listNode.isExpr() && listNode.operator == "list") {
+	if !listNode.isValue() && (!listNode.isExpr() || listNode.operator != "list") {
 		return nil, fmt.Errorf(
 			"hasIntersection between two stored collections requires a set-valued join that SQL " +
 				"cannot express as a row filter; one side must be a literal list",

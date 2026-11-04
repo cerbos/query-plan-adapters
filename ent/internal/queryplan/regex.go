@@ -57,11 +57,11 @@ const (
 
 // regexPlan is what one top-level alternative matches; the caller ORs the alternatives together.
 type regexPlan struct {
-	kind     regexPlanKind
 	literals []string
 	chars    []rune
 	pairs    [][2]string
 	min      int
+	kind     regexPlanKind
 }
 
 type regexNodeKind uint8
@@ -77,14 +77,14 @@ const (
 
 // regexNode is the subset of RE2 syntax the lowering reads.
 type regexNode struct {
-	kind regexNodeKind
+	// sub is a repetition's operand; max is -1 when unbounded.
+	sub *regexNode
 	// chars is the set's members, in code point order.
 	chars []rune
 	// alts is a group's alternatives; a group with none matches nothing.
-	alts [][]regexNode
-	// sub is a repetition's operand; max is -1 when unbounded.
-	sub      *regexNode
+	alts     [][]regexNode
 	min, max int
+	kind     regexNodeKind
 }
 
 func unsupportedRegex(pattern, why string) error {
@@ -96,16 +96,21 @@ func unsupportedRegex(pattern, why string) error {
 	)
 }
 
+// compileRE2 is what CEL calls, so its verdict on validity (the repeat budget included) is CEL's.
+func compileRE2(pattern string) (*regexp.Regexp, bool) {
+	re, err := regexp.Compile(pattern)
+	return re, err == nil
+}
+
 // compileRegex plans a pattern. invalid reports a pattern RE2 rejects, which CEL raises on.
 func compileRegex(pattern string) (plans []regexPlan, invalid bool, err error) {
-	// regexp.Compile is what CEL calls, so its verdict on validity (the repeat budget included) is
-	// CEL's. syntax.Parse with the same flags is the tree it compiled.
-	if _, err := regexp.Compile(pattern); err != nil {
+	if _, ok := compileRE2(pattern); !ok {
 		return nil, true, nil
 	}
+	// syntax.Parse with the same flags is the tree regexp.Compile compiled.
 	parsed, err := syntax.Parse(pattern, syntax.Perl)
 	if err != nil {
-		return nil, true, nil
+		return nil, false, unsupportedRegex(pattern, err.Error())
 	}
 	var alternatives [][]regexNode
 	if parsed.Op == syntax.OpAlternate {
@@ -160,12 +165,13 @@ func regexSequence(pattern string, re *syntax.Regexp) ([]regexNode, error) {
 		return out, nil
 	case syntax.OpEmptyMatch:
 		return nil, nil
+	default:
+		node, err := regexAtom(pattern, re)
+		if err != nil {
+			return nil, err
+		}
+		return []regexNode{node}, nil
 	}
-	node, err := regexAtom(pattern, re)
-	if err != nil {
-		return nil, err
-	}
-	return []regexNode{node}, nil
 }
 
 // regexAtom reads one non-sequence node.
@@ -221,10 +227,12 @@ func regexAtom(pattern string, re *syntax.Regexp) (regexNode, error) {
 			node.min, node.max = 1, -1
 		case syntax.OpQuest:
 			node.min, node.max = 0, 1
+		default:
 		}
 		return node, nil
+	default:
+		return regexNode{}, unsupportedRegex(pattern, fmt.Sprintf("the %s form is not read", re.Op))
 	}
-	return regexNode{}, unsupportedRegex(pattern, fmt.Sprintf("the %s form is not read", re.Op))
 }
 
 // regexGroupNode reads a node as a group of alternatives.
@@ -337,8 +345,9 @@ func finiteRegexNode(node *regexNode) ([]string, bool) {
 			}
 		}
 		return uniqueStrings(union), true
+	default:
+		return nil, false
 	}
-	return nil, false
 }
 
 // planRegexAlternative plans one top-level alternative, its anchors removed. An end without an
@@ -400,50 +409,59 @@ func planRegexAlternative(pattern string, sequence []regexNode) (plan regexPlan,
 	}
 
 	if anchoredStart && anchoredEnd {
-		// `^X*$`, `^X+$`, `^X{n,}$` over a set or `.`.
-		if len(nodes) == 1 && nodes[0].kind == regexRepeat && nodes[0].max < 0 {
-			only := nodes[0]
-			if only.sub.kind == regexDot {
-				return regexPlan{kind: regexNoNewline, min: only.min}, false, nil
-			}
-			if only.sub.kind == regexSet && len(only.sub.chars) <= maxRegexSetSize {
-				return regexPlan{kind: regexAllCharsIn, chars: only.sub.chars, min: only.min}, false, nil
-			}
-		}
-		// `^P.*S$`: a finite prefix and suffix around one unbounded run of `.`.
-		runs := make([]int, 0, 1)
-		for i, node := range nodes {
-			if node.kind == regexRepeat && node.max < 0 && node.sub.kind == regexDot {
-				runs = append(runs, i)
-			}
-		}
-		if len(runs) == 1 {
-			run := runs[0]
-			prefixes, pok := finiteRegexSequence(nodes[:run])
-			suffixes, sok := finiteRegexSequence(nodes[run+1:])
-			if pok && sok {
-				pairs := make([][2]string, 0, len(prefixes)*len(suffixes))
-				for _, prefix := range prefixes {
-					for _, suffix := range suffixes {
-						pairs = append(pairs, [2]string{prefix, suffix})
-					}
-				}
-				if len(pairs) == 0 {
-					return regexPlan{}, true, nil
-				}
-				noNewline := true
-				for _, pair := range pairs {
-					if strings.Contains(pair[0]+pair[1], "\n") {
-						noNewline = false
-					}
-				}
-				if len(pairs) <= maxRegexLiterals && noNewline {
-					return regexPlan{kind: regexPrefixSuffix, pairs: pairs, min: nodes[run].min}, false, nil
-				}
-			}
+		if plan, never, ok := planAnchoredRegex(nodes); ok {
+			return plan, never, nil
 		}
 	}
 	return regexPlan{}, false, unsupportedRegex(pattern, "what it matches is not a finite set of literals")
+}
+
+// planAnchoredRegex plans the infinite forms read under both anchors; ok is false for any other.
+func planAnchoredRegex(nodes []regexNode) (plan regexPlan, never, ok bool) {
+	// `^X*$`, `^X+$`, `^X{n,}$` over a set or `.`.
+	if len(nodes) == 1 && nodes[0].kind == regexRepeat && nodes[0].max < 0 {
+		only := nodes[0]
+		if only.sub.kind == regexDot {
+			return regexPlan{kind: regexNoNewline, min: only.min}, false, true
+		}
+		if only.sub.kind == regexSet && len(only.sub.chars) <= maxRegexSetSize {
+			return regexPlan{kind: regexAllCharsIn, chars: only.sub.chars, min: only.min}, false, true
+		}
+	}
+	// `^P.*S$`: a finite prefix and suffix around one unbounded run of `.`.
+	runs := make([]int, 0, 1)
+	for i, node := range nodes {
+		if node.kind == regexRepeat && node.max < 0 && node.sub.kind == regexDot {
+			runs = append(runs, i)
+		}
+	}
+	if len(runs) != 1 {
+		return regexPlan{}, false, false
+	}
+	run := runs[0]
+	prefixes, pok := finiteRegexSequence(nodes[:run])
+	suffixes, sok := finiteRegexSequence(nodes[run+1:])
+	if !pok || !sok {
+		return regexPlan{}, false, false
+	}
+	pairs := make([][2]string, 0, len(prefixes)*len(suffixes))
+	for _, prefix := range prefixes {
+		for _, suffix := range suffixes {
+			pairs = append(pairs, [2]string{prefix, suffix})
+		}
+	}
+	if len(pairs) == 0 {
+		return regexPlan{}, true, true
+	}
+	if len(pairs) > maxRegexLiterals {
+		return regexPlan{}, false, false
+	}
+	for _, pair := range pairs {
+		if strings.Contains(pair[0]+pair[1], "\n") {
+			return regexPlan{}, false, false
+		}
+	}
+	return regexPlan{kind: regexPrefixSuffix, pairs: pairs, min: nodes[run].min}, false, true
 }
 
 // regexPredicate lowers the plans over a non-NULL string receiver.
@@ -564,8 +582,8 @@ func (b *builder) matches(n *node, m Mapper, negated bool) (Expr, error) {
 		return Lit{V: nil}, nil
 	}
 	if s, ok := receiver.(string); ok {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
+		re, ok := compileRE2(pattern)
+		if !ok {
 			return Lit{V: nil}, nil
 		}
 		return negate(BoolConst{V: re.MatchString(s)}, negated), nil
