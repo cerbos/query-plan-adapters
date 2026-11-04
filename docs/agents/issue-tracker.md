@@ -31,6 +31,7 @@ plus one or more scope labels.
 | `activerecord` | ActiveRecord (Ruby) |
 | `ent` | Ent (Go) |
 | `pgx` | pgx / PostgreSQL (Go) |
+| `sqlrewrite` | SQL rewrite service (Go) |
 | `elasticsearch-java` | Elasticsearch (Java) |
 | `jpa` | Jakarta Persistence / JPA Criteria (Java) |
 | `spring-data` | Spring Data JPA (Java) |

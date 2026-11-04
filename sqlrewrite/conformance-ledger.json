@@ -1,0 +1,152 @@
+{
+  "adapter": "sqlrewrite",
+  "lacks": {
+    "null-list": "The harness stores aNumberList as element rows in a child table, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+  },
+  "cases": {
+    "arithmetic/add/int-beside-double-field": {
+      "reason": "int() cannot be lowered to a SQL CAST, which reads a numeric prefix where CEL requires the whole string and rounds where CEL truncates, so the int + double sum over it (a CEL no-such-overload error) is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "reason": "Same int() refusal as arithmetic/add/int-beside-double-field, under negation.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/field-by-field": {
+      "reason": "A zero column denominator gives an infinity whose sign is the stored zero's sign, and SQL cannot read it: SQLite stores -0.0 as 0 and no dialect has a portable sign-bit function, so a comparison that sign decides is refused.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/int-truncates": {
+      "reason": "int() cannot be lowered to a SQL CAST, which on PostgreSQL and MySQL rounds to nearest where CEL truncates toward zero, so the int division over it is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates: a SQL CAST rounds where CEL truncates toward zero, so the int division over it is never reached.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates, under negation.",
+      "status": "unsupported"
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "reason": "The divisor resolves to a conditional IEEE value; division requires a plain SQL expression and cannot bind the symbolic branches.",
+      "status": "unsupported"
+    },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "reason": "The int() cast that gives % an integer operand has no SQL lowering: SQL CAST on PostgreSQL and MySQL rounds where CEL truncates toward zero.",
+      "status": "unsupported"
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "reason": "% over an attribute is a CEL no-overload error (every attribute number is a double and % is integer-only), which the PDP denies on every row; a SQL modulus would answer it, so the translator refuses instead.",
+      "status": "unsupported"
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "reason": "The int() cast that gives % an integer operand has no SQL lowering: SQL CAST on PostgreSQL and MySQL rounds where CEL truncates toward zero.",
+      "status": "unsupported"
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "reason": "The self-division's NaN arm must be added to a column, and SQL has no literal for NaN to carry through the arithmetic.",
+      "status": "unsupported"
+    },
+    "cast/double/malformed-string": {
+      "reason": "double() cannot be lowered to a SQL CAST, which on every ent dialect accepts spellings CEL rejects as malformed.",
+      "status": "unsupported"
+    },
+    "cast/double/negated-malformed-string": {
+      "reason": "Negated double() remains unsupported: SQL CAST accepts numeric prefixes where CEL requires the whole string and errors otherwise; negation must not turn those errors into matches.",
+      "status": "unsupported"
+    },
+    "cast/int/double-truncation-bounds": {
+      "reason": "int() cannot be lowered to a SQL CAST, which on PostgreSQL and MySQL rounds to nearest where CEL truncates toward zero and errors outside the int64 range.",
+      "status": "unsupported"
+    },
+    "cast/int/malformed-string": {
+      "reason": "int() cannot be lowered to a SQL CAST, which on every ent dialect reads what CEL rejects as malformed and rounds where CEL truncates.",
+      "status": "unsupported"
+    },
+    "cast/int/negated-malformed-string": {
+      "reason": "Negated int() remains unsupported: SQL CAST accepts numeric prefixes where CEL requires the whole string and errors otherwise; negation must not turn those errors into matches.",
+      "status": "unsupported"
+    },
+    "cast/int/negative-fraction": {
+      "reason": "int() cannot be lowered to a SQL CAST, which on PostgreSQL and MySQL rounds to nearest where CEL truncates toward zero.",
+      "status": "unsupported"
+    },
+    "cast/int/string-beyond-double-precision": {
+      "reason": "int() cannot be lowered to a SQL CAST, which on every ent dialect reads what CEL rejects as malformed and rounds where CEL truncates.",
+      "status": "unsupported"
+    },
+    "cast/string/from-int-beyond-double-precision": {
+      "reason": "int() cannot be lowered to a SQL CAST, which on every ent dialect reads what CEL rejects as malformed, so the string() over it is never reached.",
+      "status": "unsupported"
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "reason": "int() cannot be lowered to a SQL CAST, which on PostgreSQL and MySQL rounds to nearest where CEL truncates toward zero, so the string() over it is never reached.",
+      "status": "unsupported"
+    },
+    "cast/string/from-integral-ternary": {
+      "reason": "string() over a numeric constant is refused: the plan ships an int and a double constant as the same number, which CEL renders differently (\"1000000\" and \"1e+06\"), and a SQL CAST of the bound parameter spells neither reliably (SQLite says \"1000000.0\").",
+      "status": "unsupported"
+    },
+    "cast/string/from-negative-zero-double": {
+      "reason": "CEL spells -0.0 \"-0\" and 0.0 \"0\"; telling them apart needs the stored zero's sign, which SQLite discards on storage and no dialect exposes portably.",
+      "status": "unsupported"
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "reason": "string() over a ternary with a numeric constant branch is refused as in cast/string/from-integral-ternary, and its int() branch cannot be lowered to a SQL CAST either.",
+      "status": "unsupported"
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "reason": "Same int() refusal as cast/string/from-int-past-exponent-threshold, under negation.",
+      "status": "unsupported"
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "reason": "Same string() refusal of a numeric constant as cast/string/from-integral-ternary, under negation.",
+      "status": "unsupported"
+    },
+    "cast/timestamp/malformed-string": {
+      "reason": "timestamp() over a column requires that column to be mapped with a timestamp value type; a malformed string must stay a CEL error, which no dialect's cast reproduces.",
+      "status": "unsupported"
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "reason": "timestamp() cannot lower an arbitrary string column: malformed strings must remain CEL evaluation errors under negation; only a typed timestamp column or valid literal is supported.",
+      "status": "unsupported"
+    },
+    "collection/exists/map-keys": {
+      "reason": "A macro over a map-valued attribute ranges over its keys, and `parent` is a to-one relation: one joined row whose CEL keys are the columns that are not NULL. SQL has no form for that key set, so a macro over the hop is refused.",
+      "status": "unsupported"
+    },
+    "collection/exists/negated-map-keys": {
+      "reason": "Same refusal as collection/exists/map-keys, under negation.",
+      "status": "unsupported"
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "reason": "The two-variable exists() binds each element's list index, and a related table has no row order to read an index from, so every two-variable lambda is refused.",
+      "status": "unsupported"
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "reason": "The two-variable exists() over a map binds each key, and the map is no table: the mapper declares only obj.inner as a column, and SQL has no form for the set of a row's keys. Every two-variable lambda is refused.",
+      "status": "unsupported"
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "reason": "hierarchy() over a list of segments has no lowering: it compares segment by segment, and the translator lowers only a delimited string.",
+      "status": "unsupported"
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "reason": "Same refusal as hierarchy/overlaps/path-built-from-identifier: hierarchy() over a list() of segments has no lowering.",
+      "status": "unsupported"
+    },
+    "membership/in/map-attribute-keys": {
+      "reason": "The to-one parent is one joined row, not a value: `in` over a CEL map tests its keys, the row's present columns, and SQL has no form for the set of a row's present columns.",
+      "status": "unsupported"
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
+      "status": "unsupported"
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "reason": "Native timestamp storage discards the original RFC 3339 spelling, so instant equality cannot reproduce CEL string equality without timestamp() wrappers.",
+      "status": "unsupported"
+    }
+  }
+}

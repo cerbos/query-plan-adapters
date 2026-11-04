@@ -1,0 +1,15 @@
+server:
+  listenAddr: "127.0.0.1:13594"
+
+rewrite:
+  dialect: postgres
+  nullRepresentation: omitted
+  resources:
+    document:
+      table: document
+      attributes:
+        request.resource.attr.ownerId:
+          column: owner_id
+        request.resource.attr.public:
+          column: is_public
+          valueType: bool

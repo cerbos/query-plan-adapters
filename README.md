@@ -22,6 +22,7 @@ query, an Elasticsearch query, and so on) using a mapping you provide from Cerbo
 | SQLAlchemy | Python | `pip install cerbos-sqlalchemy` | [sqlalchemy](sqlalchemy/) |
 | Ent | Go | `go get github.com/cerbos/query-plan-adapters/ent` | [ent](ent/) |
 | pgx / PostgreSQL | Go | `go get github.com/cerbos/query-plan-adapters/pgx` | [pgx](pgx/) |
+| SQL rewrite service (PostgreSQL, MySQL, SQLite) | Go service: gRPC + HTTP | Not released yet | [sqlrewrite](sqlrewrite/) |
 | JPA (Hibernate, Quarkus, Jakarta EE, Micronaut) | Java | Build from source (not yet on Maven Central) | [jpa](jpa/) |
 | Spring Data JPA | Java | Build from source (not yet on Maven Central) | [spring-data](spring-data/) |
 | Elasticsearch | Java | Build from source (not yet on Maven Central) | [elasticsearch-java](elasticsearch-java/) |

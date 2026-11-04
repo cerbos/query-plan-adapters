@@ -15,6 +15,7 @@
 #   sqlalchemy          all                      (one pytest run covers every store)
 #   activerecord        sqlite postgres mysql    (ACTIVERECORD_VERSION / RUBY_VERSION pass through)
 #   ent, pgx            all                      (the Go harness starts its own containers)
+#   sqlrewrite          all                      (the Go harness starts its own containers)
 #   elasticsearch-java  elasticsearch elasticsearch-next
 #   jpa                 h2 postgres mysql mysql-server-prep   (ADAPTER_TEST_ORM passes through)
 #   spring-data         h2                       (ADAPTER_TEST_ORM passes through)
@@ -51,7 +52,7 @@ stores_for() {
     mongoose) echo "mongo mongo-next" ;;
     langchain-chromadb) echo "chroma" ;;
     convex) echo "convex" ;;
-    sqlalchemy | ent | pgx) echo "all" ;;
+    sqlalchemy | ent | pgx | sqlrewrite) echo "all" ;;
     activerecord) echo "sqlite postgres mysql" ;;
     elasticsearch-java) echo "elasticsearch elasticsearch-next" ;;
     jpa) echo "h2 postgres mysql mysql-server-prep" ;;
@@ -168,6 +169,7 @@ run_leg() { # <adapter> <store>
       ADAPTER_TEST_DB="${store}" ./scripts/test.sh spec/conformance_spec.rb ;;
 
     ent:all | pgx:all) go test -count=1 -run TestAdversarialConformance -timeout 30m ./... ;;
+    sqlrewrite:all) go test -tags tests -count=1 -run TestAdversarialConformance -timeout 30m ./pkg/rewrite/ ;;
 
     elasticsearch-java:elasticsearch)
       ELASTICSEARCH_IMAGE_FILE=ELASTICSEARCH_IMAGE gradle "${adapter}" test --tests '*ElasticsearchAdversarialConformanceTest*' ;;

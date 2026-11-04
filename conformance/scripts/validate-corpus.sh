@@ -8,7 +8,7 @@
 #      mapping only store capabilities some seed in seeds.json requires to a reason;
 #   2. the PDP pin: pdp-versions.json is well-formed, and every restatement of it agrees;
 #   3. service image pinning (repo:tag@sha256, one digest per tag);
-#   4. the ent and pgx vendored translator trees are byte-identical;
+#   4. the ent, pgx and sqlrewrite vendored translator trees are byte-identical;
 #   5. the dataset's to-one relation resolves;
 #   6. each adapter README's "Conformance contract" table matches its ledger on the current PDP.
 set -euo pipefail
@@ -120,7 +120,7 @@ while IFS=: read -r file _ match; do
 done < <(source_grep -rn 'ghcr\.io/cerbos/cerbos:' "${REPO_ROOT}")
 
 # The Go modules decode plans with cerbos/api/genpb, which must match the current PDP.
-for gomod in "${REPO_ROOT}"/ent/go.mod "${REPO_ROOT}"/pgx/go.mod; do
+for gomod in "${REPO_ROOT}"/ent/go.mod "${REPO_ROOT}"/pgx/go.mod "${REPO_ROOT}"/sqlrewrite/go.mod; do
   genpb="$(sed -n 's|.*github\.com/cerbos/cerbos/api/genpb v\([^[:space:]]*\).*|\1|p' "${gomod}")"
   [[ -z "${genpb}" || "${genpb}" == "${current_tag}" ]] \
     || fail "${gomod#"${REPO_ROOT}"/} pins cerbos/api/genpb v${genpb}, expected v${current_tag}"
@@ -161,15 +161,18 @@ done < <(sort -u "${TMP}/image-refs" | awk -F'\t' '
     else if (seen[$1] != $2) { print $1 ": " seen[$1] " (" where[$1] ") vs " $2 " (" $3 ")" } }')
 
 # ---- 4. The vendored Go translator. ----------------------------------------------------------
-# ent and pgx each vendor it so a consumer pulls in one module. The copies must stay identical,
-# or a fix can land in one alone (#319). Per-module code belongs in that module's render.go.
+# ent and pgx each vendor it so a consumer pulls in one module, and sqlrewrite holds a third copy
+# under pkg/rewrite. The copies must stay identical, or a fix can land in one alone (#319).
+# Per-module code belongs in that module's render.go.
 VENDORED="internal/queryplan"
-if [[ ! -d "${REPO_ROOT}/ent/${VENDORED}" || ! -d "${REPO_ROOT}/pgx/${VENDORED}" ]]; then
-  fail "ent/${VENDORED} or pgx/${VENDORED} is missing: the sync check would guard nothing"
-elif ! diff -ru --label "ent/${VENDORED}" --label "pgx/${VENDORED}" \
-  "${REPO_ROOT}/ent/${VENDORED}" "${REPO_ROOT}/pgx/${VENDORED}"; then
-  fail "the vendored translator trees have drifted: apply the change to both copies"
-fi
+for copy in "pgx/${VENDORED}" "sqlrewrite/pkg/rewrite/${VENDORED}"; do
+  if [[ ! -d "${REPO_ROOT}/ent/${VENDORED}" || ! -d "${REPO_ROOT}/${copy}" ]]; then
+    fail "ent/${VENDORED} or ${copy} is missing: the sync check would guard nothing"
+  elif ! diff -ru --label "ent/${VENDORED}" --label "${copy}" \
+    "${REPO_ROOT}/ent/${VENDORED}" "${REPO_ROOT}/${copy}"; then
+    fail "the vendored translator trees have drifted: apply the change to every copy"
+  fi
+done
 
 # ---- 5. The dataset's to-one relation. -------------------------------------------------------
 # A dangling parentSeedId reads as "no parent" on both sides, so it would pass for the wrong reason.

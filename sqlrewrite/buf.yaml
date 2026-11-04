@@ -1,0 +1,18 @@
+version: v2
+modules:
+  - path: protos
+    name: buf.build/cerbos/sqlrewrite-api
+deps:
+  - buf.build/bufbuild/protovalidate
+  - buf.build/cerbos/cerbos-api
+lint:
+  use:
+    - STANDARD
+  except:
+    - FIELD_NOT_REQUIRED
+    - PACKAGE_NO_IMPORT_CYCLE
+breaking:
+  use:
+    - WIRE_JSON
+  except:
+    - FIELD_SAME_DEFAULT

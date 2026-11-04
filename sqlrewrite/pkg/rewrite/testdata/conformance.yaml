@@ -1,0 +1,102 @@
+# The conformance corpus mapped onto the harness schema in conformance_test.go. It is the same
+# mapping ent's harness builds in Go, written the way a deployment configures the service.
+rewrite:
+  nullRepresentation: explicit
+  resources:
+    conformance:
+      table: adversarial_resource
+      attributes:
+        request.resource.id: {column: id}
+        request.resource.attr.aBool: {column: a_bool, valueType: bool, nullConvention: omitted}
+        request.resource.attr.aString: {column: a_string, valueType: string, nullConvention: omitted}
+        request.resource.attr.aNumber: {column: a_number, valueType: number, nullConvention: omitted}
+        request.resource.attr.aDouble: {column: a_double, valueType: number, nullConvention: omitted}
+        request.resource.attr.aOptionalString: {column: a_optional_string, valueType: string, nullConvention: omitted}
+        request.resource.attr.createdBy: {column: created_by}
+        request.resource.attr.owner: {column: a_optional_string, nullConvention: explicit}
+        request.resource.attr.coOwner: {column: scope, nullConvention: explicit}
+        request.resource.attr.scope: {column: scope, nullConvention: omitted}
+        request.resource.attr.createdAt: {column: created_at, valueType: timestamp, nullConvention: omitted}
+        request.resource.attr.updatedAt: {column: updated_at, valueType: timestamp, nullConvention: omitted}
+        request.resource.attr.obj.inner: {column: a_string, nullConvention: omitted}
+        request.resource.attr.tags:
+          relation:
+            table: adversarial_tag
+            sourceColumn: id
+            targetColumn: resource_id
+            position: position
+            field: {column: name, valueType: string}
+            fields:
+              id: {column: tag_id}
+              name: {column: name, valueType: string}
+        request.resource.attr.tagNames:
+          relation:
+            table: adversarial_tag
+            sourceColumn: id
+            targetColumn: resource_id
+            position: position
+            field: {column: name, valueType: string, nullConvention: explicit}
+            fields:
+              id: {column: tag_id}
+              name: {column: name, valueType: string}
+        request.resource.attr.categories:
+          relation:
+            table: adversarial_category
+            sourceColumn: id
+            targetColumn: resource_id
+            fields:
+              name: {column: name}
+              subCategories:
+                relation:
+                  table: adversarial_sub_category
+                  sourceColumn: id
+                  targetColumn: category_id
+                  field: {column: name}
+                  fields:
+                    name: {column: name}
+                    labels:
+                      relation: &labels
+                        table: adversarial_label
+                        sourceColumn: id
+                        targetColumn: sub_category_id
+                        field: {column: name}
+                        fields:
+                          name: {column: name}
+        request.resource.attr.aNumberList:
+          relation:
+            table: adversarial_number_elem
+            sourceColumn: id
+            targetColumn: resource_id
+            position: position
+            field: {column: value, valueType: number, nullConvention: explicit}
+        request.resource.attr.aBoolList:
+          relation:
+            table: adversarial_bool_elem
+            sourceColumn: id
+            targetColumn: resource_id
+            position: position
+            field: {column: value, valueType: bool, nullConvention: explicit}
+        request.resource.attr.mainCategory.subCategories:
+          relation: &mainSub
+            table: adversarial_sub_category
+            via:
+              - {table: adversarial_category, childColumn: category_id, joinColumn: id}
+            sourceColumn: id
+            targetColumn: resource_id
+            field: {column: name}
+            fields:
+              name: {column: name}
+              labels:
+                relation: *labels
+        request.resource.attr.mainCategory.subNames:
+          relation: *mainSub
+        request.resource.attr.parent:
+          scalarRelation: &parent {table: adversarial_parent, sourceColumn: id, targetColumn: resource_id}
+        request.resource.attr.parent.aBool: {scalarRelation: *parent, column: a_bool, valueType: bool, nullConvention: omitted}
+        request.resource.attr.parent.aString: {scalarRelation: *parent, column: a_string, nullConvention: omitted}
+        request.resource.attr.parent.aNumber: {scalarRelation: *parent, column: a_number, nullConvention: omitted}
+        request.resource.attr.parent.aOptionalString: {scalarRelation: *parent, column: a_optional_string, nullConvention: omitted}
+        request.resource.attr.parent.inner.aBool: {scalarRelation: &inner {table: adversarial_inner, via: [{table: adversarial_parent, childColumn: parent_id, joinColumn: id}], sourceColumn: id, targetColumn: resource_id}, column: a_bool, valueType: bool, nullConvention: omitted}
+        request.resource.attr.parent.inner.aString: {scalarRelation: *inner, column: a_string, nullConvention: omitted}
+        request.resource.attr.parent.inner.aNumber: {scalarRelation: *inner, column: a_number, nullConvention: omitted}
+        request.resource.attr.parent.inner.aOptionalString: {scalarRelation: *inner, column: a_optional_string, nullConvention: omitted}

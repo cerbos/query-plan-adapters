@@ -1,0 +1,66 @@
+// Copyright 2021-2026 Zenauth Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package cerbos.sqlrewrite.v1;
+
+import "buf/validate/validate.proto";
+import "cerbos/response/v1/response.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/cerbos/query-plan-adapters/sqlrewrite/generated/pb/cerbos/sqlrewrite/v1;sqlrewritev1";
+
+service SQLRewriteService {
+  rpc Rewrite(RewriteRequest) returns (RewriteResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message RewriteRequest {
+  string sql = 1 [(buf.validate.field).string.min_len = 1];
+  repeated google.protobuf.Value params = 2;
+  map<string, cerbos.response.v1.PlanResourcesResponse> plans = 3 [(buf.validate.field).map = {
+    min_pairs: 1
+    keys: {
+      string: {min_len: 1}
+    }
+    values: {required: true}
+  }];
+}
+
+enum PlanKind {
+  PLAN_KIND_UNSPECIFIED = 0;
+  PLAN_KIND_ALWAYS_ALLOWED = 1;
+  PLAN_KIND_ALWAYS_DENIED = 2;
+  PLAN_KIND_CONDITIONAL = 3;
+}
+
+message RewriteResponse {
+  message Applied {
+    string resource = 1;
+    string table = 2;
+    PlanKind kind = 3;
+    uint32 references = 4;
+  }
+
+  string sql = 1;
+  repeated google.protobuf.Value params = 2;
+  repeated Applied applied = 3;
+}
+
+message RewriteRefusal {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    CODE_UNSUPPORTED_PLAN = 1;
+    CODE_UNSUPPORTED_SQL = 2;
+    CODE_UNMAPPED_ATTRIBUTE = 3;
+    CODE_MISSING_PLAN = 4;
+    CODE_UNUSED_PLAN = 5;
+    CODE_AMBIGUOUS_REFERENCE = 6;
+    CODE_INVALID_REQUEST = 7;
+  }
+
+  Code code = 1;
+  string message = 2;
+}

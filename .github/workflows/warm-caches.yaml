@@ -65,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [ent, ent/example, pgx, pgx/example, conformance/generator]
+        module: [ent, ent/example, pgx, pgx/example, sqlrewrite, sqlrewrite/example, conformance/generator]
     runs-on: ubuntu-latest
     defaults:
       run:

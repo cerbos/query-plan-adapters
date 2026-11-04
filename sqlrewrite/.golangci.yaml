@@ -1,0 +1,146 @@
+---
+# ent's configuration, which mirrors github.com/cerbos/cerbos, plus the build tag the conformance
+# suites carry.
+version: "2"
+
+run:
+  build-tags:
+    - tests
+
+linters:
+  enable:
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - dupl
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - forcetypeassert
+    - gocritic
+    - godot
+    - goheader
+    - gomoddirectives
+    - gosec
+    - importas
+    - makezero
+    - misspell
+    - mnd
+    - nakedret
+    - nestif
+    - nilerr
+    - noctx
+    - nolintlint
+    - prealloc
+    - predeclared
+    - promlinter
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - tagliatelle
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - usetesting
+    - wastedassign
+    - whitespace
+
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+
+    goheader:
+      values:
+        const:
+          COMPANY: Zenauth Ltd.
+      template: |-
+        Copyright 2021-{{ YEAR }} {{ COMPANY }}
+        SPDX-License-Identifier: Apache-2.0
+
+    gosec:
+      excludes:
+        - G115 # integer overflow conversion
+
+    govet:
+      disable:
+        - shadow
+      enable-all: true
+
+    nolintlint:
+      allow-unused: true # false would be preferable, but it's flaky (https://github.com/golangci/golangci-lint/issues/3228)
+      require-specific: true
+
+    revive:
+      rules:
+        - name: var-naming
+          arguments:
+            - []
+            - []
+            - - skipPackageNameChecks: true
+
+    tagliatelle:
+      case:
+        rules:
+          bson: goCamel
+          json: goCamel
+          xml: goCamel
+          yaml: goCamel
+
+  exclusions:
+    generated: lax
+    paths:
+      - generated/
+
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+
+    rules:
+      - linters:
+          - dupl
+          - forcetypeassert
+          - goconst
+          - govet
+          - mnd
+        path: _test\.go
+
+      # example/ is a nested module and is linted with this same configuration, so that the example
+      # a consumer reads holds to the standard the adapter does. Its go.mod replaces the adapter with
+      # the directory above it, which is how a Go example resolves the change under review: there is
+      # no packaging step to install instead
+      # (../docs/adr/0002-examples-install-the-packed-artifact.md).
+      #
+      # Scoped to that one file rather than turned off with `replace-local: true`, so a local
+      # replacement in the ADAPTER's go.mod — which would reach every consumer — is still reported.
+      - linters:
+          - gomoddirectives
+        path: ^example/go\.mod$
+
+issues:
+  max-same-issues: 30
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/cerbos/query-plan-adapters)
+        - blank
+        - dot
+      custom-order: true
+
+    gofumpt:
+      extra-rules: true
+
+  exclusions:
+    generated: lax

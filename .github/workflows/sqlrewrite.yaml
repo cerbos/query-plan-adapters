@@ -1,0 +1,98 @@
+name: SQL Rewrite Test
+
+on:
+  pull_request:
+    paths:
+      - "sqlrewrite/**"
+      - "conformance/**"
+      - "demo/**"
+      - ".github/workflows/sqlrewrite.yaml"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
+  push:
+    tags:
+      - sqlrewrite/v*
+
+concurrency:
+  group: sqlrewrite-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: sqlrewrite
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      # cache-dependency-path: setup-go resolves the default against the repository root, where no
+      # go.sum lives (see ent.yaml).
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sqlrewrite/go.mod
+          cache-dependency-path: sqlrewrite/go.sum
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          working-directory: sqlrewrite
+          args: --config=.golangci.yaml
+
+      - name: Check formatting
+        run: |
+          golangci-lint fmt --config=.golangci.yaml ./...
+          git diff --exit-code
+
+      - name: Build (CGO_ENABLED=0)
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./...
+
+      # Replays both pinned PDPs' goldens through the rewriter against in-memory SQLite and
+      # PostgreSQL and MySQL testcontainers, then runs the SQL-shape suite on the same stores.
+      # -count=1: GOCACHE holds the test result cache, and ../conformance is outside this module.
+      - name: Conformance and SQL-shape suites
+        run: go test -tags tests -count=1 -timeout 30m ./...
+
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sqlrewrite/example/go.mod
+          cache-dependency-path: |
+            sqlrewrite/go.sum
+            sqlrewrite/example/go.sum
+
+      - name: Lint the example
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          working-directory: sqlrewrite/example
+          args: --config=../.golangci.yaml
+
+      - name: Check the example's formatting
+        working-directory: sqlrewrite/example
+        run: |
+          golangci-lint fmt --config=../.golangci.yaml ./...
+          git diff --exit-code
+
+      # The PDP is the pinned container from demo/docker-compose.yml; run.sh starts PostgreSQL and
+      # the service built from cmd/sqlrewrite.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh sqlrewrite
