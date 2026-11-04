@@ -269,8 +269,9 @@ The type is `dict[str, Callable[[GenericColumn, Any], GenericExpression]]`, wher
 - Without `operator_override_fns`, every `attr_map` entry is validated. With an explicit mapping
   (even `{}` or only `None` entries), only attributes reached outside active overrides are
   validated; an override owns the operands it translates.
-- `matches()` fails closed by default, because SQL regex engines don't guarantee CEL/RE2 semantics.
-  Override it only if your database's engine is equivalent.
+- `matches()` never reaches the store's regex engine (none is RE2): the pattern is lowered to
+  exact string predicates, or refused (["Regular expressions"](#regular-expressions)). Override it
+  only if your database's engine is equivalent.
 - An override's intermediate value reaching a default handler raises.
 
 For a collection reached through a to-one parent, wrap the override's result with
@@ -291,7 +292,10 @@ The planner unrolls this into an `or`/`and` chain at 10 elements or fewer, and s
 above that (cerbos/cerbos#2570, cerbos/cerbos#2817). The adapter applies the same fold with no cap,
 so the SQL is equivalent either side of the threshold. A bare `t` becomes the element, `t.name`
 drills into it, and each body goes through the normal pipeline (overrides and NULL handling apply).
-An empty list: `exists` matches nothing, `all` matches everything.
+An empty list: `exists` matches nothing, `all` matches everything. `exists_one` counts the bodies
+that hold, `size(list.filter(t, ...))` counts them as a number, and `x in list.map(t, ...)` is an
+`==` against each mapped body; CEL raises if any body raises, so each of these is UNKNOWN where
+any body is. `except` over a literal list is still refused.
 
 A list the plan builds from attributes (`[R.attr.a, R.attr.b].exists(s, s == "x")`) folds the same
 way, with each element substituted into the body. Building the list evaluates every element, so an
@@ -304,6 +308,26 @@ is `x in A || x in B`.
 doesn't carry, a map or list element, and a two-variable comprehension (`exists(i, v, ...)`), whose
 index or map key has no SQL lowering. Macros over a column or relation (`R.attr.tags.exists(...)`)
 need an `operator_override_fns` entry.
+
+
+### Regular expressions
+
+CEL's `matches()` is RE2, and no store's regex dialect is: MySQL's ICU engine lets `$` match before a
+trailing newline, PostgreSQL's differs in classes and flags, and SQLite has none. So the pattern is
+never handed to the store. The adapter parses it and lowers it only when what it matches can be said
+with exact string predicates:
+
+- a finite set of literals, under anchors or not: `^(ab|b)$` is `IN ('ab', 'b')`, `^h` and `\d` are
+  `startsWith`/`contains` over each literal, `(?i)` folds ASCII case (and `k`/`s` to KELVIN SIGN and
+  LONG S, as RE2 does);
+- every character drawn from a set of at most 64, with a minimum count: `^[ab]+$`, `^\s*$`,
+  `^[[:alpha:]]+$`;
+- a prefix and a suffix around one run of non-newline characters: `^a.*b$`, `^.{8,}$`.
+
+A pattern RE2 rejects (a backreference, a lookahead, `a**`, a count above 1000) is an evaluation
+error in CEL, so it is UNKNOWN for every row and denies under both polarities. Anything else (a
+negated class, an anchor inside the pattern, a repetition over an unbounded group) raises
+`UnsupportedPlanError`. A missing receiver, or one that is not a string, is UNKNOWN.
 
 ### Transports
 
@@ -423,7 +447,10 @@ the planner leaves it unevaluated, and the plan carries no instant to measure fr
 | `in` over a list built from attributes, a ternary of lists, or a concatenation `A + B` | translated per element, branch or operand | — |
 | `exists`, `all`, `exists_one`, `filter`, `map`, `in`, `hasIntersection`, `size()` over a related table | — | overrides; `require_hops` for a chain through a to-one parent |
 | `index` over any other storage | refused | an `index` override |
-| `matches()` | refused | an override, only if your engine matches RE2 |
+| `exists_one` over a literal list, `size(filter(...))` and `in` over `map(...)` of one | folded, UNKNOWN where any body raises | — |
+| `matches()` whose pattern is a finite set of literals under anchors, every character from a set, or a prefix and suffix around `.*` | translated as exact string predicates | — |
+| `matches()` with any other pattern | refused | an override, only if your engine matches RE2 |
+| `==`, `!=` between a string, number or boolean column and a list or map literal | false (true for `!=`) where the column is present | — |
 | Timestamps, hierarchies | translated | — |
 
 Numeric `size()` and string operations keep CEL's type errors rather than allowing SQL coercion.
@@ -445,10 +472,10 @@ recorded in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 73 / 102 |
-| adversarial | 279 / 375 |
+| extended | 84 / 102 |
+| adversarial | 302 / 375 |
 
-Every case that does not pass is either refused with `UnsupportedPlanError` (107 cases) or is
+Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
 harness does not compare. Under 0.57.0 those are three extended cases and four adversarial cases:
 `arithmetic/add/int-literal-plus-constant` and

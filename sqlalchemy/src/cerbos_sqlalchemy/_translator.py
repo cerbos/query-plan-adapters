@@ -9,7 +9,18 @@ This module routes operands to operators. Operator semantics live in ``_operator
 from collections.abc import Callable
 from typing import Any, NoReturn
 
-from sqlalchemy import DateTime, and_, case, false, not_, or_, true
+from sqlalchemy import (
+    DateTime,
+    Integer,
+    and_,
+    case,
+    false,
+    literal,
+    not_,
+    null,
+    or_,
+    true,
+)
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.expression import ColumnElement
 
@@ -159,6 +170,9 @@ class Translator:
             return operand.value
         if isinstance(operand, Variable):
             return self._resolve_variable(operand.name)
+        entries = self._struct_literal(operand)
+        if entries is not None:
+            return entries
         return self.value(operand)
 
     # -- collection macros over a literal list ---------------------------------------------
@@ -174,7 +188,7 @@ class Translator:
         if operator not in FOLDABLE_COLLECTION_OPERATORS:
             raise UnsupportedPlanError(
                 f"{operator} over a literal collection value is not supported. "
-                "Only exists() and all() can be folded into a flat filter."
+                "Only exists(), all() and exists_one() can be folded into a flat filter."
             )
         if not isinstance(elements, list):
             raise UnsupportedPlanError(
@@ -199,10 +213,7 @@ class Translator:
             self.predicate(substitute_lambda_variable(body, variable.name, element))
             for element in elements
         ]
-        if not predicates:
-            # Over an empty list, exists() is false and all() is true.
-            return false() if operator == "exists" else true()
-        return or_(*predicates) if operator == "exists" else and_(*predicates)
+        return _combine_macro(operator, predicates)
 
     def _try_fold_value_list_macro(
         self, operator: str, operands: tuple[Operand, ...]
@@ -229,8 +240,8 @@ class Translator:
         """
         if operator not in FOLDABLE_COLLECTION_OPERATORS:
             raise UnsupportedPlanError(
-                f"{operator} over a constructed list is not supported. Only exists() "
-                "and all() can be folded into a flat filter."
+                f"{operator} over a constructed list is not supported. Only exists(), "
+                "all() and exists_one() can be folded into a flat filter."
             )
         if (
             not isinstance(lambda_operand, Expr)
@@ -250,10 +261,7 @@ class Translator:
             )
             for element in elements
         ]
-        if not predicates:
-            folded: Any = false() if operator == "exists" else true()
-        else:
-            folded = or_(*predicates) if operator == "exists" else and_(*predicates)
+        folded = _combine_macro(operator, predicates)
         return case((and_(*guards), folded)) if guards else folded
 
     def _element_guards(self, elements: tuple[Operand, ...]) -> list[Any]:
@@ -341,6 +349,10 @@ class Translator:
                     ),
                 )
             )
+        if haystack.operator == "map":
+            mapped = self._mapped_literal_list(haystack)
+            if mapped is not None:
+                return self._structural_membership((needle, mapped))
         if haystack.operator == "add" and len(haystack.operands) == 2:
             for part in haystack.operands:
                 if isinstance(part, Value) and not isinstance(part.value, list):
@@ -356,6 +368,73 @@ class Translator:
             )
             return case((and_(*guards), membership)) if guards else membership
         return None
+
+    def _literal_list_lambda(
+        self, expression: Expr
+    ) -> tuple[list[Any], Operand, str] | None:
+        """``(elements, body, variable)`` of a macro over a literal list, else None."""
+        if len(expression.operands) != 2:
+            return None
+        collection, lambda_operand = expression.operands
+        if not isinstance(collection, Value) or not isinstance(collection.value, list):
+            return None
+        if (
+            not isinstance(lambda_operand, Expr)
+            or lambda_operand.operator != "lambda"
+            or len(lambda_operand.operands) != 2
+            or not isinstance(lambda_operand.operands[1], Variable)
+            or not lambda_operand.operands[1].name
+        ):
+            raise UnsupportedPlanError(
+                f"Second operand of {expression.operator} must be a single-variable "
+                "lambda"
+            )
+        body, variable = lambda_operand.operands
+        return collection.value, body, variable.name
+
+    def _mapped_literal_list(self, expression: Expr) -> Expr | None:
+        """``map()`` over a literal list as the list its bodies build, else None.
+
+        Both evaluate every body first, so one that raises makes the whole list raise.
+        """
+        parts = self._literal_list_lambda(expression)
+        if parts is None:
+            return None
+        elements, body, variable = parts
+        return Expr(
+            "list",
+            tuple(
+                substitute_lambda_variable(body, variable, element)
+                for element in elements
+            ),
+        )
+
+    def _filtered_count(self, expression: Expr) -> Any:
+        """``size(filter(literal list, body))``, else None.
+
+        ``filter()`` evaluates the body over every element, so a body that raises
+        raises the whole count: the count is UNKNOWN where any body is.
+        """
+        parts = self._literal_list_lambda(expression)
+        if parts is None:
+            return None
+        elements, body, variable = parts
+        predicates = [
+            _as_sql_boolean(
+                self.predicate(substitute_lambda_variable(body, variable, element))
+            )
+            for element in elements
+        ]
+        count = sum(
+            (case((predicate, 1), else_=0) for predicate in predicates),
+            literal(0, Integer),
+        )
+        if not predicates:
+            return count
+        return case(
+            (or_(*(predicate.is_(None) for predicate in predicates)), null()),
+            else_=count,
+        )
 
     # -- a map literal read at an attribute key --------------------------------------------
 
@@ -652,6 +731,16 @@ class Translator:
                 "exists()/all() or the right operand of in: SQL has no list value"
             )
 
+        if (
+            operator == "size"
+            and len(operands) == 1
+            and isinstance(operands[0], Expr)
+            and operands[0].operator == "filter"
+        ):
+            count = self._filtered_count(operands[0])
+            if count is not None:
+                return count
+
         if operator == "hierarchy":
             target = self._resolve(operands[0])
             delimiter = self._resolve(operands[1]) if len(operands) == 2 else None
@@ -850,6 +939,41 @@ class Translator:
     def _column_first(self, operator: str, variable: Variable, value: Value) -> Any:
         column = self._resolve_variable(variable.name)
         return self._leaf_comparison(operator, column, variable, value)
+
+
+def _as_sql_boolean(predicate: Any) -> Any:
+    """A folded Python bool as SQL, so it can be tested for NULL and counted."""
+    if isinstance(predicate, bool):
+        return true() if predicate else false()
+    return predicate
+
+
+def _combine_macro(operator: str, predicates: list[Any]) -> Any:
+    """Fold the per-element bodies of ``exists``, ``all`` or ``exists_one``.
+
+    ``exists`` and ``all`` are OR and AND, which absorb an erroring body beside a
+    deciding one as CEL does. ``exists_one`` counts the bodies that hold, and CEL
+    raises if any body raises, so the count is UNKNOWN where any body is.
+    """
+    if operator == "exists":
+        return or_(*predicates) if predicates else false()
+    if operator == "all":
+        return and_(*predicates) if predicates else true()
+    if operator != "exists_one":
+        raise UnsupportedPlanError(
+            f"{operator} over a literal collection is not supported. Only exists(), "
+            "all() and exists_one() can be folded into a flat filter."
+        )
+    if not predicates:
+        return false()
+    booleans = [_as_sql_boolean(predicate) for predicate in predicates]
+    count = sum(
+        (case((predicate, 1), else_=0) for predicate in booleans), literal(0, Integer)
+    )
+    return case(
+        (or_(*(predicate.is_(None) for predicate in booleans)), null()),
+        else_=count == 1,
+    )
 
 
 def _all_leaves(operands: tuple[Operand, ...]) -> bool:

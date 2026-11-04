@@ -1107,7 +1107,7 @@ class TestKnownValueCollections:
             )
         assert 'Cannot resolve "t.missing"' in exc_info.value.args[0]
 
-    @pytest.mark.parametrize("operator", ["exists_one", "filter", "map"])
+    @pytest.mark.parametrize("operator", ["filter", "map"])
     def test_unfoldable_macros_over_value_lists_fail_closed(
         self, resource_table, operator
     ):
