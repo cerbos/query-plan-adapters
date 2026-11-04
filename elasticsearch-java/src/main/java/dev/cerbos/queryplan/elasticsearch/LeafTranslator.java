@@ -429,12 +429,12 @@ final class LeafTranslator {
     }
 
     private static String floorToMillis(Instant instant) {
-        return DateTimeFormatter.ISO_INSTANT.format(instant.truncatedTo(ChronoUnit.MILLIS));
+        return PlanValues.millisecondInstant(instant.truncatedTo(ChronoUnit.MILLIS));
     }
 
     private static String ceilToMillis(Instant instant) {
         Instant floor = instant.truncatedTo(ChronoUnit.MILLIS);
-        return DateTimeFormatter.ISO_INSTANT.format(floor.equals(instant) ? floor : floor.plusMillis(1));
+        return PlanValues.millisecondInstant(floor.equals(instant) ? floor : floor.plusMillis(1));
     }
 
     /** Whether the field map names a sub-field of {@code field}, so it is an object in the index. */
@@ -650,7 +650,7 @@ final class LeafTranslator {
                 }
                 ResolvedOperand resolved = resolveLeafOperand(expression.getOperands(0));
                 if (resolved instanceof ResolvedOperand.Literal literal) {
-                    PlanValues.validateTimestampLiteral(literal.value());
+                    yield new ResolvedOperand.Literal(PlanValues.canonicalTimestampLiteral(literal.value()));
                 }
                 yield resolved;
             }

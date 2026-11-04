@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/less-or-equal/sub-second-past-literal",
+  "intent": "timestamp(createdAt) <= a whole-second literal that a5 passes by 123456 microseconds (2020-03-15T10:30:00.123456Z).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2020-03-15T10:30:00Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/less-or-equal/sub-second-past-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdAt) <= timestamp(\"2020-03-15T10:30:00Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a1 sits on the literal and is allowed; a5 is later and denied. A column that drops the fraction (MySQL DATETIME without fsp 6) stores a5 on the literal, and an Elasticsearch upper bound that omits the fraction reads it as …00.999; both over-grant a5."
+}
