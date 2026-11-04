@@ -168,6 +168,25 @@ A plan variable the mapping does not name, or names the wrong way round for its 
 `relation` compared as a scalar, a `field` walked by a macro), throws `UnmappedAttributeException`
 rather than guessing a column.
 
+### Map-valued attributes
+
+An attribute that is a map in the policy (`R.attr.parent`, a to-one relation or an embedded
+object) is mapped per field: `request.resource.attr.parent.aBool` to `"parent.aBool"`, and so on.
+The operators CEL applies to the map as a whole then read that mapping:
+
+- Its **key set** is the mapped field names, so send `check()` exactly those keys, each absent
+  when its own mapping says so (`OMITTED`). `"k" in R.attr.parent` is whether the caller sent
+  `k`; `R.attr.parent.exists(k, body)` / `.all(k, body)` fold the body over each mapped key as a
+  string constant, and the two-variable form binds the key's own attribute to the value variable,
+  so `R.attr.obj.exists(k, v, k == "inner" && v.startsWith("x"))` reads `obj.inner`. A key the
+  mapping does not name throws `UnmappedAttributeException`, and a key mapped as a `relation`
+  refuses the macro, since its rows cannot say whether the caller sent the key.
+- It is **present** (`has(R.attr.parent)`) exactly when the to-one hop its fields are read
+  through is present; a map whose fields sit on the row itself (`R.attr.obj` above) is present on
+  every row. Fields read through different associations have no one hop and are refused.
+- A missing map is a CEL error under every one of these, so the row is UNKNOWN under both
+  polarities, as a missing to-one hop is elsewhere.
+
 ### Declaring the translation: `Options`
 
 Every setting lives in one immutable record, `JpaQueryPlanAdapter.Options`. `toFilter(plan,
@@ -369,6 +388,8 @@ ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.ut
 | `R.attr.x in a + b`, each part a literal list or a direct relation | `R.attr.x in a OR R.attr.x in b`; neither part can error, so the disjunction errors only where the needle does |
 | `R.attr.x in [R.attr.a, "c"]`, `[R.attr.a, R.attr.b].exists(s, ...)` / `.all(s, ...)` | Each element folded into an `OR` (`AND` for `all`) of per-element predicates, under a guard that is UNKNOWN when any computed element errors: CEL builds the list first, so one erroring element denies even where another decides the result |
 | `rel.exists(i, v, body)` / `rel.all(i, v, body)` over a relation with `withPositionField` | The one-variable macro over `v`, with `i` read from the position field |
+| `has(R.attr.m)`, `"k" in R.attr.m`, `R.attr.m.exists(k, body)` / `.all(k, body)` and their two-variable forms over a map-valued attribute mapped per field | The map's hop `IS NOT NULL`; the key's own presence test; the body folded over each mapped key as a string constant (`OR` for `exists`, `AND` for `all`), each term guarded by the key's presence, with the value variable renamed to the key's attribute. UNKNOWN when the map is missing (see [Map-valued attributes](#map-valued-attributes)) |
+| A list where CEL needs a boolean: `filter(...)`, `map(...)`, `except(...)` or `intersect(...)` as the condition or a conjunct | UNKNOWN: a list has no boolean overload, so CEL errors on every row and the PDP denies it |
 | `rel.isSubset([...])` | `rel.all(e, e in [...])` |
 | `intersect(a, b) == []` / `!= []` | `!hasIntersection(a, b)` / `hasIntersection(a, b)` |
 | `{"k": v, ...}[R.attr.x] == c` / `!=` | `R.attr.x IN (keys whose value equals c)` when `R.attr.x` is one of the map's keys, UNKNOWN otherwise, as CEL errors on a missing key |
@@ -403,14 +424,13 @@ ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.ut
 | `string(R.attr.x) == "text"` / `!=` | By column type: a `String` column is compared as it stands; a `Boolean` column is `col = true`, `col = false`, or no row for any other constant; a `Double`/`Integer`/`Long` column is compared with the one double CEL renders as `text` (Go's shortest `%g`: `"-0.6"`, `"1e+06"`), or no row when none does. NULL excluded under both polarities |
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants. With an empty delimiter (one segment per character) between a column and a constant: `IN` over character prefixes, `''` included, and `LIKE 'ab_%'` for strict descendants |
 | A scalar against a list or map literal (`R.attr.s == {"a": 1}`, `R.attr.s in [["x"]]`) | Decided: CEL equality across types is false, so `==` matches no row and `!=` every present one; the planner's `list(...)` / `struct(...)` literal expressions are folded to constants first |
-| `R.attr.s.matches("re")` (and `== true` / `== false`) | Where the pattern's language is exact in `LIKE`: each top-level alternative a finite set of strings (literals, escapes, classes, `\d \w \s`, POSIX classes, groups, `|`, bounded repetition, a leading `(?i)` over ASCII) anchored or not, as `=` / `IN` / `LIKE 's%'` / `'%s'` / `'%s%'`; `^...$` with `.*` / `.+` between finite parts, as `LIKE` plus `NOT LIKE '%\n%'` (RE2's `.` excludes a newline); `^[set]*$` / `^[set]+$` as `REPLACE` of every member leaving `''`. A pattern RE2 rejects (lookaround, backreference) is UNKNOWN, as CEL errors. A registered `matches` override takes precedence |
+| `R.attr.s.matches("re")` (and `== true` / `== false`) | Where the pattern's language is exact in `LIKE`: each top-level alternative a finite set of strings (literals, escapes, classes, `\d \w \s`, POSIX classes, groups, `|`, bounded repetition, a leading `(?i)` over ASCII) anchored or not, as `=` / `IN` / `LIKE 's%'` / `'%s'` / `'%s%'`, an unbounded repetition at an unanchored end cut to its minimum (`x*a+b` searches for `ab`); `^...$` with `.*` / `.+` between finite parts, as `LIKE` plus `NOT LIKE '%\n%'` (RE2's `.` excludes a newline); `^[set]*$` / `^[set]+$` as `REPLACE` of every member leaving `''`. A pattern RE2 rejects (lookaround, backreference) is UNKNOWN, as CEL errors. A registered `matches` override takes precedence |
 | Bare boolean variable | `cb.equal(path, true)` |
 
 ## Not yet supported
 
 These throw `UnsupportedPlanShapeException` naming the operator — except the ambiguous-column
-timestamp row, which is `UnmappedAttributeException` because a different mapping fixes it, and the
-map-valued attribute row, which names an attribute no mapping can declare.
+timestamp row, which is `UnmappedAttributeException` because a different mapping fixes it.
 **Overridable: no** means the refusal happens while resolving an operand, before any override is
 consulted.
 
@@ -419,16 +439,16 @@ consulted.
 | `mod` other than over `int()` of an `Integer` column | `int(R.attr.aDouble) % 2 == 0` | no | CEL `%` is int-only and attribute numbers are doubles, so a bare `R.attr.x % 2` denies every row, and `int()` over a double truncates where SQL `CAST` rounds |
 | Regex match `LIKE` cannot spell exactly | `R.attr.aString.matches("^[^x]+")`, `matches("a.b")` | yes (`matches`) | No portable RE2 predicate; override per dialect (`regexp_like`, `~`, `REGEXP`) if its regex means the same as RE2 for your patterns |
 | Ordering a string against a literal holding a character at or above U+D800 | `R.attr.s < "h\u00e9llo\uFFFD"` | yes | CEL orders strings by code point; H2 compares UTF-16 code units, which put a surrogate pair before U+E000–U+FFFF |
-| A macro over a map-valued attribute (a to-one relation or embedded object as a whole) | `R.attr.parent.exists(k, k == "inner")` | no | CEL ranges over the map's keys, and a JPA row has no key set; the whole object is not a mappable attribute, so this is `UnmappedAttributeException` |
+| `exists_one` over a map-valued attribute, or a macro over one with a key mapped as a `relation` | `R.attr.parent.exists_one(k, k == "inner")` | no | Only `exists` and `all` fold over the mapped keys ([Map-valued attributes](#map-valued-attributes)); a relation's rows cannot say whether the caller sent the key |
 | List indexing without a declared order | `R.attr.tags[0] == "x"` | no | JPA collections are unordered; declare `withPositionField(...)` on the relation |
 | Type casts (`double()`, `timestamp()` over a string, `int()` other than over a `Double`/`Integer`/`String` column compared with a number, `string()` other than `==`/`!=` a string constant over a string, boolean or numeric column) | `int(R.attr.aString) > 0` | no | No portable `CAST` in Criteria; `string(x) == "0"`, `"-0"`, `"NaN"` and `"±Inf"` are refused too, since SQL cannot tell the value CEL renders that way from its neighbours |
 | `eq(map(...), [...])` | `R.attr.tags.map(t, t.id) == ["a", "b"]` | no | Use `hasIntersection(map(...), [...])` |
 | Timestamp on an ambiguous column type | `timestamp(R.attr.createdAt) < now() - duration("24h")`, `createdAt` a `LocalDateTime`/`Date`/`String` | yes (the comparison operator) | These types don't pin an absolute instant; the override receives the parsed `Instant` |
 | Other timestamp shapes | `timestamp(R.attr.a) < timestamp(R.attr.b)`, `timestamp()` in other arithmetic | no | Only `timestamp(field)`, shifted by a constant duration or under `timeSince()`, vs a constant is translated |
 | `size(intersect(...))` | `size(intersect(R.attr.tags, ["a", "b"])) == 1` | no | Cerbos's `intersect()` keeps duplicates from whichever list is shorter, so its size depends on the two lengths row by row; compare it with `[]` instead |
-| Two-variable macros other than `exists`/`all` over a relation with `withPositionField` | `R.attr.obj.exists(k, v, ...)` | no | The index needs a declared position; over a map the first variable is a key, and a JPA row has no key set (`UnmappedAttributeException` when the map is not a mapped attribute) |
+| Two-variable macros other than `exists`/`all`, or over a relation without `withPositionField` | `R.attr.tags.exists_one(i, t, ...)` | no | The index needs a declared position; over a map-valued attribute the first variable is a key, which folds over the mapped keys |
 | `eq`/`ne` between a relation without a declared position field and a list constant of two or more elements | `R.attr.tags == ["a", "b"]` | no | CEL list equality is ordered and a JPA collection has none; declare `withPositionField(...)`, or use `in`/`hasIntersection` |
-| `except` in boolean position, compared with a list of two or more elements, or removing a computed list of two or more | `R.attr.tags.except(["a"]) == ["b", "c"]` | no | A list difference in SQL has no order to compare; `size(...)` of one and equality with at most one element translate |
+| `except` compared with a list of two or more elements, or removing a computed list of two or more | `R.attr.tags.except(["a"]) == ["b", "c"]` | no | A list difference in SQL has no order to compare; `size(...)` of one and equality with at most one element translate, and one in boolean position is UNKNOWN as CEL errors |
 
 ## Conformance contract
 
@@ -442,8 +462,8 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 97 / 102 |
-| adversarial | 330 / 375 |
+| extended | 98 / 102 |
+| adversarial | 340 / 375 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 39 are `unsupported`, where the adapter
@@ -699,6 +719,11 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- New translations, where these used to throw: `has()`, `in` and `exists`/`all` (one- and
+  two-variable) over a map-valued attribute mapped per field
+  ([Map-valued attributes](#map-valued-attributes)); a `filter()`, `map()`, `except()` or
+  `intersect()` where CEL needs a boolean, now UNKNOWN as the missing overload makes it; and a
+  `matches()` pattern whose unbounded repetition sits at an unanchored end (`x*a+b`).
 - **New adapter.** The translator moved here from `spring-data`, which now wraps it
   ([ADR 0013](../docs/adr/0013-spring-data-wraps-the-jpa-core.md)). Its types moved from
   `dev.cerbos.queryplan.springdata` to `dev.cerbos.queryplan.jpa`, `Options` from
