@@ -39,7 +39,7 @@ import {
   resolveField,
 } from "./operands";
 import type { ComparisonOperator } from "./operands";
-import { matchesSafeRegexPattern, parseSafeRegexPattern } from "./regex";
+import { InvalidRegexError, compileRe2 } from "./regex";
 
 /**
  * The adapter's own CEL evaluator: the post-filter that answers, one document at a time, every
@@ -652,18 +652,19 @@ const validateDivision = ({ operands }: PlanExpression): void => {
   }
 };
 
+// A pattern RE2 rejects passes: CEL raises on every row, which the evaluator reproduces. A pattern
+// the matcher has no tables for is refused here, by `compileRe2`, before a filter exists.
 const validatePattern = ({ operands }: PlanExpression): void => {
   const pattern = operands[1];
-  if (
-    !pattern ||
-    !isValue(pattern) ||
-    typeof pattern.value !== "string" ||
-    !parseSafeRegexPattern(pattern.value)
-  ) {
+  if (!pattern || !isValue(pattern) || typeof pattern.value !== "string") {
     throw new UnsupportedQueryPlanError(
-      "matches requires a constant RE2-compatible pattern in the supported " +
-        "literal, anchor, and trailing .* subset",
+      "matches requires a constant string pattern: the post-filter compiles it at translation",
     );
+  }
+  try {
+    compileRe2(pattern.value);
+  } catch (error) {
+    if (!(error instanceof InvalidRegexError)) throw error;
   }
 };
 
@@ -770,10 +771,12 @@ const OPERATORS: Record<string, Operator> = {
       if (typeof receiver !== "string" || typeof pattern !== "string") {
         return EVALUATION_ERROR;
       }
-      const safePattern = parseSafeRegexPattern(pattern);
-      return safePattern
-        ? matchesSafeRegexPattern(receiver, safePattern)
-        : EVALUATION_ERROR;
+      try {
+        return compileRe2(pattern).test(receiver);
+      } catch (error) {
+        if (error instanceof InvalidRegexError) return EVALUATION_ERROR;
+        throw error;
+      }
     },
     validate: validatePattern,
   },
