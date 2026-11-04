@@ -49,6 +49,7 @@ from sqlalchemy import (
     select,
     true,
 )
+from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import declarative_base
 
@@ -345,6 +346,8 @@ _COLLECTION_JSON = JSON(none_as_null=True).with_variant(
 _COLLECTION_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(String), "postgresql")
 _NUMBER_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Integer), "postgresql")
 _BOOL_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Boolean), "postgresql")
+# MySQL's DATETIME defaults to whole seconds, which would store a5 on the literal it passes.
+_TIMESTAMP = DateTime(timezone=True).with_variant(MYSQL_DATETIME(fsp=6), "mysql")
 
 
 class AdvResource(AdvBase):
@@ -359,8 +362,8 @@ class AdvResource(AdvBase):
     a_optional_string = Column(_STRING, nullable=True)
     created_by = Column(_STRING, nullable=False)
     scope = Column(_STRING, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=True)
-    updated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(_TIMESTAMP, nullable=True)
+    updated_at = Column(_TIMESTAMP, nullable=True)
     tags_json = Column(_COLLECTION_JSON, nullable=True)
     tag_names_json = Column(_COLLECTION_JSON, nullable=True)
     main_sub_categories_json = Column(_COLLECTION_JSON, nullable=True)
