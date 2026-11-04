@@ -164,13 +164,12 @@ class TestOperatorOverrides:
     # "Unsupported" in the ledger means unsupported with the corpus's overrides.
     # Each test below checks both halves: refused without the override, translated with it.
 
-    def test_a_matches_override_admits_the_regex_the_corpus_refuses(self):
-        # SQL regex engines aren't RE2, so there is no default. A caller may supply one.
+    def test_a_matches_override_hands_the_pattern_to_the_store(self):
+        # The default never uses the store's regex engine (none is RE2). A caller whose
+        # database is known to agree may hand it the pattern instead.
         action = "regex/matches/anchored-prefix"
-        with pytest.raises(
-            UnsupportedPlanError, match="Unrecognised operator: matches"
-        ):
-            translate(action)
+        statement, _ = render(translate(action), "postgresql")
+        assert " ~ " not in statement
 
         statement, params = render(
             translate(
@@ -577,7 +576,7 @@ def test_refusals_keep_the_types_they_raised_before():
     # Refusals used to raise ValueError (one raised TypeError), so existing handlers
     # must still catch them.
     with pytest.raises(UnsupportedPlanError) as refused:
-        translate("regex/matches/anchored-prefix")
+        translate("cast/int/malformed-string")
     assert isinstance(refused.value, ValueError)
 
     with pytest.raises(UnsupportedPlanError, match="operator override") as refused:
