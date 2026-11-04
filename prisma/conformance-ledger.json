@@ -270,7 +270,7 @@
     },
     "regex/matches/lucene-reserved-characters-in-class": {
       "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
+      "reason": "Prisma has no regex filter, and the translator lowers only patterns a combination of LIKE filters decides exactly: `[ab@#&~<>]+` is a repeated class, an unbounded repetition with no LIKE spelling."
     },
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",

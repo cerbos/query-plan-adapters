@@ -338,7 +338,7 @@ See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6
 | Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation; `isSubset` and the emptiness of the `except`/`intersect` list functions against a literal list; `"x" in c.map(...)` and `"x" in c.filter(...)` (an element whose projection or predicate errors denies the row); `exists`/`all` over a list built from columns (`[R.attr.a, R.attr.b].exists(...)`, a missing element denying the row) |
 | Maps | `R.attr.m["key"]` reads like `R.attr.m.key`; `{"k1": v1, ...}[R.attr.x] == v` becomes an `in` over the keys whose value matches (a missing key denies under both polarities); `"key" in R.attr.parent` and `R.attr.parent.exists(k, k == "key")` over a to-one relation test the related row for a key its mapping declares, as `has(R.attr.parent.key)` does |
 | Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved exactly over IEEE-754 doubles to a range of the column (`R.attr.n + 0.5 == 0.75` → `0.24999999999999994 <= n <= 0.25000000000000006`, every double whose rounded sum is 0.75; negative multipliers flip the direction); `x / x` and `x / ±0` split on the sign of `x`; string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of string columns and literals against a literal as one arm per split of it; list concatenation around a ternary over literal lists (`["a"] + (R.attr.b ? ["c"] : []) == [...]`) |
-| Regex | `matches` against a literal RE2 pattern whose language LIKE decides exactly: literals, `^`/`$`, alternation, groups, `?` and bounded `{n,m}`, finite classes, `\d`, `[[:digit:]]`, leading `(?i)` over ASCII, and `.`/one `.*` in a pattern anchored at both ends (the value then holds no newline, as RE2's `.` requires). A pattern RE2 rejects (lookaround, a backreference) is an error on every row |
+| Regex | `matches` against a literal RE2 pattern whose language LIKE decides exactly: literals, `^`/`$`, alternation, groups, `?` and bounded `{n,m}`, finite classes, `\d`, `[[:digit:]]`, leading `(?i)` over ASCII, and `.`/one `.*` in a pattern anchored at both ends (the value then holds no newline, as RE2's `.` requires). A pattern RE2 rejects (lookaround, a backreference) is an error on every row, as decided by [re2js](https://github.com/le0pard/re2js), a port of RE2 |
 | Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)` (an empty delimiter splits per code point, so a descendant is `startsWith(path + "_")`), `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf`; a prefix holding a LIKE metacharacter is matched as a range, like a `startsWith` needle |
 | Timestamps | `timestamp()` over `valueType: "dateTime"` columns; `timestamp(x) ± duration(d)` against a timestamp literal, solved for the column (a shift past CEL's 0001–9999 range denies); `timeSince(timestamp(x))` against a duration, as `x` against `now - d` read when the plan is translated. A bare `dateTime` attribute is the RFC 3339 string, which never orders against a timestamp: that comparison settles as CEL's error |
 
@@ -493,6 +493,11 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- Whether `matches()` raises an error on a pattern (which denies every row) is now decided by
+  re2js, a port of RE2, where a hand-written check read `\1`–`\9` as a backreference. RE2 reads
+  `\1`–`\7` followed by another octal digit as an octal escape (`\11` is a tab), so such a
+  pattern used to deny every row and now matches the character it names. `re2js` is a new
+  dependency.
 - `startsWith` needles and hierarchy prefixes containing `%`, `_` or `\` no longer throw: they are
   matched as a range of the column (`gte` the prefix, `lt` the first string past it), exact under
   the code-point collation the adapter already requires. `R.attr.a in [R.attr.b]` compiles to the

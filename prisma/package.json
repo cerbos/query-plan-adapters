@@ -105,5 +105,8 @@
     "orm",
     "authorization",
     "permissions"
-  ]
+  ],
+  "dependencies": {
+    "re2js": "^2.9.1"
+  }
 }
