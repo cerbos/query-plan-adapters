@@ -74,15 +74,16 @@ module ConformanceStore
         t.string :parent_id, null: false, index: {unique: true}
       end
 
+      # Every list is child rows, one per element, with its position in the list: the column
+      # the mapping names as `order_field`, which gives `tags[0]` and `tags == [...]` their order.
       create_table :adversarial_tags, force: true do |t|
+        t.integer :position, null: false
         t.string :tag_id, null: false
         t.string :name
         t.string :resource_id, null: false
       end
 
-      # `aNumberList` and `aBoolList` as child rows: one per element, with a nullable value
-      # and a position. A relation mapping cannot use the position, so every case indexing these
-      # lists (e.g. `aNumberList[0]`) is refused at `index`.
+      # `aNumberList` and `aBoolList` as child rows too, with a nullable value.
       create_table :adversarial_number_list_elements, force: true do |t|
         t.integer :position, null: false
         t.float :value, limit: 53
@@ -161,8 +162,8 @@ module ConformanceStore
         end
       end
 
-      seed.fetch("tags").each do |tag|
-        AdvTag.create!(tag_id: tag.fetch("id"), name: tag.fetch("name"), resource_id: id)
+      seed.fetch("tags").each_with_index do |tag, position|
+        AdvTag.create!(position: position, tag_id: tag.fetch("id"), name: tag.fetch("name"), resource_id: id)
       end
 
       seed.fetch("aNumberList").each_with_index do |value, position|

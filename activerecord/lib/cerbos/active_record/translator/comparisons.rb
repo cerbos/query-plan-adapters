@@ -38,9 +38,19 @@ module Cerbos
             return compare(operator, size(filtered_list?(left) ? left : right), 0)
           end
 
+          if %w[eq ne].include?(operator) && [left, right].any? { |value| ordered_list?(value) } &&
+              [left, right].any?(Array)
+            ordered, literal = ordered_list?(left) ? [left, right] : [right, left]
+            return ordered_list_equality(operator, ordered, literal)
+          end
+
           reject_collection(operator, left)
           reject_collection(operator, right)
           assert_timestamp_wrapped(left, right)
+          if [left, right].any? { |value| value.is_a?(::Time) && !Timestamps.bindable?(value) } &&
+              [left, right].any? { |value| timestamp_operand?(value) }
+            return compare_sub_microsecond(operator, left, right)
+          end
           if [left, right].any? { |value| value.is_a?(Array) || value.is_a?(Hash) }
             return compare_list_literal(operator, left, right)
           end
@@ -75,7 +85,31 @@ module Cerbos
             return heterogeneous_comparison(operator, left, right, false, false)
           end
 
+          # An int beside a whole literal: bound as the Integer CEL holds, since MySQL compares a
+          # BIGINT with a double literal as doubles, where 2^53 + 1 equals 2^53.
+          left = int_constant(left) if cel_type(right) == :int
+          right = int_constant(right) if cel_type(left) == :int
           ArelSupport.comparison(operator, left, right)
+        end
+
+        # A timestamp literal with sub-microsecond precision, which the planner folds `now()` to,
+        # against a temporal column. Every supported store keeps at most six fractional digits,
+        # so the column's instant is on the microsecond grid, and an ordering against the literal
+        # is the same ordering against the grid point on the right side of it: `< t` is `< ceil(t)`
+        # and `<= t` is `<= floor(t)`. Equality with an instant off the grid is false on every
+        # row that holds a value, and a missing one stays the error.
+        def compare_sub_microsecond(operator, left, right)
+          time_first = left.is_a?(::Time)
+          time, other = time_first ? [left, right] : [right, left]
+          floor = time.floor(Timestamps::MAX_SUBSECOND_DIGITS)
+          ceil = floor + Rational(1, 10**Timestamps::MAX_SUBSECOND_DIGITS)
+          rounded =
+            case time_first ? Durations::MIRRORED.fetch(operator) : operator
+            when "lt", "ge" then ceil
+            when "le", "gt" then floor
+            else return unknown_if_any([ArelSupport.is_null(other)], operator == "ne")
+            end
+          time_first ? compare(operator, rounded, other) : compare(operator, other, rounded)
         end
 
         # A list or map literal. CEL compares lists element by element, in order, and maps key by

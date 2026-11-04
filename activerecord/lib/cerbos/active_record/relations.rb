@@ -37,14 +37,47 @@ module Cerbos
       #
       # @private
       class Scope
-        def initialize(hops:, model:, mapping: nil, guard_hops: [])
+        def initialize(hops:, model:, mapping: nil, guard_hops: [], rebuild: nil)
           @hops = hops
           @mapping = mapping
           @model = model
           @guard_hops = guard_hops
+          @rebuild = rebuild
         end
 
         attr_reader :hops, :mapping, :model, :guard_hops
+
+        # True if the mapping names the column that orders the elements.
+        def ordered?
+          !mapping&.order_field.nil?
+        end
+
+        def order_column
+          unless ordered?
+            raise UnsupportedOperatorError,
+              "Relation #{mapping&.association.inspect} has no element order: a SQL relation's " \
+              "rows have none without an ORDER BY the plan does not carry. Declare " \
+              "order_field: on the mapping to name the column that orders the elements."
+          end
+          table[mapping.order_field]
+        end
+
+        # Makes `(SELECT <projection> FROM ... WHERE <correlation> [AND <conditions>] ORDER BY
+        # <order> LIMIT 1 OFFSET <position>)`: the element at a zero-based position, as a scalar.
+        # NULL past the end, which {#count} tells apart from a NULL element.
+        def element_at(projection, position, *conditions)
+          manager = select_manager(hops, projection, conditions)
+          manager.order(order_column.asc).take(1).skip(position)
+          Arel::Nodes::Grouping.new(manager.ast)
+        end
+
+        # The zero-based position of the current row of {#table}: how many rows of the same
+        # collection order before it. A fresh copy of the hops, so the count correlates to the
+        # same outer row and not to itself.
+        def rank
+          copy = @rebuild.call
+          copy.count(ArelSupport.comparison("lt", copy.order_column, order_column))
+        end
 
         # The aliased table of the last hop, which holds the member columns.
         def table
@@ -147,7 +180,10 @@ module Cerbos
         end
 
         hops = hops_for(reflection, owner_table, owner_model, aliaser)
-        Scope.new(hops: hops, mapping: mapping, model: hops.last.model)
+        Scope.new(
+          hops: hops, mapping: mapping, model: hops.last.model,
+          rebuild: -> { build(owner_model: owner_model, owner_table: owner_table, mapping: mapping, aliaser: aliaser) }
+        )
       end
 
       # Resolves a relation reached through another, e.g. `R.attr.mainCategory.subCategories`,
@@ -171,7 +207,8 @@ module Cerbos
           hops: outer_scope.hops + inner.hops,
           mapping: mapping,
           model: inner.model,
-          guard_hops: outer_scope.hops
+          guard_hops: outer_scope.hops,
+          rebuild: -> { chain(outer_scope: outer_scope, mapping: mapping, aliaser: aliaser) }
         )
       end
 
