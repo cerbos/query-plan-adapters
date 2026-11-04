@@ -1,5 +1,5 @@
 // The hierarchy operators: `overlaps`, `ancestorOf`, `descendentOf` over `hierarchy(...)`
-// operands, lowered to equality, IN-lists of strict prefixes, and `startsWith` on a column.
+// operands, lowered to equality, IN-lists of strict prefixes, and a prefix match on a column.
 
 import type { PlanExpressionOperand } from "@cerbos/core";
 
@@ -7,6 +7,7 @@ import {
   assertStringField,
   buildFieldFilter,
   buildImpossibleFilter,
+  buildPrefixFilter,
 } from "./fields";
 import type { PrismaFilter } from "./index";
 import { isResolvedValue, resolveFieldReference } from "./mapping";
@@ -231,27 +232,6 @@ export function handleOverlapsOperator(
       };
 }
 
-/**
- * Guards every hierarchy prefix that is about to become a Prisma `startsWith`.
- *
- * `startsWith` compiles to `LIKE` with no `ESCAPE` clause, so `%` and `_` in the prefix
- * match as wildcards instead of literally and widen the filter past what the PDP allows.
- * `\` is unsafe because PostgreSQL and MySQL treat it as the DEFAULT escape character with no
- * `ESCAPE` clause present, where SQLite has none at all — so the same prefix means different
- * things per provider. `[` is unsafe for a third reason: SQL Server opens a character class on
- * `[` even when an `ESCAPE` clause is declared, so it cannot be made literal at all. Fail loudly
- * rather than emit a filter that admits denied rows.
- */
-function assertLikeSafePrefix(prefix: string): void {
-  if (/[%_\[\\]/.test(prefix)) {
-    throw new UnsupportedQueryPlanError(
-      "Cannot translate hierarchy prefix matching with LIKE metacharacters (%, _, \\ or [): " +
-        "Prisma emits LIKE without an ESCAPE clause, \\ is the default escape character on " +
-        "PostgreSQL and MySQL, and [ opens a character class on SQL Server even with one"
-    );
-  }
-}
-
 function handleFieldOverlaps(
   left: ResolvedHierarchy,
   right: ResolvedHierarchy
@@ -277,9 +257,7 @@ function handleFieldOverlaps(
     conditions.push(buildFieldFilter(field.fieldRef, "in", strictPrefixes));
   }
   conditions.push(buildFieldFilter(field.fieldRef, "equals", otherRaw));
-  const prefix = otherRaw + delimiter;
-  assertLikeSafePrefix(prefix);
-  conditions.push(buildFieldFilter(field.fieldRef, "startsWith", prefix));
+  conditions.push(buildPrefixFilter(field.fieldRef, otherRaw + delimiter));
 
   return { OR: conditions };
 }
@@ -343,16 +321,13 @@ export function handleAncestorDescendantOperator(
 
   if (ancestor.type === "constant" && descendant.type === "field") {
     if (descendant.delimiter === "") {
-      // Per code point, a descendant is the ancestor followed by at least one more character:
-      // LIKE's `_`, which Prisma leaves unescaped, says exactly that.
-      const path = ancestor.segments.join("");
-      assertLikeSafePrefix(path);
-      return buildFieldFilter(descendant.fieldRef, "startsWith", `${path}_`);
+      // Per code point, a descendant is the ancestor followed by at least one more character.
+      return buildPrefixFilter(descendant.fieldRef, ancestor.segments.join(""), true);
     }
-    const prefix =
-      ancestor.segments.join(descendant.delimiter) + descendant.delimiter;
-    assertLikeSafePrefix(prefix);
-    return buildFieldFilter(descendant.fieldRef, "startsWith", prefix);
+    return buildPrefixFilter(
+      descendant.fieldRef,
+      ancestor.segments.join(descendant.delimiter) + descendant.delimiter
+    );
   }
 
   if (ancestor.type === "field" && descendant.type === "constant") {
