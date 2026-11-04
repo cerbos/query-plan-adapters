@@ -109,6 +109,24 @@ final class RegexTranslator {
                 throw unsupported(pattern, "an anchor inside the pattern");
             }
         }
+        // Searched from either end, an unbounded repetition there is redundant past its minimum:
+        // every match of x*y holds a match of y, and of x{n,}y a match of x{n}y.
+        while (!start && !parts.isEmpty() && parts.get(0) instanceof Node.Rep rep
+                && rep.max() < 0) {
+            parts.remove(0);
+            if (rep.min() > 0) {
+                parts.add(0, atMinimum(rep));
+                break;
+            }
+        }
+        while (!end && !parts.isEmpty() && parts.get(parts.size() - 1) instanceof Node.Rep rep
+                && rep.max() < 0) {
+            parts.remove(parts.size() - 1);
+            if (rep.min() > 0) {
+                parts.add(atMinimum(rep));
+                break;
+            }
+        }
 
         // ^[set]*$ and ^[set]+$: every character is a member.
         if (start && end && parts.size() == 1 && parts.get(0) instanceof Node.Rep rep
@@ -182,6 +200,10 @@ final class RegexTranslator {
         Predicate shape = likes.size() == 1 ? likes.get(0) : cb.or(likes.toArray(Predicate[]::new));
         // RE2's . excludes a newline, and no finite part holds one.
         return cb.and(shape, tri.not(cb.like(column, "%\n%")));
+    }
+
+    private static Node atMinimum(Node.Rep rep) {
+        return rep.min() == 1 ? rep.node() : new Node.Rep(rep.node(), rep.min(), rep.min());
     }
 
     private static boolean containsAnchor(Node node) {

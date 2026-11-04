@@ -100,37 +100,9 @@
       "status": "unsupported",
       "reason": "createdBy is stored as a String; timestamp comparisons require an absolute-instant Java column type, rather than lexicographic string ordering or database-specific parsing."
     },
-    "collection/except/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "except() returns a list, not a boolean, so in boolean position it has no Criteria meaning and is refused; it translates only under size() or compared with a list of at most one element."
-    },
-    "collection/exists/map-keys": {
-      "status": "unsupported",
-      "reason": "A macro over a map ranges over its keys, and the to-one parent is mapped per field (parent.aBool, parent.aString, ...), not as a whole: a JPA relation row has no key set to iterate, so R.attr.parent itself is an unmapped attribute."
-    },
-    "collection/exists/negated-map-keys": {
-      "status": "unsupported",
-      "reason": "Same refusal as collection/exists/map-keys, under negation: the to-one parent is mapped per field, and a JPA relation row has no key set to range over."
-    },
-    "collection/exists/two-variable-map-key-and-value": {
-      "status": "unsupported",
-      "reason": "A two-variable macro over a map binds each key and its value, and obj is mapped per key (obj.inner), not as a whole: a JPA row has no key set to range over, so R.attr.obj itself is an unmapped attribute."
-    },
-    "collection/filter/as-conjunct": {
-      "status": "unsupported",
-      "reason": "filter() returns a list, not a boolean; only size(filter(...)) has a Criteria meaning, so a filter() conjunct is refused rather than dropped (dropping it would over-grant)."
-    },
-    "collection/filter/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "filter() returns a list, not a boolean; only size(filter(...)) has a Criteria meaning, so a bare filter() in boolean position is refused."
-    },
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
       "reason": "Cerbos's intersect() keeps duplicates from whichever list is shorter, so its size depends on comparing the two lengths row by row; the adapter translates intersect() only compared with an empty list (as hasIntersection) and refuses size(intersect(...))."
-    },
-    "collection/map/as-whole-condition": {
-      "status": "unsupported",
-      "reason": "map() returns a list, not a boolean; it translates as the collection of hasIntersection, in list equality and in membership, and used as the whole condition it is refused."
     },
     "comparison/less-than/astral-string-against-high-bmp": {
       "status": "unsupported",
@@ -140,25 +112,9 @@
       "status": "unsupported",
       "reason": "Same refusal as comparison/less-than/astral-string-against-high-bmp, under negation: a UTF-16 code unit ordering puts the surrogate pair before U+FFFD, so the literal is refused."
     },
-    "membership/in/map-attribute-keys": {
-      "status": "unsupported",
-      "reason": "in over a map tests its keys, and the to-one parent is mapped per field (parent.aBool, parent.aString, ...), not as a whole: a JPA relation row has no key set to test, so R.attr.parent itself is an unmapped attribute."
-    },
-    "membership/in/negated-map-attribute-keys": {
-      "status": "unsupported",
-      "reason": "Same refusal as membership/in/map-attribute-keys, under negation: the to-one parent is mapped per field, and a JPA relation row has no key set to test."
-    },
-    "regex/matches/unanchored-quantifiers": {
-      "status": "unsupported",
-      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; the unbounded repetitions x* and a+ have no LIKE spelling (register an OperatorFunction for matches to use a database regex)."
-    },
     "regex/matches/unbounded-count": {
       "status": "unsupported",
       "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; the unbounded run `.{8,}` is lowered only as `.*` or `.+` between finite parts, so it is refused (register an OperatorFunction for matches to use a database regex)."
-    },
-    "relation/has/parent": {
-      "status": "unsupported",
-      "reason": "The to-one parent is reached only through its dotted field paths (parent.aBool, ...); the mapping has no entry for the parent itself, so has(parent) is refused as an unmapped attribute rather than guessed from one of its columns."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
