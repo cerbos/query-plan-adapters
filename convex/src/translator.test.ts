@@ -801,7 +801,6 @@ describe("plans the planner cannot produce", () => {
  *
  * The remaining gaps are tracked below; delete these tests when their corpus coverage lands:
  *
- * - a trailing wildcard under an end anchor — #396.
  * - the value-list macro machinery past what `principal/*` drives — cerbos/query-plan-adapters#394.
  *   The corpus drives `exists`, `all` and `exists_one` over literal lists, duplicate elements and
  *   element-field paths included; an empty collection that is not folded away it does not.
@@ -811,25 +810,6 @@ describe("plans the planner cannot produce", () => {
  * licence to keep writing them.
  */
 describe("shapes the corpus does not reach yet", () => {
-  // Corpus gap (#396): `regex/matches/negated-invalid-patterns-from-principal` covers the
-  // backreference, but a trailing wildcard under an end anchor still has no corpus case. Keep its
-  // refusal contract until that shape is planned and replayed.
-  test("matches with a trailing wildcard under an end anchor is refused", () => {
-    expect(() =>
-      queryPlanToConvex({
-        queryPlan: plan({
-          operator: "matches",
-          operands: [
-            { name: "request.resource.attr.aString" },
-            { value: "^allowed.*$" },
-          ],
-        }),
-        mapper: MAPPER,
-        allowPostFilter: true,
-      }),
-    ).toThrow("constant RE2-compatible pattern");
-  });
-
   // #394. The planner ships a literal value-list collection above the unroll cliff, and the
   // adapter binds each element to the lambda variable rather than folding the macro.
   describe("a macro over a literal value-list collection", () => {

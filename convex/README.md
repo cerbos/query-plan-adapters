@@ -236,7 +236,7 @@ Evaluated in JavaScript (`postFilter`, needs `allowPostFilter: true`):
 | String functions | `upperAscii` | Folds the ASCII letters only, as CEL does |
 | Time | `timeSince`, timestamp ± duration, duration ± duration, timestamp - timestamp | `timeSince` reads the clock when `postFilter` runs; an overflow or a timestamp outside 0001–9999 is an error |
 | Conditional | `if` | Evaluates only the selected branch |
-| Pattern | `matches` | Constant patterns in the safe RE2/JS subset: literals, `^`/`$` anchors, a trailing `.*` when there is no `$`. Dynamic patterns and anything else throw (avoids JS-only regex semantics and ReDoS) |
+| Pattern | `matches` | A constant pattern, evaluated by [re2js](https://github.com/le0pard/re2js), a port of RE2, so it means what it means to the PDP: no lookaround or backreferences, a repeat count of at most 1000, `$` at the absolute end, `.` excluding only `\n`, `(?i)` by Unicode simple case folding, and linear time. A pattern RE2 rejects is CEL's evaluation error on every row, as it is in the PDP. A pattern that is not a constant throws |
 | Hierarchy | `hierarchy`, `ancestorOf`, `descendentOf`, `overlaps` | Segment-wise, as Cerbos's hierarchy type compares: the delimiter only splits the input, and `hierarchy([...])` takes the segments from a list |
 
 ### What throws
@@ -267,7 +267,7 @@ It is raised, before any filter exists, when:
   `set-field` appears outside one;
 - a lambda is malformed, or `filter()`/`map()` declares two variables;
 - `filter()`/`map()` sits in a boolean position;
-- a `matches` pattern is outside the supported subset;
+- a `matches` pattern is not a constant string;
 - a constant zero divisor whose sign JSON discards, or a division used as another division's
   denominator;
 - `nullAttributeRepresentation: "omitted"` and the plan has a null comparison operand.
@@ -286,8 +286,8 @@ total is every golden case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 93 / 102 |
-| adversarial | 345 / 375 |
+| extended | 99 / 102 |
+| adversarial | 360 / 375 |
 
 Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
 them, because the plan and `check()` disagree. On 0.57.0 there are seven, three extended and four
@@ -311,14 +311,14 @@ Convex's engine compares it as a value, exactly as CEL does.
 
 ### What the conformance run proves, and what it does not
 
-Most of the corpus is decided by `postFilter`, not by Convex. Of the 429 cases that pass on 0.56.0,
+Most of the corpus is decided by `postFilter`, not by Convex. Of the 479 cases that pass on 0.56.0,
 the harness reports:
 
 | Decided by | Cases |
 | --- | --- |
 | Convex's filter engine, alone | 19 |
-| the adapter's `postFilter`, alone | 404 |
-| folded to an unconditional plan before any filter exists | 6 |
+| the adapter's `postFilter`, alone | 453 |
+| folded to an unconditional plan before any filter exists | 7 |
 
 For the post-filtered cases the run compares the adapter's CEL evaluator against the PDP's;
 Convex's own comparison semantics only decide the 19, which include the null comparisons against
