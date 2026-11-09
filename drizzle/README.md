@@ -547,6 +547,7 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- Fixed over-grants: a string, number, date or array column read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, which denies under both polarities, where it was compared with `true`; and arithmetic over a ternary whose arms are an `int()` and a double (`(c ? R.attr.d : int(x)) + int(x)`) now throws `UnsupportedQueryPlanError` (**breaking**), where it was computed as a sum on every row.
 - A relation may declare [`position`](#relations), the column holding each row's zero-based
   index in the list sent to Cerbos. With it, `R.attr.tags[0].name == "public"` (a `get-field` over
   a constant index, which used to throw), `R.attr.tags.map(t, t.id) == ["a", "b"]` and

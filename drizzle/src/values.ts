@@ -349,6 +349,17 @@ const isCelIntExpression = (operand: PlanExpressionOperand): boolean => {
   return operand.operands.every(isIntOrWhole) && operand.operands.some(isCelIntExpression);
 };
 
+/** A ternary of which exactly one arm is certainly a CEL int. */
+const selectsIntOrDouble = (operand: PlanExpressionOperand): boolean => {
+  if (!isOperatorCall(operand, "if") || !isExpressionOperand(operand)) return false;
+  const [, whenTrue, whenFalse] = operand.operands;
+  return (
+    whenTrue !== undefined &&
+    whenFalse !== undefined &&
+    isCelIntExpression(whenTrue) !== isCelIntExpression(whenFalse)
+  );
+};
+
 /**
  * Whether one operand is certainly a CEL int and the other certainly a double: an attribute read
  * (CEL reads every attribute number as a double), a fractional constant, or `double()`. CEL has no
@@ -576,6 +587,12 @@ const buildArithmeticExpression = (
   }
   if (operator === "mod") {
     return buildModulo(leftOperand, rightOperand, mapper, options);
+  }
+  if (selectsIntOrDouble(leftOperand) || selectsIntOrDouble(rightOperand)) {
+    throw new UnsupportedQueryPlanError(
+      "Arithmetic over a ternary whose arms are an int and a double is unsupported: whether CEL " +
+        "raises a no-overload error depends on the arm each row selects",
+    );
   }
   if (mixesIntWithDouble(leftOperand, rightOperand)) {
     return sql`cast(null as float(53))`;
