@@ -92,6 +92,7 @@ module Cerbos
       # CEL's int range. A wider whole number in a plan can only be a double.
       INT64_RANGE = (-(2**63))..(2**63 - 1)
       TEMPORAL_COLUMN_TYPES = %i[datetime time date].freeze
+      NON_BOOLEAN_COLUMN_TYPES = (STRING_COLUMN_TYPES + NUMERIC_COLUMN_TYPES + TEMPORAL_COLUMN_TYPES).freeze
 
       include Arithmetic
       include Casts
@@ -371,6 +372,9 @@ module Cerbos
         # absorb it exactly as CEL's `&&` and `||` absorb an error.
         return cel_type_error if collection?(value)
 
+        # So is a string, number or temporal column.
+        return cel_type_error if NON_BOOLEAN_COLUMN_TYPES.include?(column_type(value))
+
         reject_double_text("a condition", value)
 
         # A boolean column alone is a correct CEL condition. But SQLite and MySQL hold a boolean
@@ -444,7 +448,11 @@ module Cerbos
         arm_kinds = [scalar_kind(then_value), scalar_kind(else_value)]
         mixed_arms = arm_kinds.uniq.length == 2 && arm_kinds.all? { |kind| %i[string number].include?(kind) }
         list_arms = then_value.is_a?(Array) || else_value.is_a?(Array)
-        if deferred_value?(then_value) || deferred_value?(else_value) || mixed_arms || list_arms
+        # So must an int arm beside one that is not: arithmetic over the ternary is a CEL error
+        # only on the rows that select the arm of the other type.
+        int_arms = [then_value, else_value].any? { |value| cel_type(value) == :int } &&
+          ![then_value, else_value].all? { |value| cel_int?(value) }
+        if deferred_value?(then_value) || deferred_value?(else_value) || mixed_arms || list_arms || int_arms
           return Values::ConditionalValue.new(
             condition: condition, then_value: then_value, else_value: else_value
           )

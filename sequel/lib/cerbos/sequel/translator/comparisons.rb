@@ -89,9 +89,24 @@ module Cerbos
               "#{operator} with a list or map literal: only eq and ne against constants " \
               "are translated"
           end
+          unless literals.all? { |literal| plain_literal?(literal) }
+            raise UnsupportedOperatorError,
+              "#{operator} with a list or map holding a computed or NaN element: Ruby's equality " \
+              "would call NaN equal to itself, where CEL's does not"
+          end
           return fold_comparison(operator, left, right) unless SqlSupport.sql_node?(left) || SqlSupport.sql_node?(right)
 
           heterogeneous_comparison(operator, left, right, false, false)
+        end
+
+        def plain_literal?(value)
+          case value
+          when Array then value.all? { |element| plain_literal?(element) }
+          when Hash then value.values.all? { |element| plain_literal?(element) }
+          when Float then !value.nan?
+          else value.nil? || value.is_a?(::String) || value.is_a?(Numeric) || value == true ||
+            value == false || value.is_a?(::Time)
+          end
         end
 
         # Two temporal columns compare as instants only when both went through `timestamp()`.
