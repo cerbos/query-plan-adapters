@@ -35,17 +35,51 @@ module Cerbos
         end
       end
 
-      # Raises if the instant has sub-microsecond precision.
+      DIGITS_KEY = :cerbos_sequel_bindable_subsecond_digits
+
+      # Sequel's MySQL adapter drops every fractional digit of a Time it literalizes unless the
+      # connection sets +fractional_seconds: true+.
       #
-      # Sequel removes the digits past the sixth when it puts a Time into SQL, so the query
-      # would compare with a different instant from the one in the policy. The planner makes
-      # such a literal for +now()+. Checked where a Time reaches SQL, not where it is parsed: a
-      # literal that never reaches SQL (one a type mismatch makes an error, or one compared with
-      # another literal) is exact in Ruby.
+      # @api private
+      def bindable_digits(db)
+        return MAX_SUBSECOND_DIGITS unless db.database_type == :mysql
+
+        db.supports_timestamp_usecs? ? MAX_SUBSECOND_DIGITS : 0
+      end
+
+      # @api private
+      def with_bindable_digits(digits)
+        previous = Thread.current[DIGITS_KEY]
+        Thread.current[DIGITS_KEY] = digits
+        yield
+      ensure
+        Thread.current[DIGITS_KEY] = previous
+      end
+
+      # @api private
+      def current_bindable_digits
+        Thread.current[DIGITS_KEY] || MAX_SUBSECOND_DIGITS
+      end
+
+      # Raises if the instant has more fractional digits than a literalized Time keeps.
+      #
+      # The query would otherwise compare with a different instant from the one in the policy.
+      # Checked where a Time reaches SQL, not where it is parsed: a literal that never reaches
+      # SQL (one a type mismatch makes an error, or one compared with another literal) is exact
+      # in Ruby.
       #
       # @api private
       def assert_bindable(time)
-        return if (time.subsec * 1_000_000).denominator == 1
+        digits = current_bindable_digits
+        return if (time.subsec * (10**digits)).denominator == 1
+
+        if digits.zero?
+          raise UnsupportedOperatorError,
+            "Timestamp literal #{time.iso8601(9).inspect} carries fractional seconds, which " \
+            "Sequel's MySQL adapter drops when literalizing a Time unless the connection sets " \
+            "fractional_seconds: true; translating it would compare against a different " \
+            "instant than the policy specifies"
+        end
 
         raise UnsupportedOperatorError,
           "Timestamp literal #{time.iso8601(9).inspect} carries sub-microsecond precision, which " \

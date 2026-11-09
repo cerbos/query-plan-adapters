@@ -99,9 +99,9 @@ module Cerbos
           ::Time.at(instant.to_r + seconds).utc
         end
 
-        # The translation's clock, at the microsecond precision a bound Time keeps.
+        # The translation's clock, at the precision a bound Time keeps.
         def now
-          @now ||= ::Time.now.utc.floor(Timestamps::MAX_SUBSECOND_DIGITS)
+          @now ||= ::Time.now.utc.floor(Timestamps.current_bindable_digits)
         end
       end
     end

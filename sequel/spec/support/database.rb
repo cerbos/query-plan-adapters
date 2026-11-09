@@ -54,7 +54,9 @@ module Database
       # `collation_connection` and not `SET NAMES utf8mb4 COLLATE ...`: with the latter, the
       # trilogy driver (2.13, against MySQL 8.4) crashes the Ruby process with a segfault on the
       # next query. The connection already speaks utf8mb4, so only the collation needs setting.
-      Sequel.connect(url, max_connections: 1,
+      # `fractional_seconds`: without it Sequel's MySQL adapter drops the microseconds of every
+      # Time it writes, rows and literals alike, and the adapter refuses a fractional literal.
+      Sequel.connect(url, max_connections: 1, fractional_seconds: true,
         connect_sqls: ["SET collation_connection = #{MYSQL_COLLATION}"])
     end
 

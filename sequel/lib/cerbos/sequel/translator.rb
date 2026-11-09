@@ -184,6 +184,10 @@ module Cerbos
       # @param plan [Object] anything {Plan.normalise} accepts
       # @return [::Sequel::Dataset]
       def translate(plan)
+        Timestamps.with_bindable_digits(Timestamps.bindable_digits(model.db)) { translate_plan(plan) }
+      end
+
+      private def translate_plan(plan)
         normalised = Plan.normalise(plan)
         # `where(false)` and not an empty array: the result stays a dataset that a caller can
         # compose with, count and page through, exactly as a conditional plan does.

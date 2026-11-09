@@ -57,7 +57,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 30 / 30 |
 | extended | 91 / 102 |
-| adversarial | 331 / 373 |
+| adversarial | 333 / 375 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
@@ -265,8 +265,13 @@ The adapter reads each `timestamp()` literal as a UTC `Time`, and Sequel convert
 `Sequel.database_timezone` when it writes the SQL. Set that to the zone your columns hold — on
 SQLite a datetime is text, and a literal in another zone compares as the wrong instant.
 
+On MySQL, declare timestamp columns `datetime(6)` and connect with `fractional_seconds: true`.
+Without that option Sequel's MySQL adapter drops the fraction of every Time it writes, so a row
+0.123456 seconds past a policy's literal is stored on it and matches. The adapter refuses a
+literal with a fraction on such a connection, and reads `now()` to the second.
+
 The conformance harness replays the corpus on SQLite, PostgreSQL (initialised with
-`--lc-collate=C`) and MySQL (`utf8mb4_0900_bin` on the columns and the connection). The contract
+`--lc-collate=C`) and MySQL (`utf8mb4_0900_bin` on the columns and the connection, `fractional_seconds: true`). The contract
 suite runs on SQLite only.
 
 ## Requirements
