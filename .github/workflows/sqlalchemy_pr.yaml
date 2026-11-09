@@ -83,7 +83,7 @@ jobs:
 
       - name: Check repo status
         if: matrix.sqlalchemy.constraint == ''
-        uses: cerbos/actions/check-repo-status@6f636d2f02ee257dd226044f85ca097b901b3572 # main
+        uses: cerbos/actions/check-repo-status@d175c743932636d403a72e9baf690c37da2963fa # main
 
       # Fail if the constraint did not take effect.
       - name: Assert SQLAlchemy version
