@@ -1321,7 +1321,7 @@ function translateStringPredicate(
   // Mongo matches $regex with PCRE2, where `$` also matches immediately
   // before a final newline, so "tail\n" would satisfy endsWith("tail")
   // while CEL says false. `\z` is the absolute end of subject — the same
-  // rewrite normalizeRe2PatternForMongo applies to a trailing `$`.
+  // rewrite lowerRe2PatternForMongo applies to a trailing `$`.
   // `^` needs no counterpart: without PCRE2_MULTILINE it already matches
   // only at the start of the subject.
   const regexStr =

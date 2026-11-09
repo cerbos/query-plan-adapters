@@ -1413,37 +1413,6 @@ export const celScalarType = (
   }
 };
 
-/**
- * Whether CEL can never order `left` against `right`: both types are known and differ. CEL has no
- * ordering between types, so the comparison is an error that denies under either polarity, where
- * `$lt` falls back to BSON's cross-type order (every number sorts below every string) and answers
- * true or false for every document. A type the plan does not carry is not checked, as on the
- * field-to-constant path. A ternary whose branches differ orders against one branch and raises on
- * the other, per document, which one `$expr` cannot say, so it is refused.
- */
-export const isUnorderable = (
-  left: PlanExpressionOperand,
-  right: PlanExpressionOperand,
-  mapper: Mapper,
-): boolean => {
-  const leftType = celScalarType(left, mapper);
-  const rightType = celScalarType(right, mapper);
-  if (leftType === "mixed" || rightType === "mixed") {
-    throw new UnsupportedQueryPlanError(
-      "Cannot order against a conditional whose branches have different types: CEL raises an " +
-        "error on the documents that take the branch of the other type, and $expr would order " +
-        "them by BSON type instead",
-    );
-  }
-  const numeric = (type: CelScalarType | undefined) => type === "number" || type === "int";
-  return (
-    leftType !== undefined &&
-    rightType !== undefined &&
-    leftType !== rightType &&
-    !(numeric(leftType) && numeric(rightType))
-  );
-};
-
 
 /**
  * CEL's `string()` of a double: every attribute number reaches CEL as a double, which cel-go
@@ -1664,22 +1633,4 @@ function buildTimestampConversion(input: unknown): MongooseFilter {
       },
     },
   };
-}
-
-export function parseConstantIndexOperands(
-  operands: PlanExpressionOperand[],
-): readonly [collection: PlanExpressionOperand, index: number] {
-  const [collectionOperand, indexOperand] = operands;
-  if (!collectionOperand || !indexOperand) {
-    throw new UnsupportedQueryPlanError("index operator requires two operands");
-  }
-  if (
-    !isValue(indexOperand) ||
-    typeof indexOperand.value !== "number" ||
-    !Number.isInteger(indexOperand.value) ||
-    indexOperand.value < 0
-  ) {
-    throw new UnsupportedQueryPlanError("index operator requires a non-negative integer constant");
-  }
-  return [collectionOperand, indexOperand.value];
 }
