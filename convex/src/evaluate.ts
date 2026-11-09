@@ -39,7 +39,7 @@ import {
   resolveField,
 } from "./operands";
 import type { ComparisonOperator } from "./operands";
-import { InvalidRegexError, compileRe2 } from "./regex";
+import { compileRe2 } from "./regex";
 
 /**
  * The adapter's own CEL evaluator: the post-filter that answers, one document at a time, every
@@ -731,11 +731,7 @@ const validatePattern = ({ operands }: PlanExpression): void => {
       "matches requires a constant string pattern: the post-filter compiles it at translation",
     );
   }
-  try {
-    compileRe2(pattern.value);
-  } catch (error) {
-    if (!(error instanceof InvalidRegexError)) throw error;
-  }
+  compileRe2(pattern.value);
 };
 
 const hierarchyRelation = (call: Call): unknown => {
@@ -841,12 +837,7 @@ const OPERATORS: Record<string, Operator> = {
       if (typeof receiver !== "string" || typeof pattern !== "string") {
         return EVALUATION_ERROR;
       }
-      try {
-        return compileRe2(pattern).test(receiver);
-      } catch (error) {
-        if (error instanceof InvalidRegexError) return EVALUATION_ERROR;
-        throw error;
-      }
+      return compileRe2(pattern)?.test(receiver) ?? EVALUATION_ERROR;
     },
     validate: validatePattern,
   },
