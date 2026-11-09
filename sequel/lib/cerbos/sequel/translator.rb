@@ -92,6 +92,7 @@ module Cerbos
       # CEL's int range. A wider whole number in a plan can only be a double.
       INT64_RANGE = (-(2**63))..(2**63 - 1)
       TEMPORAL_COLUMN_TYPES = %i[datetime time date].freeze
+      # The column types CEL cannot read as a condition: such a column in boolean position is a type error.
       NON_BOOLEAN_COLUMN_TYPES = (STRING_COLUMN_TYPES + NUMERIC_COLUMN_TYPES + TEMPORAL_COLUMN_TYPES).freeze
 
       include Arithmetic
