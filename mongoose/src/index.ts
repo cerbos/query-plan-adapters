@@ -3,7 +3,7 @@ import { PlanResourcesResponse, PlanKind } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
 import type { TranslateContext } from "./context";
 import { translateCondition } from "./filter";
-import { withOmittedNullDefault } from "./mapper";
+import { withMapperState, withOmittedNullDefault } from "./mapper";
 
 export { PlanKind };
 export { UnsupportedQueryPlanError };
@@ -104,10 +104,10 @@ export function queryPlanToMongoose({
   nullAttributeRepresentation = "omitted",
 }: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
   const ctx: TranslateContext = {
-    mapper:
-      nullAttributeRepresentation === "omitted"
-        ? withOmittedNullDefault(mapper)
-        : mapper,
+    mapper: withMapperState(
+      nullAttributeRepresentation === "omitted" ? withOmittedNullDefault(mapper) : mapper,
+      nullAttributeRepresentation === "omitted",
+    ),
     nullRepresentation: nullAttributeRepresentation,
     scope: { kind: "root" },
   };
@@ -119,9 +119,31 @@ export function queryPlanToMongoose({
     case PlanKind.CONDITIONAL:
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: translateCondition(queryPlan.condition, ctx),
+        filters: shieldExpressions(translateCondition(queryPlan.condition, ctx)) as MongooseFilter,
       };
     default:
       throw new UnsupportedQueryPlanError(`Invalid query plan.`);
   }
 }
+
+/**
+ * Every `$expr` wrapped in a `$let` with no variables, which evaluates to the same value. Mongoose
+ * casts the operands of the `$expr` operators it knows against the schema: a constant compared
+ * with a path is cast to the path's type (`"5"` against a Number field becomes `5`), a `$literal`
+ * beside `$multiply` is rejected, and a comparison between two expressions loses the schema and
+ * throws. It does not descend into `$let`, so the expression reaches MongoDB as it was built.
+ */
+const shieldExpressions = (filter: unknown): unknown => {
+  if (Array.isArray(filter)) return filter.map(shieldExpressions);
+  if (typeof filter !== "object" || filter === null || Object.getPrototypeOf(filter) !== Object.prototype) {
+    return filter;
+  }
+  return Object.fromEntries(
+    Object.entries(filter).map(([key, value]) => [
+      key,
+      key === "$expr" && typeof value !== "boolean"
+        ? { $let: { vars: {}, in: value } }
+        : shieldExpressions(value),
+    ]),
+  );
+};

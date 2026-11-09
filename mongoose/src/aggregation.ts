@@ -2,20 +2,33 @@ import type { PlanExpression, PlanExpressionOperand } from "@cerbos/core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper, MongooseFilter } from "./index";
+import { filterValue, mapValue } from "./logic";
 import {
   declaredScalarType,
   isNullableReference,
   relationOfReference,
   resolveFieldReference,
+  valueTypeOf,
 } from "./mapper";
-import { isExpression, isValue, isVariable } from "./operands";
-import { normalizeRe2PatternForMongo } from "./regex";
+import { getOperandAt, isExpression, isValue, isVariable } from "./operands";
+import { lowerRe2PatternForMongo } from "./regex";
 import {
   MAX_CEL_TIMESTAMP,
   MIN_CEL_TIMESTAMP,
   RFC3339_TIMESTAMP_MONGO_PATTERN,
   isRfc3339Timestamp,
 } from "./timestamp";
+
+/**
+ * Aggregation-expression lowering, for everything that has to be evaluated inside `$expr`:
+ * arithmetic, conversions, ternaries, `size`, positional reads, and comparisons between two
+ * fields.
+ *
+ * Each operator may also declare a GUARD: the filter that keeps out every document on which the
+ * expression cannot be evaluated — where CEL raises and `check()` denies, while the pipeline
+ * would carry on with a null or a wrongly typed value. The enclosing filter walks its operands
+ * for guards and ANDs each one alongside itself (see `withEvaluationGuards`).
+ */
 
 /**
  * The aggregation-pipeline spelling of the comparisons, shared by `$expr` and by the query
@@ -32,50 +45,1271 @@ export const COMPARISON_OPERATORS = {
 
 export type ComparisonOperator = keyof typeof COMPARISON_OPERATORS;
 
+const isComparison = (operator: string): operator is ComparisonOperator =>
+  Object.hasOwn(COMPARISON_OPERATORS, operator);
+
+/** The comparisons that are orderings: between two types an ordering is an error to CEL, `==` false. */
+export const ORDERINGS = new Set(["lt", "le", "gt", "ge"]);
+
+const ARITHMETIC: Record<string, string> = {
+  add: "$add",
+  sub: "$subtract",
+  mult: "$multiply",
+  div: "$divide",
+};
+
+/** Operators whose second operand is a lambda, which the three-valued evaluation evaluates. */
+export const LAMBDA_OPERATORS = new Set(["exists", "exists_one", "all", "filter", "map", "lambda"]);
+
+/** Guarded by "the expression is not null": each evaluates to null exactly where CEL raises. */
+const NOT_NULL_GUARDED = new Set([
+  "string", "double", "int", "size", "contains", "startsWith", "endsWith", "add", "sub", "mult",
+  "div", "mod", "in", "except", "hierarchy", "ancestorOf", "descendentOf", "overlaps",
+  "hasIntersection", "map", "intersect", "isSubset", "upperAscii", "timeSince",
+]);
+
+const isNumber = (value: unknown): value is number => typeof value === "number";
+const isString = (value: unknown): value is string => typeof value === "string";
+const isComposite = (value: unknown): boolean =>
+  Array.isArray(value) || (typeof value === "object" && value !== null && !(value instanceof Date));
+const isMap = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
+
 /**
- * Builds an aggregation-pipeline expression value for use inside `$expr`.
- * - Variables become field paths prefixed with `$` (e.g. `"$aNumber"`).
- * - Values become themselves, wrapped in `$literal` where the pipeline would evaluate them.
- * - Nested expressions recurse.
+ * A plan operand as an aggregation expression: a variable becomes a `$field.path`, a value a
+ * constant (see `buildConstant`), an expression recurses.
  */
 export const buildAggregationExpression = (
   operand: PlanExpressionOperand,
   mapper: Mapper,
 ): unknown => {
-  if (isVariable(operand)) {
-    const { path } = resolveFieldReference(operand.name, mapper);
-    return "$" + path.join(".");
-  }
-  if (isValue(operand)) {
-    return buildConstant(operand.value);
-  }
-  if (isExpression(operand)) {
-    return buildAggregationExpressionFromExpression(operand, mapper);
-  }
+  if (isVariable(operand)) return fieldPath(operand.name, mapper);
+  if (isValue(operand)) return buildConstant(operand.value);
+  if (isExpression(operand)) return buildAggregationExpressionFromExpression(operand, mapper);
   throw new UnsupportedQueryPlanError("Invalid operand structure");
 };
 
-/**
- * A plan constant as an aggregation expression. The pipeline reads a string starting with `$` as
- * a field path (`"$$…"` as a variable), and evaluates a list or map element by element, so such a
- * constant — `R.attr.aString + "g" == "$aOptionalString"` — would compare against the document's
- * own field (cerbos/query-plan-adapters#575). `$literal` makes it a constant. Every other constant
- * stays bare: Mongoose's `$expr` caster sends each literal operand of `$add`, `$subtract` and the
- * like through its Number cast, which rejects a `{ $literal: 1 }`.
- */
-const buildConstant = (value: unknown): unknown =>
-  isEvaluatedByPipeline(value) ? { $literal: value } : value;
+const build = buildAggregationExpression;
 
-const isEvaluatedByPipeline = (value: unknown): boolean => {
-  if (typeof value === "string") return value.startsWith("$");
-  if (Array.isArray(value)) return value.some(isEvaluatedByPipeline);
-  if (typeof value === "object" && value !== null) {
-    return Object.entries(value).some(
-      ([key, element]) => key.startsWith("$") || isEvaluatedByPipeline(element),
+/**
+ * A variable's value. A to-many relation's projected field is a `$map` over its elements, where
+ * the dotted path would skip an element that lacks the field instead of reading it as null, and
+ * so shorten the list.
+ */
+const fieldPath = (name: string, mapper: Mapper): unknown => {
+  const { path, relation } = resolveFieldReference(name, mapper);
+  if (relation?.type !== "many") return `$${path.join(".")}`;
+  const field = path[1];
+  if (relation.requiresParent !== undefined) return relationElements(relation, field);
+  if (field === undefined) return `$${relation.name}`;
+  return { $map: { input: `$${relation.name}`, as: "cerbos_element", in: `$$cerbos_element.${field}` } };
+};
+
+/**
+ * The elements of a to-many relation reached through a to-one parent stored as an array
+ * (`requiresParent`): the parent's list, or null (a CEL error) where no parent is stored.
+ */
+export const relationElements = (
+  relation: { name: string; requiresParent?: string },
+  field: string | undefined,
+): unknown => {
+  const parent = relation.requiresParent!;
+  if (!relation.name.startsWith(`${parent}.`)) {
+    throw new UnsupportedQueryPlanError("A relation's requiresParent must be a prefix of its path");
+  }
+  const child = relation.name.slice(parent.length + 1);
+  const element = field ? `$$cerbos_element.${field}` : "$$cerbos_element";
+  const elements = {
+    $reduce: {
+      input: `$${parent}`,
+      initialValue: [],
+      in: {
+        $concatArrays: [
+          "$$value",
+          {
+            $cond: [
+              { $isArray: `$$this.${child}` },
+              { $map: { input: `$$this.${child}`, as: "cerbos_element", in: element } },
+              [],
+            ],
+          },
+        ],
+      },
+    },
+  };
+  const parents = { $cond: [{ $isArray: `$${parent}` }, `$${parent}`, []] };
+  // The parent is stored, and holds the list: a parent without it is a missing attribute.
+  const stored = {
+    $and: [
+      { $gt: [{ $size: parents }, 0] },
+      { $allElementsTrue: [{ $map: { input: parents, in: { $isArray: `$$this.${child}` } } }] },
+    ],
+  };
+  return { $cond: [stored, elements, null] };
+};
+
+/**
+ * A plan constant as an aggregation expression. Inside `$expr` a string that starts with `$` is a
+ * field path (and `$$` a variable), and an array or a document is evaluated element by element,
+ * so `R.attr.a + "q" == "$b"` would compare with the document's own `b` field and return
+ * documents the PDP denies (cerbos/query-plan-adapters#575). `$literal` keeps each such constant
+ * the value it is.
+ */
+export const buildConstant = (value: unknown): unknown => {
+  if (isMap(value) || (Array.isArray(value) && value.some((element) => !isComparableElement(element)))) {
+    throw new UnsupportedQueryPlanError(
+      "A map constant inside an expression is unsupported: MongoDB compares embedded documents in stored field order, CEL's maps ignore it",
     );
   }
-  return false;
+  if (Array.isArray(value) || (isString(value) && value.startsWith("$"))) return { $literal: value };
+  return value;
 };
+
+/** An element a constant list may hold inside `$expr`: a scalar other than NaN, or a map of one such scalar. */
+const isComparableElement = (element: unknown): boolean => {
+  if (isMap(element)) {
+    const values = Object.values(element);
+    return values.length === 1 && !isMap(values[0]) && isComparableElement(values[0]);
+  }
+  return !Array.isArray(element) && !(isNumber(element) && Number.isNaN(element));
+};
+
+export const buildAggregationExpressionFromExpression = (
+  expression: PlanExpression,
+  mapper: Mapper,
+): unknown => {
+  const { operator, operands } = expression;
+  if (operator === "and" || operator === "or") {
+    return { [`$${operator}`]: operands.map((op) => build(op, mapper)) };
+  }
+  if (isComparison(operator)) {
+    // A timestamp or duration against a value of another CEL type: an ordering is an error
+    // (null), and `==` is decided without reading either side.
+    if (temporalMismatch(operands[0], operands[1], mapper)) {
+      return ORDERINGS.has(operator) ? null : operator === "ne";
+    }
+    return compare(operator, build(operands[0]!, mapper), build(operands[1]!, mapper));
+  }
+  switch (operator) {
+    case "add":
+      return buildAdd(operands, mapper);
+    case "sub":
+    case "mult":
+    case "div":
+      return buildArithmetic(operator, operands, mapper);
+    case "mod":
+      return operands.some(isIntTyped) ? buildIntArithmetic("mod", operands, mapper) : null;
+    case "not":
+      return { $not: [build(getOperandAt(operands, 0, "not operator requires an operand"), mapper)] };
+    case "string":
+      return buildString(operands, mapper);
+    case "int":
+      return buildInt(operands, mapper);
+    case "in":
+      return buildIn(operands, mapper);
+    case "filter":
+      return filterValue(expression, mapper);
+    case "map":
+      return mapValue(expression, mapper);
+    case "except":
+      return scalarLists(operands, mapper, () => ({
+        $filter: {
+          input: "$$cerbos_left",
+          as: "cerbos_item",
+          cond: {
+            $or: [
+              { $eq: ["$$cerbos_item", Number.NaN] },
+              { $not: [{ $in: ["$$cerbos_item", "$$cerbos_right"] }] },
+            ],
+          },
+        },
+      }));
+    // Cerbos's `intersect(a, b)` walks the shorter list (the first on a tie) and keeps, in order
+    // and with its repeats, each element the other list contains.
+    case "intersect":
+      return scalarLists(operands, mapper, () => ({
+        $let: {
+          vars: { cerbos_swap: { $gt: [{ $size: "$$cerbos_left" }, { $size: "$$cerbos_right" }] } },
+          in: {
+            $filter: {
+              input: { $cond: ["$$cerbos_swap", "$$cerbos_right", "$$cerbos_left"] },
+              as: "cerbos_item",
+              cond: {
+                $and: [
+                  { $ne: ["$$cerbos_item", Number.NaN] },
+                  { $in: ["$$cerbos_item", { $cond: ["$$cerbos_swap", "$$cerbos_left", "$$cerbos_right"] }] },
+                ],
+              },
+            },
+          },
+        },
+      }));
+    case "isSubset":
+      return scalarLists(operands, mapper, () => ({
+        $allElementsTrue: [
+          {
+            $map: {
+              input: "$$cerbos_left",
+              as: "cerbos_item",
+              in: { $and: [{ $ne: ["$$cerbos_item", Number.NaN] }, { $in: ["$$cerbos_item", "$$cerbos_right"] }] },
+            },
+          },
+        ],
+      }));
+    case "hasIntersection":
+      return scalarLists(operands, mapper, () => ({
+        $anyElementTrue: [
+          {
+            $map: {
+              input: "$$cerbos_left",
+              as: "cerbos_item",
+              in: { $and: [{ $ne: ["$$cerbos_item", Number.NaN] }, { $in: ["$$cerbos_item", "$$cerbos_right"] }] },
+            },
+          },
+        ],
+      }));
+    // CEL's upperAscii() folds a-z only, which is what $toUpper does to a string; anything but a
+    // string is null here.
+    case "upperAscii":
+      return {
+        $let: {
+          vars: { cerbos_input: build(getOperandAt(operands, 0, "upperAscii requires an operand"), mapper) },
+          in: { $cond: [{ $eq: [{ $type: "$$cerbos_input" }, "string"] }, { $toUpper: "$$cerbos_input" }, null] },
+        },
+      };
+    case "duration": {
+      const operand = getOperandAt(operands, 0, "duration requires an operand");
+      if (!isValue(operand) || !isString(operand.value)) {
+        throw new UnsupportedQueryPlanError("duration() is translated only over a constant string");
+      }
+      return parseDurationMilliseconds(operand.value);
+    }
+    // timeSince() is relative to the clock of whoever evaluates it, so it reads the server's $$NOW.
+    case "timeSince": {
+      const operand = getOperandAt(operands, 0, "timeSince requires an operand");
+      if (celKind(operand, mapper) !== "timestamp") {
+        throw new UnsupportedQueryPlanError("timeSince() is translated only over a timestamp");
+      }
+      return {
+        $let: {
+          vars: { cerbos_instant: build(operand, mapper) },
+          in: { $cond: [{ $eq: [{ $type: "$$cerbos_instant" }, "date"] }, { $subtract: ["$$NOW", "$$cerbos_instant"] }, null] },
+        },
+      };
+    }
+    case "hierarchy":
+      return buildHierarchy(operands, mapper);
+    case "ancestorOf":
+      return hierarchyPrefix(operands.map((op) => build(op, mapper)), "ancestor");
+    case "descendentOf":
+      return hierarchyPrefix(operands.map((op) => build(op, mapper)).reverse(), "ancestor");
+    case "overlaps":
+      return hierarchyPrefix(operands.map((op) => build(op, mapper)), "overlaps");
+    case "list":
+      return operands.map((op) => build(op, mapper));
+    case "double":
+      return buildDouble(operands, mapper);
+    case "if": {
+      const [condition, whenTrue, whenFalse] = operands;
+      if (!condition || !whenTrue || !whenFalse) {
+        throw new UnsupportedQueryPlanError("if operator requires three operands");
+      }
+      return { $cond: { if: build(condition, mapper), then: build(whenTrue, mapper), else: build(whenFalse, mapper) } };
+    }
+    case "index": {
+      if (isMapLiteralIndex(operands)) return buildMapLookup(operands, mapper);
+      const [collection, index] = constantIndex(operands);
+      // A negative or fractional position is an error on every document; its guard keeps every
+      // document out. $arrayElemAt keeps each element's BSON type, so `true` is never `1` here.
+      if (index === undefined) return null;
+      return { $arrayElemAt: [build(collection, mapper), index] };
+    }
+    case "get-field": {
+      const [input, field] = operands;
+      if (!input || !field || !isVariable(field)) {
+        throw new UnsupportedQueryPlanError("get-field requires an input and a field name");
+      }
+      return { $getField: { field: field.name, input: build(input, mapper) } };
+    }
+    // $size for an array, $strLenCP for a string, and null — an error to CEL — otherwise. A
+    // relation reached through a parent array is already the one parent's list, or null where
+    // no parent is stored: an absent to-one parent is UNKNOWN, not 0 (#309).
+    case "size":
+      return {
+        $let: {
+          vars: { cerbos_sized: build(getOperandAt(operands, 0, "size operator requires an operand"), mapper) },
+          in: {
+            $cond: [
+              { $isArray: "$$cerbos_sized" },
+              { $size: "$$cerbos_sized" },
+              { $cond: [{ $eq: [{ $type: "$$cerbos_sized" }, "string"] }, { $strLenCP: "$$cerbos_sized" }, null] },
+            ],
+          },
+        },
+      };
+    case "matches": {
+      const [input, pattern] = operands;
+      if (!input || !pattern || !isValue(pattern) || !isString(pattern.value)) {
+        throw new UnsupportedQueryPlanError("matches operator requires two operands");
+      }
+      const lowered = lowerRe2PatternForMongo(pattern.value);
+      // An invalid RE2 pattern raises in CEL; its guard keeps every document out.
+      if ("invalid" in lowered) return null;
+      return { $regexMatch: { input: build(input, mapper), regex: buildConstant(lowered.pattern) } };
+    }
+    case "contains":
+      return buildStringPredicate(expression, mapper, (index) => ({ $gte: [index, 0] }));
+    case "startsWith":
+      return buildStringPredicate(expression, mapper, (index) => ({ $eq: [index, 0] }));
+    case "endsWith":
+      return buildStringPredicate(expression, mapper, (_index, receiver, needle) => {
+        const receiverLength = { $strLenCP: receiver };
+        const needleLength = { $strLenCP: needle };
+        return {
+          $cond: {
+            if: { $gte: [receiverLength, needleLength] },
+            then: { $eq: [{ $substrCP: [receiver, { $subtract: [receiverLength, needleLength] }, needleLength] }, needle] },
+            else: false,
+          },
+        };
+      });
+    case "timestamp": {
+      const operand = getOperandAt(operands, 0, "timestamp operator requires an operand");
+      if (isValue(operand)) {
+        if (!isString(operand.value) || !isRfc3339Timestamp(operand.value)) {
+          throw new UnsupportedQueryPlanError(
+            "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range",
+          );
+        }
+        return new Date(operand.value);
+      }
+      return buildTimestampConversion(build(operand, mapper));
+    }
+    default:
+      throw new UnsupportedQueryPlanError(`Unsupported operator inside aggregation expression: ${operator}`);
+  }
+};
+
+/** The evaluation guards for every guarded expression below `operand`, outermost first. */
+export const buildEvaluationGuards = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): MongooseFilter[] => {
+  if (!isExpression(operand)) return [];
+  const guard = guardFor(operand, mapper);
+  // A lambda's body reads its own element, and its value is already null where the body
+  // raises; the collection is guarded where the value is.
+  if (LAMBDA_OPERATORS.has(operand.operator)) return guard ? [guard] : [];
+  const nested =
+    operand.operator === "if" && operand.operands.length === 3
+      ? branchGuards(operand, mapper)
+      : operand.operands.flatMap((child) => buildEvaluationGuards(child, mapper));
+  return guard ? [guard, ...nested] : nested;
+};
+
+const isExprGuard = (guard: MongooseFilter): boolean =>
+  Object.keys(guard).length === 1 && "$expr" in guard;
+
+/**
+ * A ternary evaluates only the branch its condition selects, so a branch's guards apply only
+ * where it is selected: `{$cond: [condition, then-guards, else-guards]}` inside `$expr`. A guard
+ * that is not an `$expr` cannot sit in a `$cond`, so then every guard applies unconditionally,
+ * which denies more than CEL does but never less.
+ */
+const branchGuards = (expression: PlanExpression, mapper: Mapper): MongooseFilter[] => {
+  const [condition, whenTrue, whenFalse] = expression.operands as [
+    PlanExpressionOperand,
+    PlanExpressionOperand,
+    PlanExpressionOperand,
+  ];
+  const conditionGuards = buildEvaluationGuards(condition, mapper);
+  const thenGuards = buildEvaluationGuards(whenTrue, mapper);
+  const elseGuards = buildEvaluationGuards(whenFalse, mapper);
+  if (thenGuards.length === 0 && elseGuards.length === 0) return conditionGuards;
+  if (![...thenGuards, ...elseGuards].every(isExprGuard)) {
+    return [...conditionGuards, ...thenGuards, ...elseGuards];
+  }
+  const selected = [thenGuards, elseGuards].map((guards) =>
+    guards.length === 0 ? true : { $and: guards.map((guard) => guard["$expr"]) },
+  );
+  return [...conditionGuards, { $expr: { $cond: [build(condition, mapper), ...selected] } }];
+};
+
+export const guardFor = (
+  expression: PlanExpression,
+  mapper: Mapper,
+): MongooseFilter | undefined => {
+  const { operator, operands } = expression;
+  if (isComparison(operator) && temporalMismatch(operands[0], operands[1], mapper)) {
+    // No overload: an ordering raises on every document. `==` is false and needs no guard.
+    return ORDERINGS.has(operator) ? { $expr: false } : undefined;
+  }
+  if (NOT_NULL_GUARDED.has(operator)) return notNullGuard(expression, mapper);
+  switch (operator) {
+    case "lt":
+    case "le":
+    case "gt":
+    case "ge":
+      return { $expr: orderable(build(operands[0]!, mapper), build(operands[1]!, mapper)) };
+    case "eq":
+    case "ne": {
+      const [left, right] = operands;
+      if (!left || !right || [left, right].some((op) => isValue(op) && !isComposite(op.value))) {
+        return undefined;
+      }
+      return { $expr: equalityDecidable(build(left, mapper), build(right, mapper)) };
+    }
+    // MongoDB reads any value as truthy or falsy, where CEL's logic has no overload for anything
+    // but a boolean.
+    case "and":
+    case "or":
+    case "not":
+      return { $expr: { $and: operands.map((op) => ({ $eq: [{ $type: build(op, mapper) }, "bool"] })) } };
+    // A ternary over anything but a boolean condition raises in CEL; $cond reads any value as
+    // truthy or falsy instead.
+    case "if":
+      return {
+        $expr: { $eq: [{ $type: build(getOperandAt(operands, 0, "if requires a condition"), mapper) }, "bool"] },
+      };
+    // A literal is validated at translation time; only a field can fail per document.
+    case "timestamp":
+      return operands[0] && !isValue(operands[0]) ? notNullGuard(expression, mapper) : undefined;
+    case "index": {
+      // A key the map literal does not hold is an error to CEL, and null here.
+      if (isMapLiteralIndex(operands)) return notNullGuard(expression, mapper);
+      const [collectionOperand, index] = constantIndex(operands);
+      // CEL raises for a negative or fractional list position whatever the document holds.
+      if (index === undefined) return { $expr: false };
+      // An out-of-range index is an error to CEL, not a missing value.
+      const collection = build(collectionOperand, mapper);
+      return {
+        $expr: { $cond: { if: { $isArray: [collection] }, then: { $gt: [{ $size: [collection] }, index] }, else: false } },
+      };
+    }
+    // A field the element lacks is a missing-key error to CEL, and so is a stored null on a field
+    // the relation declares nullable; $getField yields missing or null, which a negated
+    // comparison would read as unequal.
+    case "get-field": {
+      const [input, field] = operands;
+      if (!input || !field || !isVariable(field)) return undefined;
+      const value = buildAggregationExpressionFromExpression(expression, mapper);
+      const collection = isExpression(input) && input.operator === "index" ? input.operands[0] : undefined;
+      const nullable =
+        collection !== undefined && isVariable(collection) && isNullableReference(`${collection.name}.${field.name}`, mapper);
+      return {
+        $expr: nullable ? { $ne: [{ $ifNull: [value, null] }, null] } : { $ne: [{ $type: value }, "missing"] },
+      };
+    }
+    case "matches": {
+      const input = getOperandAt(operands, 0, "matches operator requires an input operand");
+      const pattern = operands[1];
+      // An invalid RE2 pattern raises whatever the document holds.
+      if (pattern && isValue(pattern) && isString(pattern.value) && "invalid" in lowerRe2PatternForMongo(pattern.value)) {
+        return { $expr: false };
+      }
+      return { $expr: { $eq: [{ $type: build(input, mapper) }, "string"] } };
+    }
+    default:
+      return undefined;
+  }
+};
+
+const notNullGuard = (expression: PlanExpression, mapper: Mapper): MongooseFilter => ({
+  $expr: { $ne: [buildAggregationExpressionFromExpression(expression, mapper), null] },
+});
+
+/** Binds each operand to `$$operand<i>` so an expression can read it more than once. */
+const withOperands = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  body: (values: string[]) => unknown,
+): unknown => {
+  const names = operands.map((_, index) => `operand${index}`);
+  return {
+    $let: {
+      vars: Object.fromEntries(names.map((name, index) => [name, build(operands[index]!, mapper)])),
+      in: body(names.map((name) => `$$${name}`)),
+    },
+  };
+};
+
+/**
+ * CEL overloads `+` on strings, lists, timestamps and durations, and MongoDB's `$add` takes
+ * numbers and dates only, aborting the whole query otherwise. A constant settles the overload,
+ * since CEL has no mixed-type `+`; with none, the operands' runtime types do, per document: two
+ * strings concatenate, two numbers add as doubles, two lists concatenate, and anything else has
+ * no overload (null).
+ */
+const buildAdd = (operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  if (operands.some((op) => isValue(op) && isString(op.value))) {
+    // $concat raises on anything but a string, where CEL has no overload: null instead.
+    return withOperands(operands, mapper, (values) => ({
+      $cond: [{ $and: values.map((value) => ({ $eq: [{ $type: value }, "string"] })) }, { $concat: values }, null],
+    }));
+  }
+  if (operands.some((op) => isTemporal(op, mapper))) return buildTemporalArithmetic("add", operands, mapper);
+  if (operands.some(isListTyped)) {
+    return withOperands(operands, mapper, (values) => ({
+      $cond: [{ $and: values.map((value) => ({ $isArray: value })) }, { $concatArrays: values }, null],
+    }));
+  }
+  if (operands.some((op) => isIntTyped(op) || isValue(op))) return buildArithmetic("add", operands, mapper);
+  return withOperands(operands, mapper, (values) => {
+    const all = (check: (value: string) => unknown) => ({ $and: values.map(check) });
+    return {
+      $switch: {
+        branches: [
+          { case: all((value) => ({ $eq: [{ $type: value }, "string"] })), then: { $concat: values } },
+          { case: all((value) => ({ $isNumber: value })), then: { $add: values.map((value) => ({ $toDouble: value })) } },
+          { case: all((value) => ({ $isArray: value })), then: { $concatArrays: values } },
+        ],
+        default: null,
+      },
+    };
+  });
+};
+
+/**
+ * `needle in list`: null (a CEL error) where the list is not an array. `$in` compares as `$eq`
+ * does, which agrees with CEL's equality for scalars but NaN, which CEL never finds; a map or
+ * list needle is null too, since MongoDB compares embedded documents in stored field order.
+ */
+const buildIn = (operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  const [needle, list] = operands;
+  if (!needle || !list) throw new UnsupportedQueryPlanError("in requires two operands");
+  if (isVariable(list) && relationOfReference(list.name, mapper)?.type === "one") {
+    throw new UnsupportedQueryPlanError(
+      "`in` over a to-one relation tests the related object's keys in CEL, and the adapter has no expression for a subdocument's field names",
+    );
+  }
+  return {
+    $let: {
+      vars: { cerbos_needle: build(needle, mapper), cerbos_list: build(list, mapper) },
+      in: {
+        $switch: {
+          branches: [
+            { case: { $not: [{ $isArray: "$$cerbos_list" }] }, then: null },
+            { case: { $in: [{ $type: "$$cerbos_needle" }, ["object", "array"]] }, then: null },
+            { case: { $eq: ["$$cerbos_needle", Number.NaN] }, then: false },
+          ],
+          default: { $in: ["$$cerbos_needle", "$$cerbos_list"] },
+        },
+      },
+    },
+  };
+};
+
+/**
+ * Binds the two operands to `$$cerbos_left` and `$$cerbos_right`, and evaluates `body` where both
+ * are lists of scalars; null (a CEL error) where either is not a list. A list or map element
+ * makes the whole value null too, since MongoDB compares embedded documents in stored field order
+ * where CEL's maps ignore it (which denies where CEL might allow).
+ */
+const scalarLists = (
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+  body: () => unknown,
+): unknown => {
+  const [left, right] = operands;
+  if (!left || !right) throw new UnsupportedQueryPlanError("A list function requires two operands");
+  const scalars = (list: string) => ({
+    $allElementsTrue: [{ $map: { input: list, in: { $not: [{ $in: [{ $type: "$$this" }, ["object", "array"]] }] } } }],
+  });
+  return {
+    $let: {
+      vars: { cerbos_left: build(left, mapper), cerbos_right: build(right, mapper) },
+      in: {
+        $cond: [
+          { $and: [{ $isArray: "$$cerbos_left" }, { $isArray: "$$cerbos_right" }] },
+          { $cond: [{ $and: [scalars("$$cerbos_left"), scalars("$$cerbos_right")] }, body(), null] },
+          null,
+        ],
+      },
+    },
+  };
+};
+
+type CelKind = "string" | "number" | "bool" | "timestamp" | "duration";
+
+const TEMPORAL_RESULTS: Record<string, CelKind> = {
+  "add,timestamp,duration": "timestamp",
+  "add,duration,timestamp": "timestamp",
+  "sub,timestamp,duration": "timestamp",
+  "sub,timestamp,timestamp": "duration",
+  "add,duration,duration": "duration",
+  "sub,duration,duration": "duration",
+};
+
+/** The CEL type of a temporal `+` or `-`, or undefined where CEL has no such overload. */
+const temporalResult = (operator: string, kinds: (CelKind | undefined)[]): CelKind | undefined =>
+  TEMPORAL_RESULTS[[operator, ...kinds].join(",")];
+
+/**
+ * The CEL type `operand` evaluates to, as far as the plan and the mapper settle it: a constant's
+ * own, a field's declared `valueType` (a `dateTime` field is the string the application sends),
+ * and the result type of an operator that has one.
+ */
+const celKind = (operand: PlanExpressionOperand, mapper: Mapper): CelKind | undefined => {
+  if (isValue(operand)) {
+    const { value } = operand;
+    if (isString(value)) return "string";
+    if (typeof value === "boolean") return "bool";
+    return isNumber(value) ? "number" : undefined;
+  }
+  if (isVariable(operand)) {
+    const type = valueTypeOf(operand.name, mapper);
+    return type === "string" || type === "dateTime"
+      ? "string"
+      : type === "number"
+        ? "number"
+        : type === "boolean"
+          ? "bool"
+          : undefined;
+  }
+  if (!isExpression(operand)) return undefined;
+  switch (operand.operator) {
+    case "timestamp":
+      return "timestamp";
+    case "duration":
+    case "timeSince":
+      return "duration";
+    case "add":
+    case "sub":
+      return temporalResult(operand.operator, operand.operands.map((op) => celKind(op, mapper)));
+    case "upperAscii":
+    case "string":
+      return "string";
+    case "int":
+    case "double":
+    case "size":
+      return "number";
+    default:
+      return undefined;
+  }
+};
+
+const isTemporal = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
+  const kind = celKind(operand, mapper);
+  return kind === "timestamp" || kind === "duration";
+};
+
+/**
+ * Whether a comparison sets a timestamp or a duration against a value of another known CEL type.
+ * An ordering between them has no overload, which raises; `==` between them is false. MongoDB
+ * would order a date against a string by BSON type, and a duration against any number.
+ */
+export const temporalMismatch = (
+  left: PlanExpressionOperand | undefined,
+  right: PlanExpressionOperand | undefined,
+  mapper: Mapper,
+): boolean => {
+  if (!left || !right) return false;
+  const kinds = [celKind(left, mapper), celKind(right, mapper)];
+  if (kinds.includes(undefined) || kinds[0] === kinds[1]) return false;
+  return kinds.some((kind) => kind === "timestamp" || kind === "duration");
+};
+
+/**
+ * timestamp ± duration, timestamp - timestamp and duration ± duration, with a timestamp as a BSON
+ * date and a duration as its milliseconds. A timestamp computed outside CEL's range is an error.
+ */
+const buildTemporalArithmetic = (
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+): unknown => {
+  const kinds = operands.map((op) => celKind(op, mapper));
+  const result = temporalResult(operator, kinds);
+  if (result === undefined) {
+    throw new UnsupportedQueryPlanError(
+      `${operator} over ${kinds.map((kind) => kind ?? "an untyped operand").join(" and ")}: CEL's ` +
+        "only temporal overloads are timestamp ± duration, timestamp - timestamp and duration ± duration",
+    );
+  }
+  return withOperands(operands, mapper, (values) => {
+    const typed = values.map((value, index) =>
+      kinds[index] === "timestamp" ? { $eq: [{ $type: value }, "date"] } : { $isNumber: value },
+    );
+    let computed: unknown = { [ARITHMETIC[operator]!]: values };
+    if (result === "timestamp") {
+      computed = {
+        $let: {
+          vars: { cerbos_instant: computed },
+          in: {
+            $cond: [
+              { $and: [{ $gte: ["$$cerbos_instant", MIN_CEL_TIMESTAMP] }, { $lte: ["$$cerbos_instant", MAX_CEL_TIMESTAMP] }] },
+              "$$cerbos_instant",
+              null,
+            ],
+          },
+        },
+      };
+    }
+    return { $cond: [{ $and: typed }, computed, null] };
+  });
+};
+
+/**
+ * Whether `operand` is a list the plan settles as one: a list constant or constructor, a ternary
+ * whose branches are both lists, a `+` with a list operand, or a list function.
+ */
+export const isListTyped = (operand: PlanExpressionOperand): boolean => {
+  if (isValue(operand)) return Array.isArray(operand.value);
+  if (!isExpression(operand)) return false;
+  switch (operand.operator) {
+    case "list":
+    case "intersect":
+    case "except":
+    case "filter":
+    case "map":
+      return true;
+    case "add":
+      return operand.operands.some(isListTyped);
+    case "if":
+      return operand.operands.length === 3 && operand.operands.slice(1).every(isListTyped);
+    default:
+      return false;
+  }
+};
+
+const isMapLiteralIndex = (operands: PlanExpressionOperand[]): boolean => {
+  const [collection, key] = operands;
+  return collection !== undefined && isValue(collection) && isMap(collection.value) && key !== undefined;
+};
+
+/**
+ * A map literal indexed by a key the document supplies (`{"a": "X"}[R.attr.k]`): the value under
+ * that key, or null, CEL's no-such-key error, where the map holds none. Only a map of scalars
+ * other than null and NaN is read this way: a null value could not be told from the error.
+ */
+const buildMapLookup = (operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  const [map, key] = operands as [PlanExpressionOperand & { value: Record<string, unknown> }, PlanExpressionOperand];
+  const entries = Object.entries(map.value);
+  if (!entries.every(([, value]) => value !== null && !isMap(value) && isComparableElement(value))) {
+    throw new UnsupportedQueryPlanError(
+      "A map literal is indexed only when every value is a scalar other than null and NaN: a null value reads as the missing key's error",
+    );
+  }
+  if (entries.length === 0) return null;
+  return {
+    $let: {
+      vars: { cerbos_key: build(key, mapper) },
+      in: {
+        $switch: {
+          branches: entries.map(([name, value]) => ({
+            case: { $eq: ["$$cerbos_key", buildConstant(name)] },
+            then: buildConstant(value),
+          })),
+          default: null,
+        },
+      },
+    },
+  };
+};
+
+/**
+ * Cerbos's hierarchy(): the segments of a string split on the separator ("." when none is given;
+ * an empty one splits into code points, as Go's strings.Split does), or a list of strings as it
+ * is. Anything else is null (a CEL error).
+ */
+const buildHierarchy = (operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  const [path, separator] = operands;
+  if (!path) throw new UnsupportedQueryPlanError("hierarchy requires a path");
+  if (separator && !(isValue(separator) && isString(separator.value))) {
+    throw new UnsupportedQueryPlanError("hierarchy separator must be a string constant");
+  }
+  const delimiter = separator && isValue(separator) ? (separator.value as string) : ".";
+  const split =
+    delimiter === ""
+      ? { $map: { input: { $range: [0, { $strLenCP: "$$cerbos_path" }] }, in: { $substrCP: ["$$cerbos_path", "$$this", 1] } } }
+      : { $split: ["$$cerbos_path", buildConstant(delimiter)] };
+  const branches: unknown[] = [{ case: { $eq: [{ $type: "$$cerbos_path" }, "string"] }, then: split }];
+  if (!separator) {
+    const everyString = {
+      $allElementsTrue: [{ $map: { input: "$$cerbos_path", in: { $eq: [{ $type: "$$this" }, "string"] } } }],
+    };
+    branches.push({ case: { $and: [{ $isArray: "$$cerbos_path" }, everyString] }, then: "$$cerbos_path" });
+  }
+  return { $let: { vars: { cerbos_path: build(path, mapper) }, in: { $switch: { branches, default: null } } } };
+};
+
+/**
+ * ancestorOf (the second strictly longer, starting with the first) and overlaps (the shorter
+ * starting the longer) between two hierarchies; null where either is not one.
+ */
+const hierarchyPrefix = (hierarchies: unknown[], relation: "ancestor" | "overlaps"): unknown => {
+  const [first, second] = hierarchies;
+  if (first === undefined || second === undefined) {
+    throw new UnsupportedQueryPlanError("a hierarchy comparison requires two operands");
+  }
+  const starts = (short: string, long: string) => ({
+    $cond: [{ $eq: [{ $size: short }, 0] }, true, { $eq: [{ $slice: [long, { $size: short }] }, short] }],
+  });
+  const compared =
+    relation === "ancestor"
+      ? {
+          $and: [
+            { $gt: [{ $size: "$$cerbos_second" }, { $size: "$$cerbos_first" }] },
+            starts("$$cerbos_first", "$$cerbos_second"),
+          ],
+        }
+      : {
+          $cond: [
+            { $lte: [{ $size: "$$cerbos_first" }, { $size: "$$cerbos_second" }] },
+            starts("$$cerbos_first", "$$cerbos_second"),
+            starts("$$cerbos_second", "$$cerbos_first"),
+          ],
+        };
+  return {
+    $let: {
+      vars: { cerbos_first: first, cerbos_second: second },
+      in: { $cond: [{ $and: [{ $isArray: "$$cerbos_first" }, { $isArray: "$$cerbos_second" }] }, compared, null] },
+    },
+  };
+};
+
+/**
+ * A CEL comparison inside `$expr`. MongoDB orders NaN below every number and equal to itself,
+ * where every CEL comparison with NaN is false but `!=`, which is true. Two lists are equal
+ * element by element, so NaN inside them is compared the same way (see `equalityDecidable` for
+ * the lists and maps that are not compared at all).
+ */
+export const compare = (operator: ComparisonOperator, left: unknown, right: unknown): unknown => {
+  let scalar: unknown = { [COMPARISON_OPERATORS[operator]]: ["$$left", "$$right"] };
+  if (operator === "eq" || operator === "ne") {
+    // Every array operator reads an operand that is an array on any document: MongoDB 9 folds a
+    // constant operand before $cond would skip the branch.
+    const lists = (variable: string) => ({ $cond: [{ $isArray: variable }, variable, []] });
+    const equal = {
+      $cond: [
+        { $and: [{ $isArray: "$$left" }, { $isArray: "$$right" }] },
+        {
+          $and: [
+            { $eq: [{ $size: lists("$$left") }, { $size: lists("$$right") }] },
+            {
+              $allElementsTrue: [
+                {
+                  $map: {
+                    input: { $zip: { inputs: [lists("$$left"), lists("$$right")] } },
+                    as: "cerbos_pair",
+                    in: {
+                      $and: [
+                        { $ne: [{ $arrayElemAt: ["$$cerbos_pair", 0] }, Number.NaN] },
+                        { $eq: [{ $arrayElemAt: ["$$cerbos_pair", 0] }, { $arrayElemAt: ["$$cerbos_pair", 1] }] },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        { $eq: ["$$left", "$$right"] },
+      ],
+    };
+    scalar = operator === "eq" ? equal : { $not: [equal] };
+  }
+  return {
+    $let: {
+      vars: { left, right },
+      in: {
+        $cond: [{ $or: [{ $eq: ["$$left", Number.NaN] }, { $eq: ["$$right", Number.NaN] }] }, operator === "ne", scalar],
+      },
+    },
+  };
+};
+
+/**
+ * Whether MongoDB's equality can decide CEL's between `left` and `right`: not between two maps
+ * (MongoDB compares embedded documents in stored field order, CEL ignores it), nor between two
+ * lists where either holds a list or a map. Those are kept out under either polarity.
+ */
+const equalityDecidable = (left: unknown, right: unknown): unknown => {
+  const composite = (list: string) => ({
+    $anyElementTrue: [
+      { $map: { input: { $cond: [{ $isArray: list }, list, []] }, in: { $in: [{ $type: "$$this" }, ["object", "array"]] } } },
+    ],
+  });
+  return {
+    $let: {
+      vars: { left, right },
+      in: {
+        $not: [
+          {
+            $or: [
+              { $and: [{ $eq: [{ $type: "$$left" }, "object"] }, { $eq: [{ $type: "$$right" }, "object"] }] },
+              {
+                $and: [
+                  { $isArray: "$$left" },
+                  { $isArray: "$$right" },
+                  { $or: [composite("$$left"), composite("$$right")] },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+};
+
+/**
+ * Whether CEL can order `left` against `right` at all: two numbers, two strings, two booleans or
+ * two timestamps. Anything else is a no-such-overload error, which denies under either polarity,
+ * where MongoDB orders every pair of BSON types. cel-go answers an ordering whose left side is
+ * NaN false whatever the right side is, and one whose right side is NaN false when the left side
+ * is a number, a string, a boolean or a timestamp; it raises for null, a list or a map on the left.
+ */
+export const orderable = (left: unknown, right: unknown): unknown => ({
+  $let: {
+    vars: { left, right },
+    in: {
+      $or: [
+        { $eq: ["$$left", Number.NaN] },
+        {
+          $and: [
+            { $eq: ["$$right", Number.NaN] },
+            { $in: [{ $type: "$$left" }, ["double", "int", "long", "decimal", "string", "bool", "date"]] },
+          ],
+        },
+        { $and: [{ $isNumber: "$$left" }, { $isNumber: "$$right" }] },
+        {
+          $and: [
+            { $eq: [{ $type: "$$left" }, { $type: "$$right" }] },
+            { $in: [{ $type: "$$left" }, ["string", "bool", "date"]] },
+          ],
+        },
+      ],
+    },
+  },
+});
+
+/**
+ * CEL arithmetic over doubles: every attribute number reaches CEL as a double. MongoDB keeps an
+ * int an int, so int 0 times -1 is 0 where CEL's double is -0.0, and 1 over that is +Infinity
+ * where CEL's is -Infinity; so every operand is converted with `$toDouble` first. A non-number
+ * operand is an error to CEL and null here (MongoDB would abort the query instead).
+ *
+ * Division is IEEE 754's, which `$divide` is except by zero, where it aborts the query: x / 0 is
+ * NaN when x is NaN or zero, and otherwise an infinity whose sign is x's, flipped by a negative
+ * zero divisor (`$toString` spells -0.0 "-0").
+ *
+ * Arithmetic over a CEL int is int arithmetic instead (`buildIntArithmetic`).
+ */
+const buildArithmetic = (operator: string, operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  if (operands.some((op) => isTemporal(op, mapper))) return buildTemporalArithmetic(operator, operands, mapper);
+  if (operands.some(isIntTyped)) return buildIntArithmetic(operator, operands, mapper);
+  return withOperands(operands, mapper, (values) => {
+    const doubles = values.map((value) => ({ $toDouble: value }));
+    let result: unknown;
+    if (operator === "div") {
+      const [numerator, denominator] = doubles;
+      const divisor = operands[1]!;
+      if (isValue(divisor) && isNumber(divisor.value)) {
+        result = divisor.value === 0 ? divideByZero(numerator, denominator, divisor.value) : { $divide: doubles };
+      } else {
+        result = { $cond: [{ $eq: [denominator, 0] }, divideByZero(numerator, denominator), { $divide: doubles }] };
+      }
+    } else {
+      result = { [ARITHMETIC[operator]!]: doubles };
+    }
+    return { $cond: [{ $and: values.map((value) => ({ $isNumber: value })) }, result, null] };
+  });
+};
+
+/** A constant denominator's sign is settled here rather than read back from the server. */
+const divideByZero = (numerator: unknown, denominator: unknown, constant?: number): unknown => {
+  const negativeZero = constant === undefined ? { $eq: [{ $toString: denominator }, "-0"] } : Object.is(constant, -0);
+  return {
+    $cond: [
+      { $or: [{ $eq: [numerator, Number.NaN] }, { $eq: [numerator, 0] }] },
+      Number.NaN,
+      { $cond: [{ $eq: [{ $lt: [numerator, 0] }, negativeZero] }, Infinity, -Infinity] },
+    ],
+  };
+};
+
+const buildString = (operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  const operand = getOperandAt(operands, 0, "string conversion requires an operand");
+  if (rendersUntypedIntegralConstant(operand)) {
+    throw new UnsupportedQueryPlanError(
+      "string() over an integral constant whose int or double type the plan does not carry: " +
+        'CEL renders the int 1000000 as "1000000" and the double as "1e+06", and the plan ' +
+        "ships both as the same bare number",
+    );
+  }
+  const input = build(operand, mapper);
+  // A CEL int renders in plain decimal, which $toString of a long is.
+  if (isIntTyped(operand)) return { $cond: [{ $isNumber: input }, { $toString: input }, null] };
+  return {
+    $switch: {
+      branches: [
+        { case: { $in: [{ $type: input }, ["int", "long", "double", "decimal"]] }, then: celDoubleToString({ $toDouble: input }) },
+        { case: { $in: [{ $type: input }, ["string", "bool"]] }, then: { $toString: input } },
+      ],
+      default: null,
+    },
+  };
+};
+
+/**
+ * Whether string() over the operand could render a numeric constant, bare or as a ternary
+ * branch, whose int or double type the plan dropped: the plan ships 1000000 and 1000000.0 alike.
+ */
+const rendersUntypedIntegralConstant = (operand: PlanExpressionOperand): boolean => {
+  if (isValue(operand)) {
+    return isNumber(operand.value) && Number.isInteger(operand.value) && Math.abs(operand.value) >= 1e6;
+  }
+  if (!isExpression(operand) || operand.operator !== "if") return false;
+  // A branch CEL types int fixes the ternary's type, and so every literal branch's.
+  if (isIntTyped(operand)) return false;
+  return operand.operands.slice(1).some(rendersUntypedIntegralConstant);
+};
+
+/**
+ * int() as cel-go converts: a number truncates toward zero, and raises outside (-2^63, 2^63),
+ * NaN and the infinities included; a string must be a whole base-10 int64, an optional sign then
+ * ASCII digits. Anything else raises, and is null here. $convert on its own would parse a
+ * numeric prefix and round.
+ */
+const buildInt = (operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  const input = build(getOperandAt(operands, 0, "int conversion requires an operand"), mapper);
+  return {
+    $let: {
+      vars: { input },
+      in: {
+        $switch: {
+          branches: [
+            {
+              case: { $isNumber: "$$input" },
+              then: {
+                $let: {
+                  vars: { double: { $toDouble: "$$input" } },
+                  in: {
+                    $cond: [
+                      { $and: [{ $gt: ["$$double", MIN_CEL_INT_DOUBLE] }, { $lt: ["$$double", MAX_CEL_INT_DOUBLE] }] },
+                      { $toLong: { $trunc: ["$$double"] } },
+                      null,
+                    ],
+                  },
+                },
+              },
+            },
+            {
+              case: { $eq: [{ $type: "$$input" }, "string"] },
+              then: {
+                $cond: [
+                  { $regexMatch: { input: "$$input", regex: CEL_INT_STRING_PATTERN } },
+                  { $convert: { input: { $ltrim: { input: "$$input", chars: "+" } }, to: "long", onError: null, onNull: null } },
+                  null,
+                ],
+              },
+            },
+          ],
+          default: null,
+        },
+      },
+    },
+  };
+};
+
+/**
+ * double() as cel-go converts: a number as itself, and a string that is a decimal floating-point
+ * literal. Go's ParseFloat also reads "Inf", "NaN" and hexadecimal forms, which this leaves to
+ * null, and denied, where CEL might allow.
+ */
+const buildDouble = (operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  const input = build(getOperandAt(operands, 0, "double conversion requires an operand"), mapper);
+  return {
+    $let: {
+      vars: { input },
+      in: {
+        $switch: {
+          branches: [
+            { case: { $isNumber: "$$input" }, then: { $toDouble: "$$input" } },
+            {
+              case: { $eq: [{ $type: "$$input" }, "string"] },
+              then: {
+                $cond: [
+                  { $regexMatch: { input: "$$input", regex: CEL_DOUBLE_STRING_PATTERN } },
+                  {
+                    $convert: {
+                      input: { $replaceAll: { input: "$$input", find: "_", replacement: "" } },
+                      to: "double",
+                      onError: null,
+                      onNull: null,
+                    },
+                  },
+                  null,
+                ],
+              },
+            },
+          ],
+          default: null,
+        },
+      },
+    },
+  };
+};
+
+/**
+ * Whether CEL types `operand` int: int(), size(), `%`, and arithmetic or a ternary over one. CEL's
+ * checker then types every literal beside it int too.
+ */
+export const isIntTyped = (operand: PlanExpressionOperand): boolean => {
+  if (!isExpression(operand)) return false;
+  switch (operand.operator) {
+    case "int":
+    case "size":
+    case "mod":
+      return true;
+    case "add":
+    case "sub":
+    case "mult":
+    case "div":
+      return operand.operands.some(isIntTyped);
+    case "if":
+      return operand.operands.slice(1).some(isIntTyped);
+    default:
+      return false;
+  }
+};
+
+/**
+ * Whether `operand` may stand beside a CEL int: an int-typed expression, a numeric literal, or a
+ * ternary whose branches all are, which CEL's checker types int beside an int.
+ */
+const isIntOperand = (operand: PlanExpressionOperand): boolean =>
+  isIntTyped(operand) ||
+  (isValue(operand) && isNumber(operand.value)) ||
+  (isExpression(operand) && operand.operator === "if" && operand.operands.slice(1).every(isIntOperand));
+
+/**
+ * Whether `operand` evaluates to a CEL int (or is a numeric literal beside one), as an aggregation
+ * boolean: int(), size() and `%` are ints, arithmetic is an int when every operand is, a ternary
+ * when the branch it selects is, and an attribute never is.
+ */
+const intSelected = (operand: PlanExpressionOperand, mapper: Mapper): unknown => {
+  if (isValue(operand)) return isNumber(operand.value);
+  if (!isExpression(operand)) return false;
+  switch (operand.operator) {
+    case "int":
+    case "size":
+    case "mod":
+      return true;
+    case "add":
+    case "sub":
+    case "mult":
+    case "div":
+    {
+      const parts = operand.operands.map((op) => intSelected(op, mapper));
+      if (parts.includes(false)) return false;
+      const open = parts.filter((part) => part !== true);
+      return open.length === 0 ? true : { $and: open };
+    }
+    case "if": {
+      const [condition, whenTrue, whenFalse] = operand.operands;
+      if (!condition || !whenTrue || !whenFalse) return false;
+      const branches = [intSelected(whenTrue, mapper), intSelected(whenFalse, mapper)];
+      if (branches[0] === branches[1] && typeof branches[0] === "boolean") return branches[0];
+      return { $cond: [build(condition, mapper), ...branches] };
+    }
+    default:
+      return false;
+  }
+};
+
+const INT64_MIN = -9223372036854775808;
+const SAFE_INTEGER = 9007199254740992;
+
+/**
+ * CEL int arithmetic over int64. A literal beside an int is an int; an attribute beside one is a
+ * double, which has no overload with an int, so the whole expression raises and is null here.
+ * Overflow raises in CEL, where MongoDB widens a long to a double; division and `%` by zero
+ * raise; division truncates toward zero, spelled exactly as (n - n % d) / d while both are within
+ * 2^53 and null (denied) beyond.
+ */
+const buildIntArithmetic = (operator: string, operands: PlanExpressionOperand[], mapper: Mapper): unknown => {
+  if (!operands.every(isIntOperand)) return null;
+  for (const op of operands) {
+    if (isValue(op) && !Number.isInteger(op.value)) {
+      throw new UnsupportedQueryPlanError("A fractional literal beside a CEL int does not type-check");
+    }
+  }
+  return withOperands(operands, mapper, (values) => {
+    const longs = values.map((value) => ({ $toLong: value }));
+    let result: unknown;
+    if (operator === "div" || operator === "mod") {
+      const [numerator, denominator] = longs;
+      const invalid =
+        operator === "div"
+          ? {
+              $or: [
+                { $eq: [denominator, 0] },
+                { $gt: [{ $abs: numerator }, SAFE_INTEGER] },
+                { $gt: [{ $abs: denominator }, SAFE_INTEGER] },
+              ],
+            }
+          : { $or: [{ $eq: [denominator, 0] }, { $and: [{ $eq: [numerator, INT64_MIN] }, { $eq: [denominator, -1] }] }] };
+      const quotient =
+        operator === "div"
+          ? { $toLong: { $divide: [{ $subtract: [numerator, { $mod: [numerator, denominator] }] }, denominator] } }
+          : { $mod: [numerator, denominator] };
+      result = { $cond: [invalid, null, quotient] };
+    } else {
+      result = {
+        $let: {
+          vars: { long: { [ARITHMETIC[operator]!]: longs } },
+          in: { $cond: [{ $eq: [{ $type: "$$long" }, "long"] }, "$$long", null] },
+        },
+      };
+    }
+    // A ternary typed int by one branch can select an attribute in the other, which reaches CEL
+    // as a double and has no overload with an int. Which branch is an int is settled by the plan,
+    // not by the stored BSON type: a driver stores an integral double as an int.
+    const typed = values.map((value, index) => ({
+      $and: [{ $isNumber: value }, intSelected(operands[index]!, mapper)],
+    }));
+    return { $cond: [{ $and: typed }, result, null] };
+  });
+};
+
+/** contains/startsWith/endsWith over two strings; null (an error to CEL) otherwise. */
+const buildStringPredicate = (
+  { operator, operands }: PlanExpression,
+  mapper: Mapper,
+  predicate: (index: unknown, receiver: unknown, needle: unknown) => unknown,
+): unknown => {
+  const [receiverOperand, needleOperand] = operands;
+  if (!receiverOperand || !needleOperand) throw new UnsupportedQueryPlanError(`${operator} requires two operands`);
+  const receiver = build(receiverOperand, mapper);
+  const needle = build(needleOperand, mapper);
+  return {
+    $cond: [
+      { $and: [{ $eq: [{ $type: receiver }, "string"] }, { $eq: [{ $type: needle }, "string"] }] },
+      predicate({ $indexOfCP: [receiver, needle] }, receiver, needle),
+      null,
+    ],
+  };
+};
+
+/**
+ * The position of an index expression: a non-negative integer, or undefined for a numeric
+ * constant CEL can never index with (negative, or fractional), which raises on every document.
+ */
+const constantIndex = (
+  operands: PlanExpressionOperand[],
+): readonly [PlanExpressionOperand, number | undefined] => {
+  const [collection, index] = operands;
+  if (!collection || !index) throw new UnsupportedQueryPlanError("index operator requires two operands");
+  if (!isValue(index) || !isNumber(index.value)) {
+    throw new UnsupportedQueryPlanError("index operator requires a numeric constant position");
+  }
+  const position = index.value;
+  if (!Number.isInteger(position) || position < 0) return [collection, undefined];
+  return [collection, position];
+};
+
 
 /** `number` is a double, or a numeric constant whose int or double type the plan does not carry;
  * `int` is the result of `int()`. */
@@ -210,78 +1444,6 @@ export const isUnorderable = (
   );
 };
 
-/**
- * Whether an operand is certainly a double to CEL: an attribute number, or arithmetic over one.
- * A numeric constant is not, since the plan drops whether it was written as an int or a double.
- */
-const isDoubleTyped = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
-  if (isVariable(operand)) {
-    return celScalarType(operand, mapper) === "number";
-  }
-  if (!isExpression(operand)) {
-    return false;
-  }
-  switch (operand.operator) {
-    case "double":
-      return true;
-    case "add":
-    case "sub":
-    case "mult":
-    case "div":
-      return operand.operands.some((op) => isDoubleTyped(op, mapper));
-    case "if":
-      return operand.operands.slice(1).some((op) => isDoubleTyped(op, mapper));
-    default:
-      return false;
-  }
-};
-
-/**
- * Arithmetic over an `int()`: CEL has no overload between an int and a double, so beside an
- * attribute number the operation is an error on every document, which `null` under the
- * not-null guard denies. Beside an int or a numeric constant it is refused: the constant may
- * have been written as a double, which the plan does not say, and int overflow and division
- * are not lowered.
- */
-const intArithmetic = (
-  operator: string,
-  operands: PlanExpressionOperand[],
-  mapper: Mapper,
-): unknown | undefined => {
-  if (!operands.some((op) => celScalarType(op, mapper) === "int")) {
-    return undefined;
-  }
-  if (operands.some((op) => isDoubleTyped(op, mapper))) {
-    return { $literal: null };
-  }
-  throw new UnsupportedQueryPlanError(
-    `${operator} over an int() is translated only beside an attribute number, where CEL has no ` +
-      "int and double overload: a numeric constant may have been written as a double, which " +
-      "the plan does not say",
-  );
-};
-
-const intArithmeticGuard = (
-  expression: PlanExpression,
-  mapper: Mapper,
-): MongooseFilter | undefined =>
-  expression.operands.some((op) => celScalarType(op, mapper) === "int")
-    ? notNullGuard(expression, mapper)
-    : undefined;
-
-type AggregationOperator = {
-  build: (expression: PlanExpression, mapper: Mapper) => unknown;
-  /**
-   * The filter that keeps out every document on which this expression cannot be evaluated —
-   * where CEL raises and `check()` denies, while the pipeline would carry on with a null or a
-   * wrong-typed value. Every operand the enclosing filter translated is walked for these and each
-   * one found is ANDed alongside it (see `withEvaluationGuards`).
-   */
-  guard?: (
-    expression: PlanExpression,
-    mapper: Mapper,
-  ) => MongooseFilter | undefined;
-};
 
 /**
  * CEL's `string()` of a double: every attribute number reaches CEL as a double, which cel-go
@@ -384,655 +1546,6 @@ const celDoubleToString = (double: unknown): unknown => ({
   },
 });
 
-/** Every operator that can appear inside `$expr`. Adding one is adding an entry here. */
-const AGGREGATION_OPERATORS: Record<string, AggregationOperator> = {
-  eq: variadic(COMPARISON_OPERATORS.eq),
-  ne: variadic(COMPARISON_OPERATORS.ne),
-  lt: ordering(COMPARISON_OPERATORS.lt),
-  le: ordering(COMPARISON_OPERATORS.le),
-  gt: ordering(COMPARISON_OPERATORS.gt),
-  ge: ordering(COMPARISON_OPERATORS.ge),
-  and: variadic("$and"),
-  or: variadic("$or"),
-  sub: {
-    build: (expression, mapper) =>
-      intArithmetic("sub", expression.operands, mapper) ??
-      variadic("$subtract").build(expression, mapper),
-    guard: (expression, mapper) =>
-      intArithmeticGuard(expression, mapper) ?? timestampRangeGuard(expression, mapper),
-  },
-  mult: {
-    build: (expression, mapper) =>
-      intArithmetic("mult", expression.operands, mapper) ??
-      variadic("$multiply").build(expression, mapper),
-    guard: intArithmeticGuard,
-  },
-  // CEL's `%` is integer-only: it has no double overload, and every number a resource attribute
-  // carries reaches CEL as a double, so `R.attr.x % 2` is a no-such-overload error that denies
-  // the row under either polarity, where `$mod` computes a floating remainder. The one int this
-  // pipeline produces is `size()` (`int()` is refused), and a zero divisor is an error that
-  // `$mod` turns into an aborted query, so the divisor must be a non-zero integer constant.
-  mod: {
-    build: ({ operands }, mapper) => {
-      const int = intArithmetic("mod", operands, mapper);
-      if (int !== undefined) {
-        return int;
-      }
-      const [dividend, divisor] = operands;
-      if (
-        !dividend ||
-        !(isExpression(dividend) && dividend.operator === "size")
-      ) {
-        throw new UnsupportedQueryPlanError(
-          "mod operator requires an integer dividend: CEL's % has no double overload and every " +
-            "attribute number reaches CEL as a double, so the modulo is an error on every " +
-            "document where $mod would compute a floating remainder",
-        );
-      }
-      if (
-        !divisor ||
-        !isValue(divisor) ||
-        !Number.isInteger(divisor.value) ||
-        divisor.value === 0
-      ) {
-        throw new UnsupportedQueryPlanError(
-          "mod operator requires a non-zero integer constant divisor: $mod aborts the whole " +
-            "query on a zero divisor instead of denying that document",
-        );
-      }
-      return {
-        $mod: operands.map((op) => buildAggregationExpression(op, mapper)),
-      };
-    },
-    guard: intArithmeticGuard,
-  },
-  // CEL overloads `+` on strings, and MongoDB does not: `$add` accepts numeric and date types
-  // only and the server rejects the whole query at execution time rather than returning no
-  // rows ("$add only supports numeric or date types"). `$concat` is the string spelling.
-  //
-  // A CONSTANT settles which overload it is — CEL has no mixed-type `+`, so one string operand
-  // means every operand is a string (cerbos/query-plan-adapters#376). Between two field paths
-  // there is no constant, and the plan carries no field types, so neither spelling can be
-  // chosen: the shape is refused at translation instead of being sent to the server as a guess
-  // that aborts the whole query (cerbos/query-plan-adapters#391).
-  add: {
-    build: ({ operands }, mapper) => {
-      const built = () =>
-        operands.map((op) => buildAggregationExpression(op, mapper));
-      const int = intArithmetic("add", operands, mapper);
-      if (int !== undefined) {
-        return int;
-      }
-      if (operands.some((op) => isValue(op) && typeof op.value === "string")) {
-        return { $concat: built() };
-      }
-      // CEL also overloads `+` on lists, which `$add` rejects as loudly as strings. A list
-      // operand is spelled out in the plan — a list constant, a ternary between two, or a
-      // nested concatenation — and `$concatArrays` keeps CEL's order and duplicates. A list
-      // read from a field is not: a relation projects through its elements, so it is refused.
-      if (operands.some(isListOperand)) {
-        if (!operands.every(isListOperand)) {
-          throw new UnsupportedQueryPlanError(
-            "List concatenation is translated only between list constants and ternaries over " +
-              "them: a list read from the document is a projection over a relation's " +
-              "elements, not an ordered list value $concatArrays can extend",
-          );
-        }
-        return { $concatArrays: built() };
-      }
-      // Between bare field paths the mapper's declared types decide, and where they do not,
-      // the stored values do, per document: two strings concatenate, two numbers add, and any
-      // other pair is CEL's no-such-overload error, a null here that the guard denies. A nested
-      // expression keeps the numeric reading it has always had — the divisions and ternaries
-      // that reach here are numeric by construction.
-      if (operands.every(isVariable)) {
-        const types = operands.map((op) => celScalarType(op, mapper));
-        if (types.every((type) => type === "string")) {
-          return { $concat: built() };
-        }
-        if (types.every((type) => type === "number")) {
-          return { $add: built() };
-        }
-        if (types.some((type) => type !== undefined && type !== "string" && type !== "number")) {
-          throw new UnsupportedQueryPlanError(
-            "'+' between two fields is translated only over strings and numbers",
-          );
-        }
-        const paths = built();
-        return {
-          $switch: {
-            branches: [
-              {
-                case: { $and: paths.map((path) => ({ $eq: [{ $type: path }, "string"] })) },
-                then: { $concat: paths },
-              },
-              {
-                case: { $and: paths.map((path) => ({ $isNumber: path })) },
-                then: { $add: paths },
-              },
-            ],
-            default: null,
-          },
-        };
-      }
-      // A nested concatenation (`a + "_" + b` is `(a + "_") + b`) carries its string type up
-      // even though no operand of THIS `+` is a constant.
-      if (
-        operands.some((op) => isExpression(op) && celScalarType(op, mapper) === "string")
-      ) {
-        return { $concat: built() };
-      }
-      return { $add: built() };
-    },
-    // timestamp + duration leaves CEL's timestamp range as an error, where `$add` carries on.
-    guard: (expression, mapper) =>
-      intArithmeticGuard(expression, mapper) ??
-      (expression.operands.every(isVariable) &&
-      !expression.operands.every((op) => celScalarType(op, mapper) !== undefined)
-        ? notNullGuard(expression, mapper)
-        : timestampRangeGuard(expression, mapper)),
-  },
-  div: {
-    build: ({ operands }, mapper) => {
-      const int = intArithmetic("div", operands, mapper);
-      if (int !== undefined) {
-        return int;
-      }
-      const denominator = operands[1];
-      if (
-        !denominator ||
-        !isValue(denominator) ||
-        typeof denominator.value !== "number" ||
-        denominator.value === 0
-      ) {
-        throw new UnsupportedQueryPlanError(
-          "div operator requires a non-zero constant denominator",
-        );
-      }
-      return {
-        $divide: operands.map((op) => buildAggregationExpression(op, mapper)),
-      };
-    },
-    guard: intArithmeticGuard,
-  },
-  not: {
-    build: ({ operands }, mapper) => {
-      const operand = operands[0];
-      if (!operand) {
-        throw new UnsupportedQueryPlanError("not operator requires an operand");
-      }
-      return { $not: [buildAggregationExpression(operand, mapper)] };
-    },
-  },
-  string: {
-    build: ({ operands }, mapper) => {
-      const operand = operands[0];
-      if (!operand) {
-        throw new UnsupportedQueryPlanError("string conversion requires an operand");
-      }
-      const input = buildAggregationExpression(operand, mapper);
-      // An int renders in plain decimal, as `$toString` spells a long; a ternary's int branch
-      // types the constant in the other.
-      if (celScalarType(operand, mapper) === "int") {
-        return { $toString: input };
-      }
-      if (rendersUntypedIntegralConstant(operand)) {
-        throw new UnsupportedQueryPlanError(
-          "string() over an integral constant whose int or double type the plan does not carry: " +
-            'CEL renders the int 1000000 as "1000000" and the double as "1e+06", and the plan ' +
-            "ships both as the same bare number",
-        );
-      }
-      return {
-        $switch: {
-          branches: [
-            {
-              case: {
-                $in: [{ $type: input }, ["int", "long", "double", "decimal"]],
-              },
-              then: celDoubleToString({ $toDouble: input }),
-            },
-            {
-              case: { $in: [{ $type: input }, ["string", "bool"]] },
-              then: { $toString: input },
-            },
-          ],
-          default: null,
-        },
-      };
-    },
-    guard: notNullGuard,
-  },
-  // CEL's int()/double() are not $convert. CEL reads a WHOLE string or raises, and an
-  // error DENIES the row; $convert parses a leading numeric prefix, so "100%_done"
-  // becomes 100 and the filter returns records the PDP denies. The numeric direction is
-  // no safer: CEL truncates toward zero while $convert to "long" ROUNDS, so int(-0.6) is
-  // 0 to CEL and -1 here. Nothing in the plan says what type the field holds, so no
-  // conversion is faithful for every document (cerbos/query-plan-adapters#311).
-  double: {
-    build: ({ operands }, mapper) => {
-      const operand = operands[0];
-      if (!operand) {
-        throw new UnsupportedQueryPlanError("double conversion requires an operand");
-      }
-      const input = buildAggregationExpression(operand, mapper);
-      return {
-        $switch: {
-          branches: [
-            {
-              case: { $isNumber: input },
-              then: { $toDouble: input },
-            },
-            {
-              case: {
-                $and: [
-                  { $eq: [{ $type: input }, "string"] },
-                  { $regexMatch: { input, regex: CEL_DOUBLE_STRING_PATTERN } },
-                ],
-              },
-              then: {
-                $convert: {
-                  input: { $replaceAll: { input, find: "_", replacement: "" } },
-                  to: "double",
-                  onError: null,
-                  onNull: null,
-                },
-              },
-            },
-          ],
-          default: null,
-        },
-      };
-    },
-    guard: notNullGuard,
-  },
-  int: {
-    build: ({ operands }, mapper) => {
-      const operand = operands[0];
-      if (!operand) {
-        throw new UnsupportedQueryPlanError("int conversion requires an operand");
-      }
-      const type = celScalarType(operand, mapper);
-      if (type === "int") {
-        return buildAggregationExpression(operand, mapper);
-      }
-      if (type !== undefined && type !== "number" && type !== "string") {
-        throw new UnsupportedQueryPlanError(`int() over a ${type} is not translated`);
-      }
-      const input = buildAggregationExpression(operand, mapper);
-      return {
-        $switch: {
-          branches: [
-            {
-              // Truncation toward zero, within the range CEL converts; NaN orders below every
-              // number here and fails the lower bound as CEL's error does.
-              case: {
-                $and: [
-                  { $isNumber: input },
-                  { $gt: [input, MIN_CEL_INT_DOUBLE] },
-                  { $lt: [input, MAX_CEL_INT_DOUBLE] },
-                ],
-              },
-              then: {
-                $convert: { input: { $trunc: input }, to: "long", onError: null, onNull: null },
-              },
-            },
-            {
-              case: {
-                $and: [
-                  { $eq: [{ $type: input }, "string"] },
-                  { $regexMatch: { input, regex: CEL_INT_STRING_PATTERN } },
-                ],
-              },
-              then: {
-                $convert: {
-                  input: { $ltrim: { input, chars: "+" } },
-                  to: "long",
-                  onError: null,
-                  onNull: null,
-                },
-              },
-            },
-          ],
-          default: null,
-        },
-      };
-    },
-    guard: notNullGuard,
-  },
-  if: {
-    build: ({ operands }, mapper) => {
-      const [ifOp, thenOp, elseOp] = operands;
-      if (!ifOp || !thenOp || !elseOp) {
-        throw new UnsupportedQueryPlanError("if operator requires three operands");
-      }
-      return {
-        $cond: {
-          if: buildAggregationExpression(ifOp, mapper),
-          then: buildAggregationExpression(thenOp, mapper),
-          else: buildAggregationExpression(elseOp, mapper),
-        },
-      };
-    },
-  },
-  index: {
-    build: ({ operands }, mapper) => {
-      const [collection, index] = parseConstantIndexOperands(operands);
-      // Keep `$arrayElemAt` even for index 0. Mongoose's `$expr` caster casts a comparison's
-      // literal to the schema type of a PATH on the other side, and it treats `$first`/`$last`
-      // as one: over a `[Boolean]` array, `$first == 1` is cast to `== true`, which CEL denies.
-      // `$arrayElemAt` takes an array operand, so the literal reaches the server uncast
-      // (`type-mismatch/equals/boolean-list-element-against-number-literal` and
-      // `type-mismatch/equals/number-list-element-against-boolean-literal` fail otherwise).
-      return {
-        $arrayElemAt: [buildAggregationExpression(collection, mapper), index],
-      };
-    },
-    // An out-of-range index is an error to CEL, not a missing value.
-    guard: ({ operands }, mapper) => {
-      const [collectionOperand, index] = parseConstantIndexOperands(operands);
-      const collection = buildAggregationExpression(collectionOperand, mapper);
-      return {
-        $expr: {
-          $cond: {
-            if: { $isArray: collection },
-            then: { $gt: [{ $size: collection }, index] },
-            else: false,
-          },
-        },
-      };
-    },
-  },
-  "get-field": {
-    build: ({ operands }, mapper) => {
-      const [inputOperand, fieldOperand] = operands;
-      if (!inputOperand || !fieldOperand || !isVariable(fieldOperand)) {
-        throw new UnsupportedQueryPlanError("get-field requires an input and a field name");
-      }
-      return {
-        $getField: {
-          field: fieldOperand.name,
-          input: buildAggregationExpression(inputOperand, mapper),
-        },
-      };
-    },
-    // A field the element lacks is a missing-key error to CEL, and so is a stored null on a field
-    // the relation declares nullable. `$getField` yields missing or null there instead, which a
-    // negated comparison would read as unequal: `!(tags[0].name == "public")` selected a first
-    // tag with no name.
-    guard: (expression, mapper) => {
-      const [inputOperand, fieldOperand] = expression.operands;
-      if (!inputOperand || !fieldOperand || !isVariable(fieldOperand)) {
-        return undefined;
-      }
-      const value = buildAggregationExpressionFromExpression(expression, mapper);
-      const collection =
-        isExpression(inputOperand) && inputOperand.operator === "index"
-          ? inputOperand.operands[0]
-          : undefined;
-      const nullable =
-        collection !== undefined &&
-        isVariable(collection) &&
-        isNullableReference(`${collection.name}.${fieldOperand.name}`, mapper);
-      return {
-        $expr: nullable
-          ? { $ne: [{ $ifNull: [value, null] }, null] }
-          : { $ne: [{ $type: value }, "missing"] },
-      };
-    },
-  },
-  size: {
-    build: ({ operands }, mapper) => {
-      const operand = operands[0];
-      if (!operand) {
-        throw new UnsupportedQueryPlanError("size operator requires an operand");
-      }
-      const inner = buildAggregationExpression(operand, mapper);
-      // Works for both arrays and strings: $size for arrays, $strLenCP otherwise.
-      const size = {
-        $cond: [
-          { $isArray: inner },
-          { $size: inner },
-          {
-            $cond: [
-              { $eq: [{ $type: inner }, "string"] },
-              { $strLenCP: inner },
-              null,
-            ],
-          },
-        ],
-      };
-      const parentPath = isVariable(operand)
-        ? relationOfReference(operand.name, mapper)?.requiresParent
-        : undefined;
-      if (parentPath === undefined) {
-        return size;
-      }
-      // Reached through the stored parent array, `$parent.children` is one array PER parent
-      // element, so `$size` of it counts parents, not children. The chain's list is every
-      // child of the (one) parent: flatten before counting.
-      const children = {
-        $size: {
-          $reduce: {
-            input: { $ifNull: [inner, []] },
-            initialValue: [],
-            in: {
-              $concatArrays: [
-                "$$value",
-                { $cond: [{ $isArray: "$$this" }, "$$this", []] },
-              ],
-            },
-          },
-        },
-      };
-      // An absent to-one parent counts as UNKNOWN, not 0. null loses against every number
-      // in BSON order, so both `== 0` and `>= 0` exclude the document (#309).
-      return {
-        $cond: [
-          { $gt: [{ $size: { $ifNull: [`$${parentPath}`, []] } }, 0] },
-          children,
-          null,
-        ],
-      };
-    },
-    guard: notNullGuard,
-  },
-  matches: {
-    build: ({ operands }, mapper) => {
-      const [valueOp, patternOp] = operands;
-      if (
-        !valueOp ||
-        !patternOp ||
-        !isValue(patternOp) ||
-        typeof patternOp.value !== "string"
-      ) {
-        throw new UnsupportedQueryPlanError("matches operator requires two operands");
-      }
-      return {
-        $regexMatch: {
-          input: buildAggregationExpression(valueOp, mapper),
-          regex: normalizeRe2PatternForMongo(patternOp.value),
-        },
-      };
-    },
-    guard: ({ operands }, mapper) => {
-      const inputOperand = operands[0];
-      if (!inputOperand) {
-        throw new UnsupportedQueryPlanError("matches operator requires an input operand");
-      }
-      return {
-        $expr: {
-          $eq: [
-            { $type: buildAggregationExpression(inputOperand, mapper) },
-            "string",
-          ],
-        },
-      };
-    },
-  },
-  contains: {
-    build: (expression, mapper) =>
-      buildStringPredicate(expression, mapper, (index) => ({
-        $gte: [index, 0],
-      })),
-    guard: notNullGuard,
-  },
-  startsWith: {
-    build: (expression, mapper) =>
-      buildStringPredicate(expression, mapper, (index) => ({
-        $eq: [index, 0],
-      })),
-    guard: notNullGuard,
-  },
-  endsWith: {
-    build: (expression, mapper) =>
-      buildStringPredicate(expression, mapper, (_index, receiver, needle) => {
-        const receiverLength = { $strLenCP: receiver };
-        const needleLength = { $strLenCP: needle };
-        return {
-          $cond: {
-            if: { $gte: [receiverLength, needleLength] },
-            then: {
-              $eq: [
-                {
-                  $substrCP: [
-                    receiver,
-                    { $subtract: [receiverLength, needleLength] },
-                    needleLength,
-                  ],
-                },
-                needle,
-              ],
-            },
-            else: false,
-          },
-        };
-      }),
-    guard: notNullGuard,
-  },
-  timestamp: {
-    build: ({ operands }, mapper) => {
-      const operand = operands[0];
-      if (!operand) {
-        throw new UnsupportedQueryPlanError("timestamp operator requires an operand");
-      }
-      if (isValue(operand)) {
-        if (
-          typeof operand.value !== "string" ||
-          !isRfc3339Timestamp(operand.value)
-        ) {
-          throw new UnsupportedQueryPlanError(
-            "timestamp value must be a millisecond-exact RFC 3339 instant in the CEL range",
-          );
-        }
-        return new Date(operand.value);
-      }
-      return buildTimestampConversion(
-        buildAggregationExpression(operand, mapper),
-      );
-    },
-    // A literal is validated at translation time; only a field can fail to convert per document.
-    guard: (expression, mapper) =>
-      expression.operands[0] && !isValue(expression.operands[0])
-        ? notNullGuard(expression, mapper)
-        : undefined,
-  },
-  // A duration is carried as its length in milliseconds, the unit `$add` and `$subtract` apply to
-  // a date and the one the difference of two dates is in. The planner normalises the literal to
-  // seconds ("86400s"); one finer than a millisecond has no exact spelling and is refused, as a
-  // sub-millisecond timestamp literal is.
-  duration: {
-    build: ({ operands }) => {
-      const operand = operands[0];
-      if (!operand || !isValue(operand) || typeof operand.value !== "string") {
-        throw new UnsupportedQueryPlanError(
-          "duration() is translated only over a constant string",
-        );
-      }
-      return parseDurationMilliseconds(operand.value);
-    },
-  },
-  // `timeSince` is relative to the clock of whoever evaluates it, so it is read from the server's
-  // own `$$NOW` at query time, in milliseconds like every duration here.
-  timeSince: {
-    build: ({ operands }, mapper) => {
-      const operand = operands[0];
-      if (!operand) {
-        throw new UnsupportedQueryPlanError("timeSince requires an operand");
-      }
-      if (celScalarType(operand, mapper) !== "timestamp") {
-        throw new UnsupportedQueryPlanError(
-          "timeSince() is translated only over a timestamp() conversion",
-        );
-      }
-      return {
-        $subtract: ["$$NOW", buildAggregationExpression(operand, mapper)],
-      };
-    },
-  },
-  // CEL's upperAscii folds a-z only and leaves every other character as it is, which is what
-  // MongoDB's `$toUpper` does too. `$toUpper` turns a null into "" and a number into its digits,
-  // where CEL has no overload, so anything but a string is null here and guarded out.
-  upperAscii: {
-    build: ({ operands }, mapper) => {
-      const operand = operands[0];
-      if (!operand) {
-        throw new UnsupportedQueryPlanError("upperAscii requires an operand");
-      }
-      const input = buildAggregationExpression(operand, mapper);
-      return {
-        $cond: [{ $eq: [{ $type: input }, "string"] }, { $toUpper: input }, null],
-      };
-    },
-    guard: notNullGuard,
-  },
-};
-
-/**
- * Whether `operand` is a list the plan spells out: a list constant, a ternary whose branches are
- * both such lists, or a concatenation of them.
- */
-const isListOperand = (operand: PlanExpressionOperand): boolean => {
-  if (isValue(operand)) {
-    return Array.isArray(operand.value);
-  }
-  if (!isExpression(operand)) {
-    return false;
-  }
-  if (operand.operator === "if") {
-    const [, thenOperand, elseOperand] = operand.operands;
-    return (
-      thenOperand !== undefined &&
-      elseOperand !== undefined &&
-      isListOperand(thenOperand) &&
-      isListOperand(elseOperand)
-    );
-  }
-  return (
-    operand.operator === "add" &&
-    operand.operands.length > 0 &&
-    operand.operands.every(isListOperand)
-  );
-};
-
-/** A timestamp computed by `+` or `-` outside CEL's range is an error to CEL, not a date. */
-function timestampRangeGuard(
-  expression: PlanExpression,
-  mapper: Mapper,
-): MongooseFilter | undefined {
-  if (celScalarType(expression, mapper) !== "timestamp") {
-    return undefined;
-  }
-  const computed = buildAggregationExpressionFromExpression(expression, mapper);
-  return {
-    $expr: {
-      $and: [
-        { $gte: [computed, MIN_CEL_TIMESTAMP] },
-        { $lte: [computed, MAX_CEL_TIMESTAMP] },
-      ],
-    },
-  };
-}
 
 const DURATION_UNIT_NANOSECONDS: Record<string, bigint> = {
   ns: 1n,
@@ -1084,151 +1597,6 @@ function parseDurationMilliseconds(literal: string): number {
   return Number(milliseconds);
 }
 
-const aggregationOperator = (
-  operator: string,
-): AggregationOperator | undefined =>
-  Object.hasOwn(AGGREGATION_OPERATORS, operator)
-    ? AGGREGATION_OPERATORS[operator]
-    : undefined;
-
-export const buildAggregationExpressionFromExpression = (
-  expression: PlanExpression,
-  mapper: Mapper,
-): unknown => {
-  const definition = aggregationOperator(expression.operator);
-  if (!definition) {
-    throw new UnsupportedQueryPlanError(
-      `Unsupported operator inside aggregation expression: ${expression.operator}`,
-    );
-  }
-  return definition.build(expression, mapper);
-};
-
-/**
- * The evaluation guards for every guarded expression below `operand`, outermost first.
- */
-export const buildEvaluationGuards = (
-  operand: PlanExpressionOperand,
-  mapper: Mapper,
-): MongooseFilter[] => {
-  if (!isExpression(operand)) {
-    return [];
-  }
-  const guard = aggregationOperator(operand.operator)?.guard?.(operand, mapper);
-  const nested =
-    scopedBranchGuards(operand, mapper) ??
-    operand.operands.flatMap((child) => buildEvaluationGuards(child, mapper));
-  return guard ? [guard, ...nested] : nested;
-};
-
-/**
- * The guards of a ternary: CEL reads only the branch the condition selects, so each branch's
- * guards hold under that condition alone, as one `$cond`. Undefined for any other expression,
- * or a branch guard that is not an aggregation expression.
- */
-const scopedBranchGuards = (
-  operand: PlanExpression,
-  mapper: Mapper,
-): MongooseFilter[] | undefined => {
-  const [condition, whenTrue, whenFalse] = operand.operands;
-  if (operand.operator !== "if" || !condition || !whenTrue || !whenFalse) {
-    return undefined;
-  }
-  const asExpression = (guards: MongooseFilter[]): unknown[] | undefined => {
-    const expressions = guards.map((guard) =>
-      Object.keys(guard).length === 1 ? guard["$expr"] : undefined,
-    );
-    return expressions.every((expression) => expression !== undefined)
-      ? expressions
-      : undefined;
-  };
-  const thenGuards = asExpression(buildEvaluationGuards(whenTrue, mapper));
-  const elseGuards = asExpression(buildEvaluationGuards(whenFalse, mapper));
-  if (thenGuards === undefined || elseGuards === undefined) {
-    return undefined;
-  }
-  const conditionGuards = buildEvaluationGuards(condition, mapper);
-  if (thenGuards.length === 0 && elseGuards.length === 0) {
-    return conditionGuards;
-  }
-  const all = (expressions: unknown[]): unknown =>
-    expressions.length === 0 ? true : { $and: expressions };
-  return [
-    ...conditionGuards,
-    {
-      $expr: {
-        $cond: [
-          buildAggregationExpression(condition, mapper),
-          all(thenGuards),
-          all(elseGuards),
-        ],
-      },
-    },
-  ];
-};
-
-/** A plan operator that maps one-to-one onto a variadic aggregation operator. */
-function variadic(mongoOperator: string): AggregationOperator {
-  return {
-    build: ({ operands }, mapper) => ({
-      [mongoOperator]: operands.map((op) =>
-        buildAggregationExpression(op, mapper),
-      ),
-    }),
-  };
-}
-
-/**
- * An ordering nested inside `$expr`, where it cannot answer CEL's error: an operand of each type
- * would leave a ternary's condition, or a `$not`, to BSON's cross-type order.
- */
-function ordering(mongoOperator: string): AggregationOperator {
-  const { build } = variadic(mongoOperator);
-  return {
-    build: (expression, mapper) => {
-      const built = build(expression, mapper);
-      const [left, right] = expression.operands;
-      if (left && right && isUnorderable(left, right, mapper)) {
-        throw new UnsupportedQueryPlanError(
-          "Cannot order operands of different types inside an aggregation expression: CEL " +
-            "raises an error there, and $expr would order them by BSON type instead",
-        );
-      }
-      return built;
-    },
-  };
-}
-
-/** The expression evaluates to null exactly where CEL would raise. */
-function notNullGuard(
-  expression: PlanExpression,
-  mapper: Mapper,
-): MongooseFilter {
-  return {
-    $expr: {
-      $ne: [buildAggregationExpressionFromExpression(expression, mapper), null],
-    },
-  };
-}
-
-/**
- * Whether `string()` over the operand could render a numeric constant, bare or as a ternary
- * branch, whose int or double type the plan dropped: the plan ships `1000000` and `1000000.0`
- * alike. Only an integral magnitude of 1e6 or more renders differently, since Go's shortest `%g`
- * switches a double to an exponent there ("1e+06") while an int stays plain decimal. `int()` and
- * `double()`, which would fix a branch's type, are refused on their own.
- */
-function rendersUntypedIntegralConstant(operand: PlanExpressionOperand): boolean {
-  if (isValue(operand)) {
-    return (
-      typeof operand.value === "number" &&
-      Number.isInteger(operand.value) &&
-      Math.abs(operand.value) >= 1e6
-    );
-  }
-  if (!isExpression(operand) || operand.operator !== "if") return false;
-  return operand.operands.slice(1).some(rendersUntypedIntegralConstant);
-}
 
 /**
  * The strings CEL's `int()` reads, Go's `strconv.ParseInt` in base 10: an optional sign and
@@ -1249,31 +1617,6 @@ const CEL_DOUBLE_STRING_PATTERN =
 const MIN_CEL_INT_DOUBLE = -9223372036854775808;
 const MAX_CEL_INT_DOUBLE = 9223372036854775808;
 
-/** `contains`/`startsWith`/`endsWith` over two strings; null (an error to CEL) otherwise. */
-function buildStringPredicate(
-  { operator, operands }: PlanExpression,
-  mapper: Mapper,
-  predicate: (index: unknown, receiver: unknown, needle: unknown) => unknown,
-): MongooseFilter {
-  const [receiverOperand, needleOperand] = operands;
-  if (!receiverOperand || !needleOperand) {
-    throw new UnsupportedQueryPlanError(`${operator} requires two operands`);
-  }
-  const receiver = buildAggregationExpression(receiverOperand, mapper);
-  const needle = buildAggregationExpression(needleOperand, mapper);
-  return {
-    $cond: [
-      {
-        $and: [
-          { $eq: [{ $type: receiver }, "string"] },
-          { $eq: [{ $type: needle }, "string"] },
-        ],
-      },
-      predicate({ $indexOfCP: [receiver, needle] }, receiver, needle),
-      null,
-    ],
-  };
-}
 
 /**
  * A field as a CEL timestamp: a stored date as-is, an RFC 3339 string converted, anything else —

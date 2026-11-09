@@ -43,6 +43,8 @@ const CONTROL_CODE_POINTS: Record<string, number> = { n: 0x0a, t: 0x09, r: 0x0d,
 /** Perl classes both engines read over ASCII only: `\s` is left out, since PCRE2's includes \v. */
 const PERL_CLASSES = new Set(["d", "D", "w", "W"]);
 
+const SPACE_MEMBERS = "\\t\\n\\f\\r ";
+
 type Node =
   | { kind: "atom"; out: string; caseless: boolean }
   | { kind: "anchor"; out: string }
@@ -279,6 +281,13 @@ class Parser {
     if (PERL_CLASSES.has(c)) {
       return { kind: "atom", out: `\\${c}`, caseless: false };
     }
+    // RE2's `\s` holds no vertical tab, PCRE2's does: spelled as RE2's set.
+    if (c === "s") {
+      return { kind: "atom", out: inClass ? SPACE_MEMBERS : `[${SPACE_MEMBERS}]`, caseless: false };
+    }
+    if (c === "S" && !inClass) {
+      return { kind: "atom", out: `[^${SPACE_MEMBERS}]`, caseless: false };
+    }
     const control = CONTROL_ESCAPES[c];
     if (control !== undefined) {
       return { kind: "atom", out: control, caseless: false };
@@ -376,7 +385,7 @@ class Parser {
       if (node.kind !== "atom") {
         throw new UnsupportedQueryPlanError("matches pattern has an invalid class escape");
       }
-      if (PERL_CLASSES.has(escaped)) {
+      if (PERL_CLASSES.has(escaped) || escaped === "s") {
         return { kind: "class", out: node.out };
       }
       const codePoint = CONTROL_CODE_POINTS[escaped] ?? escaped.codePointAt(0)!;

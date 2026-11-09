@@ -427,14 +427,12 @@ describe("timestamp literals", () => {
     });
 
   // The nanosecond instant the PDP actually folds lies between two BSON Dates, and a stored date
-  // is never between them: `< t` is `< the next millisecond`.
-  test("the nanosecond instant the PDP folds is rounded to the next millisecond", async () => {
+  // is never between them: `< t` is `<= the millisecond below`.
+  test("the nanosecond instant the PDP folds is rounded to the millisecond below", async () => {
     const result = await at("2026-08-11T09:13:39.123456789Z");
+    expect(JSON.stringify(filtersOf(result))).toContain('"$lte":["$$left","$$right"]');
     expect(JSON.stringify(filtersOf(result))).toContain(
-      '"$lt":[{"$let"',
-    );
-    expect(JSON.stringify(filtersOf(result))).toContain(
-      '"2026-08-11T09:13:39.124Z"',
+      '"2026-08-11T09:13:39.123Z"',
     );
   });
 
