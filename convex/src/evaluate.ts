@@ -343,16 +343,18 @@ const arithmetic = (call: Call): unknown => {
   }
   const left = arg(call, 0, "left");
   const right = arg(call, 1, "right");
+  // A ternary operand has the type of the branch this document selects.
+  const operands = call.operands.map((operand) => selectedBranch(operand, call.scope));
   // Over two int operands CEL does int arithmetic: `int(3) / 2` truncates to 1, where JavaScript
   // divides to 1.5. The plan carries no numeric type, so the mode is chosen from the expression.
-  if (isIntExpression({ operator, operands: call.operands })) {
+  if (isIntExpression({ operator, operands })) {
     return intArithmetic(operator as ArithmeticOperator, left, right);
   }
   // CEL has no overload mixing int and double, so `int(x) + R.attr.aDouble` is an error, where
   // JavaScript adds the two numbers and a negation would turn the sum into a grant.
   if (
-    call.operands.some(isIntExpression) &&
-    call.operands.some((operand) => isDoubleOperand(operand, call.scope))
+    operands.some(isIntExpression) &&
+    operands.some((operand) => isDoubleOperand(operand, call.scope))
   ) {
     return EVALUATION_ERROR;
   }
@@ -497,6 +499,20 @@ const isDocumentField = (
  * no-such-overload error: a document field (every number an attribute carries is a double, and
  * any other type is no number at all), a fractional constant, or `double()`.
  */
+/** The branch a ternary selects for this document, through nested ternaries; else the operand. */
+const selectedBranch = (
+  operand: PlanExpressionOperand,
+  scope: Scope,
+): PlanExpressionOperand => {
+  if (!isExpression(operand) || operand.operator !== "if") return operand;
+  const [condition, whenTrue, whenFalse] = operand.operands;
+  if (!condition || !whenTrue || !whenFalse) return operand;
+  const selected = evaluate(condition, scope);
+  if (selected === true) return selectedBranch(whenTrue, scope);
+  if (selected === false) return selectedBranch(whenFalse, scope);
+  return operand;
+};
+
 const isDoubleOperand = (
   operand: PlanExpressionOperand,
   scope: Scope,
