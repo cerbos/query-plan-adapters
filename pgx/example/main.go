@@ -16,15 +16,15 @@
 // $1 while the surrounding statement already binds two arguments is wrong in a way no type checker
 // sees. Both directions are exercised here:
 //
-//   - usage shape 5 puts the application's predicate FIRST and shifts the fragment behind it with
-//     WithPlaceholderOffset;
+//   - usage shape 5 puts the application's predicate FIRST and composes the fragment behind it with
+//     Result.AppendTo, checked against WithPlaceholderOffset;
 //   - usage shape 4 puts the fragment first and numbers the application's own LIMIT/OFFSET
 //     parameters after it, which the adapter cannot help with — the application has to count
 //     Result.Args.
 //
 // Every statement a usage shape builds goes through checkPlaceholders before it is executed, so a
 // misnumbered composition fails by name instead of returning plausible rows. The two negative controls
-// — assertOffsetIsLoadBearing and assertDenialSplicesToNoRows — go straight to the database instead,
+// — assertNumberingIsLoadBearing and assertDenialSplicesToNoRows — go straight to the database instead,
 // which is the point of them: the first executes a statement checkPlaceholders has just been required
 // to REJECT, and the second runs a statement no usage shape would. Nothing else bypasses the check.
 //
@@ -376,21 +376,20 @@ func (a *app) paginated(ctx context.Context, principalID, action string, pageSiz
 // names, and it is built BEFORE the plan is translated — because that is the honest order: an
 // application composing its own filters does not know, and must not have to know, which plan kind
 // the PDP is about to return. Putting it first is also what makes this shape sharp for this adapter:
-// the application's parameters take $1 and $2, so the fragment MUST be numbered from $3, which is
-// what WithPlaceholderOffset does. The offset renumbers the placeholders; keeping Result.Args in the
-// matching position of the argument slice is still the caller's job.
+// the application's parameters take $1 and $2, so the fragment MUST be numbered from $3.
+// Result.AppendTo does that numbering and returns the arguments in the matching order.
 //
-// All three plan kinds go through here on purpose. KindAlwaysAllowed leaves nothing to AND with, and
+// All three plan kinds go through here on purpose. KindAlwaysAllowed ANDs TRUE, and
 // KindAlwaysDenied must not have its denial undone — see assertDenialSplicesToNoRows.
 func (a *app) composed(ctx context.Context, principalID, action string) (shapeResult, error) {
 	appWhere, appArgs := a.seeds.applicationPredicate()
 
-	result, kind, err := a.translate(ctx, principalID, action, cerbospgx.WithPlaceholderOffset(len(appArgs)))
+	result, kind, err := a.translate(ctx, principalID, action)
 	if err != nil {
 		return shapeResult{}, err
 	}
 
-	where, accessible, err := clause(result)
+	_, accessible, err := clause(result)
 	if err != nil {
 		return shapeResult{}, err
 	}
@@ -403,20 +402,14 @@ func (a *app) composed(ctx context.Context, principalID, action string) (shapeRe
 		return shapeResult{Kind: kind, IDs: []string{}}, nil
 	}
 
-	stmt := idSelect + " WHERE " + appWhere
-	args := appArgs
-	if where != "" {
-		stmt += " AND (" + where + ")"
-		args = append(slices.Clone(appArgs), result.Args...)
-	}
-
-	ids, err := a.selectIDs(ctx, stmt, args)
+	where, args := result.AppendTo(appWhere, appArgs)
+	ids, err := a.selectIDs(ctx, idSelect+" WHERE "+where, args)
 	if err != nil {
 		return shapeResult{}, err
 	}
 
-	if where != "" {
-		if err := a.assertOffsetIsLoadBearing(ctx, principalID, action, appWhere, appArgs, ids); err != nil {
+	if result.Kind == cerbospgx.KindConditional {
+		if err := a.assertNumberingIsLoadBearing(ctx, principalID, action, appWhere, appArgs, ids); err != nil {
 			return shapeResult{}, err
 		}
 	}
@@ -433,7 +426,7 @@ func (a *app) composed(ctx context.Context, principalID, action string) (shapeRe
 // from; ../render.go's pgTypeSuffix says why. The two halves of the composed statement are
 // visibly different in that respect, which is worth seeing side by side.
 func (s *seeds) applicationPredicate() (string, []any) {
-	where := fmt.Sprintf("(%s = $1 AND %s = $2)", colArchived, colRegion)
+	where := fmt.Sprintf("%s = $1 AND %s = $2", colArchived, colRegion)
 	return where, []any{s.ApplicationFilter.Archived, s.ApplicationFilter.Region}
 }
 
@@ -522,50 +515,66 @@ func checkPlaceholders(stmt string, args []any) error {
 	return nil
 }
 
-// assertOffsetIsLoadBearing rebuilds one composed statement the way a consumer who forgot
-// WithPlaceholderOffset would — fragment numbered from $1, arguments appended after the
-// application's — and requires that it does not answer the same question.
+// assertNumberingIsLoadBearing checks AppendTo's composition against two built by hand.
 //
-// Without this the offset could be wrong, or unnecessary, and every shape would still pass: the
-// composed ids would come back correct because nothing had proved the numbering mattered. So this is
-// the negative control for checkPlaceholders, and it asserts two things. First, that the check
-// REPORTS the misnumbering, rather than being a scan that happens to pass everything. Second, that
-// executing it really does give a different answer — either PostgreSQL refuses it, or it returns
-// some other set of rows.
+// The first numbers the fragment with WithPlaceholderOffset and must return the same rows as
+// AppendTo did: the composer and the option agree. The second is the negative control, the way a
+// consumer who forgot the offset would compose — fragment numbered from $1, arguments appended after
+// the application's — and requires that it does not answer the same question. Without it the
+// numbering could be unnecessary and every shape would still pass. It asserts that checkPlaceholders
+// REPORTS the misnumbering, and that executing it anyway gives a different answer: either PostgreSQL
+// refuses it, or it returns some other set of rows.
 //
 // In this domain it is always the first: the application predicate binds two arguments and the plan
 // binds one, so dropping the offset leaves three arguments for a statement with two placeholders and
 // pgx will not send it. Which outcome happens is a property of the shapes involved rather than a
 // promise — see checkPlaceholders for the case nothing catches — so this reports what it observed
 // rather than requiring a particular failure.
-func (a *app) assertOffsetIsLoadBearing(
+func (a *app) assertNumberingIsLoadBearing(
 	ctx context.Context, principalID, action, appWhere string, appArgs []any, correct []string,
 ) error {
+	offset, _, err := a.translate(ctx, principalID, action, cerbospgx.WithPlaceholderOffset(len(appArgs)))
+	if err != nil {
+		return err
+	}
 	misnumbered, _, err := a.translate(ctx, principalID, action)
 	if err != nil {
 		return err
 	}
 
 	// Through clause() like every other read of a Result, and required to be conditional: this is the
-	// same plan re-planned, so anything else means the two calls disagreed and there is no
-	// misnumbering left to demonstrate.
-	where, accessible, err := clause(misnumbered)
+	// same plan re-planned, so anything else means the calls disagreed and there is no numbering left
+	// to demonstrate.
+	for _, r := range []cerbospgx.Result{offset, misnumbered} {
+		where, accessible, err := clause(r)
+		if err != nil {
+			return err
+		}
+		if !accessible || where == "" {
+			return fmt.Errorf(
+				"re-planning %s/%s for the numbering checks gave plan kind %d rather than a conditional one",
+				principalID, action, r.Kind,
+			)
+		}
+	}
+
+	stmt := idSelect + " WHERE (" + appWhere + ") AND " + offset.Where
+	ids, err := a.selectIDs(ctx, stmt, append(slices.Clone(appArgs), offset.Args...))
 	if err != nil {
 		return err
 	}
-	if !accessible || where == "" {
+	if !slices.Equal(ids, correct) {
 		return fmt.Errorf(
-			"re-planning %s/%s for the negative control gave plan kind %d rather than a conditional one",
-			principalID, action, misnumbered.Kind,
+			"composing with AppendTo returned [%s] where WithPlaceholderOffset returned [%s]", joinIDs(correct), joinIDs(ids),
 		)
 	}
 
-	stmt := idSelect + " WHERE " + appWhere + " AND (" + where + ")"
+	stmt = idSelect + " WHERE (" + appWhere + ") AND " + misnumbered.Where
 	args := append(slices.Clone(appArgs), misnumbered.Args...)
 
 	if err := checkPlaceholders(stmt, args); err == nil {
 		return fmt.Errorf(
-			"composing without WithPlaceholderOffset produced a statement checkPlaceholders accepts, "+
+			"composing without numbering the fragment produced a statement checkPlaceholders accepts, "+
 				"so that check is guarding nothing: %s", stmt,
 		)
 	}
@@ -574,19 +583,19 @@ func (a *app) assertOffsetIsLoadBearing(
 	// thing being executed. Sorted before the comparison because `correct` came back sorted, and the
 	// same id SET in another order is exactly the case this guard exists to rule out — comparing
 	// unsorted against sorted would call it a difference and pass.
-	ids, err := a.query(ctx, stmt, args)
+	ids, err = a.query(ctx, stmt, args)
 	slices.Sort(ids)
 	switch {
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "    omitting WithPlaceholderOffset: rejected before any rows were read (%v)\n", err)
+		fmt.Fprintf(os.Stderr, "    without numbering the fragment: rejected before any rows were read (%v)\n", err)
 		return nil
 	case slices.Equal(ids, correct):
 		return fmt.Errorf(
-			"composing without WithPlaceholderOffset returned the same rows as composing with it, "+
+			"composing without numbering the fragment returned the same rows as AppendTo, "+
 				"so usage shape 5 is not exercising the numbering at all: %s", stmt,
 		)
 	default:
-		fmt.Fprintf(os.Stderr, "    omitting WithPlaceholderOffset: silently returned [%s] instead of [%s]\n",
+		fmt.Fprintf(os.Stderr, "    without numbering the fragment: silently returned [%s] instead of [%s]\n",
 			joinIDs(ids), joinIDs(correct))
 		return nil
 	}
@@ -611,8 +620,8 @@ func (a *app) assertDenialSplicesToNoRows(
 
 	// Straight to query, past checkPlaceholders: the fragment binds nothing, so there is nothing for
 	// that check to say.
-	stmt := idSelect + " WHERE " + appWhere + " AND (" + result.Where + ")"
-	ids, err := a.query(ctx, stmt, appArgs)
+	where, args := result.AppendTo(appWhere, appArgs)
+	ids, err := a.query(ctx, idSelect+" WHERE "+where, args)
 	if err != nil {
 		return fmt.Errorf("splicing a denied plan's filter: %w", err)
 	}

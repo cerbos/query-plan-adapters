@@ -492,8 +492,54 @@ func filteredIDs(ctx context.Context, pool *pgxpool.Pool, mapper cerbospgx.Mappe
 	// Spliced without switching on Kind, as a caller that skips the switch would: every kind's
 	// Where must return exactly the rows the PDP allows on its own (ADR 0011).
 	query := `SELECT id FROM ` + resourceTable + " WHERE " + result.Where
+	ids, err := selectIDs(ctx, pool, query, result.Args)
+	if err != nil {
+		return nil, err
+	}
 
-	rows, err := pool.Query(ctx, query, result.Args...)
+	if err := checkSelfDelimiting(ctx, pool, result); err != nil {
+		return nil, err
+	}
+
+	// A caller predicate that selects every row, with a top-level OR and two arguments ahead of the
+	// fragment's: AppendTo must keep both its precedence and the fragment's numbering.
+	where, args := result.AppendTo(`"id" <> $1 OR $2`, []any{"", false})
+	composed, err := selectIDs(ctx, pool, `SELECT id FROM `+resourceTable+" WHERE "+where, args)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Equal(composed, ids) {
+		return nil, fmt.Errorf("composing with AppendTo returned %v where Where alone returned %v\nSQL: %s", composed, ids, where)
+	}
+	return ids, nil
+}
+
+// selfDelimitingContexts splice Where where an unparenthesised top-level AND, OR, NOT or comparison
+// would bind differently than the whole fragment.
+var selfDelimitingContexts = []string{"NOT %s", "FALSE AND %s", "%s AND FALSE", "FALSE = %s", "%s IS NOT TRUE"}
+
+// checkSelfDelimiting guards Result's contract that Where needs no parentheses of its own: each
+// context must select the same rows spliced as it does with Where parenthesised.
+func checkSelfDelimiting(ctx context.Context, pool *pgxpool.Pool, result cerbospgx.Result) error {
+	differs := make([]string, len(selfDelimitingContexts))
+	for i, c := range selfDelimitingContexts {
+		spliced := fmt.Sprintf(c, result.Where)
+		wrapped := fmt.Sprintf(c, "("+result.Where+")")
+		differs[i] = "((" + spliced + ") IS DISTINCT FROM (" + wrapped + "))"
+	}
+	query := `SELECT id FROM ` + resourceTable + " WHERE " + strings.Join(differs, " OR ")
+	ids, err := selectIDs(ctx, pool, query, result.Args)
+	if err != nil {
+		return err
+	}
+	if len(ids) > 0 {
+		return fmt.Errorf("the fragment is not self-delimiting: rows %v change when it is parenthesised\nSQL: %s", ids, query)
+	}
+	return nil
+}
+
+func selectIDs(ctx context.Context, pool *pgxpool.Pool, query string, args []any) ([]string, error) {
+	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("executing the translated filter: %w\nSQL: %s", err, query)
 	}

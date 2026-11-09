@@ -12,6 +12,7 @@ package cerbospgx
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	enginev1 "github.com/cerbos/cerbos/api/genpb/cerbos/engine/v1"
 	responsev1 "github.com/cerbos/cerbos/api/genpb/cerbos/response/v1"
@@ -121,13 +122,39 @@ type Result struct {
 	// empty on a successful translation, so a caller that splices it without switching on Kind
 	// still gets exactly the rows the PDP allows
 	// (docs/adr/0011-denial-fails-closed-in-the-result.md).
+	//
+	// Where is self-delimiting: it can be joined to any boolean expression with AND, OR or NOT, or
+	// tested with IS, without parentheses of its own. AppendTo composes it with a predicate of the
+	// caller's and numbers the placeholders.
 	Where string
 	// Args binds Where's placeholders, in order.
-	Args []any
-	Kind PlanKind
+	Args     []any
+	fragment fragment
+	Kind     PlanKind
 }
 
-var alwaysDenied = Result{Kind: KindAlwaysDenied, Where: "FALSE"}
+// AppendTo returns `(predicate) AND Where` with Where's placeholders numbered after args, and the
+// arguments to bind with it: args followed by Args. An empty predicate returns Where alone, still
+// numbered after args. It ignores WithPlaceholderOffset.
+//
+// The zero Result appends FALSE, as its Kind is KindAlwaysDenied.
+func (r Result) AppendTo(predicate string, args []any) (string, []any) {
+	f := r.fragment
+	if f.segments == nil {
+		f = denyFragment
+	}
+	where := f.number(len(args))
+	if predicate != "" {
+		where = "(" + predicate + ") AND " + where
+	}
+	return where, append(slices.Clone(args), f.args...)
+}
+
+var (
+	denyFragment  = fragment{segments: []string{"FALSE"}}
+	allowFragment = fragment{segments: []string{"TRUE"}}
+	alwaysDenied  = Result{Kind: KindAlwaysDenied, Where: "FALSE", fragment: denyFragment}
+)
 
 // ErrUnsupported wraps every shape this adapter refuses to translate, so callers can distinguish
 // "the policy asks for something PostgreSQL cannot express" from a mapping or transport error.
@@ -148,7 +175,7 @@ func WithNullRepresentation(rep NullRepresentation) Option {
 }
 
 // WithPlaceholderOffset shifts the generated `$n` placeholders so the fragment can be appended to
-// a query that already binds n arguments.
+// a query that already binds n arguments. Result.AppendTo numbers the fragment itself.
 func WithPlaceholderOffset(n int) Option {
 	return func(o *options) { o.placeholderOffset = n }
 }
@@ -183,7 +210,7 @@ func Translate(plan *responsev1.PlanResourcesResponse, table string, mapper Mapp
 	case enginev1.PlanResourcesFilter_KIND_ALWAYS_DENIED:
 		return alwaysDenied, nil
 	case enginev1.PlanResourcesFilter_KIND_ALWAYS_ALLOWED:
-		return Result{Kind: KindAlwaysAllowed, Where: "TRUE"}, nil
+		return Result{Kind: KindAlwaysAllowed, Where: "TRUE", fragment: allowFragment}, nil
 	case enginev1.PlanResourcesFilter_KIND_CONDITIONAL:
 	default:
 		return Result{}, fmt.Errorf("cerbospgx: unrecognised filter kind %s", filter.GetKind())
@@ -197,10 +224,10 @@ func Translate(plan *responsev1.PlanResourcesResponse, table string, mapper Mapp
 		return Result{}, fmt.Errorf("%w: %w", ErrUnsupported, err)
 	}
 
-	where, args, err := render(expr, cfg.placeholderOffset)
+	f, err := render(expr)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrUnsupported, err)
 	}
 
-	return Result{Kind: KindConditional, Where: where, Args: args}, nil
+	return Result{Kind: KindConditional, Where: f.number(cfg.placeholderOffset), Args: f.args, fragment: f}, nil
 }
