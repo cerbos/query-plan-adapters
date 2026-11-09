@@ -25,20 +25,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ./__pypackages__
-          key: ${{ runner.os }}-python-${{ hashFiles('**/pdm.lock') }}
-
       - uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
         name: Setup PDM
         with:
-          python-version: "3.10"  # Version range or exact version of a Python version to use, the same as actions/setup-python
-          prerelease: true     # Allow prerelease versions to be installed
-          enable-pep582: true  # Enable PEP 582 package loading globally
-
-      - run: pdm install -G testcontainers
+          python-version: "3.10"
 
       - name: Set PDM version env
         run: echo "PDM_BUILD_SCM_VERSION=${GITHUB_REF_NAME#*\/}" >> $GITHUB_ENV
@@ -49,9 +39,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: sqlalchemy/dist/
-
-      #- name: Create release
-        #run: |-
-          #gh release create "$GITHUB_REF_NAME" --generate-notes
-        #env:
-          #GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
