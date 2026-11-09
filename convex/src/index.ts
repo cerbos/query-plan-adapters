@@ -4,12 +4,16 @@ import {
   PlanExpression,
   PlanKind,
 } from "@cerbos/core";
+import type {
+  Expression,
+  FilterBuilder,
+  GenericTableInfo,
+} from "convex/server";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import { evaluate } from "./evaluate";
 import { isExpression, withOmittedNullDefault } from "./operands";
 import { canPushToDb, translateExpression } from "./pushdown";
-import type { FilterQ } from "./pushdown";
 import {
   assertEveryReferenceMapped,
   assertNoListValuedCondition,
@@ -19,7 +23,13 @@ import {
 
 export { PlanKind, UnsupportedQueryPlanError };
 
-export type ConvexFilter<Q, R = unknown> = (q: Q) => R;
+/**
+ * What `.filter()` takes. Mapped field names are runtime strings, so the filter reads any table's
+ * field paths, and a function of every table's builder is accepted by every table's `.filter()`.
+ */
+export type ConvexFilter = (
+  q: FilterBuilder<GenericTableInfo>,
+) => Expression<boolean>;
 
 export type MapperConfig = {
   field?: string;
@@ -78,11 +88,11 @@ type PostFilter = (doc: Record<string, unknown>) => boolean;
 // A caller that applies `filter` without reading `path` gets a type error, or a throw from
 // `.filter(undefined)`, rather than a partial filter
 // (docs/adr/0011-denial-fails-closed-in-the-result.md).
-type ConditionalResult<Q, R> =
+type ConditionalResult =
   | {
       kind: PlanKind.CONDITIONAL;
       path: "db";
-      filter: ConvexFilter<Q, R>;
+      filter: ConvexFilter;
     }
   | {
       kind: PlanKind.CONDITIONAL;
@@ -92,14 +102,14 @@ type ConditionalResult<Q, R> =
   | {
       kind: PlanKind.CONDITIONAL;
       path: "split";
-      prefilter: ConvexFilter<Q, R>;
+      prefilter: ConvexFilter;
       postFilter: PostFilter;
     };
 
 /** An unconditional result carries no filter at all, so none can be applied by mistake. */
-export type QueryPlanToConvexResult<Q = unknown, R = unknown> =
+export type QueryPlanToConvexResult =
   | { kind: PlanKind.ALWAYS_ALLOWED | PlanKind.ALWAYS_DENIED; path?: undefined }
-  | ConditionalResult<Q, R>;
+  | ConditionalResult;
 
 /**
  * Routes a validated condition to the half of the output that answers it: Convex's filter engine
@@ -107,11 +117,11 @@ export type QueryPlanToConvexResult<Q = unknown, R = unknown> =
  * (`split`), the engine narrowing the candidates with the pushable conjuncts before the
  * post-filter decides on the whole condition.
  */
-const buildFilters = <Q, R>(
+const buildFilters = (
   expression: PlanExpressionOperand,
   mapper: Mapper,
   nullIsMissing: boolean,
-): ConditionalResult<Q, R> => {
+): ConditionalResult => {
   if (canPushToDb(expression, mapper)) {
     return {
       kind: PlanKind.CONDITIONAL,
@@ -155,14 +165,10 @@ const conjunction = (
     ? operands[0]!
     : ({ operator: "and", operands } as PlanExpression);
 
-// The caller's `Q` is Convex's `FilterBuilder`, of which `FilterQ` is the subset the filter calls.
 const convexFilter =
-  <Q, R>(
-    expression: PlanExpressionOperand,
-    mapper: Mapper,
-  ): ConvexFilter<Q, R> =>
+  (expression: PlanExpressionOperand, mapper: Mapper): ConvexFilter =>
   (q) =>
-    translateExpression(expression, q as unknown as FilterQ, mapper) as R;
+    translateExpression(expression, q, mapper);
 
 const postFilterFor =
   (
@@ -173,12 +179,12 @@ const postFilterFor =
   (doc) =>
     evaluate(expression, { doc, mapper, bindings: {}, nullIsMissing }) === true;
 
-export function queryPlanToConvex<Q = unknown, R = unknown>({
+export function queryPlanToConvex({
   queryPlan,
   mapper = {},
   allowPostFilter = false,
   nullAttributeRepresentation = "omitted",
-}: QueryPlanToConvexArgs): QueryPlanToConvexResult<Q, R> {
+}: QueryPlanToConvexArgs): QueryPlanToConvexResult {
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
@@ -194,7 +200,7 @@ export function queryPlanToConvex<Q = unknown, R = unknown>({
       validateStructure(condition);
       assertEveryReferenceMapped(condition, mapper);
 
-      const result = buildFilters<Q, R>(
+      const result = buildFilters(
         condition,
         omitted ? withOmittedNullDefault(mapper) : mapper,
         omitted,

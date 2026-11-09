@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Breaking:** `queryPlanToConvex`, `QueryPlanToConvexResult` and `ConvexFilter` take no type
+  arguments. The filter is typed `(q: FilterBuilder<GenericTableInfo>) => Expression<boolean>`
+  from `convex/server`, which every table's `.filter()` accepts, so the `<Q, R>` a caller used to
+  pass, and which nothing checked, is gone: delete it. `convex` is now a peer dependency
+  ([#462](https://github.com/cerbos/query-plan-adapters/issues/462)).
+
 - `postFilter` evaluates `matches()` with [re2js](https://github.com/le0pard/re2js), a port of
   RE2 and a new dependency, in place of the literal, anchor and trailing `.*` subset. Every pattern
   is matched as the PDP matches it. A pattern RE2 rejects (a lookaround, a backreference, a

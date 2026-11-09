@@ -1,4 +1,3 @@
-import type { Expression, FilterBuilder } from "convex/server";
 import { v } from "convex/values";
 
 import { PlanKind, queryPlanToConvex } from "../src/index";
@@ -6,7 +5,6 @@ import { PlanKind, queryPlanToConvex } from "../src/index";
 // suite must run without the `_generated` API this file imports. See adversarialMapper.ts.
 import { MAPPER } from "./adversarialMapper";
 import { mutation, query } from "./_generated/server";
-import type { DataModel } from "./_generated/dataModel";
 import { executionPathOf, isPlanResourcesResponse } from "./planExecution";
 import { adversarialDocument } from "./schema";
 
@@ -42,10 +40,7 @@ export const executePlan = query({
       throw new Error("Invalid Cerbos query plan");
     }
 
-    const translated = queryPlanToConvex<
-      FilterBuilder<DataModel["adversarial"]>,
-      Expression<boolean>
-    >({
+    const translated = queryPlanToConvex({
       queryPlan,
       mapper: MAPPER,
       allowPostFilter: true,
