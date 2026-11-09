@@ -494,6 +494,51 @@ describe("the mapper contract", () => {
   });
 });
 
+describe("which patterns RE2 rejects", () => {
+  // matches() raises an error on a pattern RE2 rejects, which denies every row, so the adapter
+  // must agree with RE2 on exactly which patterns those are. The corpus pins the rejected shapes
+  // it carries; this pins the one the previous hand-rolled check got wrong: a digit after a
+  // backslash is a backreference to RE2 only on its own, and an octal escape when another octal
+  // digit follows, so `\11` is a tab.
+  const matches = (pattern: string, sibling = false): PlanResourcesResponse => {
+    const test = {
+      operator: "matches",
+      operands: [{ name: "request.resource.attr.aString" }, { value: pattern }],
+    };
+    const condition = sibling
+      ? {
+          operator: "or",
+          operands: [test, { operator: "eq", operands: [{ name: "request.resource.attr.aNumber" }, { value: 5 }] }],
+        }
+      : test;
+    return {
+      kind: PlanKind.CONDITIONAL,
+      condition: condition as PlanExpressionOperand,
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    } as PlanResourcesResponse;
+  };
+
+  test("an octal escape is the character it names, not a backreference", () => {
+    const result = queryPlanToPrisma({ queryPlan: matches("^\\11"), mapper: MAPPER, model: MODEL });
+    expect(result.kind).toBe(PlanKind.CONDITIONAL);
+  });
+
+  test("a backreference is an error on every row, so only its sibling decides", () => {
+    const result = queryPlanToPrisma({
+      queryPlan: matches("(a)\\1", true),
+      mapper: MAPPER,
+      model: MODEL,
+    });
+    expect(result).toEqual({ kind: PlanKind.CONDITIONAL, filters: { aNumber: { equals: 5 } } });
+    expect(queryPlanToPrisma({ queryPlan: matches("\\8"), mapper: MAPPER, model: MODEL })).toEqual({
+      kind: PlanKind.ALWAYS_DENIED,
+    });
+  });
+});
+
 describe("plans the planner cannot produce", () => {
   // Input validation on a public function, not policy shapes. Every other assertion in this file
   // reads its plan from a golden file precisely because a typed plan is a belief about the planner —

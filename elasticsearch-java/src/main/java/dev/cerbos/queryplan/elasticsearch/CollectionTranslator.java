@@ -9,12 +9,15 @@ import static dev.cerbos.queryplan.elasticsearch.Refusals.malformed;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.unmapped;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.unsupported;
 
+import com.google.protobuf.ListValue;
+import com.google.protobuf.Struct;
 import com.google.protobuf.Value;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Options;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,7 +62,8 @@ final class CollectionTranslator {
         }
     }
 
-    Map<String, Object> translateMacro(String operator, List<Operand> operands, Polarity polarity) {
+    Map<String, Object> translateMacro(String operator, List<Operand> operands, Scope scope,
+                                       Polarity polarity) {
         boolean whenTrue = polarity.holds();
         if (operands.size() != 2) {
             throw malformed(operator + " requires exactly 2 operands, got " + operands.size());
@@ -68,6 +72,10 @@ final class CollectionTranslator {
         Operand listOperand = operands.get(0);
         Operand lambdaOperand = operands.get(1);
 
+        if (scope instanceof Scope.Lambda enclosing
+                && operands.stream().anyMatch(o -> PlanWalker.readsOutside(o, Set.of(enclosing.lambdaVariable())))) {
+            throw PlanWalker.outsideNestedScope(operator + "()");
+        }
         if (lambdaOperand.getNodeCase() == Operand.NodeCase.EXPRESSION
                 && "lambda".equals(lambdaOperand.getExpression().getOperator())
                 && lambdaOperand.getExpression().getOperandsCount() == 3) {
@@ -79,14 +87,14 @@ final class CollectionTranslator {
 
         if (listOperand.getNodeCase() == Operand.NodeCase.EXPRESSION
                 && "list".equals(listOperand.getExpression().getOperator())) {
-            return handleListExpression(operator, listOperand.getExpression(), lambdaOperand, polarity);
+            return handleListExpression(operator, listOperand.getExpression(), lambdaOperand, scope, polarity);
         }
 
         // The planner unrolls a macro over a literal list of up to 10 elements itself; a longer
         // list arrives as the collection operand, so fold it here the same way.
         if (listOperand.getNodeCase() == Operand.NodeCase.VALUE) {
             return handleKnownValueCollection(
-                    operator, listOperand.getValue(), lambdaOperand, polarity);
+                    operator, listOperand.getValue(), lambdaOperand, scope, polarity);
         }
 
         if (listOperand.getNodeCase() != Operand.NodeCase.VARIABLE) {
@@ -94,13 +102,13 @@ final class CollectionTranslator {
         }
 
         String cerbosAttr = listOperand.getVariable();
-        String esField = root.field(cerbosAttr);
+        String esField = scope.field(cerbosAttr);
 
         if (!options.nestedPaths().contains(esField)) {
             if (options.collectionFields().contains(esField)) {
-                Map<String, Object> equality = flatScalarExistsEquality(
+                Map<String, Object> predicate = flatScalarExists(
                         operator, lambdaOperand, esField, polarity);
-                if (equality != null) return equality;
+                if (predicate != null) return predicate;
                 throw unsupported("Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping");
             }
             if (isObjectPath(esField)) {
@@ -137,15 +145,24 @@ final class CollectionTranslator {
 
         // Only positive exists and negated all reach here. Either way a document matches when
         // one nested element satisfies the body under this polarity.
-        Scope scope = new Scope.Lambda(esField, lambda.variable());
-        return Queries.nestedQuery(esField, walker.operand(lambda.body(), scope, polarity));
+        Scope element = new Scope.Lambda(esField, lambda.variable());
+        return Queries.nestedQuery(esField, walker.operand(lambda.body(), element, polarity));
     }
 
+    /** Positive predicates of one element against a literal that a flat array answers as a whole. */
+    private static final Set<String> FLAT_ELEMENT_OPERATORS = Set.of(
+            "eq", "in", "lt", "le", "gt", "ge", "contains", "startsWith", "endsWith", "matches");
+
     /**
-     * {@code exists(x, x == v)} over a flat array is a single term match. Returns {@code null}
+     * {@code exists(x, x op v)} over a flat array: a query on the array field matches a document
+     * holding one element that satisfies it, which is what {@code exists} asks. Only a positive
+     * predicate of the element against a literal is exact: {@code exists(x, x != v)} needs an
+     * element the term does not match, which a {@code must_not} over the whole array cannot find
+     * in an array that also holds {@code v}. A null element, which Elasticsearch does not index,
+     * errors in CEL only where no other element holds, and that denies too. Returns {@code null}
      * for any other shape.
      */
-    private Map<String, Object> flatScalarExistsEquality(
+    private Map<String, Object> flatScalarExists(
             String operator, Operand lambdaOperand, String field, Polarity polarity) {
         if (!"exists".equals(operator) || !polarity.holds()
                 || lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION) return null;
@@ -154,7 +171,7 @@ final class CollectionTranslator {
                 || lambda.getOperands(1).getNodeCase() != Operand.NodeCase.VARIABLE
                 || lambda.getOperands(0).getNodeCase() != Operand.NodeCase.EXPRESSION) return null;
         Expression body = lambda.getOperands(0).getExpression();
-        if (!"eq".equals(body.getOperator()) || body.getOperandsCount() != 2) return null;
+        if (!FLAT_ELEMENT_OPERATORS.contains(body.getOperator()) || body.getOperandsCount() != 2) return null;
         String variable = lambda.getOperands(1).getVariable();
         Operand left = body.getOperands(0);
         Operand right = body.getOperands(1);
@@ -165,8 +182,85 @@ final class CollectionTranslator {
                 && right.getVariable().equals(variable)
                 && left.getNodeCase() == Operand.NodeCase.VALUE;
         if (!variableFirst && !valueFirst) return null;
-        return leaf.applyResolvedLeaf("eq", body.getOperandsList(),
+        if (valueFirst && "in".equals(body.getOperator())) return null;
+        return leaf.applyResolvedLeaf(body.getOperator(), body.getOperandsList(),
                 new Scope.Root(Map.of(variable, field)), Polarity.TRUE);
+    }
+
+    /**
+     * {@code exists_one(t, t == f)} over a literal list, with {@code f} a document field: exactly
+     * one element equals the field, so the field is one of the elements that occur once. The
+     * negation is the field present and not one of them. Each element's comparison errors
+     * exactly when the field is missing, so the error is the same for every element, as
+     * {@code exists_one} requires: it errors when any element does.
+     */
+    Map<String, Object> translateExistsOne(List<Operand> operands, Polarity polarity) {
+        if (operands.size() != 2) {
+            throw malformed("exists_one requires exactly 2 operands, got " + operands.size());
+        }
+        Operand listOperand = operands.get(0);
+        if (listOperand.getNodeCase() != Operand.NodeCase.VALUE) {
+            throw unsupported("exists_one cannot be expressed by Elasticsearch nested queries without"
+                    + " scripts: the Query DSL counts no nested matches");
+        }
+        if (listOperand.getValue().getKindCase() != Value.KindCase.LIST_VALUE) {
+            throw malformed("exists_one over a literal collection requires a list value");
+        }
+        if (operands.get(1).getNodeCase() != Operand.NodeCase.EXPRESSION
+                || !"lambda".equals(operands.get(1).getExpression().getOperator())) {
+            throw malformed("exists_one second operand must be a lambda expression");
+        }
+        Lambda lambda = Lambda.of(operands.get(1).getExpression(),
+                "exists_one over a literal collection supports single-variable lambdas only");
+        Operand field = elementEqualsField(lambda);
+        if (field == null) {
+            throw unsupported("exists_one over a literal list folds only when its body compares the"
+                    + " element with one document field for equality: any other body is decided"
+                    + " per element, which the Query DSL cannot count");
+        }
+        Map<Object, Integer> occurrences = new LinkedHashMap<>();
+        for (Value element : listOperand.getValue().getListValue().getValuesList()) {
+            Object value = PlanValues.protoValueToJava(element);
+            if (value == null || value instanceof List<?> || value instanceof Map<?, ?>) {
+                // No indexed field equals a null, a list or a map.
+                continue;
+            }
+            occurrences.merge(value, 1, Integer::sum);
+        }
+        ListValue.Builder singles = ListValue.newBuilder();
+        occurrences.forEach((value, count) -> {
+            if (count == 1) {
+                singles.addValues(javaToProtoValue(value));
+            }
+        });
+        Operand members = Operand.newBuilder().setValue(Value.newBuilder().setListValue(singles)).build();
+        return walker.expression(Expression.newBuilder().setOperator("in")
+                .addOperands(field).addOperands(members).build(), root, polarity);
+    }
+
+    /** The field operand of a {@code t == f} / {@code f == t} lambda body, or null. */
+    private static Operand elementEqualsField(Lambda lambda) {
+        if (lambda.body().getNodeCase() != Operand.NodeCase.EXPRESSION) return null;
+        Expression body = lambda.body().getExpression();
+        if (!"eq".equals(body.getOperator()) || body.getOperandsCount() != 2) return null;
+        for (int side = 0; side < 2; side++) {
+            Operand element = body.getOperands(side);
+            Operand other = body.getOperands(1 - side);
+            if (element.getNodeCase() == Operand.NodeCase.VARIABLE
+                    && element.getVariable().equals(lambda.variable())
+                    && other.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                return other;
+            }
+        }
+        return null;
+    }
+
+    private static Value javaToProtoValue(Object value) {
+        Value.Builder builder = Value.newBuilder();
+        if (value instanceof String s) return builder.setStringValue(s).build();
+        if (value instanceof Number n) return builder.setNumberValue(n.doubleValue()).build();
+        if (value instanceof Boolean b) return builder.setBoolValue(b).build();
+        throw malformed("Unsupported literal element: " + value.getClass().getSimpleName());
     }
 
     /**
@@ -179,6 +273,7 @@ final class CollectionTranslator {
             String operator,
             Value collectionValue,
             Operand lambdaOperand,
+            Scope scope,
             Polarity polarity) {
         boolean whenTrue = polarity.holds();
         if (!"exists".equals(operator) && !"all".equals(operator)) {
@@ -208,17 +303,18 @@ final class CollectionTranslator {
                     lambda.body(), lambda.variable(), Operand.newBuilder().setValue(element).build()));
         }
         Expression folded = combined.build();
-        return walker.expression(folded, root, polarity);
+        return walker.expression(folded, scope, polarity);
     }
 
     /**
      * Folds {@code exists}/{@code all} over a list built in the policy, such as
      * {@code [R.attr.a, R.attr.b].exists(s, s == "x")}, the same way as a literal list. CEL builds
      * the list before the macro runs, so a missing element attribute errors the whole expression:
-     * every field element must exist, under either polarity.
+     * every field element must exist, under either polarity. A {@code struct()} literal element,
+     * which the planner leaves unfolded when the list holds a field, is a map literal.
      */
     private Map<String, Object> handleListExpression(
-            String operator, Expression list, Operand lambdaOperand, Polarity polarity) {
+            String operator, Expression list, Operand lambdaOperand, Scope scope, Polarity polarity) {
         if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
                 || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
             throw malformed(operator + " second operand must be a lambda expression");
@@ -229,10 +325,13 @@ final class CollectionTranslator {
         Expression.Builder combined = Expression.newBuilder()
                 .setOperator("exists".equals(operator) ? "or" : "and");
         for (Operand element : list.getOperandsList()) {
+            if (isStructLiteral(element)) {
+                element = Operand.newBuilder().setValue(structLiteral(element.getExpression())).build();
+            }
             switch (element.getNodeCase()) {
                 case VALUE -> { }
                 case VARIABLE -> {
-                    String field = root.field(element.getVariable());
+                    String field = scope.field(element.getVariable());
                     if (!options.scalarTypes().containsKey(field)
                             || options.explicitNullAttributes().contains(element.getVariable())) {
                         throw unsupported(operator + " over a list holding the attribute '"
@@ -253,8 +352,35 @@ final class CollectionTranslator {
             boolean holds = "all".equals(operator);
             return holds == polarity.holds() ? Queries.matchAll() : Queries.matchNone();
         }
-        clauses.add(walker.expression(combined.build(), root, polarity));
+        clauses.add(walker.expression(combined.build(), scope, polarity));
         return clauses.size() == 1 ? clauses.get(0) : Queries.boolMust(clauses);
+    }
+
+    private static boolean isStructLiteral(Operand operand) {
+        return operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "struct".equals(operand.getExpression().getOperator());
+    }
+
+    /** A {@code struct(set-field(k, v), ...)} of literals as one map value. */
+    private static Value structLiteral(Expression struct) {
+        Struct.Builder fields = Struct.newBuilder();
+        for (Operand entry : struct.getOperandsList()) {
+            if (entry.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+                throw malformed("struct requires set-field operands");
+            }
+            Expression setField = entry.getExpression();
+            if (!"set-field".equals(setField.getOperator()) || setField.getOperandsCount() != 2
+                    || setField.getOperands(0).getNodeCase() != Operand.NodeCase.VALUE
+                    || setField.getOperands(0).getValue().getKindCase() != Value.KindCase.STRING_VALUE
+                    || setField.getOperands(1).getNodeCase() != Operand.NodeCase.VALUE) {
+                throw unsupported("A map literal with a computed key or value cannot be folded: the"
+                        + " Query DSL compares a field against a literal, and computing the entry"
+                        + " needs a script");
+            }
+            fields.putFields(setField.getOperands(0).getValue().getStringValue(),
+                    setField.getOperands(1).getValue());
+        }
+        return Value.newBuilder().setStructValue(fields).build();
     }
 
     /**
@@ -407,7 +533,7 @@ final class CollectionTranslator {
                     + " cannot do without scripts");
         }
         Value needle = Value.newBuilder().setListValue(
-                com.google.protobuf.ListValue.newBuilder().addValues(operands.get(0).getValue())).build();
+                ListValue.newBuilder().addValues(operands.get(0).getValue())).build();
         return handleMapHasIntersection(
                 operands.get(1).getExpression(), Operand.newBuilder().setValue(needle).build());
     }

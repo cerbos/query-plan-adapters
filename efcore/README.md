@@ -87,13 +87,14 @@ var attributes = new AttributeMap<Document>()
   Inside it, keys are the field names a lambda body reads (`x.role` in
   `R.attr.reviewers.exists(x, x.role == "lead")`), and lists nest.
 - **`position`** is optional. It names the column holding each element's zero-based index in the
-  list your application sends to `check()`, and only `R.attr.list[0]` needs it; without one, an
-  index is refused.
+  list your application sends to `check()`. `R.attr.list[0]`, comparing a whole list with `==` and
+  the index variable of a two-variable macro (`R.attr.list.exists(i, v, …)`) read it; without one,
+  they are refused.
 
-`exists`, `all`, `exists_one`, `filter`, `map`, `in`, `size` and `hasIntersection` over a mapped list
-become correlated subqueries. A list is a set of related rows, so the adapter refuses what needs
-row order or multiplicity it cannot read: comparing a whole list, `except`/`intersect`/`isSubset`,
-list concatenation and two-variable `exists`.
+`exists`, `all`, `exists_one`, `filter`, `map`, `in`, `size`, `hasIntersection`, `except`,
+`intersect`, `isSubset` and `+` (concatenation) over a mapped list become correlated subqueries. A
+list is a set of related rows, so the adapter refuses what needs an order it cannot read: comparing
+a whole list without a `position` column, or a list that `except` filtered.
 
 ### NULL columns
 
@@ -148,7 +149,9 @@ Map a timestamp column as `DateTime` or `DateTimeOffset`. To CEL it is the RFC 3
 application sends; `timestamp(R.attr.createdAt)` compares instants. A plan literal finer than the
 provider keeps (PostgreSQL holds microseconds, SQL Server and SQLite 100 ns) is truncated, and the
 comparison adjusted so the truncation never admits a row. Comparing the column as a string, without
-`timestamp()`, is refused: the store does not keep the exact spelling.
+`timestamp()`, is refused: the store does not keep the exact spelling. A duration added to or
+subtracted from the column shifts it in SQL, and `timeSince` subtracts the column from a clock the
+adapter reads once per `ToFilter`: `DateTimeOffset.UtcNow`, or `QueryPlanOptions.Now` when set.
 
 ## Supported operators
 
@@ -157,23 +160,26 @@ comparison adjusted so the truncation never admits a row. Comparing the column a
 | `&&`, `\|\|`, `!`, `? :` | Boolean logic over the true/false pair, so an erroring operand denies under both polarities |
 | `==`, `!=` | Equality with CEL's heterogeneous rule: values of different types are unequal, never an error |
 | `<`, `<=`, `>`, `>=` | Numbers, strings (code-point order), booleans, timestamps; across types, an error |
-| `in` | A literal list, a mapped list, or a list literal with columns in it |
-| `+`, `-`, `*`, `/` | Double arithmetic; `/` only by a finite, non-zero constant |
+| `in` | A literal list, a mapped list, a list literal with columns in it, or a list a macro or list function built |
+| `+`, `-`, `*`, `/`, `%` | Double arithmetic, and integer arithmetic after `int()`, with CEL's overflow and division errors; `/` by a constant or by the dividend itself (`x / x`), division by zero into NaN or an infinity as CEL does |
+| `matches` | An RE2 pattern lowered to equality, `startsWith`/`endsWith`/`contains`, `size` and character-set checks; a pattern that is not a finite shape is refused |
 | `startsWith`, `endsWith`, `contains` | With a constant or a column on either side, escaped |
-| `size` | Strings (code points), mapped lists |
-| `has` | A mapped field, a navigation's field, a field of a list element |
-| `exists`, `all`, `exists_one`, `filter`, `map` | Over a mapped list, nesting; `exists`, `all` and `exists_one` over a list literal |
-| `hasIntersection` | A mapped list against a literal, or two lists |
-| `timestamp()`, `duration()` | A `DateTime` column or a literal; durations add to and subtract from literal timestamps |
-| `string()`, `double()` | `string()` over a string or boolean, `double()` over a number |
-| `hierarchy()`, `ancestorOf`, `descendentOf`, `overlaps` | Over a delimited string column or literal |
-| `list[i]` | With a constant index and a mapped `position` column |
+| `size` | Strings (code points), mapped lists, lists a macro or list function built |
+| `has` | A mapped field, a navigation's field, a field of a list element, a prefix of mapped fields |
+| `exists`, `all`, `exists_one`, `filter`, `map` | Over a mapped list, nesting, with one or two variables; over a list literal |
+| `hasIntersection`, `except`, `intersect`, `isSubset` | A mapped list against a literal, or two lists |
+| `timestamp()`, `duration()`, `timeSince` | A `DateTime` column or a literal; durations add to and subtract from either |
+| `string()`, `double()`, `int()` | `string()` over a string, a boolean or a numeric column, `double()` over a number, `int()` over a number |
+| `upperAscii()`, `lowerAscii()` | Over a string column or literal |
+| `hierarchy()`, `ancestorOf`, `descendentOf`, `overlaps` | Over a delimited string column, a literal or a mapped list of segments |
+| `list[i]`, `map[k]` | A mapped list with a `position` column by a constant or a numeric column; a map literal by a column |
+| `? :` as a value | A conditional value is carried as its cases, and the operator over it is applied to each |
 
-Refused, each with the reason in [`conformance-ledger.json`](conformance-ledger.json): `matches()`
-(CEL's RE2 has no provider equivalent, and SQLite and SQL Server before 2025 have no regex),
-`int()`, `%`, `upperAscii()`/`lowerAscii()`, division by a column, NaN and infinities,
-`string()` of a number, `except`/`intersect`/`isSubset`, `timeSince` and timestamp arithmetic over a
-column.
+Refused, each with the reason in [`conformance-ledger.json`](conformance-ledger.json): `int()`,
+`double()` and `timestamp()` over a string column (the store cannot say whether the text parses),
+division by a column other than the dividend, the sign of a zero, `string()` of a number literal
+(the plan does not say whether CEL typed it as an int or a double), ordered equality of a list
+`except` filtered, map keys of a to-one navigation, and textual equality of a timestamp column.
 
 ## Conformance contract
 
@@ -188,11 +194,11 @@ passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 73 / 102 |
-| adversarial | 290 / 373 |
+| extended | 98 / 102 |
+| adversarial | 349 / 375 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json). All 102 are `unsupported`: the adapter throws
+[`conformance-ledger.json`](conformance-ledger.json). All 20 are `unsupported`: the adapter throws
 `QueryPlanRefusedException` rather than emit a predicate, identically on all three stores. None is
 `divergent`, and none is a wrong answer.
 
@@ -210,8 +216,8 @@ An `int`, `long` or `decimal` column is converted to `double` in SQL, which is e
 
 ### SQL Server stores no NaN or infinity
 
-A plan comparing with `NaN` or `±Inf` is folded at translation time; one that would have to store
-or compute one is refused.
+A plan comparing with `NaN` or `±Inf` is folded at translation time, and a division that CEL
+would carry into NaN or an infinity becomes a case per outcome, so no query ever computes one.
 
 ## Example application
 

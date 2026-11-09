@@ -77,7 +77,7 @@ interface FieldNameMapperConfig {
   field: string;
   required?: boolean;
   numericType?: "integer" | "float";
-  valueType?: "boolean";
+  valueType?: "boolean" | "json";
 }
 ```
 
@@ -88,6 +88,11 @@ interface FieldNameMapperConfig {
 | `numericType: "float"` | The key is always stored as floating-point metadata. Required for ordered comparisons against a fractional threshold, because Chroma distinguishes integer from float metadata. |
 | `numericType: "integer"` | Every value stored under the key is an integer. An inequality then needs no `$ne` and no `required`: `x != 5` becomes `$or` of `$lt: 5` and `$gt: 5`, and `x != "5"` (a string or boolean literal, which no integer equals) becomes `$or` of `$lt: 0` and `$gte: 0`. A fractional literal (`x != 2.5`) still takes `$ne` and needs `required: true`, because Chroma compares a fractional threshold with integer metadata inexactly. |
 | `valueType: "boolean"` | Every value stored under the key is a boolean. An inequality against a boolean then needs no `$ne` and no `required`: `x != true` and `!x` become `$eq: false`. Cannot be combined with `numericType`. |
+| `valueType: "json"` | The key holds the attribute as JSON text (`JSON.stringify(value)`): a list, a map, a null, or a scalar, exactly as the application sends it to the PDP. Chroma metadata cannot hold a list with a null element or an empty list, a map, or a null, and this is how such an attribute reaches the [post-filter](#post-filtering), which parses it. No `Where` clause reads it: a comparison against it is refused, or answered by the post-filter under `allowPostFilter`. A reference below the attribute (`R.attr.doc.tags`) resolves through the entry for `R.attr.doc`. Cannot be combined with `numericType`. |
+
+A key declared `"json"` must hold what the PDP saw, as text: a key that holds the JSON of a list
+but is declared as a plain key reads as a string, so `size(R.attr.list)` would count its characters.
+Declare the encoding wherever it is used.
 
 Chroma's `$eq`, `$lt`, `$gt` and `$gte` never match a record missing the key, so these spellings
 are sound over an optional key. They rely on the declaration holding for every record: a string
@@ -120,11 +125,17 @@ function mapper declares one by returning a value).
 ## NULL attribute representation
 
 Other adapters take a `nullAttributeRepresentation` option because `R.attr.x == null` produces the
-same plan whether a NULL field is sent to `check()` as an explicit `null` or omitted. **This adapter
-needs none**: Chroma metadata has no null (it rejects a null value or list element), so every null
-comparison operand is rejected under either convention (every `null/*` corpus case that compares a
-null literal throws, including `null/equals/null-literal-on-missing-attribute`). See
-[#302](https://github.com/cerbos/query-plan-adapters/issues/302).
+same plan whether a NULL field is sent to `check()` as an explicit `null` or omitted. This adapter
+reads the convention off the mapping instead. A scalar metadata key cannot hold a null (Chroma
+rejects a null value), so an attribute stored under one is either present or **missing**: the
+post-filter reads an absent key as CEL's missing-attribute error, which denies under both
+polarities, exactly as `check()` does for an attribute the request omits. An attribute the
+application sends as an **explicit null** must be stored under a key declared
+`valueType: "json"`, as the text `null`: the post-filter then compares it as CEL does (`null != "x"`
+is true, `has()` is true). The corpus pins both: `null/equals/null-literal-on-missing-attribute`
+reads a scalar key and denies, and the `null/*` cases over `owner` read a JSON key. No `Where`
+clause compares a null, so every null comparison is answered by the post-filter and refused without
+`allowPostFilter` ([#302](https://github.com/cerbos/query-plan-adapters/issues/302)).
 
 > [!WARNING]
 > **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An
@@ -177,19 +188,21 @@ Resulting `$ne`/`$nin` still need `required: true`, except where a `valueType: "
 mirrored.
 
 A `Where` clause compares one metadata key with a literal, so these throw unless
-[`allowPostFilter`](#post-filtering) is set, in which case the post-filter answers many of them:
+[`allowPostFilter`](#post-filtering) is set, in which case the post-filter answers them:
 
-- string helpers (`contains`, `startsWith`, `endsWith`): Chroma has no prefix, substring or pattern
-  operator on a string value, and its `$contains` tests list membership, not a substring;
-- null comparisons: Chroma metadata has no null, and rejects a null value or list element;
-- collection operators (`hasIntersection`, `exists`, `exists_one`, `all`, `filter`, `map`, `lambda`,
-  `size`), positional reads (`R.attr.list[0]`) and value-first membership in a list-valued key
-  (`"x" in R.attr.list`). The pinned server stores a homogeneous list, but `$eq` on a list key and a
-  dotted `key.N` both match nothing, there is no count function, and there is no quantifier over a
-  list's elements. Its position-blind `$contains` is not translated: Chroma stores an empty list as
-  an absent key and rejects null elements and mixed types, so a list cannot always be stored as the
-  PDP sees it ([#475](https://github.com/cerbos/query-plan-adapters/issues/475));
-- collections reached through a relation, and lists of objects: Chroma metadata has no relation or array-of-object model;
+- string helpers (`contains`, `startsWith`, `endsWith`) and `matches`: Chroma has no prefix,
+  substring or pattern operator on a string value, and its `$contains` tests list membership, not
+  a substring;
+- null comparisons: Chroma metadata has no null (see above);
+- collection operators (`hasIntersection`, `exists`, `exists_one`, `all`, `filter`, `map`,
+  `except`, `intersect`, `isSubset`, `size`), positional reads (`R.attr.list[0]`), value-first
+  membership in a list-valued key (`"x" in R.attr.list`) and whole-list equality. The pinned
+  server stores a homogeneous list, but `$eq` on a list key and a dotted `key.N` both match
+  nothing, there is no count function, and there is no quantifier over a list's elements. Its
+  position-blind `$contains` is not translated: Chroma stores an empty list as an absent key and
+  rejects null elements and mixed types, so a list cannot always be stored as the PDP sees it
+  ([#475](https://github.com/cerbos/query-plan-adapters/issues/475)). The post-filter reads a list,
+  a map or a list of objects from a key declared `valueType: "json"`;
 - field-to-field comparisons, arithmetic, casts, ternaries, hierarchy and timestamp operations: an
   operand must be a bare key or a literal, never a computed value or a second key.
 
@@ -254,19 +267,21 @@ point. It evaluates arithmetic, string helpers (`contains`, `startsWith`, `endsW
 `+`), casts (`int`, `double`, `string`, `timestamp`, `duration`), timestamp and duration
 arithmetic and `timeSince` (against the clock when the plan is translated), field-to-field
 comparisons, ternaries, `size`, hierarchies (built from a string or a list of segments), list
-literals built from expressions, an index into a map literal, and the collection macros over a
-literal list (a principal attribute's list, which the planner inlines). `matches` is answered for a literal pattern with optional anchors and a trailing
-`.*` only.
+literals and map literals built from expressions, an index into a list or a map, the collection
+macros (one- and two-variable) and Cerbos's `except`, `intersect` and `isSubset` over any list, and
+null comparisons. `matches` is evaluated by [re2js](https://github.com/le0pard/re2js), a port of
+RE2, so a pattern means what it means to the PDP: no lookaround, a repeat count of at most 1000,
+`$` at the absolute end, `(?i)` by Unicode simple case folding; a pattern RE2 rejects is an
+evaluation error, as it is in Cerbos.
 
-It reads only the metadata the mapper declares, and only scalars: a key holding a list or anything
-else that is not a string, finite number or boolean reads as missing, which denies. Everything it
-cannot evaluate exactly is still refused with `UnsupportedOperatorError`, at translation, never from
-the predicate:
+It reads only the metadata the mapper declares. A plain key must hold a scalar: a list or anything
+else that is not a string, finite number or boolean reads as missing, which denies. A key declared
+`valueType: "json"` is parsed, and holds whatever the PDP saw: a list, a list of objects, a map, a
+null. Everything the post-filter cannot evaluate exactly is still refused with
+`UnsupportedOperatorError`, at translation, never from the predicate:
 
 - a reference the mapper has no entry for: an undeclared attribute is one the record may not
   store (a list, a relation), and reading it as missing would deny records the PDP allows;
-- a null literal: Chroma metadata has no null, so a record cannot tell an explicit null attribute
-  from a missing one;
 - arithmetic between a stored number and an integral literal, or between two integral literals.
   A plan carries `1` whether the policy wrote `1` or `1.0`, and CEL arithmetic has no int/double
   overload: `R.attr.x + 1` is an error on every record, so `!(R.attr.x + 1 > 2)` denies every
@@ -275,10 +290,12 @@ the predicate:
   `valueType: "boolean"`): the chromadb client stores metadata through JSON, which writes -0.0 as
   0, so the sign of a stored zero is lost, and it decides both the infinity a division by zero
   gives and `string()`'s `"-0"`;
-- any other `matches` pattern, `filter` or `map` used as a condition, a two-variable comprehension,
-  a map literal anywhere but the target of an index (the plan's `struct` drops the type name, so a
-  message literal is the same node), and the operators it has no evaluation for (`except`,
-  `intersect`, `isSubset`, among others).
+- a map literal with a key that is not a string literal, and the operators it has no evaluation
+  for.
+
+A list-valued expression (`filter`, `map`, `except`, `intersect`) in a boolean position has no
+overload, so CEL errors on every record and the PDP denies it; the predicate denies it the same
+way, as the other adapters do.
 
 ## Error handling
 
@@ -328,13 +345,13 @@ caller must. Passed cases on the current PDP, 0.57.0, out of every golden case i
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 24 / 30 |
-| extended | 52 / 102 |
-| adversarial | 183 / 373 |
+| core | 30 / 30 |
+| extended | 93 / 102 |
+| adversarial | 339 / 375 |
 
-Without `allowPostFilter`, the 167 cases the post-filter answers throw `UnsupportedOperatorError`
-instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 71
-passing: 20, 12 and 39 in the three tiers.
+Without `allowPostFilter`, the 388 cases the post-filter answers throw `UnsupportedOperatorError`
+instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 74
+passing: 21, 12 and 41 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -356,10 +373,14 @@ no `Where` form, so the post-filter answers it. The corpus therefore proves no `
 `src/translator.test.ts` pins that `required` gates them, and that the type declarations are what
 spell the others.
 
-The harness stores every scalar the dataset has, `createdBy` and `scope` included, and maps each. It
-stores no list (#475), and not `owner` or `coOwner`, which reach `check()` as an explicit null on
-some rows, a value Chroma metadata cannot hold; the mapping declares none of them, so every case
-reading one is refused.
+The harness stores every scalar the dataset has, `createdBy` and `scope` included, and maps each.
+What a scalar key cannot hold (#475) it stores as JSON text under a key declared
+`valueType: "json"`: the lists (`tagNames`, `aNumberList`, `aBoolList`, `tags`), `categories` and
+`mainCategory`, `owner` and `coOwner`, which reach `check()` as an explicit null on some rows, and
+`parent` and `obj` whole, beside their flattened scalar keys. Each is written as the generator
+builds the resource, so the record read back is the resource. The 35 cases that remain refused
+turn on a type the plan does not carry (an integral literal next to a stored number, `0 / 0` in a
+ternary) or on the sign of a stored zero.
 
 ## Mapping hazards
 
@@ -375,7 +396,7 @@ flat metadata on the record being matched, and every shape that would reach a se
 | Subtype discrimination | **Caller-owned** | The Chroma collection you pass the `where` clause to. The adapter never sees the collection, so it cannot check that it is the one whose metadata became the resource attributes. If one collection mixes document kinds, add the discriminating metadata key to the `where` yourself |
 | To-one relation used as a collection | Not applicable — a metadata key holds exactly what the application stored | — |
 | Composite association key | Not applicable — no join, so no key to compose | — |
-| Absent to-one parent | **Handled** for a scalar reached through the parent, **rejected** for a collection — `relation/contains/one-hop`, `relation/and/negated-conjunction-short-circuits-absent-parent` and the other scalar hops pass; `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain` and the other chained collections are `unsupported` in the ledger and throw | A scalar hop is stored flattened onto a dotted key (`parent.aString`) that an absent parent leaves out, which the post-filter reads as CEL's missing-attribute error. The dotted key must be written exactly when the parent exists. Chroma metadata has no relation or nested-object model, so a collection behind a relation has nowhere to resolve and the plan is refused ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
+| Absent to-one parent | **Handled** — `relation/contains/one-hop`, `relation/and/negated-conjunction-short-circuits-absent-parent` and the other scalar hops pass over flattened keys; `relation/all/to-one-chain`, `relation/exists/negated-to-one-chain` and the other chained collections pass over a JSON key | A scalar hop is stored flattened onto a dotted key (`parent.aString`) that an absent parent leaves out, which the post-filter reads as CEL's missing-attribute error. The dotted key must be written exactly when the parent exists. A collection behind a relation is read from the parent stored whole under a key declared `valueType: "json"`, which an absent parent leaves out ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)) |
 
 ## Behaviour changes
 
@@ -396,6 +417,18 @@ flat metadata on the record being matched, and every shape that would reach a se
   `UnsupportedOperatorError`, and `QueryPlanToChromaDBResult`'s default type argument keeps
   `filters` a `Where` on every conditional result.
 
+- **Widening, opt-in:** a key declared `valueType: "json"` (new) holds an attribute as JSON text,
+  which the post-filter parses, so a list, a list of objects, a map and an explicit null attribute
+  can be read under `allowPostFilter`; a reference below it resolves through its entry. The
+  post-filter now also evaluates null comparisons, two-variable comprehensions, `except`,
+  `intersect` and `isSubset`, a map literal as a value, `has()` of a nested attribute under
+  negation when the enclosing attribute is a JSON key, and every RE2 `matches` pattern (through
+  re2js, a new dependency). Each used to throw `UnsupportedOperatorError`, as did `filter()`,
+  `map()`, `except()` or `intersect()` in a boolean position, which the predicate now denies on
+  every record, as the PDP does. A null comparison over
+  a plain key reads an absent key as a missing attribute, which denies: an attribute sent to
+  `check()` as an explicit null belongs under a JSON key (see
+  [NULL attribute representation](#null-attribute-representation)).
 - **Widening, opt-in:** under `allowPostFilter`, the post-filter now evaluates `upperAscii`,
   `duration()`, `timeSince`, timestamp and duration arithmetic, list literals built from
   expressions (`R.attr.a in [R.attr.b]`), an index into a map literal, and a hierarchy built from a

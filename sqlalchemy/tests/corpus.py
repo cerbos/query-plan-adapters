@@ -50,6 +50,7 @@ from sqlalchemy import (
     true,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import declarative_base
 
 from cerbos_sqlalchemy import CollectionColumn, UnsupportedPlanError, require_hops
@@ -347,6 +348,20 @@ _NUMBER_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Integer), "postgresql
 _BOOL_ARRAY = JSON(none_as_null=True).with_variant(ARRAY(Boolean), "postgresql")
 
 
+# MySQL's DATETIME defaults to whole seconds, which would store a5 on the literal it passes. A
+# subclass, not with_variant: SQLAlchemy 1.4's Variant is not a DateTime to the adapter.
+class _Timestamp(DateTime):
+    pass
+
+
+@compiles(_Timestamp, "mysql")
+def _mysql_timestamp(type_, compiler, **kw):
+    return "DATETIME(6)"
+
+
+_TIMESTAMP = _Timestamp(timezone=True)
+
+
 class AdvResource(AdvBase):
     __tablename__ = "adversarial_resource"
 
@@ -359,8 +374,8 @@ class AdvResource(AdvBase):
     a_optional_string = Column(_STRING, nullable=True)
     created_by = Column(_STRING, nullable=False)
     scope = Column(_STRING, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=True)
-    updated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(_TIMESTAMP, nullable=True)
+    updated_at = Column(_TIMESTAMP, nullable=True)
     tags_json = Column(_COLLECTION_JSON, nullable=True)
     tag_names_json = Column(_COLLECTION_JSON, nullable=True)
     main_sub_categories_json = Column(_COLLECTION_JSON, nullable=True)

@@ -101,7 +101,7 @@ export function lookupMapping(
  * (`R.attr.a.b`) has no mapping of its own, so it is found by descending from the longest mapped
  * prefix through the nested `relation.fields`, the same walk resolveFieldReference performs.
  */
-function lookupElementFields(
+export function lookupElementFields(
   mapper: Mapper,
   collectionPath: string
 ): Record<string, MapperConfig> | undefined {

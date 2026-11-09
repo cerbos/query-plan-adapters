@@ -398,6 +398,7 @@ export interface AdversarialSchema {
   tags: Table & {
     tagId: AnyColumn;
     name: AnyColumn;
+    position: AnyColumn;
     resourceId: AnyColumn;
   };
   categories: Table & { id: AnyColumn; name: AnyColumn; resourceId: AnyColumn };
@@ -456,6 +457,7 @@ export function sqliteSchema() {
       // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
       // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
       name: text("name"),
+      position: integer("position").notNull(),
       resourceId: text("resource_id").notNull(),
     }),
 
@@ -541,6 +543,7 @@ export function postgresSchema() {
       // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
       // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
       name: pgText("name"),
+      position: pgInteger("position").notNull(),
       resourceId: pgText("resource_id").notNull(),
     }),
 
@@ -629,6 +632,7 @@ export function mysqlSchema() {
       // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
       // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
       name: varchar("name", { length: 255 }),
+      position: mysqlInt("position").notNull(),
       resourceId: varchar("resource_id", { length: 64 }).notNull(),
     }),
 
@@ -783,6 +787,7 @@ export function buildMapper(
         table: schema.tags,
         sourceColumn: schema.resources.id,
         targetColumn: schema.tags.resourceId,
+        position: schema.tags.position,
         field: schema.tags.name,
         fields: {
           id: schema.tags.tagId,
@@ -799,6 +804,7 @@ export function buildMapper(
         table: schema.tags,
         sourceColumn: schema.resources.id,
         targetColumn: schema.tags.resourceId,
+        position: schema.tags.position,
         field: schema.tags.name,
       },
     },

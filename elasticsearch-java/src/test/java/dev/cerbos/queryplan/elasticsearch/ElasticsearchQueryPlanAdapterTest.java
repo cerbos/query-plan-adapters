@@ -402,8 +402,8 @@ class ElasticsearchQueryPlanAdapterTest {
 
     /**
      * The adapter cannot tell {@code size(tags)} from {@code size(aString)} without a mapping, so
-     * a {@code size()} check over a flat array needs a {@code collectionFields} declaration. A
-     * nested path needs no second declaration.
+     * a {@code size()} check over a flat array needs a {@code collectionFields} declaration, and
+     * over a string a {@code scalarTypes} one. A nested path needs no second declaration.
      */
     @Test
     void sizeOverADeclaredFlatCollectionIsAnExistsCheckAndUndeclaredItIsRefused() {
@@ -415,7 +415,10 @@ class ElasticsearchQueryPlanAdapterTest {
                 translate(expressionOperand("gt", sizeOf("request.resource.attr.tagObjects"),
                         numberValueOperand(0))));
 
-        IllegalArgumentException ex = refusal(nonEmpty, OPTIONS.withCollectionFields(Set.of()));
+        Map<String, ScalarType> withoutTags = new java.util.HashMap<>(SCALAR_TYPES);
+        withoutTags.remove("tags");
+        IllegalArgumentException ex = refusal(nonEmpty,
+                OPTIONS.withCollectionFields(Set.of()).withScalarTypes(withoutTags));
         assertTrue(ex.getMessage().contains("size() over a field not declared as a collection"),
                 ex.getMessage());
         assertTrue(ex.getMessage().contains("'tags' is declared in nestedPaths or collectionFields"),
@@ -576,8 +579,6 @@ class ElasticsearchQueryPlanAdapterTest {
         assertInstanceOf(MalformedPlanException.class, refusal(expressionOperand("eq",
                 variableOperand("request.resource.attr.aString"))));
         assertInstanceOf(MalformedPlanException.class, refusal(expressionOperand("not")));
-        assertInstanceOf(MalformedPlanException.class, refusal(expressionOperand("eq",
-                stringValueOperand("a"), stringValueOperand("b"))));
     }
 
     /**

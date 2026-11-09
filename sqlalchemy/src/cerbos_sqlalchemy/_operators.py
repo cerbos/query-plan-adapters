@@ -25,6 +25,7 @@ from sqlalchemy import (
     Numeric,
     String,
     TypeDecorator,
+    and_,
     case,
     cast,
     false,
@@ -43,6 +44,13 @@ from sqlalchemy.sql import operators
 from sqlalchemy.sql.expression import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
 
+from cerbos_sqlalchemy._regex import (
+    AllCharactersIn,
+    Literals,
+    NoNewline,
+    PrefixSuffix,
+    compile_regex,
+)
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
 _LIKE_ESCAPE_CHAR = "\\"
@@ -329,6 +337,98 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
         if suffix:
             pattern = pattern + literal("%", String)
     return receiver.like(pattern, escape=_LIKE_ESCAPE_CHAR)
+
+
+def _matches(receiver: Any, pattern: Any) -> Any:
+    """CEL's ``matches()``, lowered through :func:`compile_regex` into exact string
+    predicates, never into the store's own regex dialect (none of which is RE2).
+
+    A NULL receiver is a missing attribute (or a null value, which has no ``matches()``):
+    CEL raises, so the predicate is UNKNOWN for it, even where a pattern matches every
+    string. A pattern RE2 rejects raises at evaluation too, so it is UNKNOWN for every row.
+    """
+    if not isinstance(pattern, str):
+        raise UnsupportedPlanError(
+            "matches() is lowered only with a constant pattern: a pattern read from a "
+            "column cannot be parsed before the query runs"
+        )
+    if isinstance(receiver, str):
+        receiver = literal(receiver, String)
+    kind = scalar_kind(receiver)
+    if kind and kind != "string":
+        return _unknown()
+    if not isinstance(receiver, (ColumnElement, InstrumentedAttribute)):
+        raise UnsupportedPlanError(
+            "matches() needs a string attribute or literal as its receiver"
+        )
+    plans = compile_regex(pattern)
+    if plans is None:
+        return _unknown()
+
+    def at_least(characters: int) -> list[Any]:
+        return [_CharLength(receiver) >= characters] if characters > 0 else []
+
+    def no_newline() -> Any:
+        return not_(_string_match(receiver, "\n", prefix=True, suffix=True))
+
+    conditions: list[Any] = []
+    for plan in plans:
+        if isinstance(plan, Literals):
+            if plan.kind == "equals":
+                conditions.append(receiver.in_(list(plan.literals)))
+            else:
+                prefix, suffix = {
+                    "startsWith": (False, True),
+                    "endsWith": (True, False),
+                    "contains": (True, True),
+                }[plan.kind]
+                conditions.append(
+                    or_(
+                        *(
+                            _string_match(receiver, text, prefix=prefix, suffix=suffix)
+                            for text in plan.literals
+                        )
+                    )
+                )
+        elif isinstance(plan, AllCharactersIn):
+            # Count each allowed character's occurrences; together they must make up
+            # the whole string. A flat sum, not a nested REPLACE chain, which
+            # overflows SQLite's parser stack before 3.46.
+            counted = sum(
+                (
+                    _CharLength(receiver)
+                    - _CharLength(func.replace(receiver, character, ""))
+                    for character in plan.characters
+                ),
+                literal(0, Integer),
+            )
+            conditions.append(
+                and_(_CharLength(receiver) == counted, *at_least(plan.min))
+            )
+        elif isinstance(plan, NoNewline):
+            conditions.append(and_(no_newline(), *at_least(plan.min)))
+        elif isinstance(plan, PrefixSuffix):
+            conditions.append(
+                and_(
+                    or_(
+                        *(
+                            and_(
+                                _string_match(
+                                    receiver, prefix, prefix=False, suffix=True
+                                ),
+                                _string_match(
+                                    receiver, suffix, prefix=True, suffix=False
+                                ),
+                                *at_least(len(prefix) + plan.min + len(suffix)),
+                            )
+                            for prefix, suffix in plan.pairs
+                        )
+                    ),
+                    no_newline(),
+                )
+            )
+    matched = or_(*conditions) if conditions else false()
+    return case((receiver.isnot(None), matched))
 
 
 _ASCII_LOWER = "abcdefghijklmnopqrstuvwxyz"
@@ -674,13 +774,18 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
             )
         equal = cel_literal_equal(left, right)
         return true() if equal == (operator == "eq") else false()
-    if isinstance(left, (list, dict)) or isinstance(right, (list, dict)):
-        raise UnsupportedPlanError(
-            "comparison with a list or map literal cannot be lowered: a SQL column "
-            "holds one scalar, and binding the literal as a parameter would compare "
-            "it by the driver's coercion rather than CEL's typed equality"
-        )
     left_kind, right_kind = scalar_kind(left), scalar_kind(right)
+    if isinstance(left, (list, dict)) or isinstance(right, (list, dict)):
+        # A scalar of known type against a list or map literal: CEL's == across
+        # types is false, and a missing attribute is still an error.
+        if not (left_kind or right_kind) or operator not in ("eq", "ne"):
+            raise UnsupportedPlanError(
+                "comparison with a list or map literal cannot be lowered: a SQL "
+                "column holds one scalar, and binding the literal as a parameter "
+                "would compare it by the driver's coercion rather than CEL's typed "
+                "equality"
+            )
+        left_kind, right_kind = left_kind or "list", right_kind or "list"
     if left_kind and right_kind and left_kind != right_kind:
         result = literal(operator == "ne") if operator in ("eq", "ne") else _unknown()
         for value in (left, right):
@@ -749,16 +854,30 @@ def _comparison(operator: str) -> Callable[[Any, Any], Any]:
 
 
 def _in(c: Any, values: Any) -> Any:
-    """CEL membership, including explicit-null list elements."""
+    """CEL membership, including explicit-null list elements.
+
+    A map haystack is its keys. A list or map member never equals a scalar column.
+    """
+    if isinstance(values, dict):
+        values = list(values)
     members = values if isinstance(values, list) else [values]
     non_nulls = [member for member in members if member is not None]
     # `5 in ["5"]` is false in CEL. Drop members of another type rather than let
     # the store coerce '5' to 5.
     column_kind = scalar_kind(c)
+    if not column_kind and any(
+        isinstance(member, (list, dict)) for member in non_nulls
+    ):
+        raise UnsupportedPlanError(
+            "membership in a list holding a list or map literal cannot be lowered: "
+            "the needle's type is unknown, and such a member cannot be bound as one "
+            "SQL value"
+        )
     comparable = [
         member
         for member in non_nulls
-        if not column_kind or scalar_kind(member) in ("", column_kind)
+        if not isinstance(member, (list, dict))
+        and (not column_kind or scalar_kind(member) in ("", column_kind))
     ]
     predicates = []
     if comparable:
@@ -936,6 +1055,7 @@ OPERATOR_FNS = MappingProxyType(
         "contains": lambda c, v: _string_match(c, v, prefix=True, suffix=True),
         "startsWith": lambda c, v: _string_match(c, v, prefix=False, suffix=True),
         "endsWith": lambda c, v: _string_match(c, v, prefix=True, suffix=False),
+        "matches": _matches,
         # int() and double() always throw. See _reject_numeric_cast.
         "string": lambda c, _: _string_cast(c),
         "double": lambda *_: _reject_numeric_cast("double"),
@@ -975,7 +1095,7 @@ MIRRORED_OPERATORS: dict[str, str] = {"lt": "gt", "gt": "lt", "le": "ge", "ge": 
 ORDER_INSENSITIVE_OPERATORS = frozenset({"eq", "ne", "in", "hasIntersection"})
 
 #: Macros that fold into a boolean over their per-element bodies. Others fail closed.
-FOLDABLE_COLLECTION_OPERATORS = frozenset({"exists", "all"})
+FOLDABLE_COLLECTION_OPERATORS = frozenset({"exists", "all", "exists_one"})
 
 # What a default handler can lower: SQL, plan literals, and this module's symbolic
 # values. An override's intermediate value (e.g. a deferred tuple) must throw here,

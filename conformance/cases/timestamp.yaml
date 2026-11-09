@@ -73,3 +73,17 @@ cases:
   condition:
     match:
       expr: 'timestamp(R.attr.updatedAt) != timestamp("2020-03-15T10:30:00Z")'
+- id: 'timestamp/less-or-equal/sub-second-past-literal'
+  tier: adversarial
+  intent: 'timestamp(createdAt) <= a whole-second literal that a5 passes by 123456 microseconds (2020-03-15T10:30:00.123456Z).'
+  trap: 'a1 sits on the literal and is allowed; a5 is later and denied. A column that drops the fraction (MySQL DATETIME without fsp 6) stores a5 on the literal, and an Elasticsearch upper bound that omits the fraction reads it as …00.999; both over-grant a5.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00Z")'
+- id: 'timestamp/equals/sub-second-past-literal'
+  tier: adversarial
+  intent: 'timestamp(createdAt) == a whole-second literal that a5 passes by 123456 microseconds.'
+  trap: 'Only a1 is equal. Elasticsearch fills the fraction a date literal omits with its largest value at an upper bound, so a term query for …00Z also matches a5.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00Z")'

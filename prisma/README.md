@@ -331,15 +331,15 @@ See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6
 | Category | Operators |
 | --- | --- |
 | Logical | `and`, `or`, `not` |
-| Comparison | `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in` |
+| Comparison | `eq`, `ne`, `lt`, `gt`, `lte`, `gte`, `in`; `in` over a list built from columns (`R.attr.a in [R.attr.b, "x"]`) is the OR of the equalities, a missing element denying the row |
 | Null checks | `== null` / `!= null` → `{ equals: null }` / `{ not: null }` (the planner has no existence operator) |
-| Strings | `startsWith`, `endsWith`, `contains`; a constant receiver with a column needle (`"a-b".startsWith(R.attr.x)`) becomes an `in` over the candidate needles; `x.upperAscii() == "LIT"` becomes an `in` over the spellings with each ASCII capital in either case (a store's `UPPER` would also fold non-ASCII letters) |
+| Strings | `startsWith`, `endsWith`, `contains`; a `startsWith` needle holding `%`, `_` or `\` is spelled as the range of strings it bounds (`gte` the prefix and `lt` the prefix with its last code point stepped up), which needs the code-point order the [collation](#database-collation-is-an-authorization-invariant) already requires; a constant receiver with a column needle (`"a-b".startsWith(R.attr.x)`) becomes an `in` over the candidate needles; `x.upperAscii() == "LIT"` becomes an `in` over the spellings with each ASCII capital in either case (a store's `UPPER` would also fold non-ASCII letters) |
 | Relations | to-one `is`/`isNot`; to-many `some`/`every`/`none` |
 | Collections | `exists`, `all`, lambda `except`, `hasIntersection`, `map`/`filter` inside another expression, emptiness of a mapped relation; `isSubset` and the emptiness of the `except`/`intersect` list functions against a literal list; `"x" in c.map(...)` and `"x" in c.filter(...)` (an element whose projection or predicate errors denies the row); `exists`/`all` over a list built from columns (`[R.attr.a, R.attr.b].exists(...)`, a missing element denying the row) |
-| Maps | `R.attr.m["key"]` reads like `R.attr.m.key`; `{"k1": v1, ...}[R.attr.x] == v` becomes an `in` over the keys whose value matches (a missing key denies under both polarities) |
+| Maps | `R.attr.m["key"]` reads like `R.attr.m.key`; `{"k1": v1, ...}[R.attr.x] == v` becomes an `in` over the keys whose value matches (a missing key denies under both polarities); `"key" in R.attr.parent` and `R.attr.parent.exists(k, k == "key")` over a to-one relation test the related row for a key its mapping declares, as `has(R.attr.parent.key)` does |
 | Arithmetic | `add`, `sub`, `mult`, `div` against a constant, solved exactly over IEEE-754 doubles to a range of the column (`R.attr.n + 0.5 == 0.75` → `0.24999999999999994 <= n <= 0.25000000000000006`, every double whose rounded sum is 0.75; negative multipliers flip the direction); `x / x` and `x / ±0` split on the sign of `x`; string concatenation solving (`P.attr.ctx == "projects:" + R.attr.id` → `{ id: { equals: "…" } }`), and a concatenation of string columns and literals against a literal as one arm per split of it; list concatenation around a ternary over literal lists (`["a"] + (R.attr.b ? ["c"] : []) == [...]`) |
-| Regex | `matches` against a literal RE2 pattern whose language LIKE decides exactly: literals, `^`/`$`, alternation, groups, `?` and bounded `{n,m}`, finite classes, `\d`, `[[:digit:]]`, leading `(?i)` over ASCII, and `.`/one `.*` in a pattern anchored at both ends (the value then holds no newline, as RE2's `.` requires). A pattern RE2 rejects (lookaround, a backreference) is an error on every row |
-| Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)` (an empty delimiter splits per code point, so a descendant is `startsWith(path + "_")`), `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf` |
+| Regex | `matches` against a literal RE2 pattern whose language LIKE decides exactly: literals, `^`/`$`, alternation, groups, `?` and bounded `{n,m}`, finite classes, `\d`, `[[:digit:]]`, leading `(?i)` over ASCII, and `.`/one `.*` in a pattern anchored at both ends (the value then holds no newline, as RE2's `.` requires). A pattern RE2 rejects (lookaround, a backreference) is an error on every row, as decided by [re2js](https://github.com/le0pard/re2js), a port of RE2 |
+| Hierarchy | `hierarchy(string)`, `hierarchy(string, delimiter)` (an empty delimiter splits per code point, so a descendant is `startsWith(path + "_")`), `hierarchy([segments])`, `overlaps`, `ancestorOf`, `descendentOf`; a prefix holding a LIKE metacharacter is matched as a range, like a `startsWith` needle |
 | Timestamps | `timestamp()` over `valueType: "dateTime"` columns; `timestamp(x) ± duration(d)` against a timestamp literal, solved for the column (a shift past CEL's 0001–9999 range denies); `timeSince(timestamp(x))` against a duration, as `x` against `now - d` read when the plan is translated. A bare `dateTime` attribute is the RFC 3339 string, which never orders against a timestamp: that comparison settles as CEL's error |
 
 Outer-column references inside a macro (`R.attr.tags.exists(t, t.name == "x" && R.attr.aBool)`)
@@ -368,17 +368,17 @@ try {
 A mapper misconfiguration, such as a field-to-field comparison without the `model` option or
 `relation.model`, stays a plain `Error`. The refused shapes include:
 
-- **LIKE metacharacters.** Prisma emits `LIKE` without `ESCAPE`, so `contains`/`startsWith`/
-  `endsWith` with a needle containing `%`, `_` or `\`, or a column-valued needle, throws. Hierarchy
-  prefixes (`ancestorOf`, `descendentOf`, `overlaps`) throw on `%`, `_`, `\` or `[` (SQL Server
-  opens a character class on `[` even with `ESCAPE`). If you match on backslashes, compare the
-  whole value with `==`.
+- **LIKE metacharacters.** Prisma emits `LIKE` without `ESCAPE`, so `contains`/`endsWith` with a
+  needle containing `%`, `_` or `\`, or a column-valued needle of any string operator, throws. A
+  `startsWith` needle and a hierarchy prefix (`ancestorOf`, `descendentOf`, `overlaps`) holding
+  one are matched as a range instead, so they never reach `LIKE`. If you match on a backslash
+  suffix or substring, compare the whole value with `==`.
 - **Counting.** `exists_one` over a relation, `size()` of a mapped relation other than empty, non-empty or (on
   a chain) reachable, and `size()` of a derived list such as `intersect()`.
 - **Two-variable comprehensions** (`list.exists(i, v, ...)`, `map.all(k, v, ...)`): a relation
   filter tests related rows, which carry no position, and enumerates no map keys.
 - **Cross-model column comparisons**, including membership between an outer scalar column and a
-  related collection column, and membership in a list built from expressions over columns
+  related collection column, and membership in a list holding an expression over a column
   (`R.attr.a in ["x", R.attr.b + "y"]`, `R.attr.a in R.attr.list + ["x"]`).
 - **Unsolvable arithmetic.** Arithmetic on both sides, and division *by* a column other than
   `x / x`.
@@ -396,9 +396,9 @@ or a same-model field reference, never an expression. These shapes throw:
 | --- | --- | --- |
 | `a % b` | `arithmetic/modulo/*` | No modulo operator, and `%` is not invertible, so it cannot be solved into a plain comparison. |
 | Arithmetic on both sides | `arithmetic/add/on-both-sides` | Field references compare two columns as they are; no operand is an expression. |
-| `matches` beyond the LIKE-decidable subset | `regex/matches/lucene-reserved-characters-in-class` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)), and no provider here has RE2. A repeated class (`[ab]+`), a negated class, a wildcard in a pattern not anchored at both ends, or a literal `%`/`_`/`\` inside a LIKE has no exact LIKE spelling. |
+| `matches` beyond the LIKE-decidable subset | `regex/matches/lucene-reserved-characters-in-class` | No regex filter ([prisma/prisma#18481](https://github.com/prisma/prisma/issues/18481)), and no provider here has RE2. A repeated class (`[ab]+`), a negated class, a wildcard in a pattern not anchored at both ends, or a literal `%`/`_`/`\` inside a LIKE pattern has no exact LIKE spelling. |
 | List index `l[i]` | `collection/index/*` (every positional case) | List filters test membership, emptiness or equality, never a position. |
-| `int()`, `double()` or `timestamp()` parsing a string; an `int()` threshold | `cast/int/malformed-string`, `cast/double/malformed-string`, `cast/timestamp/malformed-string` and their negations | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). `int()` of a number is translated only as `==` (or `!=` under a `!`): a threshold would need CEL's ±2^63 overflow bound spelled out, which an `Int` column rejects. The invertible casts are solved for the column instead — `string()` of a boolean or number, `int(d) == k` as the interval truncation maps to `k`, and `string()`/`double()` of a column already of that type. |
+| `int()`, `double()` or `timestamp()` parsing a string; an `int()` threshold | `cast/int/malformed-string`, `cast/double/malformed-string`, `cast/timestamp/malformed-string` and their negations | No cast operator, and SQL `CAST` would not reproduce CEL's conversion errors (SQLite reads `CAST('abc' AS INTEGER)` as `0`). `int()` of a number is translated only as `==` (or `!=` under a `!`): a threshold would need CEL's ±2^63 overflow bound spelled out, which an `Int` column rejects. The invertible casts are solved for the column instead — `string()` of a boolean column, a boolean-valued expression or a number column, `string(int(d)) == "k"` as `int(d) == k`, `int(d) == k` as the interval truncation maps to `k`, and `string()`/`double()` of a column already of that type. |
 | `size()` of `filter()` over a relation | `size/equals/filtered-collection` | No count filter; `_count` exists only in `orderBy`, `select` and aggregates ([prisma/prisma#8935](https://github.com/prisma/prisma/issues/8935)). |
 
 Raw SQL fragments, an id subquery and an in-memory post-filter were considered and rejected: Prisma
@@ -425,7 +425,7 @@ current PDP, 0.57.0, identical on all six combinations, out of every golden case
 | --- | --- |
 | core | 30 / 30 |
 | extended | 81 / 102 |
-| adversarial | 276 / 373 |
+| adversarial | 297 / 375 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -493,6 +493,18 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- Whether `matches()` raises an error on a pattern (which denies every row) is now decided by
+  re2js, a port of RE2, where a hand-written check read `\1`–`\9` as a backreference. RE2 reads
+  `\1`–`\7` followed by another octal digit as an octal escape (`\11` is a tab), so such a
+  pattern used to deny every row and now matches the character it names. `re2js` is a new
+  dependency.
+- `startsWith` needles and hierarchy prefixes containing `%`, `_` or `\` no longer throw: they are
+  matched as a range of the column (`gte` the prefix, `lt` the first string past it), exact under
+  the code-point collation the adapter already requires. `R.attr.a in [R.attr.b]` compiles to the
+  field-to-field equality, `string(<boolean expression>) == "true"` to the expression,
+  `string(int(x)) == "1000000"` to `int(x) == 1000000`, `"key" in R.attr.parent` and
+  `R.attr.parent.exists(k, k == "key")` to `has(R.attr.parent.key)`, and an ordering between a
+  string column and an arithmetic result settles as CEL's no-overload error.
 - **Breaking:** `nullAttributeRepresentation` defaults to `"omitted"`, where it defaulted to
   `"explicit"`. A caller that sends explicit nulls and set nothing now gets a refusal on most null
   comparisons, and `x == null` selects no row where it rendered `IS NULL`; pass

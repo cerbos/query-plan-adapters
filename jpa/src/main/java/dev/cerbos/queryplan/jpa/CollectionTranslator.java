@@ -30,11 +30,14 @@ final class CollectionTranslator {
     private final CriteriaBuilder cb;
     private final PlanWalker walker;
     private final ChainSubqueries subqueries;
+    private final ObjectAttributeTranslator objects;
 
-    CollectionTranslator(CriteriaBuilder cb, PlanWalker walker, ChainSubqueries subqueries) {
+    CollectionTranslator(CriteriaBuilder cb, PlanWalker walker, ChainSubqueries subqueries,
+                         ObjectAttributeTranslator objects) {
         this.cb = cb;
         this.walker = walker;
         this.subqueries = subqueries;
+        this.objects = objects;
     }
 
     /**
@@ -62,6 +65,11 @@ final class CollectionTranslator {
         }
         Operand listOperand = operands.get(0);
         Operand lambdaOperand = operands.get(1);
+
+        if (listOperand.getNodeCase() == Operand.NodeCase.VARIABLE
+                && ObjectAttributeTranslator.isObject(scope, listOperand.getVariable())) {
+            return objects.macro(op, listOperand.getVariable(), lambdaOperand, scope);
+        }
 
         if (isTwoVariableLambda(lambdaOperand)) {
             return handleTwoVariableMacro(op, listOperand, lambdaOperand, scope);

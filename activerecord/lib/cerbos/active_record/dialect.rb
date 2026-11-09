@@ -74,6 +74,46 @@ module Cerbos
       def text_type
         mysql? ? "CHAR" : "TEXT"
       end
+
+      # The CAST type for a 64-bit whole number.
+      def int_type
+        case adapter_name
+        when "sqlite", "sqlite3" then "INTEGER"
+        when *MYSQL_ADAPTERS then "SIGNED"
+        else "BIGINT"
+        end
+      end
+
+      # True where a string is spelled as Go's `strconv.ParseInt` reads it, which CEL's `int()`
+      # over a string requires: an optional sign and then ASCII digits only, nothing else, not
+      # even a trailing newline. SQLite has no regex, so it strips the digits from both ends and
+      # checks that only a sign at the front is left; PostgreSQL does the same with BTRIM; MySQL's
+      # ICU regex anchors with `\A` and `\z`, since `$` would match before a final newline.
+      def integer_text(expression)
+        if mysql?
+          return ArelSupport.infix("REGEXP", expression, "\\A[+-]?[0-9]+\\z")
+        end
+
+        trim = ArelSupport.function(postgres? ? "BTRIM" : "TRIM", [expression, "0123456789"])
+        ArelSupport.and_node([
+          Arel::Nodes::In.new(trim, ["", "+", "-"].map { |sign| ArelSupport.quote(sign) }),
+          ArelSupport.comparison("eq", ArelSupport.function("SUBSTR", [expression, 1, ArelSupport.function("LENGTH", [trim])]), trim),
+          ArelSupport.comparison("gt", ArelSupport.function("LENGTH", [expression]), ArelSupport.function("LENGTH", [trim]))
+        ])
+      end
+
+      # The digits of a string {#integer_text} accepted, without its sign and leading zeros, so
+      # their count and text order give the number's magnitude.
+      def integer_digits(expression)
+        return ArelSupport.function("REGEXP_REPLACE", [expression, "\\A[+-]?0*", ""]) if mysql?
+
+        ArelSupport.function("LTRIM", [ArelSupport.function("LTRIM", [expression, "+-"]), "0"])
+      end
+
+      # True on PostgreSQL, where TRIM with a character set is spelled BTRIM.
+      def postgres?
+        adapter_name.start_with?("postg")
+      end
     end
   end
 end

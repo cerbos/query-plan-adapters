@@ -29,7 +29,7 @@ import {
 } from "./cel";
 import type { ComparisonOperator } from "./cel";
 import { UnsupportedOperatorError } from "./errors";
-import { matchesSafeRegexPattern, parseSafeRegexPattern } from "./regex";
+import { compileRegex } from "./regex";
 
 /**
  * The post-filter: the part of a plan Chroma's `Where` grammar cannot hold, compiled into a
@@ -58,6 +58,17 @@ export interface PostFilterFields {
   metadataKey: (reference: string) => string;
   /** Whether the mapping declares every value stored under the reference a boolean. */
   isBoolean: (reference: string) => boolean;
+  /**
+   * For a reference resolved through a key declared `valueType: "json"`, the path from the
+   * document the key holds to the value; `undefined` for a scalar key.
+   */
+  jsonPath: (reference: string) => string[] | undefined;
+  /**
+   * The JSON key and path through which a reference's presence can be read: its own
+   * `valueType: "json"` entry, or a declared prefix's document, which holds a nested attribute as
+   * the PDP saw it even where the reference itself is also flattened onto a scalar key.
+   */
+  jsonPresence: (reference: string) => { key: string; path: string[] } | undefined;
 }
 
 /** Compiles `condition` into a predicate, or throws `UnsupportedOperatorError`. */
@@ -143,7 +154,7 @@ const constant = (type: StaticType, value: unknown): Compiled => ({
 
 function compile(operand: PlanExpressionOperand, ctx: Context): Compiled {
   if (isVariable(operand)) return compileVariable(operand.name, ctx);
-  if (isValue(operand)) return compileValue(operand.value, ctx);
+  if (isValue(operand)) return compileValue(operand.value);
   if (!isExpression(operand)) {
     throw Error(
       `Query plan did not contain an expression for operand ${String(operand)}`,
@@ -162,7 +173,7 @@ function compile(operand: PlanExpressionOperand, ctx: Context): Compiled {
     );
   }
   if (operand.operator === "has" && !ctx.falseDenies) {
-    refuseNestedPresence(operand.operands);
+    refuseNestedPresence(operand.operands, ctx);
   }
   return compiler(operand.operands, {
     ...ctx,
@@ -176,15 +187,17 @@ function compile(operand: PlanExpressionOperand, ctx: Context): Compiled {
  * `has(parent.x)` through a missing `parent` is an error CEL denies under both polarities, and
  * `false` only when `parent` is present without `x`. A record's metadata is flat, so a missing
  * `parent.x` key cannot tell the two apart. Where `false` denies anyway the answer is exact;
- * anywhere else, as under `!`, it would select every record without a parent.
+ * anywhere else, as under `!`, it would select every record without a parent. A `parent` stored
+ * whole as a JSON document tells them apart, and is read instead.
  */
-function refuseNestedPresence(operands: PlanExpressionOperand[]): void {
+function refuseNestedPresence(operands: PlanExpressionOperand[], ctx: Context): void {
   const [operand] = operands;
   if (
     operand !== undefined &&
     isVariable(operand) &&
     operand.name.startsWith("request.resource.attr.") &&
-    operand.name.substring("request.resource.attr.".length).includes(".")
+    operand.name.substring("request.resource.attr.".length).includes(".") &&
+    ctx.fields.jsonPresence(operand.name) === undefined
   ) {
     throw new UnsupportedOperatorError(
       "has",
@@ -194,43 +207,18 @@ function refuseNestedPresence(operands: PlanExpressionOperand[]): void {
 }
 
 /**
- * An operand in a boolean position. `filter()` and `map()` return a list, which CEL rejects as a
- * condition and the evaluator would read as an error that denies every record — agreeing with the
- * PDP silently while giving the shape a meaning the policy never stated. Refused instead.
+ * An operand in a boolean position. `filter()`, `map()`, `except()` and `intersect()` return a
+ * list, which has no boolean overload: CEL errors on every record and the PDP denies it, and the
+ * evaluator reads the list as an error that denies the same way, as the other adapters lower it.
  */
 function compileCondition(
   operand: PlanExpressionOperand,
   ctx: Context,
 ): Compiled {
-  if (
-    isExpression(operand) &&
-    (operand.operator === "filter" || operand.operator === "map")
-  ) {
-    throw new UnsupportedOperatorError(
-      operand.operator,
-      `${operand.operator}() returns a list, not a boolean, so it cannot be a condition on its own`,
-    );
-  }
   return compile(operand, ctx);
 }
 
-function containsNull(value: unknown): boolean {
-  if (value === null) return true;
-  if (Array.isArray(value)) return value.some(containsNull);
-  if (isRecord(value)) return Object.values(value).some(containsNull);
-  return false;
-}
-
-function compileValue(value: unknown, ctx: Context): Compiled {
-  // Chroma metadata has no null, so a record cannot tell a NULL sent to `check()` as an explicit
-  // `null` (which CEL compares) from one left out (a missing-attribute error). The pushdown refuses
-  // a null operand for the same reason.
-  if (containsNull(value)) {
-    throw new UnsupportedOperatorError(
-      ctx.parent,
-      `${ctx.parent} compares a null literal, and Chroma metadata has no null: a record cannot tell an explicit null attribute from a missing one`,
-    );
-  }
+function compileValue(value: unknown): Compiled {
   if (typeof value === "number") {
     return constant(Number.isInteger(value) ? "ambiguous" : "double", value);
   }
@@ -258,6 +246,13 @@ function compileVariable(name: string, ctx: Context): Compiled {
     );
   }
   const key = ctx.fields.metadataKey(name);
+  const path = ctx.fields.jsonPath(name);
+  if (path !== undefined) {
+    return {
+      type: "attribute",
+      run: ({ metadata }) => readJsonMetadata(metadata, key, path),
+    };
+  }
   return {
     // A key declared `valueType: "boolean"` never holds a number, so no zero whose sign was lost.
     type: ctx.fields.isBoolean(name) ? "other" : "attribute",
@@ -294,6 +289,26 @@ function compilePresence(name: string, ctx: Context): Compiled {
       `${name} has no fieldNameMapper entry, so the post-filter cannot tell whether a record carries it`,
     );
   }
+  const viaJson = ctx.fields.jsonPresence(name);
+  if (viaJson !== undefined) {
+    // A JSON document holds a present null, so presence is the key, or the field in the document.
+    const { key, path } = viaJson;
+    const field = path[path.length - 1];
+    const parentPath = path.slice(0, -1);
+    return {
+      type: "other",
+      run: ({ metadata }) => {
+        if (field === undefined) {
+          if (!Object.prototype.hasOwnProperty.call(metadata, key)) return false;
+          return isEvaluationError(readJsonMetadata(metadata, key, [])) ? EVALUATION_ERROR : true;
+        }
+        // Selecting through an absent enclosing attribute is an error, as in CEL.
+        const parent = readJsonMetadata(metadata, key, parentPath);
+        if (!isRecord(parent)) return EVALUATION_ERROR;
+        return Object.prototype.hasOwnProperty.call(parent, field);
+      },
+    };
+  }
   const key = ctx.fields.metadataKey(name);
   return {
     type: "other",
@@ -302,6 +317,30 @@ function compilePresence(name: string, ctx: Context): Compiled {
       return isEvaluationError(readMetadata(metadata, key)) ? EVALUATION_ERROR : true;
     },
   };
+}
+
+/**
+ * A key declared `valueType: "json"`, as CEL reads the attribute it encodes: the parsed document,
+ * or the value at `path` inside it. An absent key, a value that is not a string, text that is not
+ * JSON, and a path the document does not hold are each the missing-attribute error.
+ */
+function readJsonMetadata(
+  metadata: Readonly<Record<string, unknown>>,
+  key: string,
+  path: readonly string[],
+): unknown {
+  if (!Object.prototype.hasOwnProperty.call(metadata, key)) {
+    return EVALUATION_ERROR;
+  }
+  const text = metadata[key];
+  if (typeof text !== "string") return EVALUATION_ERROR;
+  let document: unknown;
+  try {
+    document = JSON.parse(text);
+  } catch {
+    return EVALUATION_ERROR;
+  }
+  return path.length === 0 ? document : getNestedValue(document, path.join("."));
 }
 
 /**
@@ -628,26 +667,23 @@ const arithmetic =
 /** The planner does not fix the order of a lambda's operands: the variable is the bare name. */
 function lambdaComponents(lambda: PlanExpressionOperand | undefined): {
   body: PlanExpressionOperand;
-  variable: string;
+  /** The lambda's variables in CEL order: the element alone, or the index (or key) then the value. */
+  variables: string[];
 } {
   if (!lambda || !isExpression(lambda) || lambda.operator !== "lambda") {
     throw Error("Expected a lambda operand");
   }
-  if (lambda.operands.length === 3) {
-    throw new UnsupportedOperatorError(
-      "lambda",
-      "a two-variable comprehension (index and element, or key and value) has no evaluation in the post-filter",
-    );
+  if (lambda.operands.length !== 2 && lambda.operands.length !== 3) {
+    throw Error("Expected two or three operands for lambda");
   }
-  const [first, second] = exactly(lambda.operands, 2, "lambda") as [
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-  ];
   const bare = (op: PlanExpressionOperand): op is PlanExpressionVariable =>
     isVariable(op) && !op.name.includes(".");
-  if (bare(second)) return { body: first, variable: second.name };
-  if (bare(first)) return { body: second, variable: first.name };
-  throw Error("Lambda requires a variable operand");
+  const bodies = lambda.operands.filter((op) => !bare(op));
+  const variables = lambda.operands.filter(bare).map((op) => op.name);
+  if (bodies.length !== 1 || bodies[0] === undefined) {
+    throw Error("Lambda requires a variable operand");
+  }
+  return { body: bodies[0], variables };
 }
 
 /**
@@ -674,36 +710,48 @@ const macro =
       PlanExpressionOperand,
     ];
     const collection = compile(collectionOperand, ctx);
-    const { body, variable } = lambdaComponents(lambda);
-    const bodyCtx: Context = {
-      ...ctx,
-      bindings: new Map([
-        ...ctx.bindings,
-        [variable, elementType(collectionOperand)],
-      ]),
-    };
+    const { body, variables } = lambdaComponents(lambda);
+    const [first, second] = variables;
+    // One variable binds the element (or a map's key). Two bind the index then the element over a
+    // list, or the key then the value over a map: the index is a CEL int, the rest is whatever the
+    // collection holds.
+    const bindings = new Map(ctx.bindings);
+    if (second === undefined) {
+      bindings.set(first!, elementType(collectionOperand));
+    } else {
+      bindings.set(first!, "unknown");
+      bindings.set(second, elementType(collectionOperand));
+    }
+    const bodyCtx: Context = { ...ctx, bindings };
     const compiledBody =
       operator === "map"
         ? compile(body, bodyCtx)
         : compileCondition(body, bodyCtx);
-    const each = (env: Env, element: unknown): unknown =>
+    const each = (env: Env, item: unknown, position: unknown): unknown =>
       compiledBody.run({
         ...env,
-        bindings: { ...env.bindings, [variable]: element },
+        bindings:
+          second === undefined
+            ? { ...env.bindings, [first!]: item }
+            : { ...env.bindings, [first!]: position, [second]: item },
       });
     return {
       type: "other",
       run: (env) => {
         const iterated = collection.run(env);
-        // A CEL macro over a map ranges over its keys.
-        const items = isRecord(iterated) ? Object.keys(iterated) : iterated;
-        if (!Array.isArray(items)) return EVALUATION_ERROR;
+        if (!Array.isArray(iterated) && !isRecord(iterated)) return EVALUATION_ERROR;
+        // A CEL macro over a map ranges over its keys; with two variables, over its entries.
+        const entries: [unknown, unknown][] = Array.isArray(iterated)
+          ? iterated.map((item, index) => [item, index])
+          : second === undefined
+            ? Object.keys(iterated).map((k) => [k, k])
+            : Object.entries(iterated).map(([k, v]) => [v, k]);
         switch (operator) {
           case "filter":
           case "map": {
             const out: unknown[] = [];
-            for (const item of items) {
-              const value = each(env, item);
+            for (const [item, position] of entries) {
+              const value = each(env, item, position);
               if (isEvaluationError(value)) return EVALUATION_ERROR;
               if (operator === "map") {
                 out.push(value);
@@ -711,7 +759,7 @@ const macro =
               }
               const keep = asBoolean(value);
               if (isEvaluationError(keep)) return EVALUATION_ERROR;
-              if (keep) out.push(item);
+              if (keep) out.push(second === undefined ? item : position);
             }
             return out;
           }
@@ -719,8 +767,8 @@ const macro =
             // CEL's error absorption across elements: a deciding element wins over an error.
             let trueCount = 0;
             let sawError = false;
-            for (const item of items) {
-              const value = asBoolean(each(env, item));
+            for (const [item, position] of entries) {
+              const value = asBoolean(each(env, item, position));
               if (value === true) {
                 trueCount += 1;
                 if (operator === "exists") return true;
@@ -840,9 +888,7 @@ function indexInto(collection: Compiled, key: Compiled): Compiled {
 }
 
 /**
- * A map literal, `{"a": x, "b": y}`, read only as the target of an index: the plan's `struct` drops
- * the type name, so a message literal is the same node, and only a map can be indexed with `[]`.
- * Each key must be a string literal, since a JavaScript record cannot tell the CEL key `1` from
+ * A map literal, `{"a": x, "b": y}`, as the plan's `struct` node carries it. Each key must be a string literal, since a JavaScript record cannot tell the CEL key `1` from
  * `"1"`, and no two keys may repeat. A value that errors makes the whole map one.
  */
 function compileMapLiteral(
@@ -939,25 +985,28 @@ const OPERATORS: Record<string, Compiler> = {
       PlanExpressionOperand,
       PlanExpressionOperand,
     ];
-    const safe =
+    const compiledReceiver = compile(receiver, ctx);
+    // A literal pattern is compiled once; one the plan computes is compiled per record. A pattern
+    // RE2 rejects is an evaluation error, as it is in Cerbos.
+    const constant =
       isValue(pattern) && typeof pattern.value === "string"
-        ? parseSafeRegexPattern(pattern.value)
+        ? compileRegex(pattern.value)
         : undefined;
-    if (!safe) {
-      throw new UnsupportedOperatorError(
-        "matches",
-        "matches requires a constant RE2 pattern in the literal, anchor and trailing .* subset the post-filter answers with plain string comparisons, without a regex engine whose dialect differs from RE2",
-      );
-    }
-    const compiled = compile(receiver, ctx);
+    const compiledPattern = compile(pattern, ctx);
     return {
       type: "other",
       run: (env) => {
-        const value = compiled.run(env);
+        const value = compiledReceiver.run(env);
         if (isEvaluationError(value)) return value;
-        return typeof value === "string"
-          ? matchesSafeRegexPattern(value, safe)
-          : EVALUATION_ERROR;
+        if (typeof value !== "string") return EVALUATION_ERROR;
+        let regex = constant;
+        if (regex === undefined) {
+          const text = compiledPattern.run(env);
+          if (isEvaluationError(text)) return text;
+          if (typeof text !== "string") return EVALUATION_ERROR;
+          regex = compileRegex(text);
+        }
+        return regex === EVALUATION_ERROR ? regex : regex.matches(value);
       },
     };
   },
@@ -973,6 +1022,25 @@ const OPERATORS: Record<string, Compiler> = {
   hasIntersection: strict(2, "other", ([left, right]) =>
     Array.isArray(left) && Array.isArray(right)
       ? left.some((l) => right.some((r) => valuesEqual(l, r)))
+      : EVALUATION_ERROR,
+  ),
+  // Cerbos's list functions (internal/conditions/cerbos_lib.go): `except` keeps the elements of
+  // the first list the second does not contain, `intersect` the elements of the shorter list the
+  // longer contains, duplicates included, and `isSubset` holds when the second contains every
+  // element of the first.
+  except: strict(2, "other", ([left, right]) =>
+    Array.isArray(left) && Array.isArray(right)
+      ? left.filter((l) => !right.some((r) => valuesEqual(l, r)))
+      : EVALUATION_ERROR,
+  ),
+  intersect: strict(2, "other", ([left, right]) => {
+    if (!Array.isArray(left) || !Array.isArray(right)) return EVALUATION_ERROR;
+    const [shorter, longer] = left.length > right.length ? [right, left] : [left, right];
+    return shorter.filter((s) => longer.some((l) => valuesEqual(s, l)));
+  }),
+  isSubset: strict(2, "other", ([left, right]) =>
+    Array.isArray(left) && Array.isArray(right)
+      ? left.every((l) => right.some((r) => valuesEqual(l, r)))
       : EVALUATION_ERROR,
   ),
 
@@ -999,12 +1067,9 @@ const OPERATORS: Record<string, Compiler> = {
       PlanExpressionOperand,
       PlanExpressionOperand,
     ];
-    const collection =
-      isExpression(target) && target.operator === "struct"
-        ? compileMapLiteral(target.operands, ctx)
-        : compile(target, ctx);
-    return indexInto(collection, compile(key, ctx));
+    return indexInto(compile(target, ctx), compile(key, ctx));
   },
+  struct: (operands, ctx) => compileMapLiteral(operands, ctx),
   "get-field": (operands, ctx) => {
     const [targetOperand, fieldOperand] = exactly(operands, 2, "get-field") as [
       PlanExpressionOperand,

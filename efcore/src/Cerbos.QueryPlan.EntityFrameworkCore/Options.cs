@@ -59,4 +59,10 @@ public sealed class QueryPlanOptions<TEntity>
 
     /// <summary>The convention for every field that does not declare its own. Defaults to <see cref="NullConvention.Omitted"/>.</summary>
     public NullConvention Nulls { get; init; } = NullConvention.Omitted;
+
+    /// <summary>
+    /// The instant <c>timeSince()</c> measures from. Defaults to the clock when <c>ToFilter</c> runs, so
+    /// translate the plan for the query you are about to run.
+    /// </summary>
+    public DateTimeOffset? Now { get; init; }
 }

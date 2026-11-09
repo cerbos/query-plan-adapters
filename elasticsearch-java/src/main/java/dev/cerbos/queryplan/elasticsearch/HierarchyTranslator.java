@@ -114,9 +114,7 @@ final class HierarchyTranslator {
 
         if (ancestor instanceof Hierarchy.Constant constant
                 && descendant instanceof Hierarchy.FieldRef field) {
-            String prefix = String.join(field.delimiter(), constant.segments())
-                    + field.delimiter();
-            return Queries.prefix(field.field(), prefix);
+            return strictDescendants(field, constant);
         }
         if (ancestor instanceof Hierarchy.FieldRef field
                 && descendant instanceof Hierarchy.Constant constant) {
@@ -173,8 +171,22 @@ final class HierarchyTranslator {
         // or equal to it,
         clauses.add(Queries.term(field.field(), whole));
         // or a strict descendant of it.
-        clauses.add(Queries.prefix(field.field(), whole + delimiter));
+        clauses.add(strictDescendants(field, constant));
         return Queries.boolShould(List.copyOf(clauses));
+    }
+
+    /**
+     * The field holds a strict descendant of the constant: a prefix query on the constant
+     * followed by the delimiter. With an empty delimiter that prefix is the constant itself,
+     * which the prefix query also matches as equal, so the equal term is excluded.
+     */
+    private static Map<String, Object> strictDescendants(Hierarchy.FieldRef field, Hierarchy.Constant constant) {
+        String whole = String.join(field.delimiter(), constant.segments());
+        Map<String, Object> prefix = Queries.prefix(field.field(), whole + field.delimiter());
+        if (!field.delimiter().isEmpty()) {
+            return prefix;
+        }
+        return Queries.boolMust(List.of(prefix, Queries.notQuery(Queries.term(field.field(), whole))));
     }
 
     private static MalformedPlanException unfoldedConstantHierarchy(String operator) {
@@ -299,12 +311,18 @@ final class HierarchyTranslator {
         return true;
     }
 
-    /** Every strict ancestor of a segment list, joined with {@code delimiter}. */
+    /**
+     * Every strict ancestor of a segment list, joined with {@code delimiter}. With an empty
+     * delimiter the empty string splits to no segments, so it is the ancestor of every other path.
+     */
     private static List<String> strictPrefixes(List<String> segments, String delimiter) {
-        if (segments.size() <= 1) {
-            return List.of();
-        }
         List<String> prefixes = new ArrayList<>();
+        if (delimiter.isEmpty() && !segments.isEmpty()) {
+            prefixes.add("");
+        }
+        if (segments.size() <= 1) {
+            return List.copyOf(prefixes);
+        }
         StringBuilder current = new StringBuilder(segments.get(0));
         prefixes.add(current.toString());
         for (int index = 1; index < segments.size() - 1; index++) {
@@ -316,13 +334,12 @@ final class HierarchyTranslator {
 
     /**
      * Splits on a literal delimiter, keeping trailing empty segments. {@link String#split} would
-     * treat the default {@code .} as a regex. An empty delimiter is refused.
+     * treat the default {@code .} as a regex. Cerbos splits with Go's {@code strings.Split}, which
+     * on an empty delimiter yields one segment per code point, and none for the empty string.
      */
     private static List<String> splitLiteral(String raw, String delimiter) {
         if (delimiter.isEmpty()) {
-            throw unsupported("hierarchy delimiter is empty: a path cannot be split into "
-                    + "segments on an empty delimiter, so the relation has no segment prefix to "
-                    + "compare the field's stored path against");
+            return raw.codePoints().mapToObj(Character::toString).toList();
         }
         List<String> parts = new ArrayList<>();
         int start = 0;

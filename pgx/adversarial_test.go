@@ -83,6 +83,7 @@ CREATE TABLE adversarial_tag (
 	pk           bigserial PRIMARY KEY,
 	tag_id       text NOT NULL,
 	name         text,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 
@@ -125,12 +126,14 @@ CREATE TABLE adversarial_inner (
 CREATE TABLE adversarial_number_elem (
 	pk           bigserial PRIMARY KEY,
 	value        double precision,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 
 CREATE TABLE adversarial_bool_elem (
 	pk           bigserial PRIMARY KEY,
 	value        boolean,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 `
@@ -152,8 +155,9 @@ func buildMapper() cerbospgx.Mapper {
 	tags := &cerbospgx.Relation{
 		Table:        tagTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
-		Field:  &cerbospgx.Entry{Column: "name", ValueType: cerbospgx.ValueString},
-		Fields: tagFields,
+		Position: "position",
+		Field:    &cerbospgx.Entry{Column: "name", ValueType: cerbospgx.ValueString},
+		Fields:   tagFields,
 	}
 
 	tagNames := *tags
@@ -353,7 +357,8 @@ func elementList(table string, element cerbospgx.Entry) *cerbospgx.Relation {
 	return &cerbospgx.Relation{
 		Table:        table,
 		SourceColumn: "id", TargetColumn: "resource_id",
-		Field: &element,
+		Position: "position",
+		Field:    &element,
 	}
 }
 
@@ -406,23 +411,22 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 			}
 		}
 
-		for _, tag := range seed.Tags {
+		// Each list keeps its order in a position column, which is what `index` reads.
+		for i, tag := range seed.Tags {
 			_, err := pool.Exec(ctx,
-				`INSERT INTO adversarial_tag (tag_id, name, resource_id) VALUES ($1,$2,$3)`,
-				tag.ID, tag.Name, seed.ID)
+				`INSERT INTO adversarial_tag (tag_id, name, position, resource_id) VALUES ($1,$2,$3,$4)`,
+				tag.ID, tag.Name, i, seed.ID)
 			require.NoError(t, err, "seeding tag %s", tag.ID)
 		}
 
-		// A relation has no row order, which is why `index` over these lists stays refused;
-		// membership and hasIntersection are position-blind and need none.
-		for _, element := range seed.ANumberList {
+		for i, element := range seed.ANumberList {
 			_, err := pool.Exec(ctx,
-				`INSERT INTO adversarial_number_elem (value, resource_id) VALUES ($1,$2)`, element, seed.ID)
+				`INSERT INTO adversarial_number_elem (value, position, resource_id) VALUES ($1,$2,$3)`, element, i, seed.ID)
 			require.NoError(t, err, "seeding aNumberList for %s", seed.ID)
 		}
-		for _, element := range seed.ABoolList {
+		for i, element := range seed.ABoolList {
 			_, err := pool.Exec(ctx,
-				`INSERT INTO adversarial_bool_elem (value, resource_id) VALUES ($1,$2)`, element, seed.ID)
+				`INSERT INTO adversarial_bool_elem (value, position, resource_id) VALUES ($1,$2,$3)`, element, i, seed.ID)
 			require.NoError(t, err, "seeding aBoolList for %s", seed.ID)
 		}
 

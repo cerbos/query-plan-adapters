@@ -1,40 +1,39 @@
+import { RE2JS, RE2JSException } from "re2js";
+
 /**
- * The subset of RE2 the post-filter answers: a literal of plain characters, optionally anchored at
- * either end or followed by a trailing `.*`. The post-filter answers it with plain string
- * comparisons rather than a regex engine, and any other pattern is refused at translation time.
+ * CEL's `matches`: an unanchored RE2 search. The engine is re2js, a port of RE2 with its syntax
+ * and its limits (no lookaround or backreferences, a repeat count of at most 1000, `$` at the
+ * absolute end, `.` excluding only `\n`, `(?i)` by Unicode simple case folding), so a pattern
+ * means what it means to the PDP. JavaScript's RegExp is not RE2 and is never handed a pattern.
  */
-export interface SafeRegexPattern {
-  literal: string;
-  anchoredStart: boolean;
-  anchoredEnd: boolean;
-  trailingWildcard: boolean;
+export interface CompiledRegex {
+  test(input: string): boolean;
 }
 
-const SAFE_REGEX_PATTERN = /^(\^)?([A-Za-z0-9 _:/-]+?)(\.\*)?(\$)?$/;
+/** A pattern RE2 itself rejects: evaluating `matches()` with it is a CEL error on every row. */
+export class InvalidRegexError extends Error {
+  override readonly name = "InvalidRegexError";
+}
 
-export const parseSafeRegexPattern = (
-  pattern: string,
-): SafeRegexPattern | undefined => {
-  const match = SAFE_REGEX_PATTERN.exec(pattern);
-  const literal = match?.[2];
-  if (!literal) return undefined;
-  if (match[3] === ".*" && match[4] === "$") return undefined;
-  return {
-    literal,
-    anchoredStart: match[1] === "^",
-    trailingWildcard: match[3] === ".*",
-    anchoredEnd: match[4] === "$",
-  };
-};
+const CACHE = new Map<string, CompiledRegex | InvalidRegexError>();
 
-export const matchesSafeRegexPattern = (
-  receiver: string,
-  pattern: SafeRegexPattern,
-): boolean => {
-  if (pattern.anchoredStart && pattern.anchoredEnd) {
-    return receiver === pattern.literal;
+/** Compiles `pattern` as RE2 reads it, or throws `InvalidRegexError` for one RE2 rejects. */
+export const compileRe2 = (pattern: string): CompiledRegex => {
+  const cached = CACHE.get(pattern);
+  if (cached instanceof InvalidRegexError) throw cached;
+  if (cached !== undefined) return cached;
+  let compiled: RE2JS;
+  try {
+    compiled = RE2JS.compile(pattern);
+  } catch (error) {
+    if (!(error instanceof RE2JSException)) throw error;
+    const invalid = new InvalidRegexError(error.message);
+    if (CACHE.size < 1000) CACHE.set(pattern, invalid);
+    throw invalid;
   }
-  if (pattern.anchoredStart) return receiver.startsWith(pattern.literal);
-  if (pattern.anchoredEnd) return receiver.endsWith(pattern.literal);
-  return receiver.includes(pattern.literal);
+  const result: CompiledRegex = {
+    test: (input) => compiled.matcher(input).find(),
+  };
+  if (CACHE.size < 1000) CACHE.set(pattern, result);
+  return result;
 };

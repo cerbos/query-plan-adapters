@@ -58,13 +58,16 @@ import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
  * spells the same conversion `CAST(-0.6 AS CHAR)`. Nor is `VARCHAR`. And `CHAR` is `character(1)`
  * on PostgreSQL, where `CAST(-0.6 AS CHAR)` is `'-'`. Even a per-dialect target would render a
  * number in the store's format, not CEL's: SQLite's `CAST(2.0 AS TEXT)` is `'2.0'`, CEL's is `"2"`.
- * So three shapes are lowered WITHOUT a cast, and every other `string()` is refused:
+ * So four shapes are lowered WITHOUT a cast, and every other `string()` is refused:
  *
  * - over a string column it is the identity;
  * - over a boolean column it is a CASE spelling CEL's two words (`buildBooleanString`, #418);
  * - over a number column compared for (in)equality with a string constant, the comparison is
  *   inverted into a numeric one against the one double CEL spells that way
- *   (`buildNumberStringComparison` in `comparison.ts`).
+ *   (`buildNumberStringComparison` in `comparison.ts`);
+ * - over any other boolean, or an `int()` or `size()`, compared for (in)equality with a string
+ *   constant, the comparison is folded into the operand's own polarity or int comparison
+ *   (`buildRenderedComparison` in `comparison.ts`).
  */
 const NUMERIC_CONVERSION_REFUSAL =
   "SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL " +
@@ -75,8 +78,9 @@ const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
   int: NUMERIC_CONVERSION_REFUSAL,
   double: NUMERIC_CONVERSION_REFUSAL,
   string:
-    "only string() over a string or boolean column, or string() over a number column compared " +
-    "for equality with a string constant, is lowered — each without a CAST. A CAST would render " +
+    "only string() over a string or boolean column, or string() over a number column, a boolean " +
+    "expression, an int() or a size() compared for equality with a string constant, is lowered — " +
+    "each without a CAST. A CAST would render " +
     "the number in the store's own format rather than CEL's (SQLite spells 2.0 as '2.0' where " +
     "CEL spells it '2'), and no cast target is shared by every store: TEXT is a syntax error on " +
     "MySQL, whose CHAR is character(1) on PostgreSQL",

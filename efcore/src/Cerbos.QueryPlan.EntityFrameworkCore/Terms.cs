@@ -50,8 +50,34 @@ internal sealed record ListTerm(Expression Source, Type ElementType, Func<Expres
 /// <summary>An element of a list of objects, inside a lambda body.</summary>
 internal sealed record ObjectTerm(Expression Target, IReadOnlyDictionary<string, Mapping> Fields) : Term;
 
-/// <summary>The value of <c>hierarchy(path, delimiter)</c>.</summary>
+/// <summary>The value of <c>hierarchy(path, delimiter)</c>: the path is a string, or a list of segments.</summary>
 internal sealed record HierarchyTerm(Term Path, string Delimiter) : Term;
+
+/// <summary>
+/// A value that is one of several terms, chosen by mutually exclusive two-valued guards; a row no guard
+/// selects is a CEL error. Every operator distributes over the arms, so a ternary with branches of
+/// different types, a division that can be NaN or a map literal indexed by a column keep their exact
+/// per-row meaning.
+/// </summary>
+internal sealed record CaseTerm(IReadOnlyList<(Expression When, Term Then)> Arms) : Term;
+
+/// <summary><c>string()</c> of a number read from the store, compared only against literals.</summary>
+internal sealed record NumberTextTerm(ScalarTerm Number) : Term;
+
+/// <summary>A timestamp read from the store, shifted by a constant duration.</summary>
+internal sealed record ShiftedTimestampTerm(ScalarTerm Timestamp, System.Numerics.BigInteger Nanos) : Term;
+
+/// <summary><c>timeSince()</c> of a timestamp read from the store: the clock minus the column.</summary>
+internal sealed record SinceTerm(ScalarTerm Timestamp) : Term;
+
+/// <summary>A list literal whose items each remain only where <c>Keep</c> holds: a filter, except or intersect over a literal.</summary>
+internal sealed record GuardedList(IReadOnlyList<(Expression Keep, Term Item)> Items, Expression Defined) : Term;
+
+/// <summary>A list known only by its size and whether it is empty: intersect() over related rows.</summary>
+internal sealed record CountedList(Expression Count, Expression Defined, BoolTerm Empty) : Term;
+
+/// <summary>Lists concatenated with <c>+</c>, at least one of them read from the store.</summary>
+internal sealed record ConcatList(IReadOnlyList<Term> Parts) : Term;
 
 /// <summary>A list literal with members read from the store. A member that errors makes the whole list an error.</summary>
 internal sealed record TermList(IReadOnlyList<Term> Items) : Term
@@ -65,6 +91,14 @@ internal sealed record TermList(IReadOnlyList<Term> Items) : Term
         ErrorTerm => Ex.False,
         ListTerm l => l.Defined,
         TermList l => l.Defined,
+        GuardedList g => g.Defined,
+        CountedList c => c.Defined,
+        ConcatList c => Ex.And([.. c.Parts.Select(DefinedOf)]),
+        CaseTerm c => Ex.Or([.. c.Arms.Select(a => a.When)]),
+        NumberTextTerm n => n.Number.Defined,
+        ShiftedTimestampTerm s => s.Timestamp.Defined,
+        SinceTerm s => s.Timestamp.Defined,
+        HierarchyTerm h => DefinedOf(h.Path),
         _ => Ex.True,
     };
 
@@ -80,6 +114,9 @@ internal static class Ex
     public static bool IsTrue(Expression e) => e is ConstantExpression { Value: true };
 
     public static bool IsFalse(Expression e) => e is ConstantExpression { Value: false };
+
+    /// <summary>Whether two expressions read the same thing, so <c>x / x</c> is known to be a self-division.</summary>
+    public static bool Same(Expression a, Expression b) => a.Type == b.Type && a.ToString() == b.ToString();
 
     public static Expression And(params Expression[] items)
     {
@@ -189,6 +226,15 @@ internal static class Ex
         }
         checks.Reverse();
         return And([.. checks]);
+    }
+
+    /// <summary>The owner of a member chain's last member is present: every navigation up to and including it.</summary>
+    public static Expression OwnerPresent(Expression body)
+    {
+        if (Unwrap(body) is not MemberExpression { Expression: { } inner }) return True;
+        inner = Unwrap(inner);
+        Expression present = inner is ParameterExpression || inner.Type.IsValueType ? True : Expression.NotEqual(inner, Expression.Constant(null, inner.Type));
+        return And(HopsPresent(inner), present);
     }
 
     private static Expression Unwrap(Expression e) =>

@@ -5,6 +5,7 @@ import {
   COMPARISON_OPERATORS,
   buildAggregationExpression,
   buildAggregationExpressionFromExpression,
+  celScalarType,
   isUnorderable,
 } from "./aggregation";
 import type { ComparisonOperator } from "./aggregation";
@@ -55,7 +56,8 @@ const toOneMacroRefusal = (operator: string): UnsupportedQueryPlanError =>
     `${operator}() over a to-one relation ranges over the related object's keys in CEL, and ` +
       "a MongoDB filter has no form that iterates a subdocument's field names",
   );
-import { escapeRegexValue, normalizeRe2PatternForMongo } from "./regex";
+import { escapeRegexValue, lowerRe2PatternForMongo } from "./regex";
+import { subMillisecondTimestampBounds } from "./timestamp";
 
 /** Translates a CONDITIONAL plan's condition into a Mongoose filter. */
 export const translateCondition = (
@@ -507,6 +509,9 @@ const negatedRewrite = (
   if (operand.operator === "isSubset") {
     return buildFilter(everyElementIn("exists", left, right, true), ctx);
   }
+  if (matchesInvalidPattern(operand)) {
+    return buildFilter(operand, ctx);
+  }
   if (operand.operator === "eq" || operand.operator === "ne") {
     const flipped = operand.operator === "eq" ? "ne" : "eq";
     const rewritten =
@@ -743,6 +748,15 @@ const translateComparison = (
       "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value",
     );
   }
+  const roundedLiteral = roundSubMillisecondTimestampLiteral(
+    operator,
+    leftOperand,
+    rightOperand,
+    ctx,
+  );
+  if (roundedLiteral !== undefined) {
+    return roundedLiteral;
+  }
   // If either operand is a (non-relational) expression, emit a `$expr`
   // with aggregation-pipeline operators. This covers arithmetic, type
   // conversion, ternary, `index`, `size`, `matches` etc. on either side
@@ -852,6 +866,59 @@ const translateComparison = (
     },
     valueOperand.value,
     `\`${effectiveOperator}\` against a null operand`,
+  );
+};
+
+/**
+ * A comparison against `timestamp("…")` finer than a millisecond, which the planner folds
+ * `now() - duration("24h")` into: a BSON Date is never between the two milliseconds around the
+ * literal, so an ordering is the same ordering against the one of them that keeps the answer,
+ * and an equality is false on every document CEL can evaluate. Only a timestamp on the other
+ * side is rewritten; a string or number there has no ordering in CEL, which the comparison
+ * itself answers. Undefined when the comparison is not that shape.
+ */
+const roundSubMillisecondTimestampLiteral = (
+  operator: ComparisonOperator,
+  leftOperand: PlanExpressionOperand,
+  rightOperand: PlanExpressionOperand,
+  ctx: TranslateContext,
+): MongooseFilter | undefined => {
+  const bounds = (operand: PlanExpressionOperand) => {
+    const literal = isExpression(operand) && operand.operator === "timestamp" ? operand.operands[0] : undefined;
+    return literal !== undefined && isValue(literal) && typeof literal.value === "string"
+      ? subMillisecondTimestampBounds(literal.value)
+      : undefined;
+  };
+  const [literalOperand, other, literalOnLeft] = bounds(leftOperand)
+    ? [leftOperand, rightOperand, true]
+    : [rightOperand, leftOperand, false];
+  const literal = bounds(literalOperand);
+  if (literal === undefined || bounds(other) !== undefined) {
+    return undefined;
+  }
+  const otherType = celScalarType(other, ctx.mapper);
+  if (otherType === undefined || otherType === "mixed") {
+    return undefined;
+  }
+  // As `other OP literal`.
+  const effective = literalOnLeft ? MIRRORED_COMPARISON[operator] : operator;
+  if (effective === "eq" || effective === "ne") {
+    if (otherType !== "timestamp") {
+      return undefined;
+    }
+    return effective === "eq"
+      ? { $expr: false }
+      : withEvaluationGuards({ $expr: true }, [other], ctx.mapper);
+  }
+  // An ordering against another type is an error CEL raises whichever bound stands in.
+  const bound = effective === "lt" || effective === "ge" ? literal.ceil : literal.floor;
+  const rounded: PlanExpressionOperand = {
+    operator: "timestamp",
+    operands: [{ value: bound.toISOString() }],
+  };
+  return buildFilter(
+    { operator, operands: literalOnLeft ? [rounded, other] : [other, rounded] },
+    ctx,
   );
 };
 
@@ -1083,11 +1150,26 @@ const translateMatches = (
     throw new UnsupportedQueryPlanError("matches operator requires a string regex pattern");
   }
 
+  const lowered = lowerRe2PatternForMongo(patternOperand.value);
   return emitLeafComparison(
     ctx,
     fieldOperand.name,
-    { $regex: normalizeRe2PatternForMongo(patternOperand.value) },
+    // A pattern CEL cannot compile is an evaluation error, which denies the document under
+    // either polarity; nothing is in an empty list, in either scope.
+    "invalid" in lowered ? { $in: [] } : { $regex: lowered.pattern },
     { nullable: false, requireExists: false },
+  );
+};
+
+/** `matches()` over a constant pattern Go's regexp rejects: an error to CEL, false either way. */
+const matchesInvalidPattern = (operand: PlanExpression): boolean => {
+  const pattern = operand.operands[1];
+  return (
+    operand.operator === "matches" &&
+    pattern !== undefined &&
+    isValue(pattern) &&
+    typeof pattern.value === "string" &&
+    "invalid" in lowerRe2PatternForMongo(pattern.value)
   );
 };
 
@@ -1463,6 +1545,17 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
     }
     if (relation.type !== "many") {
       throw toOneMacroRefusal(operator);
+    }
+
+    // The planner folds a body that reads no element to a constant (`t.name in []`). A missing
+    // or null list is an error CEL denies under both macros, so each needs an actual array.
+    if (isValue(conditionOperand) && conditionOperand.value === false) {
+      return operator === "exists"
+        ? { [relation.name]: { $in: [] } }
+        : { [relation.name]: { $type: "array", $size: 0 } };
+    }
+    if (isValue(conditionOperand) && conditionOperand.value === true && operator === "all") {
+      return { [relation.name]: { $type: "array" } };
     }
 
     const elementCondition = buildFilter(conditionOperand, {

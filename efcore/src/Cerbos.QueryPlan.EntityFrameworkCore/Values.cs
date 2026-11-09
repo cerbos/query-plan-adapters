@@ -19,6 +19,9 @@ internal enum ScalarKind
     Bool,
     TimestampString,
     Timestamp,
+
+    /// <summary>A CEL int, which only <c>int()</c> and a lambda's index variable produce: no column maps to one.</summary>
+    Int,
 }
 
 internal static class ScalarKinds
@@ -79,6 +82,38 @@ internal readonly record struct CelTimestamp(long Seconds, int Nanos) : ICompara
         return new CelTimestamp(seconds, nanos);
     }
 
+    /// <summary>CEL's range: 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z.</summary>
+    public static readonly CelTimestamp Min = new(-62135596800, 0);
+    public static readonly CelTimestamp Max = new(253402300799, 999_999_999);
+
+    public static CelTimestamp operator +(CelTimestamp t, CelDuration d)
+    {
+        var nanos = new System.Numerics.BigInteger(t.Seconds) * 1_000_000_000 + t.Nanos + d.Nanos;
+        var seconds = (long)System.Numerics.BigInteger.Divide(nanos, 1_000_000_000);
+        var rem = (int)(nanos - new System.Numerics.BigInteger(seconds) * 1_000_000_000);
+        if (rem < 0)
+        {
+            seconds--;
+            rem += 1_000_000_000;
+        }
+        return new CelTimestamp(seconds, rem);
+    }
+
+    public static CelDuration operator -(CelTimestamp a, CelTimestamp b) =>
+        new((new System.Numerics.BigInteger(a.Seconds) - b.Seconds) * 1_000_000_000 + (a.Nanos - b.Nanos));
+
+    public static CelTimestamp FromDateTimeOffset(DateTimeOffset t)
+    {
+        var ticks = t.UtcTicks - DateTime.UnixEpoch.Ticks;
+        var seconds = Math.DivRem(ticks, TimeSpan.TicksPerSecond, out var rem);
+        if (rem < 0)
+        {
+            seconds--;
+            rem += TimeSpan.TicksPerSecond;
+        }
+        return new CelTimestamp(seconds, (int)(rem * 100));
+    }
+
     /// <summary>The instant truncated to <paramref name="ticksPerUnit"/> ticks, and whether anything was cut.</summary>
     public (DateTime Value, bool Truncated) ToDateTime(long ticksPerUnit)
     {
@@ -115,6 +150,7 @@ internal static class Cel
         Dictionary<string, object> => "map",
         CelTimestamp => "timestamp",
         CelDuration => "duration",
+        long => "int",
         _ => value.GetType().Name,
     };
 
@@ -126,6 +162,9 @@ internal static class Cel
             case (CelNull, CelNull): return true;
             case (string x, string y): return string.Equals(x, y, StringComparison.Ordinal);
             case (double x, double y): return x == y;
+            case (long x, long y): return x == y;
+            case (long x, double y): return !double.IsNaN(y) && CompareIntDouble(x, y) == 0;
+            case (double x, long y): return !double.IsNaN(x) && CompareIntDouble(y, x) == 0;
             case (bool x, bool y): return x == y;
             case (CelTimestamp x, CelTimestamp y): return x == y;
             case (CelDuration x, CelDuration y): return x == y;
@@ -141,11 +180,107 @@ internal static class Cel
     {
         (string x, string y) => CompareCodePoints(x, y),
         (double x, double y) when !double.IsNaN(x) && !double.IsNaN(y) => x.CompareTo(y),
+        (long x, long y) => x.CompareTo(y),
+        (long x, double y) when !double.IsNaN(y) => CompareIntDouble(x, y),
+        (double x, long y) when !double.IsNaN(x) => -CompareIntDouble(y, x),
         (bool x, bool y) => x.CompareTo(y),
         (CelTimestamp x, CelTimestamp y) => x.CompareTo(y),
         (CelDuration x, CelDuration y) => x.Nanos.CompareTo(y.Nanos),
         _ => null,
     };
+
+    /// <summary>Exact order of an int and a double, as CEL compares them: neither is rounded to the other.</summary>
+    public static int CompareIntDouble(long i, double d)
+    {
+        if (d >= 9223372036854775808.0) return -1;
+        if (d < -9223372036854775808.0) return 1;
+        return ((decimal)i).CompareTo((decimal)d);
+    }
+
+    /// <summary>Whether a double is a whole number a CEL int can hold, so a plan literal beside an int is that int.</summary>
+    public static bool IsIntLiteral(double d, out long value)
+    {
+        value = 0;
+        if (!double.IsFinite(d) || d != Math.Floor(d) || d < -9223372036854775808.0 || d >= 9223372036854775808.0) return false;
+        value = (long)d;
+        return true;
+    }
+
+    /// <summary>Go's strconv.ParseInt in base 10, which CEL's <c>int()</c> reads a string with.</summary>
+    public static long? ParseGoInt(string s)
+    {
+        if (s.Length == 0) return null;
+        var body = s[0] is '+' or '-' ? s[1..] : s;
+        if (body.Length == 0 || !body.All(char.IsAsciiDigit)) return null;
+        return long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var v) ? v : null;
+    }
+
+    /// <summary>Whether a string is CEL's spelling of an int, strconv.Itoa: no sign on zero, no leading zeros.</summary>
+    public static bool IsIntSpelling(string s, out long value) =>
+        ParseGoInt(s, out value) && s == value.ToString(CultureInfo.InvariantCulture);
+
+    private static bool ParseGoInt(string s, out long value)
+    {
+        var parsed = ParseGoInt(s);
+        value = parsed ?? 0;
+        return parsed is not null;
+    }
+
+    /// <summary>
+    /// CEL's spelling of a double, strconv.FormatFloat(d, 'g', -1, 64): the shortest digits that read
+    /// back exactly, in exponent form when the exponent is below -4 or at least 6.
+    /// </summary>
+    public static string FormatDouble(double d)
+    {
+        if (double.IsNaN(d)) return "NaN";
+        if (double.IsPositiveInfinity(d)) return "+Inf";
+        if (double.IsNegativeInfinity(d)) return "-Inf";
+        var negative = d < 0 || (d == 0 && double.IsNegative(d));
+        var r = Math.Abs(d).ToString("R", CultureInfo.InvariantCulture);
+        var e = r.IndexOf('E');
+        var mantissa = e < 0 ? r : r[..e];
+        var exponent = e < 0 ? 0 : int.Parse(r[(e + 1)..], CultureInfo.InvariantCulture);
+        var point = mantissa.IndexOf('.');
+        var intPart = point < 0 ? mantissa : mantissa[..point];
+        var fracPart = point < 0 ? "" : mantissa[(point + 1)..];
+        var all = intPart + fracPart;
+        var stripped = all.TrimStart('0');
+        var dp = intPart.Length + exponent - (all.Length - stripped.Length);
+        var digits = stripped.TrimEnd('0');
+        var sb = new StringBuilder();
+        if (negative) sb.Append('-');
+        if (digits.Length == 0) return sb.Append('0').ToString();
+        var exp = dp - 1;
+        if (exp < -4 || exp >= 6)
+        {
+            sb.Append(digits[0]);
+            if (digits.Length > 1) sb.Append('.').Append(digits, 1, digits.Length - 1);
+            sb.Append('e').Append(exp < 0 ? '-' : '+');
+            var magnitude = Math.Abs(exp).ToString(CultureInfo.InvariantCulture);
+            if (magnitude.Length < 2) sb.Append('0');
+            return sb.Append(magnitude).ToString();
+        }
+        if (dp <= 0)
+        {
+            sb.Append("0.").Append('0', -dp).Append(digits);
+        }
+        else if (dp >= digits.Length)
+        {
+            sb.Append(digits).Append('0', dp - digits.Length);
+        }
+        else
+        {
+            sb.Append(digits, 0, dp).Append('.').Append(digits, dp, digits.Length - dp);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>The double a literal spells, when the literal is exactly CEL's spelling of it.</summary>
+    public static double? ParseDoubleSpelling(string s)
+    {
+        if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) return null;
+        return FormatDouble(d) == s ? d : null;
+    }
 
     public static int CompareCodePoints(string a, string b)
     {
@@ -221,6 +356,7 @@ internal static class Cel
     {
         string s => "\"" + s + "\"",
         double d => d.ToString("R", CultureInfo.InvariantCulture),
+        long l => l.ToString(CultureInfo.InvariantCulture),
         bool b => b ? "true" : "false",
         CelNull => "null",
         _ => TypeName(value),

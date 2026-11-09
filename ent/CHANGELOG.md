@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Newly translated, each proved by the corpus: `matches()` with a constant pattern. The pattern
+  is parsed with Go's `regexp/syntax`, the parser CEL matches with, so what is valid and what it
+  means are exactly CEL's, and it is lowered only when what it matches can be said with the
+  predicates the adapter already emits exactly on every dialect: a finite set of literals under anchors (`IN`, or
+  escaped `LIKE` prefix, suffix and substring tests), every character from a small set
+  (`^[ab]+$`, a `REPLACE` per character), a run of non-newline characters (`^.+$`, `^.{8,}$`) and
+  a prefix and suffix around one (`^a.*b$`). RE2's `(?i)` folds as RE2 does (`k` matches KELVIN
+  SIGN), a pattern RE2 rejects is UNKNOWN, as CEL's evaluation error is, and any other pattern
+  (a negated class, a word boundary, `(?s)`, `(?m)`) fails closed with `ErrUnsupported`. No
+  pattern reaches a store's own regex engine: none of them is RE2, and SQLite has none. Also newly translated:
+  `hierarchy(x, "")`, whose empty delimiter makes one segment per character; `==`/`!=` between a
+  column declared `NullConventionExplicit` and one on the omitted convention, UNKNOWN where the
+  omitted side is NULL and definite otherwise; a map literal compared with a column declared
+  `ValueString`, `ValueNumber` or `ValueBool`, unequal wherever the column is present; and a list or
+  map literal as the needle of `in` or an element of `hasIntersection()` against a relation whose
+  element type is declared, which no stored scalar equals (`regex/matches/*`,
+  `hierarchy/*/empty-delimiter`, `null/not-equals/field-to-field-mixed-null-conventions`,
+  `type-mismatch/*/string-field-against-map-literal*`,
+  `type-mismatch/in/list-literal-in-resource-string-list`,
+  `type-mismatch/has-intersection/resource-string-list-against-map-element`).
 - **Breaking:** `Result.Predicate` is never nil: `FALSE` for `KindAlwaysDenied`, where a nil
   predicate left the query unrestricted, and `TRUE` for `KindAlwaysAllowed`
   ([#494](https://github.com/cerbos/query-plan-adapters/issues/494)).
@@ -24,6 +44,12 @@
 - `!("x" in R.attr.list)` over a relation whose element is declared `NullConventionExplicit` keeps
   a row whose list holds a null and no `"x"`: CEL's `"x" == null` is false, where SQL's `=` was
   UNKNOWN and dropped the row (`membership/in/negated-literal-in-resource-list`).
+- `Relation.Position` names the column holding each element's zero-based position. With it,
+  `list[k]`, `list[k].field` and an ordered whole-list equality (`R.attr.list == ["a", "b"]`, also
+  over `map()` and `except()`) translate; a position past the end, negative or fractional is UNKNOWN,
+  as CEL's error. Newly translated too: `exists_one()`, `filter()` inside `size()` and `map()` over a
+  literal list, as strict counts of their bodies; `size(except(a, b))` and `size(intersect(a, b))`
+  for a stored list against a literal list; and a list in boolean position, which is UNKNOWN.
 - Newly translated, each proved by the corpus: a ternary yielding a list, lifted above the
   comparison or membership it feeds; `+` between list literals, and `x in R.attr.list + [...]`
   as a disjunction of memberships; `x in [e1, …]` and `exists()`/`all()` over a list of computed

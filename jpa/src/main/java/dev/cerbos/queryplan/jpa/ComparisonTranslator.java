@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * Translates every leaf comparison: field against value, field against field, constant against
@@ -62,15 +64,17 @@ final class ComparisonTranslator {
     private final LeafTranslator leaf;
     private final TernaryTranslator ternary;
     private final SizeTranslator sizes;
+    private final PlanWalker walker;
     private final ArithmeticTranslator arithmetic;
 
     ComparisonTranslator(CriteriaBuilder cb, TriPredicate tri, LeafTranslator leaf,
-                         TernaryTranslator ternary, SizeTranslator sizes) {
+                         TernaryTranslator ternary, SizeTranslator sizes, PlanWalker walker) {
         this.cb = cb;
         this.tri = tri;
         this.leaf = leaf;
         this.ternary = ternary;
         this.sizes = sizes;
+        this.walker = walker;
         this.arithmetic = new ArithmeticTranslator(cb, tri, leaf, this);
     }
 
@@ -179,6 +183,18 @@ final class ComparisonTranslator {
          */
         record IntOfField(String variable) implements Resolved {}
 
+        /** {@code string(int(variable))} ({@link #stringOfIntOfFieldComparison}). */
+        record StringOfIntOfField(String variable) implements Resolved {}
+
+        /**
+         * {@code string(expression)} over a boolean-valued expression
+         * ({@link #stringOfBooleanComparison}).
+         */
+        record StringOfBoolean(Operand inner) implements Resolved {}
+
+        /** A constant CEL error, such as {@code int()} of a literal beyond int64. */
+        record AlwaysError() implements Resolved {}
+
         /**
          * {@code timestamp(variable) + duration(value)}, {@code duration(value) +
          * timestamp(variable)} or {@code timestamp(variable) - duration(value)}, with the
@@ -221,9 +237,13 @@ final class ComparisonTranslator {
                     }
                     yield new Resolved.Opaque();
                 }
-                if ("string".equals(exprOp) && e.getOperandsCount() == 1
-                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VARIABLE) {
-                    yield new Resolved.StringOfField(e.getOperands(0).getVariable());
+                if ("string".equals(exprOp) && e.getOperandsCount() == 1) {
+                    yield resolveStringOf(e.getOperands(0));
+                }
+                if (("int".equals(exprOp) || "double".equals(exprOp)) && e.getOperandsCount() == 1
+                        && e.getOperands(0).getNodeCase() == Operand.NodeCase.VALUE) {
+                    // A literal a ternary's other branch typed (TernaryTranslator).
+                    yield convertedLiteral(exprOp, e.getOperands(0));
                 }
                 if ("duration".equals(exprOp) && e.getOperandsCount() == 1
                         && e.getOperands(0).getNodeCase() == Operand.NodeCase.VALUE) {
@@ -272,6 +292,106 @@ final class ComparisonTranslator {
             }
             default -> new Resolved.Opaque();
         };
+    }
+
+    /** The operators whose expression is boolean-valued, so {@code string()} of it renders it. */
+    private static final Set<String> BOOLEAN_OPS = Set.of(
+            "eq", "ne", "lt", "gt", "le", "ge", "and", "or", "not", "in", "has",
+            "exists", "exists_one", "all", "matches", "hasIntersection", "has_intersection",
+            "isSubset", "overlaps", "ancestorOf", "descendentOf",
+            "contains", "startsWith", "endsWith");
+
+    /**
+     * {@code string(arg)}: of a column, of a literal (folded), of {@code int(column)}, or of a
+     * boolean-valued expression. A ternary under it is substituted away before this
+     * ({@link TernaryTranslator}).
+     */
+    private Resolved resolveStringOf(Operand arg) {
+        switch (arg.getNodeCase()) {
+            case VARIABLE -> {
+                return new Resolved.StringOfField(arg.getVariable());
+            }
+            case VALUE -> {
+                return new Resolved.Constant(stringOfConstant(null, arg.getValue()));
+            }
+            case EXPRESSION -> {
+                PlanResourcesFilter.Expression inner = arg.getExpression();
+                String op = inner.getOperator();
+                if (("int".equals(op) || "double".equals(op)) && inner.getOperandsCount() == 1) {
+                    Operand converted = inner.getOperands(0);
+                    if (converted.getNodeCase() == Operand.NodeCase.VALUE
+                            && converted.getValue().getKindCase() == Value.KindCase.NUMBER_VALUE) {
+                        Operand text = stringOfConstant(op, converted.getValue());
+                        return text == null ? new Resolved.AlwaysError()
+                                : new Resolved.Constant(text);
+                    }
+                    if ("int".equals(op) && converted.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                        return new Resolved.StringOfIntOfField(converted.getVariable());
+                    }
+                }
+                if (BOOLEAN_OPS.contains(op)) {
+                    return new Resolved.StringOfBoolean(arg);
+                }
+                return new Resolved.Opaque();
+            }
+            default -> {
+                return new Resolved.Opaque();
+            }
+        }
+    }
+
+    /**
+     * CEL's {@code string()} of a literal, under {@code conversion} ({@code int} or
+     * {@code double}) when there is one, as a string operand; {@code null} when the conversion
+     * is a CEL error. A bare whole number is refused: the plan does not say whether the policy
+     * wrote the int {@code 1000000} or the double {@code 1e+06}.
+     */
+    private static Operand stringOfConstant(String conversion, Value value) {
+        String text;
+        switch (value.getKindCase()) {
+            case STRING_VALUE -> text = value.getStringValue();
+            case BOOL_VALUE -> text = Boolean.toString(value.getBoolValue());
+            case NUMBER_VALUE -> {
+                double d = value.getNumberValue();
+                if ("int".equals(conversion)) {
+                    if (Double.isNaN(d) || d <= -0x1p63 || d >= 0x1p63) {
+                        return null;
+                    }
+                    text = Long.toString((long) d);
+                } else if (conversion == null && d == Math.rint(d) && !Double.isInfinite(d)) {
+                    throw Refusals.unsupported("string() of a whole number literal is not"
+                            + " supported: the plan does not say whether the policy wrote an"
+                            + " int or a double, which CEL renders differently (\"1000000\""
+                            + " against \"1e+06\")");
+                } else {
+                    text = Double.isNaN(d) ? "NaN"
+                            : Double.isInfinite(d) ? (d > 0 ? "+Inf" : "-Inf")
+                            : d == 0 ? (1 / d < 0 ? "-0" : "0")
+                            : CelDoubleText.render(d);
+                }
+            }
+            default -> throw Refusals.unsupported("string() of a "
+                    + PlanValues.typeName(PlanValues.protoValueToJava(value))
+                    + " literal is not supported");
+        }
+        return Operand.newBuilder().setValue(Value.newBuilder().setStringValue(text)).build();
+    }
+
+    /** {@code int(literal)} or {@code double(literal)} as the constant it folds to. */
+    private static Resolved convertedLiteral(String conversion, Operand literal) {
+        Value v = literal.getValue();
+        if (v.getKindCase() != Value.KindCase.NUMBER_VALUE) {
+            return new Resolved.Opaque();
+        }
+        double d = v.getNumberValue();
+        if ("int".equals(conversion)) {
+            if (Double.isNaN(d) || d <= -0x1p63 || d >= 0x1p63) {
+                return new Resolved.AlwaysError();
+            }
+            d = (long) d;
+        }
+        return new Resolved.Constant(
+                Operand.newBuilder().setValue(Value.newBuilder().setNumberValue(d)).build());
     }
 
     /** The variable of {@code timestamp(variable)}, else {@code null}. */
@@ -333,6 +453,9 @@ final class ComparisonTranslator {
      */
     private Predicate dispatch(String op, Resolved left, Resolved right,
                                List<Operand> operands, Scope scope) {
+        if (left instanceof Resolved.AlwaysError || right instanceof Resolved.AlwaysError) {
+            return tri.unknown();
+        }
         // The planner never emits two constants, but ternary substitution does: the else
         // branch of `(aBool ? aNumber : 0) > 0` becomes gt(value(0), value(0)).
         if (COMPARISON_OPS.contains(op)
@@ -409,6 +532,18 @@ final class ComparisonTranslator {
                     && right instanceof Resolved.Constant c
                     && c.value() instanceof String text) {
                 return stringOfFieldComparison(op, sf, text, operands, scope);
+            }
+            if (("eq".equals(op) || "ne".equals(op))
+                    && left instanceof Resolved.StringOfIntOfField sif
+                    && right instanceof Resolved.Constant c
+                    && c.value() instanceof String text) {
+                return stringOfIntOfFieldComparison(op, sif, text, operands, scope);
+            }
+            if (("eq".equals(op) || "ne".equals(op))
+                    && left instanceof Resolved.StringOfBoolean sb
+                    && right instanceof Resolved.Constant c
+                    && c.value() instanceof String text) {
+                return stringOfBooleanComparison(op, sb, text, scope);
             }
             if (left instanceof Resolved.UpperAsciiField upper
                     && right instanceof Resolved.Constant c) {
@@ -856,6 +991,87 @@ final class ComparisonTranslator {
             return matchesNothing(op, path);
         }
         throw leafOperandError(op, operands);
+    }
+
+    /** CEL's rendering of an int: no sign on zero, no leading zeros, no exponent. */
+    private static final Pattern INT_RENDERING = Pattern.compile("0|-?[1-9][0-9]*");
+
+    /** The int64 whose CEL rendering is {@code text}, else {@code null}. */
+    private static Long canonicalInt64(String text) {
+        if (!INT_RENDERING.matcher(text).matches()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException beyondInt64) {
+            return null;
+        }
+    }
+
+    /**
+     * {@code string(int(column)) eq/ne "text"}. {@code int()} parses a String column exactly
+     * and truncates a Double one toward zero, and {@code string()} renders the int in plain
+     * decimal, so the comparison holds exactly where the column converts to the int that renders
+     * as {@code text}; a {@code text} no int renders as matches nothing. Where {@code int()}
+     * errors (NULL, unparsable, outside int64) the row is UNKNOWN under both polarities.
+     */
+    @SuppressWarnings("unchecked")
+    private Predicate stringOfIntOfFieldComparison(String op, Resolved.StringOfIntOfField field,
+                                                   String text, List<Operand> operands,
+                                                   Scope scope) {
+        Path<?> path = scope.path(field.variable());
+        Class<?> type = path.getJavaType();
+        Long k = canonicalInt64(text);
+        boolean ne = "ne".equals(op);
+        if (String.class.equals(type)) {
+            IntText parsed = new IntText((Expression<String>) path);
+            Predicate equal;
+            if (k == null) {
+                equal = cb.disjunction();
+            } else if (k == 0) {
+                equal = cb.equal(parsed.digits(), "");
+            } else {
+                equal = cb.and(k < 0 ? parsed.negative() : tri.not(parsed.negative()),
+                        cb.equal(parsed.digits(), Long.toString(k).replace("-", "")));
+            }
+            return tri.baseUnlessUnknown(ne ? tri.not(equal) : equal, parsed::unparsable);
+        }
+        if (Double.class.equals(type) || Integer.class.equals(type)) {
+            if (k != null && Math.abs(k) < 0x1p53) {
+                return intOfFieldComparison(op, new Resolved.IntOfField(field.variable()), k,
+                        operands, scope);
+            }
+            Expression<Double> d = path.as(Double.class);
+            // Beyond 2^53 every double is whole, so int() is the identity where it holds.
+            Predicate equal = k != null && Double.class.equals(type) && (long) (double) k == k
+                    ? cb.equal(d, (double) k) : cb.disjunction();
+            return tri.baseUnlessUnknown(ne ? tri.not(equal) : equal,
+                    () -> Double.class.equals(type)
+                            ? cb.or(cb.isNull(path), cb.le(d, -INT64_LIMIT), cb.ge(d, INT64_LIMIT))
+                            : cb.isNull(path));
+        }
+        if (Long.class.equals(type)) {
+            Predicate equal = k == null ? cb.disjunction() : cb.equal(path, k);
+            return tri.baseUnlessUnknown(ne ? tri.not(equal) : equal, () -> cb.isNull(path));
+        }
+        throw leafOperandError(op, operands);
+    }
+
+    /**
+     * {@code string(p) eq/ne "text"} over a boolean-valued {@code p}, which CEL renders as
+     * exactly {@code "true"} or {@code "false"}: the predicate itself, its negation, or for any
+     * other text a constant that stays UNKNOWN where {@code p} is, since CEL's error there
+     * denies under both polarities.
+     */
+    private Predicate stringOfBooleanComparison(String op, Resolved.StringOfBoolean field,
+                                                String text, Scope scope) {
+        Supplier<Predicate> inner = () -> walker.traverse(field.inner(), scope);
+        boolean eq = "eq".equals(op);
+        return switch (text) {
+            case "true" -> eq ? inner.get() : tri.not(inner.get());
+            case "false" -> eq ? tri.not(inner.get()) : inner.get();
+            default -> eq ? tri.not(tri.determined(inner)) : tri.determined(inner);
+        };
     }
 
     private static final String ASCII_LOWER = "abcdefghijklmnopqrstuvwxyz";

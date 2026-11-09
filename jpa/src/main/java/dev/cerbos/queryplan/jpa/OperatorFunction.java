@@ -21,7 +21,8 @@ import jakarta.persistence.criteria.Predicate;
  *   <li>a bare boolean attribute, as {@code eq} with {@code true};</li>
  *   <li>scalar {@code in}, where {@code value} is the value or a {@link java.util.List};</li>
  *   <li>arithmetic compared with a constant, where {@code field} is the arithmetic expression
- *       and {@code value} a {@link Double};</li>
+ *       and {@code value} a {@link Double}, or a {@link Long} when {@code int()} makes the
+ *       expression int-typed;</li>
  *   <li>{@code string(boolColumn) == "true"} or {@code "false"}, as {@code eq}/{@code ne} with
  *       a {@link Boolean}, and {@code string(stringColumn) == "text"} with the {@link String};</li>
  *   <li>{@code matches}, and a {@code timestamp()} comparison over a column type the default

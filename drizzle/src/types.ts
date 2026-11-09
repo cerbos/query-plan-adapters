@@ -141,6 +141,14 @@ export interface RelationMapping {
   field?: MapperEntry;
   fields?: { [key: string]: MapperEntry };
   /**
+   * The column holding each row's zero-based index in the list the application sends to
+   * `check()`, unique per source row and contiguous from 0. A relation has no order of its own,
+   * so without it a constant positional read (`R.attr.tags[0].name`) and an ordered list
+   * equality (`R.attr.tags.map(t, t.id) == ["a", "b"]`, `R.attr.names.except(["x"]) == ["y"]`)
+   * are refused.
+   */
+  position?: AnyColumn;
+  /**
    * The predicate the application itself applies when it reads this relation — a soft-delete
    * flag, a tenant column, a subtype discriminator, whatever narrows the rows that became the
    * resource attributes.

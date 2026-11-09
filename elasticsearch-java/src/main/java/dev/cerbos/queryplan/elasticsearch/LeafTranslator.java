@@ -25,6 +25,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -43,6 +44,13 @@ final class LeafTranslator {
 
     private static final Set<String> STRING_OPERATORS =
             Set.of("contains", "startsWith", "endsWith", "matches");
+
+    /** String predicates whose literal receiver has finitely many matching arguments. */
+    private static final Set<String> LITERAL_HAYSTACK_OPERATORS =
+            Set.of("contains", "startsWith", "endsWith");
+
+    /** More candidate arguments than this and the {@code terms} list is refused rather than built. */
+    private static final int MAX_HAYSTACK_TERMS = 1024;
 
     /** The negation of each ordering operator. */
     private static final Map<String, String> NEGATED_RANGE = Map.of(
@@ -76,6 +84,10 @@ final class LeafTranslator {
         Object value = comparison.value();
         boolean variableFirst = comparison.variableFirst();
 
+        if (!variableFirst && LITERAL_HAYSTACK_OPERATORS.contains(operator)
+                && value instanceof String haystack) {
+            return literalHaystack(operator, comparison.variable(), field, haystack, scope, polarity);
+        }
         String normalizedOperator = normalizeLeafOperator(operator, variableFirst);
         if ("in".equals(normalizedOperator) && !variableFirst && isObjectPath(field)) {
             // CEL's `in` over a map tests its keys. An object field's key set is not indexed:
@@ -170,6 +182,11 @@ final class LeafTranslator {
                     if (shifted != null) {
                         return shifted;
                     }
+                    Map<String, Object> concatenated =
+                            concatenationComparison(operator, expression, other, scope, polarity);
+                    if (concatenated != null) {
+                        return concatenated;
+                    }
                 }
                 default -> {
                     // Not a rewritable shape; the comparison resolves operands as usual.
@@ -225,7 +242,7 @@ final class LeafTranslator {
                         + " looked up by a document field: the Query DSL has no whole-"
                         + kindOf(value) + " comparison");
             }
-            if (celEquals(value, target) == wantMatch) {
+            if (Constants.equal(value, target) == wantMatch) {
                 keys.addValues(setField.getOperands(0).getValue());
             }
         }
@@ -234,15 +251,58 @@ final class LeafTranslator {
         return applyResolvedLeaf("in", List.of(key, keyList), scope, Polarity.TRUE);
     }
 
-    /** CEL equality of two scalar literals: numbers compare by value across int and double. */
-    private static boolean celEquals(Object left, Object right) {
-        if (left == null || right == null) {
-            return left == right;
+    /**
+     * {@code "haystack".startsWith(f)}: the field is the needle, and the strings a literal
+     * haystack starts with are its prefixes, finitely many, so the predicate is membership of the
+     * field in them; likewise its suffixes for {@code endsWith} and its substrings for
+     * {@code contains}. The empty string is one of them, and Elasticsearch indexes it.
+     */
+    private Map<String, Object> literalHaystack(String operator, String variable, String field,
+                                                String haystack, Scope scope, Polarity polarity) {
+        if (declaredType(field, operator) != ScalarType.STRING) {
+            // A non-string needle is a CEL no-overload error, which denies under both polarities.
+            return Queries.matchNone();
         }
-        if (left instanceof Number a && right instanceof Number b) {
-            return a.doubleValue() == b.doubleValue();
+        List<String> candidates = haystackMembers(operator, haystack);
+        if (candidates.size() > MAX_HAYSTACK_TERMS) {
+            throw unsupported(operator + " with a document field as the argument and a literal of "
+                    + haystack.length() + " characters as the receiver is refused: the terms query"
+                    + " would list every " + (operator.equals("contains") ? "substring" : "prefix")
+                    + " of the literal, " + candidates.size() + " of them, and the Query DSL"
+                    + " cannot search a literal for a field's value without scripts");
         }
-        return left.equals(right);
+        ListValue.Builder list = ListValue.newBuilder();
+        candidates.forEach(c -> list.addValues(Value.newBuilder().setStringValue(c)));
+        Operand variableOperand = Operand.newBuilder().setVariable(variable).build();
+        Operand members = Operand.newBuilder().setValue(Value.newBuilder().setListValue(list)).build();
+        return applyResolvedLeaf("in", List.of(variableOperand, members), scope, polarity);
+    }
+
+    /** The distinct strings the operator finds in {@code haystack}, by code point. */
+    static List<String> haystackMembers(String operator, String haystack) {
+        int[] points = haystack.codePoints().toArray();
+        LinkedHashSet<String> members = new LinkedHashSet<>();
+        switch (operator) {
+            case "startsWith" -> {
+                for (int end = 0; end <= points.length; end++) {
+                    members.add(new String(points, 0, end));
+                }
+            }
+            case "endsWith" -> {
+                for (int start = 0; start <= points.length; start++) {
+                    members.add(new String(points, start, points.length - start));
+                }
+            }
+            default -> {
+                members.add("");
+                for (int start = 0; start < points.length; start++) {
+                    for (int end = start + 1; end <= points.length; end++) {
+                        members.add(new String(points, start, end - start));
+                    }
+                }
+            }
+        }
+        return List.copyOf(members);
     }
 
     /** More case variants than this and the {@code terms} list is refused rather than built. */
@@ -392,6 +452,116 @@ final class LeafTranslator {
         return Queries.boolMust(List.of(comparison, inRange));
     }
 
+    /** A string concatenation of one document field and literals, as prefix, field, suffix. */
+    private record Concatenation(String prefix, String variable, String suffix) {}
+
+    /**
+     * {@code "p" + f + "s" == "L"} is {@code f == "L" without p and s} when {@code L} starts with
+     * {@code p} and ends with {@code s}, else false; {@code !=} is its negation and {@code in}
+     * keeps the elements that fit. Every form needs {@code f} to be a string, which CEL requires
+     * to concatenate: a non-string field is an error under both polarities. Returns {@code null}
+     * for any other {@code add}, which the leaf resolver refuses.
+     */
+    private Map<String, Object> concatenationComparison(String operator, Expression add,
+                                                        Operand other, Scope scope, Polarity polarity) {
+        Concatenation concatenation = concatenation(Operand.newBuilder().setExpression(add).build());
+        if (concatenation == null) {
+            return null;
+        }
+        boolean equality = "eq".equals(operator) || "ne".equals(operator);
+        if (!equality && !"in".equals(operator)) {
+            throw unsupported(operator + " over a string concatenation cannot be expressed: only"
+                    + " == and != reduce to the field compared with the literal less the"
+                    + " concatenated parts, and computing the concatenation over a field needs a"
+                    + " script");
+        }
+        if (other.getNodeCase() != Operand.NodeCase.VALUE) {
+            throw unsupported("A string concatenation over a document field reduces to a term query"
+                    + " only when compared with a literal; computing it over a field needs a script");
+        }
+        String field = scope.field(concatenation.variable());
+        if (declaredType(field, operator) != ScalarType.STRING) {
+            return Queries.matchNone();
+        }
+        Object target = PlanValues.protoValueToJava(other.getValue());
+        PlanValues.rejectNonFinite(target);
+        Operand variable = Operand.newBuilder().setVariable(concatenation.variable()).build();
+        if (equality) {
+            boolean holds = "eq".equals(operator) == polarity.holds();
+            String stripped = target instanceof String s ? strip(concatenation, s) : null;
+            if (stripped == null) {
+                // The concatenation never equals the literal, and a present string field makes
+                // that definite.
+                return holds ? Queries.matchNone() : Queries.exists(field);
+            }
+            Operand literal = Operand.newBuilder().setValue(Value.newBuilder().setStringValue(stripped)).build();
+            return applyResolvedLeaf("eq", List.of(variable, literal), scope,
+                    holds ? Polarity.TRUE : Polarity.FALSE);
+        }
+        if (!(target instanceof List<?> elements)) {
+            throw unsupported("in over a string concatenation reduces to membership of the field"
+                    + " only in a list literal");
+        }
+        ListValue.Builder members = ListValue.newBuilder();
+        for (Object element : elements) {
+            String stripped = element instanceof String s ? strip(concatenation, s) : null;
+            if (stripped != null) {
+                members.addValues(Value.newBuilder().setStringValue(stripped));
+            }
+        }
+        if (members.getValuesCount() == 0) {
+            return polarity.holds() ? Queries.matchNone() : Queries.exists(field);
+        }
+        Operand list = Operand.newBuilder().setValue(Value.newBuilder().setListValue(members)).build();
+        return applyResolvedLeaf("in", List.of(variable, list), scope, polarity);
+    }
+
+    /** The field's value for the concatenation to equal {@code literal}, or null if none can. */
+    private static String strip(Concatenation concatenation, String literal) {
+        String prefix = concatenation.prefix();
+        String suffix = concatenation.suffix();
+        if (literal.length() < prefix.length() + suffix.length()
+                || !literal.startsWith(prefix) || !literal.endsWith(suffix)) {
+            return null;
+        }
+        return literal.substring(prefix.length(), literal.length() - suffix.length());
+    }
+
+    /**
+     * Flattens a chain of {@code add} over string literals and exactly one document field, or
+     * returns null for any other operand.
+     */
+    private static Concatenation concatenation(Operand operand) {
+        List<Operand> parts = new ArrayList<>();
+        flattenAdd(operand, parts);
+        StringBuilder prefix = new StringBuilder();
+        StringBuilder suffix = new StringBuilder();
+        String variable = null;
+        for (Operand part : parts) {
+            if (part.getNodeCase() == Operand.NodeCase.VARIABLE) {
+                if (variable != null) {
+                    return null;
+                }
+                variable = part.getVariable();
+            } else if (part.getNodeCase() == Operand.NodeCase.VALUE
+                    && part.getValue().getKindCase() == Value.KindCase.STRING_VALUE) {
+                (variable == null ? prefix : suffix).append(part.getValue().getStringValue());
+            } else {
+                return null;
+            }
+        }
+        return variable == null ? null : new Concatenation(prefix.toString(), variable, suffix.toString());
+    }
+
+    private static void flattenAdd(Operand operand, List<Operand> parts) {
+        if (operand.getNodeCase() == Operand.NodeCase.EXPRESSION
+                && "add".equals(operand.getExpression().getOperator())) {
+            operand.getExpression().getOperandsList().forEach(child -> flattenAdd(child, parts));
+        } else {
+            parts.add(operand);
+        }
+    }
+
     private static boolean isTimestampOfField(Operand operand) {
         return operand.getNodeCase() == Operand.NodeCase.EXPRESSION
                 && "timestamp".equals(operand.getExpression().getOperator())
@@ -429,12 +599,12 @@ final class LeafTranslator {
     }
 
     private static String floorToMillis(Instant instant) {
-        return DateTimeFormatter.ISO_INSTANT.format(instant.truncatedTo(ChronoUnit.MILLIS));
+        return PlanValues.millisecondInstant(instant.truncatedTo(ChronoUnit.MILLIS));
     }
 
     private static String ceilToMillis(Instant instant) {
         Instant floor = instant.truncatedTo(ChronoUnit.MILLIS);
-        return DateTimeFormatter.ISO_INSTANT.format(floor.equals(instant) ? floor : floor.plusMillis(1));
+        return PlanValues.millisecondInstant(floor.equals(instant) ? floor : floor.plusMillis(1));
     }
 
     /** Whether the field map names a sub-field of {@code field}, so it is an object in the index. */
@@ -650,7 +820,7 @@ final class LeafTranslator {
                 }
                 ResolvedOperand resolved = resolveLeafOperand(expression.getOperands(0));
                 if (resolved instanceof ResolvedOperand.Literal literal) {
-                    PlanValues.validateTimestampLiteral(literal.value());
+                    yield new ResolvedOperand.Literal(PlanValues.canonicalTimestampLiteral(literal.value()));
                 }
                 yield resolved;
             }

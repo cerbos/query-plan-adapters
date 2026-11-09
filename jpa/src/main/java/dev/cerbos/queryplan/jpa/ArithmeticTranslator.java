@@ -28,6 +28,9 @@ import java.util.function.Supplier;
  * and constants mixed into SQL bind as double parameters. A zero divisor is guarded with
  * {@code NULLIF}, and a comparison against a possibly-zero division is rewritten
  * ({@link #tryDivisionByZeroComparison}) so NaN and infinities compare as they do in CEL.
+ *
+ * <p>A subtree {@code int()} makes int-typed is lowered by {@link IntArithmetic} instead, and
+ * one mixing the two types is a CEL error on every row.
  */
 final class ArithmeticTranslator {
 
@@ -37,6 +40,7 @@ final class ArithmeticTranslator {
     private final TriPredicate tri;
     private final LeafTranslator leaf;
     private final ComparisonTranslator comparisons;
+    private final IntArithmetic ints;
 
     /**
      * The division the enclosing rewrite has already split on a zero divisor, while its non-zero
@@ -50,6 +54,7 @@ final class ArithmeticTranslator {
         this.tri = tri;
         this.leaf = leaf;
         this.comparisons = comparisons;
+        this.ints = new IntArithmetic(cb, tri, leaf, this, comparisons);
     }
 
     /**
@@ -59,15 +64,25 @@ final class ArithmeticTranslator {
      * <p>Everything is computed in double space because attribute values are always CEL
      * doubles at check time, and the wire plan does not distinguish int from double.
      *
-     * <p>{@code mod} lowers only over {@code int()} of an Integer column and integral constants
-     * ({@link #modulo}): a bare {@code attr % n} is a CEL error, and {@code int()} over any other
-     * column has no faithful SQL lowering.
+     * <p>A side that is int-typed through {@code int()} goes to {@link IntArithmetic}; a side that
+     * mixes an int with a double, or applies {@code mod} to a double, is a CEL no-overload error
+     * on every row, so the comparison is UNKNOWN under both polarities.
      *
      * <p>An {@link OperatorFunction} override is consulted when one side is a constant; it
-     * receives the arithmetic expression and the constant as a {@link Double}. Expression
-     * against expression comparisons do not consult overrides.
+     * receives the arithmetic expression and the constant as a {@link Double} (a {@link Long}
+     * for an int-typed expression). Expression against expression comparisons do not consult
+     * overrides.
      */
     Predicate numericComparison(String op, List<Operand> operands, Scope scope) {
+        IntArithmetic.CelType left = IntArithmetic.typeOf(operands.get(0), scope);
+        IntArithmetic.CelType right = IntArithmetic.typeOf(operands.get(1), scope);
+        if (left == IntArithmetic.CelType.ERROR || right == IntArithmetic.CelType.ERROR) {
+            return tri.unknown();
+        }
+        if (left != null && right != null
+                && (left == IntArithmetic.CelType.INT || right == IntArithmetic.CelType.INT)) {
+            return ints.comparison(op, operands, scope, left, right);
+        }
         // `NaN != x` is TRUE in CEL, but `NULL != x` is UNKNOWN, so a possibly-zero division
         // is folded against the comparison rather than lowered to NULL.
         Predicate folded = tryDivisionByZeroComparison(op, operands, scope);
@@ -246,7 +261,7 @@ final class ArithmeticTranslator {
         return pos != neg;
     }
 
-    private static boolean ieeeHolds(String op, double side, double other, boolean sideIsLeft) {
+    static boolean ieeeHolds(String op, double side, double other, boolean sideIsLeft) {
         double l = sideIsLeft ? side : other;
         double r = sideIsLeft ? other : side;
         return switch (op) {
@@ -271,7 +286,7 @@ final class ArithmeticTranslator {
     }
 
     /** Whether {@code operand} is, or has nested in its arithmetic, a zero-capable division. */
-    private boolean hasZeroCapableDivision(Operand operand, Scope scope) {
+    boolean hasZeroCapableDivision(Operand operand, Scope scope) {
         return isZeroCapableDivisionOperand(operand, scope)
                 || operand.getNodeCase() == Operand.NodeCase.EXPRESSION
                 && ARITHMETIC_OPS.contains(operand.getExpression().getOperator())
@@ -394,7 +409,7 @@ final class ArithmeticTranslator {
     }
 
     /** A constant subtree folded in Java with IEEE semantics, or a double SQL expression. */
-    private sealed interface NumericOperand {
+    sealed interface NumericOperand {
         record Constant(double value) implements NumericOperand {}
         record Sql(Expression<Double> expr) implements NumericOperand {}
     }
@@ -448,7 +463,7 @@ final class ArithmeticTranslator {
      * on a zero divisor. A constant zero divisor becomes a NULL literal. This is only correct
      * for ordered comparisons; see {@link #tryDivisionByZeroComparison}.
      */
-    private NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
+    NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
         switch (operand.getNodeCase()) {
             case VARIABLE -> {
                 @SuppressWarnings("unchecked")
@@ -476,7 +491,14 @@ final class ArithmeticTranslator {
                 PlanResourcesFilter.Expression expr = operand.getExpression();
                 String op = expr.getOperator();
                 if ("mod".equals(op)) {
-                    return modulo(expr, scope);
+                    // Typed int or error by IntArithmetic; reached only beside a non-numeric
+                    // operand, e.g. `aString % 2`.
+                    throw Refusals.unsupported(
+                            "mod is not supported in comparisons unless each operand is int()"
+                                    + " of a numeric column or an integral constant: CEL % is"
+                                    + " integer-only while attribute values are always doubles"
+                                    + " at check time, so a satisfiable policy must cast with"
+                                    + " int() first");
                 }
                 if (ARITHMETIC_OPS.contains(op) && !"div".equals(op)
                         && containsZeroCapableDivision(expr, scope)) {
@@ -517,74 +539,11 @@ final class ArithmeticTranslator {
     }
 
     /**
-     * {@code int(a) % int(b)}. CEL {@code %} is integer-only while attribute values are doubles,
-     * so a satisfiable policy casts with {@code int()} first. That cast has no faithful SQL
-     * lowering in general (CAST rounds where CEL truncates toward zero), but over an
-     * {@link Integer} column it is the identity, and SQL {@code MOD} truncates as CEL does, so
-     * {@code -5 % 2} is {@code -1} in both. Each operand must be {@code int()} of an Integer
-     * column or an integral constant. A zero divisor is a CEL error: a constant one makes the
-     * comparison UNKNOWN, and a column one goes through {@code NULLIF}.
-     */
-    @SuppressWarnings("unchecked")
-    private NumericOperand modulo(PlanResourcesFilter.Expression expr, Scope scope) {
-        if (expr.getOperandsCount() != 2) {
-            throw Refusals.malformed("mod requires exactly 2 operands");
-        }
-        Object dividend = intOperand(expr.getOperands(0), scope);
-        Object divisor = intOperand(expr.getOperands(1), scope);
-        if (dividend instanceof Integer n && divisor instanceof Integer d) {
-            // The planner folds this itself; a zero divisor stays a CEL error.
-            return d == 0 ? new NumericOperand.Sql(cb.nullLiteral(Double.class))
-                    : new NumericOperand.Constant(n % d);
-        }
-        if (divisor instanceof Integer d && d == 0) {
-            return new NumericOperand.Sql(cb.nullLiteral(Double.class));
-        }
-        Expression<Integer> mod = divisor instanceof Integer d
-                ? cb.mod((Expression<Integer>) dividend, d)
-                : dividend instanceof Integer n
-                        ? cb.mod(n, cb.nullif((Expression<Integer>) divisor, 0))
-                        : cb.mod((Expression<Integer>) dividend,
-                                cb.nullif((Expression<Integer>) divisor, 0));
-        return new NumericOperand.Sql(toIeeeDouble(mod));
-    }
-
-    /** An {@code Integer} constant, or the {@code Integer} column under {@code int()}. */
-    private Object intOperand(Operand operand, Scope scope) {
-        if (operand.getNodeCase() == Operand.NodeCase.VALUE
-                && operand.getValue().getKindCase() == Value.KindCase.NUMBER_VALUE) {
-            double v = operand.getValue().getNumberValue();
-            if (v == Math.rint(v) && v >= Integer.MIN_VALUE && v <= Integer.MAX_VALUE) {
-                return (int) v;
-            }
-        }
-        if (operand.getNodeCase() == Operand.NodeCase.EXPRESSION
-                && "int".equals(operand.getExpression().getOperator())
-                && operand.getExpression().getOperandsCount() == 1
-                && operand.getExpression().getOperands(0).getNodeCase()
-                        == Operand.NodeCase.VARIABLE) {
-            Expression<?> path = scope.path(operand.getExpression().getOperands(0).getVariable());
-            if (Integer.class.equals(path.getJavaType())) {
-                return path;
-            }
-        }
-        // A bare `attr % n` is a CEL error; `int(attr) % n` over any other column needs an
-        // int() SQL cannot reproduce.
-        throw Refusals.unsupported(
-                "mod is not supported in comparisons unless each operand is int() of an Integer"
-                        + " column or an integral constant: CEL % is integer-only while"
-                        + " attribute values are always doubles at check time, so a"
-                        + " satisfiable policy must cast with int() first — and int() over"
-                        + " any other column has no faithful SQL lowering, because CAST"
-                        + " rounds where CEL truncates toward zero");
-    }
-
-    /**
      * Casts a column to IEEE double. Uses {@code cb.toDouble}, except when
      * {@link MySqlDoubleCastFunctionContributor} has registered {@code cerbos_ieee_double}:
      * {@code MySQLDialect} renders {@code cb.toDouble} as an exact {@code decimal(53,20)}.
      */
-    private Expression<Double> toIeeeDouble(
+    Expression<Double> toIeeeDouble(
             Expression<? extends Number> path) {
         if (IeeeDoubleCast.isRegistered(cb)) {
             return cb.function(

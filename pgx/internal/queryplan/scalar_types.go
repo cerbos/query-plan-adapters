@@ -15,10 +15,14 @@ func scalarKind(v value) string {
 		return "number"
 	case []any:
 		return "list"
+	case map[string]any:
+		return "map"
 	case Subquery:
 		if typed.Kind == SubqueryScalar {
 			return scalarKind(typed.Select)
 		}
+	case positionalElement:
+		return scalarKind(typed.element)
 	case Column:
 		switch typed.Type {
 		case ValueString:
