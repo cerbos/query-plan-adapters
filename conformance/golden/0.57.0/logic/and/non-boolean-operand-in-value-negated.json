@@ -1,0 +1,84 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "logic/and/non-boolean-operand-in-value-negated",
+  "intent": "A string attribute as an operand of && compared with false, negated, OR'd with aNumber == 5 (!((aString && aBool) == false) || aNumber == 5).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "variable": "request.resource.attr.aBool"
+                            }
+                          ],
+                          "operator": "and"
+                        }
+                      },
+                      {
+                        "value": false
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "logic/and/non-boolean-operand-in-value-negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!((R.attr.aString && R.attr.aBool) == false) || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL's && has no overload for a string: where aBool is true the conjunction errors, and where it is false it is false, so only a1 is allowed. A store that reads any string as truthy computes true for every aBool-true row and over-grants them."
+}

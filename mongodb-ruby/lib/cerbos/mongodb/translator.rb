@@ -311,7 +311,14 @@ module Cerbos
         # requirement has to sit: inside, the negation would flip it with the predicate (#315). A
         # null or absent list is the same kind of error CEL denies, so its array requirement sits
         # there too.
-        guarded = Guards.with_evaluation({"$nor" => [build(operand, mapper, scope)]}, [operand], mapper)
+        negated = {"$nor" => [build(operand, mapper, scope)]}
+        # A bare field in boolean position raises in CEL unless it holds a boolean, so its type is
+        # required outside the $nor, which would otherwise match every other value.
+        if variable?(operand)
+          assert_scoped(operand.name, scope)
+          negated = {"$and" => [Guards.field_filter(mapper.resolve_field(operand.name).path, {"$type" => "bool"}), negated]}
+        end
+        guarded = Guards.with_evaluation(negated, [operand], mapper)
         list_shape = Guards.list_shape_guard(operand, mapper, !scope.collection?)
         list_shape ? {"$and" => [list_shape, guarded]} : guarded
       end
@@ -323,12 +330,19 @@ module Cerbos
         yield
       rescue UnsupportedError => refusal
         raise refusal if scope.collection? || refusal.is_a?(FinalUnsupportedError)
+        raise refusal if @null_representation == :omitted && holds_null_literal?(condition)
 
         begin
           {"$expr" => {"$eq" => [Logic.truth(condition, mapper), polarity]}}
         rescue UnsupportedError
           raise refusal
         end
+      end
+
+      def holds_null_literal?(operand)
+        return carries_null?(operand.value) if value?(operand)
+
+        expression?(operand) && operand.operands.any? { |child| holds_null_literal?(child) }
       end
 
       # `!(a < b)` is `a >= b` whenever CEL can order `a` and `b` at all.

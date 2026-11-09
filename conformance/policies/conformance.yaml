@@ -108,6 +108,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber / R.attr.aNumber + 1.0 != 2.0
+    # arithmetic/add/ternary-selecting-double-beside-int
+    - actions:
+        - arithmetic/add/ternary-selecting-double-beside-int
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!((R.attr.aBool ? R.attr.aDouble : int(R.attr.aNumber)) + int(R.attr.aNumber) == 0)'
     # arithmetic/add/value-first
     - actions:
         - arithmetic/add/value-first
@@ -1200,6 +1209,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString == R.attr.aOptionalString
+    # comparison/equals/list-holding-nan
+    - actions:
+        - comparison/equals/list-holding-nan
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '[R.attr.aDouble / 0.0] == [R.attr.aDouble / 0.0]'
     # comparison/equals/map-member-by-string-key
     - actions:
         - comparison/equals/map-member-by-string-key
@@ -2007,6 +2025,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString != R.id
+    # logic/and/non-boolean-operand-in-value-negated
+    - actions:
+        - logic/and/non-boolean-operand-in-value-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!((R.attr.aString && R.attr.aBool) == false) || R.attr.aNumber == 5'
     # logic/and/three-conjuncts
     - actions:
         - logic/and/three-conjuncts
@@ -2038,6 +2065,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!R.attr.aBool'
+    # logic/not/bare-string-attribute
+    - actions:
+        - logic/not/bare-string-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString || R.attr.aNumber == 5'
     # logic/not/deep-mixed-nesting
     - actions:
         - logic/not/deep-mixed-nesting

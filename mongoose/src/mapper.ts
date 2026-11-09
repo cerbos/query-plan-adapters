@@ -1,7 +1,7 @@
 import type { Mapper, MapperConfig } from "./index";
 
 /** The caller's entry for exactly `reference`, whichever of the two mapper forms it supplied. */
-const lookupConfig = (
+export const lookupConfig = (
   mapper: Mapper,
   reference: string,
 ): MapperConfig | undefined =>
@@ -207,7 +207,14 @@ export const unmappedReferenceError = (reference: string): Error =>
  * `variable.field`) resolve against the relation's element `fields`, relative to the element;
  * every other key falls through to the caller's mapper.
  */
-export const createScopedMapper =
+export const createScopedMapper = (
+  collectionPath: string,
+  variableName: string,
+  fullMapper: Mapper,
+): Mapper =>
+  withMapperState(scopedLookup(collectionPath, variableName, fullMapper), nullableDefaultOf(fullMapper), boundOf(fullMapper));
+
+const scopedLookup =
   (collectionPath: string, variableName: string, fullMapper: Mapper): Mapper =>
   (key: string) => {
     if (key !== variableName && !key.startsWith(`${variableName}.`)) {
@@ -224,3 +231,33 @@ export const createScopedMapper =
     const elementField = key.slice(variableName.length + 1);
     return relation?.fields?.[elementField] || { field: elementField };
   };
+
+/** The declared stored type of a reference: its own entry's, or its relation's field's. */
+export const valueTypeOf = (
+  reference: string,
+  mapper: Mapper,
+): MapperConfig["valueType"] => resolveMapperConfig(reference, mapper)?.valueType;
+
+const NULLABLE_DEFAULT = new WeakMap<object, boolean>();
+const BOUND = new WeakMap<object, readonly string[]>();
+
+/**
+ * A mapper that answers as `mapper` does, remembering the call's nullable default (for the
+ * element fields a macro body reads, which no entry declares) and the macro variables whose
+ * elements it reads.
+ */
+export const withMapperState = (
+  mapper: Mapper,
+  nullableDefault: boolean,
+  bound: readonly string[] = [],
+): Mapper => {
+  const wrapped: Mapper = (key: string) => lookupConfig(mapper, key)!;
+  NULLABLE_DEFAULT.set(wrapped, nullableDefault);
+  BOUND.set(wrapped, bound);
+  return wrapped;
+};
+
+export const nullableDefaultOf = (mapper: Mapper): boolean =>
+  NULLABLE_DEFAULT.get(mapper) ?? false;
+
+export const boundOf = (mapper: Mapper): readonly string[] => BOUND.get(mapper) ?? [];

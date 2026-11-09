@@ -621,6 +621,8 @@ export const guardedCase = (cond: SQL, thenFilter: SQL, elseFilter: SQL): SQL =>
  * CEL's error semantics, so negation is pushed inward (De Morgan through and/or,
  * polarity-specific collection translations) until it lands on a leaf.
  */
+const NON_BOOLEAN_DATA_TYPES = new Set(["string", "number", "bigint", "date", "array", "buffer"]);
+
 export const buildFilterFromExpression = (
   expression: PlanExpressionOperand,
   mapper: Mapper,
@@ -632,6 +634,10 @@ export const buildFilterFromExpression = (
   // to-one hop must require that hop, or `!R.attr.parent.aBool` returns every parentless row
   // (cerbos/query-plan-adapters#375).
   if (isNameOperand(expression)) {
+    // A column of another type in boolean position is a CEL type error, a denial either way.
+    if (NON_BOOLEAN_DATA_TYPES.has(columnForOperand(expression, mapper)?.dataType ?? "")) {
+      return constantCondition(false);
+    }
     const resolved = resolveFieldReference(expression.name, mapper);
     const filter = applyComparison(resolved.mapping, "eq", true, options);
     return withPolarity(

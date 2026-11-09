@@ -45,6 +45,8 @@ module Cerbos
 
       module_function
 
+      def composite?(value) = value.is_a?(Array) || value.is_a?(Hash)
+
       # A plan operand as an aggregation expression: a variable becomes a +$field.path+, a
       # value becomes a constant (see #constant), an expression recurses.
       def build(operand, mapper)
@@ -224,6 +226,15 @@ module Cerbos
         when "lt", "le", "gt", "ge"
           left, right = operands.map { |op| build(op, mapper) }
           {"$expr" => orderable(left, right)}
+        when "eq", "ne"
+          left, right = operands
+          return nil if [left, right].any? { |op| op.nil? || (value?(op) && !composite?(op.value)) }
+
+          {"$expr" => equality_decidable(build(left, mapper), build(right, mapper))}
+        when "and", "or", "not"
+          # MongoDB reads any value as truthy or falsy, where CEL's logic has no overload for
+          # anything but a boolean.
+          {"$expr" => {"$and" => operands.map { |op| {"$eq" => [{"$type" => build(op, mapper)}, "bool"]} }}}
         when "if"
           # A ternary over anything but a boolean condition raises in CEL; $cond reads any value
           # as truthy or falsy instead.
@@ -345,22 +356,17 @@ module Cerbos
       end
 
       # hasIntersection(a, b): some element of +a+ that +b+ contains; null where either is not a
-      # list. NaN is never contained in CEL.
+      # list of scalars (see scalar_lists). NaN is never contained in CEL.
       def build_has_intersection(operands, mapper)
         left, right = operands
         raise InvalidPlanError, "hasIntersection requires two operands" unless left && right
 
-        {"$let" => {
-          "vars" => {"cerbos_left" => build(left, mapper), "cerbos_right" => build(right, mapper)},
-          "in" => {"$cond" => [
-            {"$and" => [{"$isArray" => "$$cerbos_left"}, {"$isArray" => "$$cerbos_right"}]},
-            {"$anyElementTrue" => [{"$map" => {"input" => "$$cerbos_left", "as" => "cerbos_item", "in" => {"$and" => [
-              {"$ne" => ["$$cerbos_item", Float::NAN]},
-              {"$in" => ["$$cerbos_item", "$$cerbos_right"]}
-            ]}}}]},
-            nil
-          ]}
-        }}
+        scalar_lists(left, right, mapper) {
+          {"$anyElementTrue" => [{"$map" => {"input" => "$$cerbos_left", "as" => "cerbos_item", "in" => {"$and" => [
+            {"$ne" => ["$$cerbos_item", Float::NAN]},
+            {"$in" => ["$$cerbos_item", "$$cerbos_right"]}
+          ]}}}]}
+        }
       end
 
       # Cerbos's `a.except(b)`: the elements of +a+, in order and with repeats, that +b+ does not
@@ -646,28 +652,79 @@ module Cerbos
       end
 
       # A CEL comparison inside $expr. MongoDB orders NaN below every number and equal to itself,
-      # where every CEL comparison with NaN is false but `!=`, which is true.
+      # where every CEL comparison with NaN is false but `!=`, which is true. Two lists are equal
+      # element by element, so NaN inside them is compared the same way (see equality_decidable
+      # for the lists and maps that are not compared at all).
       def compare(operator, left, right)
+        unordered = %w[eq ne].include?(operator)
+        scalar = {COMPARISONS.fetch(operator) => ["$$left", "$$right"]}
+        if unordered
+          # Every array operator reads an operand that is an array on any document: MongoDB 9
+          # folds a constant operand before $cond would skip the branch.
+          lists = ->(variable) { {"$cond" => [{"$isArray" => variable}, variable, []]} }
+          equal = {"$cond" => [
+            {"$and" => [{"$isArray" => "$$left"}, {"$isArray" => "$$right"}]},
+            {"$and" => [
+              {"$eq" => [{"$size" => lists.call("$$left")}, {"$size" => lists.call("$$right")}]},
+              {"$allElementsTrue" => [{"$map" => {
+                "input" => {"$zip" => {"inputs" => [lists.call("$$left"), lists.call("$$right")]}},
+                "as" => "cerbos_pair",
+                "in" => {"$and" => [
+                  {"$ne" => [{"$arrayElemAt" => ["$$cerbos_pair", 0]}, Float::NAN]},
+                  {"$eq" => [{"$arrayElemAt" => ["$$cerbos_pair", 0]}, {"$arrayElemAt" => ["$$cerbos_pair", 1]}]}
+                ]}
+              }}]}
+            ]},
+            {"$eq" => ["$$left", "$$right"]}
+          ]}
+          scalar = (operator == "eq") ? equal : {"$not" => [equal]}
+        end
         {"$let" => {
           "vars" => {"left" => left, "right" => right},
           "in" => {"$cond" => [
             {"$or" => [{"$eq" => ["$$left", Float::NAN]}, {"$eq" => ["$$right", Float::NAN]}]},
             operator == "ne",
-            {COMPARISONS.fetch(operator) => ["$$left", "$$right"]}
+            scalar
           ]}
+        }}
+      end
+
+      # Whether MongoDB's equality can decide CEL's between +left+ and +right+: not between two
+      # maps (MongoDB compares embedded documents in stored field order, CEL ignores it), nor
+      # between two lists where either holds a list or a map. Those are kept out under either
+      # polarity, which denies where CEL might allow.
+      def equality_decidable(left, right)
+        composite = ->(list) {
+          {"$anyElementTrue" => [{"$map" => {"input" => {"$cond" => [{"$isArray" => list}, list, []]}, "in" => {"$in" => [{"$type" => "$$this"}, %w[object array]]}}}]}
+        }
+        {"$let" => {
+          "vars" => {"left" => left, "right" => right},
+          "in" => {"$not" => [{"$or" => [
+            {"$and" => [{"$eq" => [{"$type" => "$$left"}, "object"]}, {"$eq" => [{"$type" => "$$right"}, "object"]}]},
+            {"$and" => [
+              {"$isArray" => "$$left"},
+              {"$isArray" => "$$right"},
+              {"$or" => [composite.call("$$left"), composite.call("$$right")]}
+            ]}
+          ]}]}
         }}
       end
 
       # Whether CEL can order +left+ against +right+ at all: two numbers, two strings, two
       # booleans or two timestamps. Anything else is a no-such-overload error, which denies under
       # either polarity, where MongoDB orders every pair of BSON types. cel-go answers an ordering
-      # with NaN false rather than raising, whatever the other side is.
+      # whose left side is NaN false whatever the right side is, and one whose right side is NaN
+      # false when the left side is a number, a string, a boolean or a timestamp; it raises for
+      # null, a list or a map on the left.
       def orderable(left, right)
         {"$let" => {
           "vars" => {"left" => left, "right" => right},
           "in" => {"$or" => [
             {"$eq" => ["$$left", Float::NAN]},
-            {"$eq" => ["$$right", Float::NAN]},
+            {"$and" => [
+              {"$eq" => ["$$right", Float::NAN]},
+              {"$in" => [{"$type" => "$$left"}, %w[double int long decimal string bool date]]}
+            ]},
             {"$and" => [{"$isNumber" => "$$left"}, {"$isNumber" => "$$right"}]},
             {"$and" => [
               {"$eq" => [{"$type" => "$$left"}, {"$type" => "$$right"}]},
@@ -951,11 +1008,42 @@ module Cerbos
             computed = {ARITHMETIC.fetch(operator) => longs}
             {"$let" => {"vars" => {"long" => computed}, "in" => {"$cond" => [{"$eq" => [{"$type" => "$$long"}, "long"]}, "$$long", nil]}}}
           end
-          {"$cond" => [{"$and" => values.map { |value| {"$isNumber" => value} }}, result, nil]}
+          # A ternary typed int by one branch can select an attribute in the other, which reaches
+          # CEL as a double and has no overload with an int. Which branch is an int is settled by
+          # the plan, not by the stored BSON type: a driver may store an integral double as an int.
+          typed = values.zip(operands).map { |value, op| {"$and" => [{"$isNumber" => value}, int_selected(op, mapper)]} }
+          {"$cond" => [{"$and" => typed}, result, nil]}
         }
       end
 
       SAFE_INTEGER = 9_007_199_254_740_992
+
+      # Whether +operand+ evaluates to a CEL int (or is a numeric literal beside one), as an
+      # aggregation boolean: int(), size() and `%` are ints, arithmetic is an int when every
+      # operand is, a ternary when the branch it selects is, and an attribute never is.
+      def int_selected(operand, mapper)
+        return number?(operand.value) if value?(operand)
+        return false unless expression?(operand)
+
+        case operand.operator
+        when "int", "size", "mod" then true
+        when *ARITHMETIC.keys
+          parts = operand.operands.map { |op| int_selected(op, mapper) }
+          return false if parts.include?(false)
+
+          parts -= [true]
+          parts.empty? || {"$and" => parts}
+        when "if"
+          condition, then_branch, else_branch = operand.operands
+          return false unless condition && then_branch && else_branch
+
+          branches = [int_selected(then_branch, mapper), int_selected(else_branch, mapper)]
+          return branches.first if branches.uniq.length == 1 && [true, false].include?(branches.first)
+
+          {"$cond" => [build(condition, mapper), *branches]}
+        else false
+        end
+      end
 
       def build_if(operands, mapper)
         condition, then_operand, else_operand = operands

@@ -1,12 +1,16 @@
-import type { PlanExpression, PlanExpressionOperand } from "@cerbos/core";
+import type { PlanExpression, PlanExpressionOperand, Value } from "@cerbos/core";
 
-import { UnsupportedQueryPlanError } from "./errors";
+import { FinalUnsupportedQueryPlanError, UnsupportedQueryPlanError } from "./errors";
 import {
   COMPARISON_OPERATORS,
+  ORDERINGS,
   buildAggregationExpression,
   buildAggregationExpressionFromExpression,
+  buildEvaluationGuards,
   celScalarType,
-  isUnorderable,
+  compare,
+  isListTyped,
+  temporalMismatch,
 } from "./aggregation";
 import type { ComparisonOperator } from "./aggregation";
 import {
@@ -21,16 +25,18 @@ import {
   withEvaluationGuards,
   withNullableGuards,
 } from "./guards";
+import { truth } from "./logic";
 import { translateHas } from "./presence";
 import { buildHierarchyFilter } from "./hierarchy";
 import type { HierarchyOperator } from "./hierarchy";
-import type { Mapper, MongooseFilter } from "./index";
+import type { Mapper, MapperConfig, MongooseFilter } from "./index";
 import { LAMBDA_BINDING_OPERATORS, foldLiteralCollection } from "./lambda";
 import {
   applyValueParser,
   createScopedMapper,
   declaredScalarType,
   isNullableReference,
+  nullableDefaultOf,
   relationOfReference,
   resolveFieldReference,
   resolveMapperConfig,
@@ -85,6 +91,10 @@ const selectMapMembers = (
     return operand;
   }
   const operands = operand.operands.map((child) => selectMapMembers(child, mapper));
+  const folded =
+    foldConstructor(operand.operator, operands) ??
+    foldSubMillisecondComparison(operand.operator, operands, mapper);
+  if (folded) return folded;
   const [collection, key] = operands;
   if (
     operand.operator === "index" &&
@@ -102,6 +112,75 @@ const selectMapMembers = (
     return { name: `${collection.name}.${key.value}` };
   }
   return { operator: operand.operator, operands };
+};
+
+/**
+ * A list or map constructor whose every element is a constant, as the constant it builds. A map
+ * with a non-string or repeated key stays a constructor: CEL raises on a repeated key, and a
+ * document has string keys only.
+ */
+const foldConstructor = (
+  operator: string,
+  operands: PlanExpressionOperand[],
+): PlanExpressionOperand | undefined => {
+  if (operator === "list") {
+    return operands.every(isValue) ? { value: operands.map((child) => child.value) } : undefined;
+  }
+  if (operator !== "struct") return undefined;
+  const entries: [string, Value][] = [];
+  for (const field of operands) {
+    if (!isExpression(field) || field.operator !== "set-field" || field.operands.length !== 2) {
+      return undefined;
+    }
+    const [key, value] = field.operands as [PlanExpressionOperand, PlanExpressionOperand];
+    if (!isValue(key) || typeof key.value !== "string" || !isValue(value)) return undefined;
+    entries.push([key.value, value.value]);
+  }
+  if (new Set(entries.map(([key]) => key)).size !== entries.length) return undefined;
+  return { value: Object.fromEntries(entries) };
+};
+
+/**
+ * A comparison between a timestamp and `timestamp("…")` finer than a millisecond, which the
+ * planner folds `now() - duration(…)` into, as the same comparison against the millisecond below
+ * it: a stored date holds whole milliseconds, so it is never between the two.
+ */
+const foldSubMillisecondComparison = (
+  operator: string,
+  operands: PlanExpressionOperand[],
+  mapper: Mapper,
+): PlanExpressionOperand | undefined => {
+  if (!Object.hasOwn(MIRRORED_COMPARISON, operator) || operands.length !== 2) return undefined;
+  const floorOf = (operand: PlanExpressionOperand | undefined) => {
+    const literal = operand !== undefined && isExpression(operand) && operand.operator === "timestamp" ? operand.operands[0] : undefined;
+    return literal !== undefined && isValue(literal) && typeof literal.value === "string"
+      ? subMillisecondTimestampBounds(literal.value)?.floor
+      : undefined;
+  };
+  const literalAt = floorOf(operands[0]) ? 0 : floorOf(operands[1]) ? 1 : undefined;
+  if (literalAt === undefined) return undefined;
+  const other = operands[1 - literalAt]!;
+  if (celScalarType(other, mapper) !== "timestamp" || floorOf(other)) return undefined;
+  if (isExpression(other) && other.operator === "timestamp" && isValue(other.operands[0]!)) return undefined;
+  const floor: PlanExpressionOperand = {
+    operator: "timestamp",
+    operands: [{ value: floorOf(operands[literalAt])!.toISOString() }],
+  };
+  const atMost: PlanExpressionOperand = { operator: "le", operands: [other, floor] };
+  const above: PlanExpressionOperand = { operator: "gt", operands: [other, floor] };
+  const op = operator as ComparisonOperator;
+  switch (literalAt === 1 ? op : MIRRORED_COMPARISON[op]) {
+    case "lt":
+    case "le":
+      return atMost;
+    case "gt":
+    case "ge":
+      return above;
+    case "eq":
+      return { operator: "and", operands: [atMost, above] };
+    default:
+      return { operator: "or", operands: [atMost, above] };
+  }
 };
 
 /** A null inside a list/struct literal is a NULL value only under the explicit representation. */
@@ -174,56 +253,23 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
       "exists_one requires exact match cardinality and is unsupported",
     );
   },
-  // filter() yields a list, not a boolean. Reaching it in a boolean position means the
-  // plan used it as a predicate, and there is no meaning to pick: `filter(...)` is not
-  // `size(filter(...)) > 0`. Fail closed (cerbos/query-plan-adapters#313); the legitimate
-  // `size(filter(...))` form is handled by the size operator before this.
-  filter: () => {
-    throw new UnsupportedQueryPlanError(
-      "filter() returns a list, not a boolean, so it cannot be a condition on its own; " +
-        "only size(filter(...)) has a boolean meaning",
-    );
-  },
-  // map() in a BOOLEAN position: the projection is a list, not a predicate. Rendering it
-  // as `$elemMatch: { $exists: true }` silently answers "the projection is non-empty",
-  // which is not what the policy said (cerbos/query-plan-adapters#313). The legitimate
-  // consumer, hasIntersection(map(...), [...]), destructures the map operand itself
-  // before reaching this table.
-  map: () => {
-    throw new UnsupportedQueryPlanError(
-      "map() returns a list, not a boolean, so it cannot be a condition on its own; " +
-        "only hasIntersection(map(...), [...]) gives the projection a boolean meaning",
-    );
-  },
+  // filter(), map(), except() and intersect() yield a list, not a boolean: in boolean position
+  // that is a runtime type error, which denies under either polarity. `filter(...)` is not
+  // `size(filter(...)) > 0` (cerbos/query-plan-adapters#313).
+  filter: listInBooleanPosition,
+  map: listInBooleanPosition,
+  except: listInBooleanPosition,
+  intersect: listInBooleanPosition,
   lambda: ({ operands }, ctx) => translateLambda(operands, ctx),
+  // A ternary evaluates only the branch its condition selects, and CEL's three-valued logic says
+  // exactly which document that leaves an error.
   if: (expression, ctx) => {
     if (ctx.scope.kind === "collection") {
       throw new UnsupportedQueryPlanError(
         "if aggregation expressions inside collection predicates are unsupported",
       );
     }
-    // CEL reads only the branch the condition selects, so each branch carries its own guards.
-    // A condition that errors fails both disjuncts, as it denies in CEL.
-    const [condition, whenTrue, whenFalse] = expression.operands;
-    if (expression.operands.length === 3 && condition && whenTrue && whenFalse) {
-      try {
-        return {
-          $or: [
-            { $and: [buildFilter(condition, ctx), buildFilter(whenTrue, ctx)] },
-            { $and: [translateNot([condition], ctx), buildFilter(whenFalse, ctx)] },
-          ],
-        };
-      } catch (error) {
-        if (!(error instanceof UnsupportedQueryPlanError)) throw error;
-      }
-    }
-    return withEvaluationGuards(
-      {
-        $expr: buildAggregationExpressionFromExpression(expression, ctx.mapper),
-      },
-      expression.operands,
-      ctx.mapper,
-    );
+    return { $expr: { $eq: [truth(expression, ctx.mapper), true] } };
   },
   ancestorOf: hierarchy("ancestorOf"),
   descendentOf: hierarchy("descendentOf"),
@@ -232,6 +278,14 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
 
 /** Builds Mongoose conditions from a Cerbos expression in boolean position. */
 const buildFilter = (
+  expression: PlanExpressionOperand,
+  ctx: TranslateContext,
+): MongooseFilter =>
+  isExpression(expression) && LOGIC_FALLBACK_OPERATORS.has(expression.operator)
+    ? withLogicFallback(expression, ctx, true, () => buildFilterDirect(expression, ctx))
+    : buildFilterDirect(expression, ctx);
+
+const buildFilterDirect = (
   expression: PlanExpressionOperand,
   ctx: TranslateContext,
 ): MongooseFilter => {
@@ -280,6 +334,57 @@ const buildFilter = (
   }
   return FILTER_OPERATORS[operator]!(expression, ctx);
 };
+
+/** The operators whose refusal at the root the three-valued evaluation may answer instead. */
+const LOGIC_FALLBACK_OPERATORS = new Set([
+  "eq", "ne", "lt", "le", "gt", "ge", "in", "hasIntersection", "exists", "all", "exists_one",
+  "isSubset", "ancestorOf", "descendentOf", "overlaps",
+]);
+
+/**
+ * `build`'s filter; where it refuses at the top level, the condition evaluated in CEL's
+ * three-valued logic instead, kept where it is `polarity`. The refusal stands where the
+ * three-valued evaluation has no form for the condition either.
+ */
+const withLogicFallback = (
+  condition: PlanExpressionOperand,
+  ctx: TranslateContext,
+  polarity: boolean,
+  build: () => MongooseFilter,
+): MongooseFilter => {
+  try {
+    return build();
+  } catch (refusal) {
+    if (
+      !(refusal instanceof UnsupportedQueryPlanError) ||
+      refusal instanceof FinalUnsupportedQueryPlanError ||
+      ctx.scope.kind === "collection" ||
+      ctx.withinNegation ||
+      (ctx.nullRepresentation === "omitted" && holdsNullLiteral(condition))
+    ) {
+      throw refusal;
+    }
+    try {
+      return { $expr: { $eq: [truth(condition, ctx.mapper), polarity] } };
+    } catch (error) {
+      if (error instanceof UnsupportedQueryPlanError) throw refusal;
+      throw error;
+    }
+  }
+};
+
+const holdsNullLiteral = (operand: PlanExpressionOperand): boolean =>
+  isValue(operand)
+    ? carriesNullOperand(operand.value)
+    : isExpression(operand) && operand.operands.some(holdsNullLiteral);
+
+/** A list where CEL needs a boolean: a runtime type error at the root, refused inside a macro. */
+function listInBooleanPosition(expression: PlanExpression, ctx: TranslateContext): MongooseFilter {
+  if (ctx.scope.kind === "collection") {
+    throw new UnsupportedQueryPlanError(`${expression.operator}() returns a list, not a boolean`);
+  }
+  return { $expr: { $eq: [truth(expression, ctx.mapper), true] } };
+}
 
 /** Every leaf resolves its field in the active collection scope before emission. */
 const emitLeafComparison = (
@@ -438,16 +543,6 @@ const translateNot = (
   // type, and a constant CEL cannot order against the field answers `false` either way. A `$nor`
   // over the ordering would instead be TRUE for a null, or a value of another type, where CEL
   // raises an error and denies (cerbos/query-plan-adapters#516).
-  // An ordering CEL can never evaluate is an error under both polarities, so its negation is the
-  // same `false` (cerbos/query-plan-adapters#575). A `$nor` over it would return every document.
-  if (
-    isExpression(operand) &&
-    COMPLEMENTED_ORDERING[operand.operator] !== undefined &&
-    operand.operands.length === 2 &&
-    isUnorderable(operand.operands[0]!, operand.operands[1]!, ctx.mapper)
-  ) {
-    return buildFilter(operand, ctx);
-  }
   const complement = complementedOrdering(operand);
   if (complement) {
     return buildFilter(complement, ctx);
@@ -457,19 +552,36 @@ const translateNot = (
       ["exists", "exists_one", "all"].includes(operand.operator)) ||
     !nullableGuardIsExact(operand, ctx)
   ) {
-    throw new UnsupportedQueryPlanError(
-      "not over nullable fields or collection macros cannot preserve Cerbos error semantics",
-    );
+    return withLogicFallback(operand, ctx, false, () => {
+      throw new UnsupportedQueryPlanError(
+        "not over nullable fields or collection macros cannot preserve Cerbos error semantics",
+      );
+    });
   }
+  return withLogicFallback(operand, ctx, false, () => negateGenerally(operand, ctx));
+};
+
+/** `!operand` as a $nor, with every guard the operand needs ANDed outside it. */
+const negateGenerally = (operand: PlanExpressionOperand, ctx: TranslateContext): MongooseFilter => {
   // withEvaluationGuards ANDs its conjuncts OUTSIDE this $nor, which is where the
   // absent-parent requirement has to sit: inside, the negation would flip it along with
   // the predicate and readmit every parentless document (#315, #316). A null or absent list
   // is the same kind of error CEL denies, so its array requirement sits there too (#534).
-  const guarded = withEvaluationGuards(
-    { $nor: [buildFilter(operand, ctx)] },
-    [operand],
-    ctx.mapper,
-  );
+  // MongoDB accepts $expr only at the top level, and inside a collection predicate the guards a
+  // negation needs outside its $nor would be element-scoped $expr.
+  if (ctx.scope.kind === "collection" && buildEvaluationGuards(operand, ctx.mapper).length > 0) {
+    throw new UnsupportedQueryPlanError(
+      "A negated expression inside a collection predicate needs $expr guards, which MongoDB accepts only at the top level",
+    );
+  }
+  let negated: MongooseFilter = { $nor: [buildFilter(operand, { ...ctx, withinNegation: true })] };
+  // A bare field in boolean position raises in CEL unless it holds a boolean, so its type is
+  // required outside the $nor, which would otherwise match every other value.
+  if (isVariable(operand)) {
+    const { path } = resolveFieldReference(operand.name, ctx.mapper);
+    negated = { $and: [buildFieldFilter(path, { $type: "bool" }), negated] };
+  }
+  const guarded = withEvaluationGuards(negated, [operand], ctx.mapper);
   const listShape = buildListShapeGuard(operand, ctx.mapper, ctx.scope.kind === "root");
   return listShape ? { $and: [listShape, guarded] } : guarded;
 };
@@ -726,26 +838,42 @@ const translateComparison = (
     return buildFilter(rewritten, ctx);
   }
 
+  const comparisonExpression: PlanExpression = { operator, operands: bothOperands };
+  // A timestamp or duration against a value of another type: no ordering overload, so an error on
+  // every document; `==` is false. The guard the aggregation lowering declares for an ordering
+  // keeps every document out, outside any $nor a negation wraps this in.
+  if (temporalMismatch(leftOperand, rightOperand, mapper)) {
+    if (ctx.scope.kind === "collection") {
+      throw new UnsupportedQueryPlanError(
+        "A comparison between CEL types inside a collection predicate needs $expr",
+      );
+    }
+    const decided = !ORDERINGS.has(operator) && operator === "ne";
+    return withEvaluationGuards({ $expr: decided }, [comparisonExpression], mapper);
+  }
+  // A null constant asks only whether the field is stored, which a Date still says.
   if (
-    isVariable(leftOperand) &&
-    isVariable(rightOperand) &&
-    [leftOperand, rightOperand].some(
+    bothOperands.some(
       (operand) =>
+        isVariable(operand) &&
         resolveMapperConfig(operand.name, mapper)?.valueType === "dateTime",
-    )
+    ) &&
+    !bothOperands.some((operand) => isValue(operand) && operand.value === null)
   ) {
-    throw new UnsupportedQueryPlanError(
+    throw new FinalUnsupportedQueryPlanError(
       "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead",
     );
   }
-  if (
-    (isVariable(leftOperand) || isVariable(rightOperand)) &&
-    bothOperands.some(
-      (operand) => isValue(operand) && Array.isArray(operand.value),
-    )
-  ) {
+  const composite = bothOperands.find(
+    (operand) => isValue(operand) && typeof operand.value === "object" && operand.value !== null,
+  );
+  const other = composite && bothOperands.find((operand) => operand !== composite);
+  if (composite && other && (operator === "eq" || operator === "ne") && !isValue(other)) {
+    return translateCompositeEquality(operator, other, (composite as { value: unknown }).value, ctx);
+  }
+  if (composite && other && isExpression(other)) {
     throw new UnsupportedQueryPlanError(
-      "Whole-list comparison is not supported: a relation mapping exposes scalar element fields, not an ordered list value",
+      "An ordering against a list or map constant inside an expression is unsupported",
     );
   }
   const roundedLiteral = roundSubMillisecondTimestampLiteral(
@@ -766,38 +894,19 @@ const translateComparison = (
     isExpression(rightOperand) ||
     (isVariable(leftOperand) && isVariable(rightOperand))
   ) {
-    if (
-      isExpression(leftOperand) &&
-      leftOperand.operator === "if" &&
-      isExpression(rightOperand) &&
-      rightOperand.operator === "if"
-    ) {
-      throw new UnsupportedQueryPlanError(
-        "Mongoose cannot cast comparisons between two conditional expressions",
-      );
-    }
     if (ctx.scope.kind === "collection") {
       throw new UnsupportedQueryPlanError(
         `${operator} aggregation expressions inside collection predicates are unsupported`,
       );
     }
-    const leftAgg = buildAggregationExpression(leftOperand, mapper);
-    const rightAgg = buildAggregationExpression(rightOperand, mapper);
-    // CEL has no ordering between types, and `$expr` falls back to BSON's cross-type order, so an
-    // ordering between a string and a computed number is decided here, as the constant path
-    // decides `aNumber < "5"`: false, and its negation reaches here as the same ordering.
-    if (
-      operator !== "eq" &&
-      operator !== "ne" &&
-      isUnorderable(leftOperand, rightOperand, mapper)
-    ) {
-      return { $expr: false };
-    }
-    return withEvaluationGuards(
-      { $expr: { [COMPARISON_OPERATORS[operator]]: [leftAgg, rightAgg] } },
-      bothOperands,
-      mapper,
+    // The comparison itself is guarded too: an ordering between two types CEL cannot order is an
+    // error, which the guard keeps out under either polarity.
+    const expr = compare(
+      operator,
+      buildAggregationExpression(leftOperand, mapper),
+      buildAggregationExpression(rightOperand, mapper),
     );
+    return withEvaluationGuards({ $expr: expr }, [comparisonExpression], mapper);
   }
 
   const variableOperand = bothOperands.find(isVariable);
@@ -1706,3 +1815,139 @@ function hierarchy(operator: HierarchyOperator): FilterOperator {
   return ({ operands }, ctx) =>
     buildHierarchyFilter(operator, operands, ctx.mapper);
 }
+
+/**
+ * `==`/`!=` between a field or a map() projection and a list or map constant.
+ *
+ * A field that declares a scalar `valueType` never equals a list or a map, so the answer is
+ * settled without a query. Otherwise the list is compared whole inside `$expr`, where `$eq`
+ * compares two arrays element by element and in order, as CEL's list equality does. Only a list of
+ * scalars is compared this way: MongoDB's NaN equals NaN where CEL's does not, and it compares
+ * embedded documents field by field in stored order where CEL's map equality ignores order.
+ */
+const translateCompositeEquality = (
+  operator: "eq" | "ne",
+  other: PlanExpressionOperand,
+  constant: unknown,
+  ctx: TranslateContext,
+): MongooseFilter => {
+  const { mapper } = ctx;
+  if (ctx.scope.kind === "collection") {
+    throw new UnsupportedQueryPlanError(
+      "Whole-value comparison inside a collection predicate needs $expr, which MongoDB accepts only at the top level",
+    );
+  }
+  if (isVariable(other)) {
+    const config = resolveMapperConfig(other.name, mapper);
+    if (config?.valueType && !config.valueParser) {
+      return withNullableGuards({ $expr: { $eq: [operator === "ne", true] } }, [other], mapper);
+    }
+  }
+  if (!Array.isArray(constant) || !constant.every(isComparableScalar)) {
+    throw new UnsupportedQueryPlanError(
+      "Whole-value comparison with a map, or with a list holding a list, a map or NaN, is " +
+        "unsupported: MongoDB compares embedded documents in stored field order and NaN equal to NaN",
+    );
+  }
+  const [list, guard] = listExpression(other, mapper);
+  const compared = { $expr: { [COMPARISON_OPERATORS[operator]]: [list, { $literal: constant }] } };
+  const filter = withEvaluationGuards(compared, [other], mapper);
+  return guard ? { $and: [guard, filter] } : filter;
+};
+
+/** A scalar CEL and MongoDB's `$eq` agree on: a string, a boolean, null, or a number other than NaN. */
+const isComparableScalar = (value: unknown): boolean =>
+  value === null ||
+  typeof value === "string" ||
+  typeof value === "boolean" ||
+  (typeof value === "number" && !Number.isNaN(value));
+
+/**
+ * The list `operand` stands for, as an aggregation expression, and the filter requiring it to be
+ * stored as an array (undefined for a plain field, whose non-array value simply compares unequal):
+ * a plain field as itself, and a to-many relation's projection or a map() over one as a `$map`
+ * over its elements. `$map` reads a missing element field as null.
+ */
+const listExpression = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): [unknown, MongooseFilter | undefined] => {
+  if (isVariable(operand)) {
+    const resolved = resolveFieldReference(operand.name, mapper);
+    if (!resolved.relation) return [`$${resolved.path.join(".")}`, undefined];
+    const relation = resolveMapperConfig(operand.name, mapper)?.relation;
+    if (!(relation?.type === "many" && relation.field && relation.requiresParent === undefined)) {
+      throw new UnsupportedQueryPlanError(
+        "Whole-list comparison needs a plain field or a to-many relation's projected field",
+      );
+    }
+    return projectedList(relation, relation.field, mapper);
+  }
+  // A list the plan computes (a concatenation, intersect(), except(), a ternary between lists):
+  // its value, null where CEL raises, which the caller's evaluation guards keep out.
+  if (
+    isExpression(operand) &&
+    isListTyped(operand) &&
+    ["add", "intersect", "except", "if", "list"].includes(operand.operator)
+  ) {
+    return [buildAggregationExpression(operand, mapper), undefined];
+  }
+  if (!(isExpression(operand) && operand.operator === "map" && operand.operands.length === 2)) {
+    throw new UnsupportedQueryPlanError(
+      "Whole-list comparison needs a field, a relation projection or a map() over a relation",
+    );
+  }
+  const [collection, lambda] = operand.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const projectionOperand = isExpression(lambda) ? lambda.operands[0] : undefined;
+  const elementOperand = isExpression(lambda) ? lambda.operands[1] : undefined;
+  if (
+    !isVariable(collection) ||
+    !isExpression(lambda) ||
+    lambda.operator !== "lambda" ||
+    !projectionOperand ||
+    !isVariable(projectionOperand) ||
+    !elementOperand ||
+    !isVariable(elementOperand)
+  ) {
+    throw new UnsupportedQueryPlanError(
+      "map() in a whole-list comparison must project one field of each element",
+    );
+  }
+  const relation = resolveMapperConfig(collection.name, mapper)?.relation;
+  if (!(relation?.type === "many" && relation.requiresParent === undefined)) {
+    throw new UnsupportedQueryPlanError("map() in a whole-list comparison needs a to-many relation");
+  }
+  const projection = projectionOperand.name;
+  const element = elementOperand.name;
+  const field =
+    projection === element
+      ? relation.field
+      : projection.startsWith(`${element}.`)
+        ? projection.slice(element.length + 1)
+        : undefined;
+  if (field === undefined) {
+    throw new UnsupportedQueryPlanError(
+      "map() in a whole-list comparison must project one field of each element",
+    );
+  }
+  return projectedList(relation, field, mapper);
+};
+
+const projectedList = (
+  relation: NonNullable<MapperConfig["relation"]>,
+  field: string,
+  mapper: Mapper,
+): [unknown, MongooseFilter] => {
+  const config = relation.fields?.[field];
+  const nullable = config?.nullable ?? nullableDefaultOf(mapper);
+  if (nullable) {
+    throw new UnsupportedQueryPlanError(
+      "Whole-list comparison over a nullable element field: a null element is a missing attribute, which CEL raises on",
+    );
+  }
+  const path = config?.field ?? field;
+  return [
+    { $map: { input: `$${relation.name}`, in: `$$this.${path}` } },
+    { [relation.name]: { $type: "array" } },
+  ];
+};

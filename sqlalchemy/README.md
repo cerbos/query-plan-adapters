@@ -473,7 +473,7 @@ recorded in that tier:
 | --- | --- |
 | core | 30 / 30 |
 | extended | 84 / 102 |
-| adversarial | 302 / 379 |
+| adversarial | 304 / 383 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
@@ -575,6 +575,7 @@ chain.
 
 ## Behaviour changes
 
+- Fixed: a string, number or temporal column read where CEL needs a boolean (`not R.attr.aString`, `R.attr.aString && R.attr.aBool`) renders as `NULL`, CEL's type error, which `AND` and `OR` absorb as `&&` and `||` absorb it. PostgreSQL rejected the query, and SQLite and MySQL over-granted by reading the text as a number.
 - **Breaking:** `null_attribute_representation` defaults to `"omitted"`, where it defaulted to
   `"explicit"`. A caller that sends explicit nulls and set nothing now gets `x == null` matching no
   row where it rendered `IS NULL`, and a refusal for the other null operands; pass

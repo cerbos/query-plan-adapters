@@ -276,7 +276,7 @@ adversarial cases.
 | --- | --- |
 | core | 30 / 30 |
 | extended | 97 / 102 |
-| adversarial | 334 / 379 |
+| adversarial | 336 / 383 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
@@ -344,6 +344,7 @@ tags := &cerbosent.Relation{
 
 ## Behaviour changes
 
+- Fixed: a column declared `ValueString`, `ValueNumber` or `ValueTimestamp` read where CEL needs a boolean (`!R.attr.aString`, `R.attr.aString && R.attr.aBool`) renders as one UNKNOWN, CEL's type error, which `AND` and `OR` absorb as `&&` and `||` absorb it. PostgreSQL rejected the query, and SQLite and MySQL over-granted by reading the text as a number.
 - **Breaking:** `Result.Predicate` is never nil. It renders `FALSE` for `KindAlwaysDenied`, where it
   was nil and `s.Where(nil)` left the query unrestricted, and `TRUE` for `KindAlwaysAllowed`
   ([#494](https://github.com/cerbos/query-plan-adapters/issues/494),

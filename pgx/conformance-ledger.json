@@ -12,6 +12,10 @@
       "reason": "Same int() refusal as arithmetic/add/int-beside-double-field, under negation.",
       "status": "unsupported"
     },
+    "arithmetic/add/ternary-selecting-double-beside-int": {
+      "status": "unsupported",
+      "reason": "The ternary's int arm is int() over a double column, which is not lowered: SQL CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL rounds where CEL truncates toward zero."
+    },
     "arithmetic/divide/field-by-field": {
       "reason": "A zero column denominator gives an infinity whose sign is the stored zero's sign; PostgreSQL compares -0.0 equal to 0.0 and the shared translator reads no sign bit, so a comparison that sign decides is refused.",
       "status": "unsupported"
@@ -139,6 +143,10 @@
     "collection/exists/two-variable-map-key-and-value": {
       "reason": "The two-variable exists() over a map binds each key, and the map is no table: the mapper declares only obj.inner as a column, and SQL has no form for the set of a row's keys. Every two-variable lambda is refused.",
       "status": "unsupported"
+    },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "Each list holds `aDouble / 0.0`, a division by a constant zero kept as a conditional value (NaN or a signed infinity per row), which a list constructor cannot hold as a plain SQL expression."
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "reason": "hierarchy() over a list of segments has no lowering: it compares segment by segment, and the translator lowers only a delimited string.",

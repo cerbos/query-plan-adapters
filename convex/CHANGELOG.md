@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed an over-grant: arithmetic over a ternary takes the type of the arm the document selects, so `(c ? R.attr.d : int(x)) + int(x)` is CEL's int-beside-double error where `c` picks the double arm, where it was summed.
+
 - `postFilter` reads a ternary whose branches are ints, or an element of a constant list of
   integral numbers, as a CEL int beside `int()`: `int(x) / (flag ? 2 : 1)` truncates as the PDP
   does, where it used to divide as JavaScript numbers and the negation over-granted

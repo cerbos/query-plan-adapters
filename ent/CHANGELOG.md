@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed: a column declared `ValueString`, `ValueNumber` or `ValueTimestamp` read where CEL needs a boolean (`!R.attr.aString`) renders as one UNKNOWN, CEL's type error, where PostgreSQL rejected the query and SQLite and MySQL over-granted.
 - Newly translated, each proved by the corpus: `matches()` with a constant pattern. The pattern
   is parsed with Go's `regexp/syntax`, the parser CEL matches with, so what is valid and what it
   means are exactly CEL's, and it is lowered only when what it matches can be said with the

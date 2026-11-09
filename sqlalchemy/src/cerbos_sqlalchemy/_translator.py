@@ -10,8 +10,12 @@ from collections.abc import Callable
 from typing import Any, NoReturn
 
 from sqlalchemy import (
+    Date,
     DateTime,
     Integer,
+    Numeric,
+    String,
+    Time,
     and_,
     case,
     false,
@@ -73,6 +77,9 @@ _BARE_TEMPORAL_REFUSAL = (
     "the original spelling, and a string has no overload against a timestamp; use "
     "timestamp() on the attribute"
 )
+
+
+_NON_BOOLEAN_TYPES = (String, Integer, Numeric, Date, DateTime, Time)
 
 
 def require_boolean(translated: Any, position: str) -> Any:
@@ -759,7 +766,12 @@ class Translator:
     def predicate(self, operand: Operand) -> Any:
         """Translate a node in a boolean position."""
         if isinstance(operand, Variable):
-            return self._resolve_variable(operand.name)
+            column = self._resolve_variable(operand.name)
+            if isinstance(getattr(column, "type", None), _NON_BOOLEAN_TYPES):
+                # A column of another type is a CEL type error: one UNKNOWN, which
+                # AND and OR absorb as CEL's && and || absorb the error.
+                return null()
+            return column
         if isinstance(operand, Value):
             return operand.value
 

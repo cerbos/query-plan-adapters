@@ -121,6 +121,9 @@ var lambdaBinding = map[string]bool{
 // collection is a literal value list; exists_one folds into a strict count of them (strictlyOne).
 var foldable = map[string]bool{"exists": true, "all": true, "exists_one": true}
 
+// Declared column types that are never a CEL bool.
+var nonBoolean = map[ValueType]bool{ValueString: true, ValueNumber: true, ValueTimestamp: true}
+
 // Operators that yield a list rather than a boolean, so are a type error in boolean position.
 var collectionValued = map[string]bool{"filter": true, "map": true, "except": true, "intersect": true}
 
@@ -132,6 +135,10 @@ func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 	switch {
 	case n.isVariable():
 		// A bare boolean attribute used as a conjunct, e.g. `R.attr.aBool`.
+		if entry, ok := m.Resolve(n.variable); ok && nonBoolean[entry.ValueType] {
+			// A column declared another type is a CEL type error: one UNKNOWN, which `&&` and `||` absorb as CEL does.
+			return Lit{V: nil}, nil
+		}
 		v, err := b.resolveVariable(n.variable, m)
 		if err != nil {
 			return nil, err

@@ -37,6 +37,10 @@
       "status": "unsupported",
       "reason": "Same scriptless-arithmetic limitation as arithmetic/add/self-division-plus-constant-greater-than, reached through an inequality"
     },
+    "arithmetic/add/ternary-selecting-double-beside-int": {
+      "status": "unsupported",
+      "reason": "A Query DSL leaf compares one document field against a literal: the sum of a ternary and int() over a field is computed per document, which needs a script."
+    },
     "arithmetic/add/value-first": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
@@ -444,6 +448,10 @@
     "comparison/equals/field-to-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "A Query DSL leaf compares one document field against a literal: a list built from `aDouble / 0.0` is computed per document, which needs a script."
     },
     "comparison/equals/whole-list-literal": {
       "status": "unsupported",

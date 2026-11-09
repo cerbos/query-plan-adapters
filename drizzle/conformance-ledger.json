@@ -1,6 +1,10 @@
 {
   "adapter": "drizzle",
   "cases": {
+    "arithmetic/add/ternary-selecting-double-beside-int": {
+      "status": "unsupported",
+      "reason": "Arithmetic over a ternary whose arms are int() and a double field: CEL raises its int-beside-double no-overload error only on the rows that select the double arm, and a SQL expression has one numeric type on every row, so the adapter refuses it."
+    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A division by a double column that may hold -0.0: CEL divides a positive number by -0.0 to -Infinity and by 0.0 to +Infinity, and `> 0.0` tells them apart, but SQLite stores -0.0 as 0 and no SQL dialect has a portable way to read the sign of a zero. The adapter refuses a zero-capable column denominator whenever the two infinities answer the comparison differently."
@@ -80,6 +84,14 @@
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
       "reason": "size(intersect(L, K)): Cerbos's intersect() keeps the duplicates of whichever list is shorter, so the size depends on comparing the stored list's length with the literal's on every row before counting matches. The adapter has no SQL form for that comparison, so it refuses the shape instead of counting a set."
+    },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "Both lists are built from a computed element (`aDouble / 0.0`, NaN where aDouble is 0), and a SQL value expression has no list value, so the `list` constructor is refused."
+    },
+    "logic/and/non-boolean-operand-in-value-negated": {
+      "status": "unsupported",
+      "reason": "`&&` as an operand of `==`: the SQL value-expression walk takes no logical connective as a comparison operand, so the adapter refuses it."
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",

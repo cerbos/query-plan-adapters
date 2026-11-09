@@ -16,6 +16,10 @@
       "status": "unsupported",
       "reason": "Arithmetic on both sides of a comparison cannot be solved to a plain column filter; Prisma filters cannot express column arithmetic"
     },
+    "arithmetic/add/ternary-selecting-double-beside-int": {
+      "status": "unsupported",
+      "reason": "A Prisma filter compares a column with a constant: arithmetic over a ternary of a double field and int() has no filter, and the adapter refuses the ternary's number arm as a condition."
+    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A denominator that is a second column leaves the comparison with two field references and no constant to solve against, which a Prisma where-filter cannot express"
@@ -220,6 +224,10 @@
       "status": "unsupported",
       "reason": "Prisma can feed a map() projection into hasIntersection, which becomes a relation `some` filter, but list EQUALITY needs the whole ordered projection materialised and compared \u2014 there is no Prisma filter that compares a relation projection to a literal list"
     },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "Prisma has no list value: a `list` constructor whose element is computed (`aDouble / 0.0`) is refused."
+    },
     "comparison/equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements; the translator refuses before constructing a filter."
@@ -243,6 +251,14 @@
     "identifier/equals/concatenation": {
       "status": "unsupported",
       "reason": "Both operands carry a column: a_optional_string is compared against a concatenation of a constant with the primary key. Prisma's arithmetic solving inverts the constant off the VALUE side to reach a plain column filter, which requires the other side to be a value; a concatenation involving a second column has no Prisma filter form"
+    },
+    "logic/and/non-boolean-operand-in-value-negated": {
+      "status": "unsupported",
+      "reason": "`aString && aBool` reads a string field as a boolean, a CEL no-overload error under both polarities that no Prisma filter keeps out (a NOT over any filter selects it), so it is refused."
+    },
+    "logic/not/bare-string-attribute": {
+      "status": "unsupported",
+      "reason": "`!R.attr.aString` reads a string field as a boolean, a CEL no-overload error under both polarities that no Prisma filter keeps out (a NOT over any filter selects it), so it is refused."
     },
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",

@@ -100,6 +100,11 @@ final class PlanWalker {
 
     private Predicate handleBareVariable(String variable, Scope scope) {
         Path<?> path = scope.path(variable);
+        Class<?> type = path.getJavaType();
+        // An attribute of another type where CEL needs a boolean is a no-overload error.
+        if (type != null && type != Boolean.class && type != boolean.class && type != Object.class) {
+            return tri.unknown();
+        }
         return leaf.applyLeaf("eq", path, true);
     }
 

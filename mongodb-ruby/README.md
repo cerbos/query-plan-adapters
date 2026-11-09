@@ -132,6 +132,12 @@ a document path. No real document stores `request.resource.attr.status`, and Mon
 Cerbos's attribute paths as field names, declare each one with an entry that names no field (`{}`,
 or `{nullable: true}`), or return one from a callable mapper.
 
+**A field the policy reads as a scalar must be stored as a scalar.** MongoDB's query operators
+match an array when any element matches, so `R.attr.status == "x"` matches a document storing
+`status: ["x", "y"]`, where CEL compares a list with a string and denies. Store a list attribute as
+an array, map it as a `type: :many` relation or a field the policy only reads as a list, and keep
+every other mapped field scalar.
+
 ### NULL attribute representation
 
 `R.attr.x == null` reaches the adapter as the same plan node however your application sends a NULL
@@ -208,7 +214,7 @@ case in that tier:
 | --- | --- |
 | core | 30 / 30 |
 | extended | 99 / 102 |
-| adversarial | 361 / 379 |
+| adversarial | 365 / 383 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, the

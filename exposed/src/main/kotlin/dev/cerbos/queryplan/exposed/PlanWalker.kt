@@ -5,6 +5,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
+import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
 import org.jetbrains.exposed.v1.core.Op
 
 /**
@@ -20,7 +21,14 @@ internal class PlanWalker(private val translation: Translation) {
     fun traverse(operand: Operand, scope: Scope): Op<Boolean> = when (operand.nodeCase) {
         Operand.NodeCase.EXPRESSION -> traverseExpression(operand.expression, scope)
         // A bare boolean attribute in condition position: `R.attr.aBool`.
-        Operand.NodeCase.VARIABLE -> translation.leaf.applyLeaf("eq", scope.scalar(operand.variable), true)
+        Operand.NodeCase.VARIABLE -> {
+            val target = scope.scalar(operand.variable)
+            // A text or numeric column in condition position is CEL's no-overload error.
+            when (ScalarColumnTypes.familyOf(target.column)) {
+                ScalarValueFamily.TEXT, ScalarValueFamily.NUMERIC -> TriLogic.unknown()
+                else -> translation.leaf.applyLeaf("eq", target, true)
+            }
+        }
         // A boolean constant as a whole condition. The planner never ships one at the root, but a
         // ternary rewrite substitutes one in: `aBool ? true : false` walks each branch through
         // here. Folded rather than routed to a leaf, because there is no column to compare.

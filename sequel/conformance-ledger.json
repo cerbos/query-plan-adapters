@@ -144,6 +144,10 @@
       "status": "unsupported",
       "reason": "map() is held as a projected association until size() or hasIntersection() gives it a scalar meaning as an aggregate or an EXISTS subquery. Comparing the ordered projection itself to a literal list gives it neither, and a correlated subquery has no ordering to compare element-wise against, so the held projection reaches a plain value position and is refused there"
     },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "`==` between lists holding a computed element (`aDouble / 0.0`, NaN where aDouble is 0) is refused: the comparison would fold in Ruby, whose equality calls NaN equal to itself where CEL's does not."
+    },
     "comparison/equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "An association collection is not a scalar SQL comparison operand; the adapter refuses whole-list equality rather than compare a member."

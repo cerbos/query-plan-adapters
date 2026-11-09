@@ -12,3 +12,10 @@
 export class UnsupportedQueryPlanError extends Error {
   override readonly name = "UnsupportedQueryPlanError";
 }
+
+/**
+ * A refusal the three-valued evaluation is not tried after: the stored data cannot answer the
+ * question (a date field has lost the string CEL compares), or the caller's null convention rules
+ * the shape out.
+ */
+export class FinalUnsupportedQueryPlanError extends UnsupportedQueryPlanError {}

@@ -313,30 +313,30 @@ reads that attribute as a map and ranges over its keys, which no filter can iter
 - Collection operators over a reference with no relation mapping (e.g. `map operator requires a relation mapping`).
 - Malformed lambdas (`Lambda variable must have a name`) and mistyped operands (e.g. a non-array
   `hasIntersection` value).
-- Shapes `$elemMatch` or `$expr` cannot express faithfully: `exists_one`, aggregation expressions or
-  outer-document references inside a collection predicate, nested collection counts, correlated
-  variable-in-variable membership, unsafe division or non-finite arithmetic, `%` over anything but `size()` or by anything but a
-  non-zero integer constant, arithmetic between an `int()` and a constant, negated collection
-  macros, a negation over a nullable field that some path through it can leave unread (one side of
-  `&&` or `||`, a ternary branch, a lambda body) or that sits on a to-many relation, a negated
-  membership whose list CEL may not evaluate, or that sits inside a collection predicate,
-  whole-list equality (including over a `map()` projection), and list-valued membership needles
+- Shapes `$elemMatch` or `$expr` cannot express faithfully: a macro over a to-one relation or a
+  two-variable macro over a map (both iterate the keys the application sent, which no stored
+  document carries), `string()` of an untyped integral constant of 1e6 or more, and a bare
+  comparison of two `dateTime` fields
   ([`conformance-ledger.json`](conformance-ledger.json) lists every refused corpus case with its
-  reason). `+` between two field paths concatenates two stored strings and adds two stored
-  numbers, decided per document; any other pair is CEL's missing overload and denies.
+  reason).
+
+A condition the filter path refuses at the top level is evaluated instead as one `$expr` in CEL's
+three-valued logic: each subexpression is true, false or null (CEL's error), and the document is
+kept where the whole condition is true, so an error denies under either polarity. A refusal inside
+a collection predicate, or one about a null operand under `"omitted"`, stands.
 
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real MongoDB
-queries over the corpus's 44 seed documents on MongoDB 7 and 8. Passed cases on the current PDP,
+queries over the corpus's 44 seed documents on MongoDB 7 and 9. Passed cases on the current PDP,
 0.56.0, identical on both servers, where the total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 74 / 102 |
-| adversarial | 279 / 379 |
+| extended | 99 / 102 |
+| adversarial | 366 / 383 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases.
@@ -350,7 +350,13 @@ treats the erroring deny rule as not matching and allows the document
 none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
 with its reason.
 
-Two behaviours the corpus relies on that a caller's mapping has to provide:
+Three behaviours the corpus relies on that a caller's mapping has to provide:
+
+- **A field the policy reads as a scalar is stored as a scalar.** MongoDB's query operators match
+  an array when any element matches, so `R.attr.status == "x"` matches a document storing
+  `status: ["x", "y"]`, where CEL compares a list with a string and denies. Store a list attribute
+  as an array, map it as a `type: "many"` relation or a field the policy only reads as a list, and
+  keep every other mapped field scalar.
 
 - **Declared `valueType`.** Mongoose casts a query literal to the schema type (`"5"` is sent as
   `5`), so `R.attr.aNumber == "5"` would match `5`. Declaring the field's `valueType` lets the
@@ -400,6 +406,13 @@ asserts that, since five of the rows below depend on it.
 
 ## Behaviour changes
 
+- The translation is a port of the MongoDB Ruby adapter's
+  ([#576](https://github.com/cerbos/query-plan-adapters/issues/576)): its refused corpus cases fall
+  from 114 to 8. Negated collection macros, `exists_one`, whole-list and map-literal equality,
+  comparisons between two expressions, ternaries in boolean position and `\s` in `matches` now
+  translate, and a top-level refusal falls back to the three-valued `$expr` above. Every non-boolean
+  `$expr` the adapter emits is wrapped in `$let`, so Mongoose's `$expr` caster leaves its literals
+  alone.
 - Shapes that threw `UnsupportedQueryPlanError` now translate, each proved by the corpus: `matches`
   over the wider RE2/PCRE2 subset above, with a pattern Go's regexp rejects matching nothing;
   `int()` and `double()`; `string()` of an `int()`; a timestamp literal finer than a millisecond

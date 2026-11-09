@@ -178,7 +178,7 @@ divergence is skipped, and counts toward the total but not as passed:
 | --- | --- |
 | core | 30 / 30 |
 | extended | 98 / 102 |
-| adversarial | 353 / 379 |
+| adversarial | 355 / 383 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json), which holds the jpa adapter's entries: the
@@ -206,6 +206,7 @@ Fix it the usual JPA way: eager-fetch small collections, map to DTOs inside
 
 ## Behaviour changes
 
+- Fixed an over-grant, in the jpa translator: an attribute whose Java type is not `Boolean` read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was compared with `true`.
 - **Breaking:** the translator moved to the [jpa](../jpa/) adapter, which this adapter now depends
   on ([ADR 0013](../docs/adr/0013-spring-data-wraps-the-jpa-core.md)). `toSpecification` and its
   overloads are unchanged, and the Specifications they return select the same rows. Change imports:

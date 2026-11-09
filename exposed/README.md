@@ -561,11 +561,11 @@ total but not as passed:
 | --- | --- |
 | core | 30 / 30 |
 | extended | 90 / 102 |
-| adversarial | 318 / 379 |
+| adversarial | 319 / 383 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-58 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+65 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 

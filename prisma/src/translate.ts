@@ -52,7 +52,7 @@ export function buildPrismaFilterFromCerbosExpression(
   // A bare named operand represents a boolean field reference (e.g. `R.attr.booleanAttr`)
   if (isNamedOperand(expression)) {
     return buildFieldFilter(
-      resolveFieldReference(expression.name, context),
+      booleanFieldReference(expression.name, context),
       "equals",
       true
     );
@@ -143,6 +143,20 @@ export function buildPrismaFilterFromCerbosExpression(
  * - all(c,P) is FALSE only with a definitive false witness (a false witness absorbs error
  *   elements) — so `!all` is `some(NOT P)`, which SQL already evaluates definitively.
  */
+/**
+ * A field read where CEL needs a boolean. A field declared another type is a no-overload error,
+ * which no Prisma filter keeps out under both polarities, so it is refused.
+ */
+function booleanFieldReference(name: string, context: TranslationContext) {
+  const fieldRef = resolveFieldReference(name, context);
+  if (fieldRef.valueType !== undefined && fieldRef.valueType !== "boolean") {
+    throw new UnsupportedQueryPlanError(
+      `A ${fieldRef.valueType} field in boolean position is a CEL type error`
+    );
+  }
+  return fieldRef;
+}
+
 export function buildNegatedFilter(
   operand: PlanExpressionOperand,
   context: TranslationContext
@@ -173,10 +187,7 @@ export function buildNegatedFilter(
     if (lookup !== null) return lookup;
   }
   if (isNamedOperand(operand)) {
-    const { relations, ...fieldRef } = resolveFieldReference(
-      operand.name,
-      context
-    );
+    const { relations, ...fieldRef } = booleanFieldReference(operand.name, context);
     if (!relations || relations.length === 0) {
       return buildFieldFilter(fieldRef, "equals", false);
     }

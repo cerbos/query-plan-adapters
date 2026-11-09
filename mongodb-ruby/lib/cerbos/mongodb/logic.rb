@@ -356,7 +356,7 @@ module Cerbos
           next outer.lookup(key) unless key == variable || key.start_with?("#{variable}.")
 
           field = (key == variable) ? relation&.field : key[(variable.length + 1)..]
-          next Mapper::Config.new(prefix, nil, nil, nil, nil) if field.nil?
+          next Mapper::Config.new(prefix, false, nil, nil, nil) if field.nil?
 
           config = relation&.fields&.[](field)
           path = "#{prefix}.#{config&.field || field}"

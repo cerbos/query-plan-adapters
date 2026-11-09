@@ -2,6 +2,7 @@
 
 ### Changed
 
+- Fixed over-grants: a string, number or temporal column read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was read as a number; and a ternary whose arms are an `int()` and a double is kept as branches, so arithmetic over it is CEL's int-beside-double error on the rows that select the double arm.
 - **Breaking:** `null_attribute_representation:` defaults to `:omitted`, where it defaulted to `:explicit`. A caller that sends explicit nulls and set nothing now gets `col == null` matching no row where it rendered `IS NULL`, and a refusal for the other null constants; pass `null_attribute_representation: :explicit` to keep the old output ([#499](https://github.com/cerbos/query-plan-adapters/issues/499), [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
 
 - **Breaking:** under `null_attribute_representation: :explicit`, `==` and `!=` give an undeclared attribute the call's convention, as `in` already did, so a NULL column compares as a null value: `NULL != 'x'` and two NULL columns under `==` now match, where they were UNKNOWN. A field of a relation's struct elements is undeclared too, so declare `null_representation: :omitted` on one your application leaves out of the element when NULL. Under the `:omitted` default nothing changes ([#592](https://github.com/cerbos/query-plan-adapters/issues/592)).

@@ -72,6 +72,10 @@
       "status": "unsupported",
       "reason": "A two-variable exists() over a map binds its keys, and `obj` is one joined row whose CEL keys are the columns that are not NULL. SQL has no form for that key set, so the attribute map maps only obj.inner and the bare variable is refused as unmapped."
     },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "Comparing a whole list built from a computed element (`aDouble / 0.0`) has no translation: the translator compares whole lists only as related rows, which have no order or multiplicity a single comparison can read."
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`in` over a map tests its keys, and the to-one `parent` is one joined row whose keys are its non-NULL columns, which SQL has no form for; the bare variable is refused as unmapped."

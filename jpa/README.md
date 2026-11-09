@@ -464,10 +464,10 @@ total but not as passed:
 | --- | --- |
 | core | 30 / 30 |
 | extended | 98 / 102 |
-| adversarial | 353 / 379 |
+| adversarial | 355 / 383 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 16 are `unsupported`, where the adapter
+[`conformance-ledger.json`](conformance-ledger.json): 21 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
 when the plan reads an attribute the mapping does not declare) rather than emit a filter. On 0.57.0,
 three extended cases and four adversarial cases are planner divergences the corpus skips:
@@ -724,6 +724,7 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- Fixed an over-grant: an attribute whose Java type is not `Boolean` read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was compared with `true`.
 - New translations, where these used to throw: `has()`, `in` and `exists`/`all` (one- and
   two-variable) over a map-valued attribute mapped per field
   ([Map-valued attributes](#map-valued-attributes)); a `filter()`, `map()`, `except()` or

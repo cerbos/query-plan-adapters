@@ -1,0 +1,98 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b2",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/add/ternary-selecting-double-beside-int",
+  "intent": "An int() sum whose other operand is a ternary choosing aDouble or int(aNumber), negated (!((aBool ? aDouble : int(aNumber)) + int(aNumber) == 0)).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aBool"
+                            },
+                            {
+                              "variable": "request.resource.attr.aDouble"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aNumber"
+                                  }
+                                ],
+                                "operator": "int"
+                              }
+                            }
+                          ],
+                          "operator": "if"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aNumber"
+                            }
+                          ],
+                          "operator": "int"
+                        }
+                      }
+                    ],
+                    "operator": "add"
+                  }
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/ternary-selecting-double-beside-int",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!((R.attr.aBool ? R.attr.aDouble : int(R.attr.aNumber)) + int(R.attr.aNumber) == 0)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The ternary is int only where aBool is false; where it is true it selects a double, which has no + overload with an int, so every aBool-true row errors and denies. Truncating the double to an int to add it over-grants those rows."
+}
