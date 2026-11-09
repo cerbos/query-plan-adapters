@@ -349,6 +349,7 @@ tags := &cerbospgx.Relation{
 
 ## Behaviour changes
 
+- Fixed: a column declared `ValueString`, `ValueNumber` or `ValueTimestamp` read where CEL needs a boolean (`!R.attr.aString`, `R.attr.aString && R.attr.aBool`) renders as one UNKNOWN, CEL's type error, which `AND` and `OR` absorb as `&&` and `||` absorb it. PostgreSQL rejected the query, and SQLite and MySQL over-granted by reading the text as a number.
 - `Result.AppendTo(predicate, args)` composes the fragment after a predicate of your own and numbers
   its placeholders after your arguments, so you no longer count them
   ([#624](https://github.com/cerbos/query-plan-adapters/issues/624)). `Result.Where` being
