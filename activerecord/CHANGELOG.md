@@ -4,6 +4,10 @@
 
 - **Breaking:** `null_attribute_representation:` defaults to `:omitted`, where it defaulted to `:explicit`. A caller that sends explicit nulls and set nothing now gets `col == null` matching no row where it rendered `IS NULL`, and a refusal for the other null constants; pass `null_attribute_representation: :explicit` to keep the old output ([#499](https://github.com/cerbos/query-plan-adapters/issues/499), [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
 
+- **Breaking:** under `null_attribute_representation: :explicit`, `==` and `!=` give an undeclared attribute the call's convention, as `in` already did, so a NULL column compares as a null value: `NULL != 'x'` and two NULL columns under `==` now match, where they were UNKNOWN. A field of a relation's struct elements is undeclared too, so declare `null_representation: :omitted` on one your application leaves out of the element when NULL. Under the `:omitted` default nothing changes ([#592](https://github.com/cerbos/query-plan-adapters/issues/592)).
+
+- `in` between columns under mixed NULL conventions answers each side as its convention says, as `==` does, where it raised `Cerbos::ActiveRecord::UnsupportedOperatorError` ([#592](https://github.com/cerbos/query-plan-adapters/issues/592)).
+
 ### Added
 
 - `order_field:` on `Cerbos::ActiveRecord.relation`, the column whose ascending order is the list's element order. It gives a translation to the shapes that read one, each of which raised `Cerbos::ActiveRecord::UnsupportedOperatorError` before:
@@ -62,7 +66,7 @@
 
 - `==` and `!=` between two columns under mixed NULL conventions ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 
-  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. The `:explicit` side's NULL is compared definitely as a null value, and a NULL on the other side, a missing attribute, makes the comparison UNKNOWN. `in` over a list mixing conventions still raises.
+  They previously raised `Cerbos::ActiveRecord::UnsupportedOperatorError`. The `:explicit` side's NULL is compared definitely as a null value, and a NULL on the other side, a missing attribute, makes the comparison UNKNOWN.
 
 - Map literals and nested lists of constants, compared by CEL equality: `==` and `!=` against a column (always FALSE / TRUE, guarded for a missing attribute), `in` and `hasIntersection` with a list or map element, and a macro over a list of maps reading `m.field` ([#577](https://github.com/cerbos/query-plan-adapters/issues/577))
 

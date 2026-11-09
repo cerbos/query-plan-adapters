@@ -83,16 +83,6 @@ module Cerbos
           )
         end
 
-        def mixed_null_conventions_error(operator)
-          UnsupportedOperatorError.new(
-            "Cannot translate #{operator} between two columns under mixed null conventions. " \
-            "One attribute is under null_representation: :explicit and the other is not, so " \
-            "one side must answer NULL definitely and the other must answer UNKNOWN, and no " \
-            "one predicate does both. Declare null_representation on both attributes, or on " \
-            "neither."
-          )
-        end
-
         # Applies declared null conventions to `plain`, the normal translation. Returns `plain`
         # when no side is `:explicit`. Taking `plain` as input keeps operator overrides intact.
         def with_null_conventions(operator, values, plain, overridden:)

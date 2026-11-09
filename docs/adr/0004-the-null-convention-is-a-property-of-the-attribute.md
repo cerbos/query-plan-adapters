@@ -3,6 +3,10 @@
 Accepted. Implementation tracked in
 [#308](https://github.com/cerbos/query-plan-adapters/issues/308). The call-level default is
 superseded by [ADR 0011](0011-denial-fails-closed-in-the-result.md), which makes it `omitted`.
+With `omitted` the default, activerecord gives an undeclared attribute the call's convention in
+`eq` and `ne` as well as `in`
+([#592](https://github.com/cerbos/query-plan-adapters/issues/592)): only a caller that passes
+`explicit` sees its SQL change, and that caller has said its NULL columns are null values.
 
 ## Context
 

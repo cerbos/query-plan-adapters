@@ -186,16 +186,9 @@ module Cerbos
           end
 
           # A column in the list, or a constant needle: one comparison per element, each as `==`
-          # would compare it (#574). E.g. `null in [R.attr.x]` is true when the column is null.
+          # would compare it (#574), under mixed conventions too (#592). E.g. `null in [R.attr.x]`
+          # is true when the column is null.
           columns = [needle, *members].select { |operand| ArelSupport.arel_node?(operand) }
-          # Only the needle meets each member. A computed node has no declaration to align.
-          needle_convention = ArelSupport.arel_node?(needle) && null_convention(needle)
-          if needle_convention && members.any? { |member|
-            ArelSupport.arel_node?(member) && ![nil, needle_convention].include?(null_convention(member))
-          }
-            raise mixed_null_conventions_error("in")
-          end
-
           result = ArelSupport.or_node(members.map { |member| member_equality(needle, member) })
           # CEL builds the list before it compares, so a missing attribute or a computed error
           # anywhere errors the whole membership, whatever the other elements say. Under `not` too.
