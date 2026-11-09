@@ -11,16 +11,13 @@ import {
   temporalMismatch,
 } from "./aggregation";
 import { FinalUnsupportedQueryPlanError, UnsupportedQueryPlanError } from "./errors";
-import type { Mapper, MapperConfig } from "./index";
+import type { MapperConfig } from "./index";
+import type { ScopedMapper } from "./mapper";
 import {
-  boundOf,
   isNullableReference,
-  lookupConfig,
-  nullableDefaultOf,
   relationOfReference,
   resolveFieldReference,
   valueTypeOf,
-  withMapperState,
 } from "./mapper";
 import { getOperandAt, isExpression, isValue, isVariable } from "./operands";
 
@@ -57,7 +54,7 @@ const LEAF_OPERATORS = new Set([
 ]);
 
 /** An aggregation expression evaluating to true, false or null. */
-export const truth = (node: PlanExpressionOperand, mapper: Mapper, bound: Bound = []): unknown => {
+export const truth = (node: PlanExpressionOperand, mapper: ScopedMapper, bound: Bound = []): unknown => {
   if (isValue(node)) {
     if (typeof node.value !== "boolean") {
       throw new UnsupportedQueryPlanError("A non-boolean constant in boolean position is an error");
@@ -121,13 +118,13 @@ const ok = (conditions: unknown[]): unknown => {
 const guarded = (condition: unknown, value: unknown): unknown => ({ $cond: [condition, value, null] });
 
 /** A boolean field in boolean position: anything but a boolean is an error. */
-const bareTruth = (name: string, mapper: Mapper, bound: Bound): unknown => {
+const bareTruth = (name: string, mapper: ScopedMapper, bound: Bound): unknown => {
   const value = buildAggregationExpression({ name }, mapper);
   return guarded(ok([...variableOks([name], mapper, bound), { $eq: [{ $type: value }, "bool"] }]), value);
 };
 
 /** A comparison or string predicate: its value where every operand evaluates, else null. */
-const leaf = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown => {
+const leaf = (node: PlanExpression, mapper: ScopedMapper, bound: Bound): unknown => {
   const [left, right] = node.operands;
   if (isComparison(node.operator) && temporalMismatch(left, right, mapper)) {
     // No ordering between the two types (an error on every document); `==` is false.
@@ -153,7 +150,7 @@ const leaf = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown => {
  * `&&` and `||` inside a value are required to evaluate on every operand, which can deny where CEL
  * absorbs an error, but never allows where it raises.
  */
-const evaluates = (node: PlanExpressionOperand, mapper: Mapper, bound: Bound): unknown => {
+const evaluates = (node: PlanExpressionOperand, mapper: ScopedMapper, bound: Bound): unknown => {
   if (isValue(node)) return true;
   if (isVariable(node)) return ok(variableOks([node.name], mapper, bound));
   if (!isExpression(node)) throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
@@ -187,7 +184,7 @@ const evaluates = (node: PlanExpressionOperand, mapper: Mapper, bound: Bound): u
  * or null, an error, where the selection reads through a missing to-one parent or a macro element
  * that is not a document.
  */
-const presence = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown => {
+const presence = (node: PlanExpression, mapper: ScopedMapper, bound: Bound): unknown => {
   const [operand] = node.operands;
   if (node.operands.length !== 1 || operand === undefined || !isVariable(operand)) {
     throw new UnsupportedQueryPlanError("has takes exactly one attribute reference");
@@ -218,7 +215,7 @@ const presence = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown =
   return receivers.length === 0 ? present : guarded(ok(receivers), present);
 };
 
-const ternary = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown => {
+const ternary = (node: PlanExpression, mapper: ScopedMapper, bound: Bound): unknown => {
   const [condition, whenTrue, whenFalse] = node.operands;
   if (!condition || !whenTrue || !whenFalse) throw new UnsupportedQueryPlanError("if requires three operands");
   return {
@@ -241,7 +238,7 @@ const ternary = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown =>
  * What must hold for each variable to be readable: a nullable one is neither null nor missing, a
  * to-one parent is a document, and a macro element read through a field is a document.
  */
-const variableOks = (names: string[], mapper: Mapper, bound: Bound): unknown[] =>
+const variableOks = (names: string[], mapper: ScopedMapper, bound: Bound): unknown[] =>
   [...new Set(names)].flatMap((name) => {
     const element = bound.find((variable) => name.startsWith(`${variable}.`));
     if (element !== undefined) {
@@ -267,7 +264,7 @@ const variableOks = (names: string[], mapper: Mapper, bound: Bound): unknown[] =
     return [...parent, ...nullableOk(name, mapper)];
   });
 
-const nullableOk = (name: string, mapper: Mapper): unknown[] =>
+const nullableOk = (name: string, mapper: ScopedMapper): unknown[] =>
   isNullableReference(name, mapper)
     ? [{ $not: [{ $in: [{ $type: buildAggregationExpression({ name }, mapper) }, ["missing", "null"]] }] }]
     : [];
@@ -291,7 +288,7 @@ const lambdaParts = (node: PlanExpression, what: string) => {
  * exists(), all() and exists_one() over a list: the elements' truths, folded as CEL folds them,
  * where the list is an array; an error otherwise.
  */
-const macro = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown => {
+const macro = (node: PlanExpression, mapper: ScopedMapper, bound: Bound): unknown => {
   const { collection, lambda } = lambdaParts(node, node.operator);
   if (lambda.operands.length === 3) return twoVariableMacro(node, mapper, bound);
   const variable = (lambda.operands[1] as { name: string }).name;
@@ -312,7 +309,7 @@ const macro = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown => {
  * its value instead, which a stored subdocument does not carry, so only a reference the mapper
  * declares as a list, or a list the plan builds, is iterated.
  */
-const twoVariableMacro = (node: PlanExpression, mapper: Mapper, bound: Bound): unknown => {
+const twoVariableMacro = (node: PlanExpression, mapper: ScopedMapper, bound: Bound): unknown => {
   const [collection, lambda] = node.operands as [PlanExpressionOperand, PlanExpression];
   const [body, indexVariable, elementVariable] = lambda.operands;
   if (!body || !indexVariable || !elementVariable || !isVariable(indexVariable) || !isVariable(elementVariable)) {
@@ -320,7 +317,7 @@ const twoVariableMacro = (node: PlanExpression, mapper: Mapper, bound: Bound): u
   }
   if (
     isVariable(collection) &&
-    lookupConfig(mapper, collection.name) === undefined &&
+    mapper.lookup(collection.name) === undefined &&
     relationOfReference(collection.name, mapper) === undefined
   ) {
     throw new UnsupportedQueryPlanError(
@@ -370,14 +367,14 @@ const foldMacro = (operator: string, values: unknown): unknown => {
  * array or any element's condition raises. A relation's projection yields the projected field of
  * each kept element.
  */
-export const filterValue = (node: PlanExpression, mapper: Mapper, bound: Bound = boundOf(mapper)): unknown => {
+export const filterValue = (node: PlanExpression, mapper: ScopedMapper, bound: Bound = mapper.bound): unknown => {
   const { collection, lambda } = lambdaParts(node, "filter");
   const variable = (lambda.operands[1] as { name: string }).name;
   const binding = `${BINDING_PREFIX}${variable}`;
   const { input, listOk, scoped } = elementScope(collection, variable, mapper, bound);
   const condition = truth(lambda.operands[0]!, scoped, [...bound, variable]);
   let kept: unknown = { $filter: { input, as: binding, cond: { $eq: [condition, true] } } };
-  const relation = isVariable(collection) ? lookupConfig(mapper, collection.name)?.relation : undefined;
+  const relation = isVariable(collection) ? mapper.lookup(collection.name)?.relation : undefined;
   if (relation?.field) {
     const field = relation.fields?.[relation.field]?.field ?? relation.field;
     kept = { $map: { input: kept, as: binding, in: `$$${binding}.${field}` } };
@@ -390,7 +387,7 @@ export const filterValue = (node: PlanExpression, mapper: Mapper, bound: Bound =
  * map(): each element's projection, or null (a CEL error) where the list is not an array or any
  * projection raises.
  */
-export const mapValue = (node: PlanExpression, mapper: Mapper, bound: Bound = boundOf(mapper)): unknown => {
+export const mapValue = (node: PlanExpression, mapper: ScopedMapper, bound: Bound = mapper.bound): unknown => {
   const { collection, lambda } = lambdaParts(node, "map");
   if (lambda.operands.length !== 2) {
     throw new UnsupportedQueryPlanError("map requires a collection and a single-variable lambda");
@@ -412,9 +409,9 @@ export const mapValue = (node: PlanExpression, mapper: Mapper, bound: Bound = bo
 const elementScope = (
   collection: PlanExpressionOperand,
   variable: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
   bound: Bound,
-): { input: unknown; listOk: unknown; scoped: Mapper } => {
+): { input: unknown; listOk: unknown; scoped: ScopedMapper } => {
   const binding = `$${BINDING_PREFIX}${variable}`;
   if (isValue(collection)) {
     if (!Array.isArray(collection.value)) {
@@ -433,7 +430,7 @@ const elementScope = (
     };
   }
   if (!isVariable(collection)) throw new UnsupportedQueryPlanError("A macro's collection must be a field or a list");
-  const relation = lookupConfig(mapper, collection.name)?.relation;
+  const relation = mapper.lookup(collection.name)?.relation;
   if (relation && relation.type !== "many") {
     throw new UnsupportedQueryPlanError("A macro over a to-one relation ranges over its keys, which have no three-valued form");
   }
@@ -455,14 +452,14 @@ const elementScope = (
  * enclosing mapper reads it.
  */
 const elementMapper = (
-  outer: Mapper,
+  outer: ScopedMapper,
   variable: string,
   binding: string,
   relation: MapperConfig["relation"] | undefined,
-): Mapper => {
-  const nullableDefault = nullableDefaultOf(outer);
+): ScopedMapper => {
+  const nullableDefault = outer.nullableDefault;
   const lookup = (key: string): MapperConfig | undefined => {
-    if (key !== variable && !key.startsWith(`${variable}.`)) return lookupConfig(outer, key);
+    if (key !== variable && !key.startsWith(`${variable}.`)) return outer.lookup(key);
     const field = key === variable ? relation?.field : key.slice(variable.length + 1);
     if (field === undefined) return { field: binding, nullable: false };
     const config = relation?.fields?.[field];
@@ -475,5 +472,5 @@ const elementMapper = (
       ...(nested ? { relation: nested } : {}),
     };
   };
-  return withMapperState(lookup as Mapper, nullableDefault, [...boundOf(outer), variable]);
+  return { lookup, nullableDefault, bound: [...outer.bound, variable] };
 };

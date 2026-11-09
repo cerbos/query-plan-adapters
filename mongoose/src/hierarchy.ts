@@ -2,7 +2,8 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import { buildFieldFilter, withNullableGuards } from "./guards";
-import type { Mapper, MongooseFilter } from "./index";
+import type { MongooseFilter } from "./index";
+import type { ScopedMapper } from "./mapper";
 import { resolveFieldReference, resolveMapperConfig } from "./mapper";
 import { isExpression, isValue, isVariable } from "./operands";
 import { escapeRegexValue } from "./regex";
@@ -56,7 +57,7 @@ const hierarchyPrefixes = (value: string, separator: string): string[] => {
 export const buildHierarchyFilter = (
   operator: HierarchyOperator,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): MongooseFilter => {
   const [leftOperand, rightOperand] = operands;
   if (!leftOperand || !rightOperand) {

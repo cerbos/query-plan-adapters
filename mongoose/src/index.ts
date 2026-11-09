@@ -3,7 +3,7 @@ import { PlanResourcesResponse, PlanKind } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
 import type { TranslateContext } from "./context";
 import { translateCondition } from "./filter";
-import { withMapperState, withOmittedNullDefault } from "./mapper";
+import { rootMapper } from "./mapper";
 
 export { PlanKind };
 export { UnsupportedQueryPlanError };
@@ -104,10 +104,7 @@ export function queryPlanToMongoose({
   nullAttributeRepresentation = "omitted",
 }: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
   const ctx: TranslateContext = {
-    mapper: withMapperState(
-      nullAttributeRepresentation === "omitted" ? withOmittedNullDefault(mapper) : mapper,
-      nullAttributeRepresentation === "omitted",
-    ),
+    mapper: rootMapper(mapper, nullAttributeRepresentation === "omitted"),
     nullRepresentation: nullAttributeRepresentation,
     scope: { kind: "root" },
   };

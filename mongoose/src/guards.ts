@@ -1,7 +1,8 @@
 import type { PlanExpressionOperand } from "@cerbos/core";
 
 import { buildEvaluationGuards } from "./aggregation";
-import type { Mapper, MongooseFilter } from "./index";
+import type { MongooseFilter } from "./index";
+import type { ScopedMapper } from "./mapper";
 import {
   isNullableReference,
   relationOfReference,
@@ -45,7 +46,7 @@ export const buildGuardedFieldFilter = (
 export const withNullableGuards = (
   filter: MongooseFilter,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): MongooseFilter => {
   const guardedNames = [
     ...new Set(
@@ -101,7 +102,7 @@ export const withNullableGuards = (
  */
 const buildRequiredParentsFilter = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): MongooseFilter | undefined => {
   const arrayParents = new Set<string>();
   const toOnePaths = new Set<string>();
@@ -180,7 +181,7 @@ const collectListReads = (
  */
 export const buildListShapeGuard = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ScopedMapper,
   rootScope: boolean,
 ): MongooseFilter | undefined => {
   const names = [...new Set(collectListReads(operand, false))];
@@ -220,7 +221,7 @@ export const buildListShapeGuard = (
 export const withEvaluationGuards = (
   filter: MongooseFilter,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): MongooseFilter => {
   const guardedFilter = withNullableGuards(filter, operands, mapper);
   const guards = operands.flatMap((operand) =>
