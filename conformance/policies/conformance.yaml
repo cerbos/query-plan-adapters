@@ -144,6 +144,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber / 2.0 >= 1.5
+    # arithmetic/divide/int-by-list-index
+    - actions:
+        - arithmetic/divide/int-by-list-index
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'int(R.attr.aNumber) / [1, 2][R.attr.aBool ? 1 : 0] == 1'
+    # arithmetic/divide/int-by-ternary
+    - actions:
+        - arithmetic/divide/int-by-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'int(R.attr.aNumber) / (R.attr.aBool ? 2 : 1) == 1'
     # arithmetic/divide/int-truncates
     - actions:
         - arithmetic/divide/int-truncates
@@ -162,6 +180,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aNumber) / 2 == -2
+    # arithmetic/divide/negated-int-by-ternary
+    - actions:
+        - arithmetic/divide/negated-int-by-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) / (R.attr.aBool ? 2 : 1) == 1)'
     # arithmetic/divide/negated-int-truncates
     - actions:
         - arithmetic/divide/negated-int-truncates
@@ -279,6 +306,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber - 3.0 <= 0.0
+    # arithmetic/subtract/int-minus-principal-double
+    - actions:
+        - arithmetic/subtract/int-minus-principal-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) - P.attr.zero == 5) || R.attr.aNumber == 5'
     # cast/double/malformed-string
     - actions:
         - cast/double/malformed-string

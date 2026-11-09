@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `postFilter` reads a ternary whose branches are ints, or an element of a constant list of
+  integral numbers, as a CEL int beside `int()`: `int(x) / (flag ? 2 : 1)` truncates as the PDP
+  does, where it used to divide as JavaScript numbers and the negation over-granted
+  ([#567](https://github.com/cerbos/query-plan-adapters/issues/567)).
+
+- **Breaking:** arithmetic between `int()` and an operand whose numeric type the plan does not
+  carry, such as a lambda binding, throws at translation. It used to compute JavaScript numbers,
+  where CEL does int arithmetic over an int and errors over a double
+  ([#567](https://github.com/cerbos/query-plan-adapters/issues/567)).
+
 - **Breaking:** `queryPlanToConvex`, `QueryPlanToConvexResult` and `ConvexFilter` take no type
   arguments. The filter is typed `(q: FilterBuilder<GenericTableInfo>) => Expression<boolean>`
   from `convex/server`, which every table's `.filter()` accepts, so the `<Q, R>` a caller used to

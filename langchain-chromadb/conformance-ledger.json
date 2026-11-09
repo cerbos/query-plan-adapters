@@ -33,6 +33,10 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
     },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "The post-filter refuses division beside an operand whose CEL type the plan does not carry, here an element of a literal list: an int element divides with truncation and a double one is an error."
+    },
     "arithmetic/divide/negated-self-division-equals": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the divisor reads metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and IEEE division by zero gives the infinity of that sign."

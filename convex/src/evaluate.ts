@@ -522,11 +522,31 @@ const modulo = (call: Call, left: number, right: number): unknown => {
 /**
  * Whether the operand is certainly a CEL int: an integral constant (a policy literal: an int
  * literal against a statically typed int operand is the only spelling that type-checks), `int()`,
- * `size()`, or int arithmetic over those. A field read is certainly a double; anything else has a
- * type the plan does not carry.
+ * `size()`, int arithmetic over those, a ternary whose branches are all ints, or an element of a
+ * constant list of integral numbers. A field read is certainly a double; anything else has a type
+ * the plan does not carry.
  */
-const isIntOperand = (operand: PlanExpressionOperand): boolean =>
-  isValue(operand) ? Number.isInteger(operand.value) : isIntExpression(operand);
+const isIntOperand = (operand: PlanExpressionOperand): boolean => {
+  if (isValue(operand)) return Number.isInteger(operand.value);
+  if (isTernary(operand)) return ternaryBranches(operand).every(isIntOperand);
+  if (isExpression(operand) && operand.operator === "index") {
+    const list = operand.operands[0];
+    return (
+      list !== undefined &&
+      isValue(list) &&
+      Array.isArray(list.value) &&
+      list.value.every(Number.isInteger)
+    );
+  }
+  return isIntExpression(operand);
+};
+
+const isTernary = (operand: PlanExpressionOperand): operand is PlanExpression =>
+  isExpression(operand) && operand.operator === "if";
+
+const ternaryBranches = ({
+  operands,
+}: PlanExpression): PlanExpressionOperand[] => operands.slice(1);
 
 /**
  * Whether the operand is an expression whose result is certainly a CEL int: `int()`, `size()`, or
@@ -540,6 +560,11 @@ const isIntExpression = (operand: PlanExpressionOperand): boolean => {
     case "int":
     case "size":
       return true;
+    case "if":
+      return (
+        ternaryBranches(operand).every(isIntOperand) &&
+        ternaryBranches(operand).some(isIntExpression)
+      );
     case "add":
     case "sub":
     case "mult":
@@ -627,12 +652,42 @@ const validateModulo = ({ operands }: PlanExpression): void => {
   }
 };
 
+/**
+ * Whether the plan says nothing about the operand's numeric type where it could still be a number:
+ * a lambda binding, an index into a list, or a ternary with such a branch. Beside a certain int it
+ * is int arithmetic if an int and an error if a double, and the post-filter cannot pick.
+ */
+const hasUntypedNumericType = (operand: PlanExpressionOperand): boolean => {
+  if (isValue(operand) || isIntOperand(operand)) return false;
+  if (isVariable(operand)) return !operand.name.startsWith("request.");
+  if (!isExpression(operand)) return false;
+  if (operand.operator === "double" || temporalKindOf(operand) !== undefined) {
+    return false;
+  }
+  if (operand.operator === "if") {
+    return ternaryBranches(operand).some(hasUntypedNumericType);
+  }
+  return ["add", "sub", "mult", "div", "mod"].includes(operand.operator)
+    ? operand.operands.some(hasUntypedNumericType)
+    : true;
+};
+
+const validateIntArithmetic = ({ operands }: PlanExpression): void => {
+  if (operands.some(isIntExpression) && operands.some(hasUntypedNumericType)) {
+    throw new UnsupportedQueryPlanError(
+      "arithmetic between a certain int and an operand whose int or double type the plan does " +
+        "not carry: CEL computes int arithmetic over two ints and errors over an int and a double",
+    );
+  }
+};
+
 // Reject at translation, not at post-filter evaluation: by the time the evaluator sees the zero
 // the filter already exists, and the invariant is that an inexpressible shape must throw before
 // its filter can be used. `arithmetic` keeps the same check as a backstop for zeros that are only
 // computed at evaluation time.
-const validateDivision = ({ operands }: PlanExpression): void => {
-  const [numerator, denominator] = operands;
+const validateDivision = (expression: PlanExpression): void => {
+  validateIntArithmetic(expression);
+  const [numerator, denominator] = expression.operands;
   if (
     denominator !== undefined &&
     isExpression(denominator) &&
@@ -913,9 +968,9 @@ const OPERATORS: Record<string, Operator> = {
     },
   },
 
-  add: { evaluate: arithmetic },
-  sub: { evaluate: arithmetic },
-  mult: { evaluate: arithmetic },
+  add: { evaluate: arithmetic, validate: validateIntArithmetic },
+  sub: { evaluate: arithmetic, validate: validateIntArithmetic },
+  mult: { evaluate: arithmetic, validate: validateIntArithmetic },
   div: { evaluate: arithmetic, validate: validateDivision },
   mod: { evaluate: arithmetic, validate: validateModulo },
 

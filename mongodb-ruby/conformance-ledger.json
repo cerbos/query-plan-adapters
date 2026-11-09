@@ -1,6 +1,10 @@
 {
   "adapter": "mongodb-ruby",
   "cases": {
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "The index operator requires a numeric constant position; a position computed from a ternary over a document field is refused."
+    },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",
       "reason": "The ternary's branches are int literals, which CEL renders in plain decimal (\"1000000\"), but the plan ships an int and a double constant as the same bare number and $toString over a double renders the exponent form (\"1e+06\"), so the adapter refuses string() over an untyped integral constant of 1e6 or more"

@@ -20,6 +20,14 @@
       "status": "unsupported",
       "reason": "A denominator that is a second column leaves the comparison with two field references and no constant to solve against, which a Prisma where-filter cannot express"
     },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/divide/int-truncates`: int() has no Prisma filter form, so the int division over it is never reached."
+    },
+    "arithmetic/divide/int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/divide/int-truncates`: int() has no Prisma filter form, so the int division over it is never reached."
+    },
     "arithmetic/divide/int-truncates": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator, so int() is refused wherever it appears: the int division over it (CEL's truncating int64 division, where int(3) / 2 is 1) has no column to solve a where-filter against."
@@ -27,6 +35,10 @@
     "arithmetic/divide/int-truncates-toward-zero": {
       "status": "unsupported",
       "reason": "Same refusal as `arithmetic/divide/int-truncates`: int() has no Prisma filter form, so its truncating division toward zero (int(-5) / 2 is -2) is never reached."
+    },
+    "arithmetic/divide/negated-int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/divide/int-truncates`: int() has no Prisma filter form, so the int division over it is never reached."
     },
     "arithmetic/divide/negated-int-truncates": {
       "status": "unsupported",
