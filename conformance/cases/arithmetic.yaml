@@ -129,6 +129,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber / 2.0 >= 1.5'
+- id: 'arithmetic/divide/int-by-list-index'
+  tier: adversarial
+  intent: 'Int division of an int() conversion by an element of an int literal list ([1, 2][aBool ? 1 : 0]).'
+  trap: 'The element is a CEL int, so int(3) / 2 truncates to 1 and a6 is allowed with a3 and a8; the plan does not carry the element''s type, and dividing as doubles drops a6.'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) / [1, 2][R.attr.aBool ? 1 : 0] == 1'
+- id: 'arithmetic/divide/int-by-ternary'
+  tier: adversarial
+  intent: 'Int division of an int() conversion by a ternary over int literals (int(aNumber) / (aBool ? 2 : 1) == 1).'
+  trap: 'CEL types the ternary as int, so int(3) / 2 truncates to 1 and a6 is allowed with a3 and a8; dividing as doubles gives 1.5 and drops a6.'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) / (R.attr.aBool ? 2 : 1) == 1'
 - id: 'arithmetic/divide/int-truncates'
   tier: adversarial
   intent: 'Int division of an int() conversion by an int literal (int(aNumber) / 2 == 1).'
@@ -143,6 +157,13 @@ cases:
   condition:
     match:
       expr: 'int(R.attr.aNumber) / 2 == -2'
+- id: 'arithmetic/divide/negated-int-by-ternary'
+  tier: adversarial
+  intent: 'Negated int division by a ternary over int literals (!(int(aNumber) / (aBool ? 2 : 1) == 1)).'
+  trap: 'Dividing as doubles makes int(3) / 2 equal 1.5, so the negation over-grants a6, which CEL denies; a missing aBool (j3) stays denied.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aNumber) / (R.attr.aBool ? 2 : 1) == 1)'
 - id: 'arithmetic/divide/negated-int-truncates'
   tier: adversarial
   intent: 'Negated int division (!(int(aNumber) / 2 == 1)).'
@@ -237,3 +258,16 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber - 3.0 <= 0.0'
+- id: 'arithmetic/subtract/int-minus-principal-double'
+  tier: adversarial
+  intent: 'A negated int() conversion minus an integral principal attribute, OR''d with aNumber == 5 (!(int(aNumber) - P.attr.zero == 5) || aNumber == 5).'
+  trap: 'P.attr.zero is a CEL double, so int - double is an error on every row and only a1 is allowed; reading the bare 0 the plan carries as an int literal over-grants every row whose aNumber is not 5.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aNumber) - P.attr.zero == 5) || R.attr.aNumber == 5'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/567
+    pdp:
+    - 0.56.0
+    - 0.57.0
+    reason: 'The planner drops the double type of the substituted P.attr.zero: the plan is byte-identical to !(int(aNumber) - 0 == 5) || aNumber == 5, which allows rows, while check() has no int - double overload and allows only a1.'
