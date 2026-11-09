@@ -493,6 +493,7 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- **Breaking:** a field declared with a `valueType` other than `"boolean"` read where CEL needs a boolean (`!R.attr.aString`) throws `UnsupportedQueryPlanError`: it is CEL's type error under both polarities, which no Prisma filter keeps out. Prisma rejected the filter before.
 - Whether `matches()` raises an error on a pattern (which denies every row) is now decided by
   re2js, a port of RE2, where a hand-written check read `\1`–`\9` as a backreference. RE2 reads
   `\1`–`\7` followed by another octal digit as an octal escape (`\11` is a tab), so such a
