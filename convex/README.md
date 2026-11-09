@@ -12,6 +12,8 @@ npm install @cerbos/http   # or @cerbos/grpc — whichever client your deploymen
 ```
 
 - Node.js >= 22, Convex 1.x
+- `convex` `^1.21.0` is a peer dependency: the filter is typed with its `FilterBuilder` and
+  `Expression`.
 - `@cerbos/core` `^0.32.0 || ^0.33.0` is a peer dependency. Install it yourself so your Cerbos
   client and the adapter share one copy of the plan types (npm 7+ adds it automatically; pnpm and
   Yarn do not).
@@ -30,11 +32,10 @@ you plan in trusted code (an action or your backend), then translate and query i
 import type { PlanResourcesResponse } from "@cerbos/core";
 import { HTTP } from "@cerbos/http";
 import { PlanKind, queryPlanToConvex, type Mapper } from "@cerbos/orm-convex";
-import type { Expression, FilterBuilder } from "convex/server";
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
-import type { DataModel, Doc } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { action, internalQuery } from "./_generated/server";
 
 const cerbos = new HTTP("http://localhost:3592");
@@ -67,10 +68,7 @@ export const listDocuments = action({
 export const listAllowed = internalQuery({
   args: { queryPlan: v.any() }, // must be the response Cerbos returned — never client input
   handler: async (ctx, { queryPlan }) => {
-    const result = queryPlanToConvex<
-      FilterBuilder<DataModel["documents"]>,
-      Expression<boolean>
-    >({
+    const result = queryPlanToConvex({
       queryPlan: queryPlan as PlanResourcesResponse,
       mapper,
       allowPostFilter: true, // only if your policies need it — see below
@@ -352,6 +350,11 @@ document — so most do not apply.
 
 See also [CHANGELOG.md](CHANGELOG.md).
 
+- **Breaking:** `queryPlanToConvex`, `QueryPlanToConvexResult` and `ConvexFilter` take no type
+  arguments. The filter is typed `(q: FilterBuilder<GenericTableInfo>) => Expression<boolean>`
+  from `convex/server`, which every table's `.filter()` accepts, so the `<Q, R>` a caller used to
+  pass, and which nothing checked, is gone: delete it. `convex` is now a peer dependency
+  ([#462](https://github.com/cerbos/query-plan-adapters/issues/462)).
 - **Breaking:** a `path: "split"` result carries `prefilter` and `postFilter`, and `postFilter`
   evaluates the whole condition. It used to carry the pushable conjuncts as `filter` and only the
   rest as `postFilter`, so a caller that applied `filter` without reading `path` returned documents

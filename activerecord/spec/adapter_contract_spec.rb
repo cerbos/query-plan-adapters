@@ -228,16 +228,59 @@ RSpec.describe Cerbos::ActiveRecord do
           expect(member_ids(expression("not", in_sum), explicit, call)).to eq(rows_at(2, 3, 4))
         end
 
-        it "refuses a column member under the other convention, as == does" do
-          [mapping(:explicit, :omitted), mapping(:omitted, :explicit)].each do |mixed|
-            [in_column, expression("not", in_column)].each do |condition|
-              expect { member_ids(condition, mixed, call) }.to raise_error(
-                Cerbos::ActiveRecord::UnsupportedOperatorError, /mixed null conventions/
-              )
-            end
+        it "answers each side of mixed conventions as its own convention says, as == does" do
+          explicit_needle = mapping(:explicit, :omitted)
+          expect(member_ids(in_column, explicit_needle, call)).to eq(rows_at(3))
+          expect(member_ids(expression("not", in_column), explicit_needle, call)).to eq(rows_at(2, 4))
+          expect(member_ids(in_column_or_two, explicit_needle, call)).to eq(rows_at(3))
+          expect(member_ids(expression("not", in_column_or_two), explicit_needle, call))
+            .to eq(rows_at(2, 4))
+
+          explicit_member = mapping(:omitted, :explicit)
+          expect(member_ids(in_column, explicit_member, call)).to eq(rows_at(3))
+          expect(member_ids(expression("not", in_column), explicit_member, call)).to eq(rows_at(1, 4, 5))
+          expect(member_ids(in_column_or_two, explicit_member, call)).to eq(rows_at(3, 5))
+          expect(member_ids(expression("not", in_column_or_two), explicit_member, call))
+            .to eq(rows_at(1, 4))
+        end
+      end
+    end
+
+    # An undeclared column takes the call's convention in `==`, `!=` and `in` alike (#592).
+    {
+      explicit: {
+        "eq" => [0, 3], "not_eq" => [1, 2, 4, 5], "ne_const" => [0, 2, 5], "not_eq_const" => [0, 2, 5]
+      },
+      omitted: {"eq" => [3], "not_eq" => [4], "ne_const" => [5], "not_eq_const" => [5]}
+    }.each do |call, expected|
+      it "gives undeclared columns the call's #{call} convention in ==, != and in alike" do
+        undeclared = mapping(nil, nil)
+        equal = expression("eq", variable("a"), variable("b"))
+        conditions = {
+          "eq" => [equal, in_column],
+          "not_eq" => [expression("not", equal), expression("ne", variable("a"), variable("b")),
+            expression("not", in_column)],
+          "ne_const" => [expression("ne", variable("a"), value(1))],
+          "not_eq_const" => [expression("not", expression("eq", variable("a"), value(1))),
+            expression("not", expression("in", variable("a"), expression("list", value(1))))]
+        }
+        conditions.each do |name, shapes|
+          shapes.each do |condition|
+            expect(member_ids(condition, undeclared, call)).to eq(rows_at(*expected.fetch(name))), "#{name}: #{condition}"
           end
         end
       end
+    end
+
+    it "answers an undeclared column beside a declared one under the call's convention" do
+      equal = expression("eq", variable("a"), variable("b"))
+      {[nil, :omitted] => :explicit, [:omitted, nil] => :explicit, [nil, :explicit] => :omitted}
+        .each do |(a, b), call|
+          declared = mapping(a || call, b || call)
+          [equal, expression("not", equal), in_column, expression("not", in_column)].each do |condition|
+            expect(member_ids(condition, mapping(a, b), call)).to eq(member_ids(condition, declared, call))
+          end
+        end
     end
   end
 

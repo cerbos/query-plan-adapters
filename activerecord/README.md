@@ -285,9 +285,12 @@ in(col, [cs])  ->  col IS NOT NULL AND col IN (cs)
 eq(a, b)       ->  (a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b)
 ```
 
-Undeclared, `NULL != 'x'` is UNKNOWN and excludes the row under both polarities — narrower than
-the decision, so safe but not in agreement. Ordering and string operators are unchanged: CEL
-raises no-overload on a null receiver, which denies exactly like UNKNOWN.
+An undeclared attribute takes the call's `null_attribute_representation:` in all three, so under
+`:explicit` it gets these expansions too
+([#592](https://github.com/cerbos/query-plan-adapters/issues/592)). That includes a field of a
+relation's struct elements: declare `:omitted` on one your application leaves out of the element
+when NULL. Ordering and string operators are unchanged: CEL raises no-overload on a null receiver,
+which denies exactly like UNKNOWN.
 
 A column-to-column `eq` or `ne` under mixed conventions answers each side as its convention says:
 the `:explicit` side's NULL is a null value, compared definitely, and the other side's NULL is a
@@ -304,9 +307,10 @@ A list literal holding a column, `a in [b, "x"]`, compares each element as `eq` 
 column's own convention (an undeclared column takes the call's): two `:explicit` columns use the
 `eq(a, b)` expansion above, an `:explicit` column beside a constant is guarded `IS NOT NULL`, and a
 NULL `:omitted` column or computed value (`b + 1`) anywhere in the membership makes the whole
-membership UNKNOWN, since CEL fails to build the list. A needle and a member column under different conventions raise
-`UnsupportedOperatorError`, as `eq` does
-([#574](https://github.com/cerbos/query-plan-adapters/issues/574)).
+membership UNKNOWN, since CEL fails to build the list. A needle and a member column under different
+conventions answer each as its own convention says, as `eq` does
+([#574](https://github.com/cerbos/query-plan-adapters/issues/574),
+[#592](https://github.com/cerbos/query-plan-adapters/issues/592)).
 
 > [!WARNING]
 > **On Cerbos 0.56.0 and earlier, do not guard with `has()`: write `R.attr.x != null`.** An

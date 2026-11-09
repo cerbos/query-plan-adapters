@@ -288,17 +288,17 @@ module Cerbos
         @omitted_attributes.key?(node)
       end
 
-      # True if the node's attribute declares `:explicit`. Only then does CEL see a null value,
-      # so only then is a definite comparison needed.
+      # True if a NULL in the node reaches CEL as a null value, so a comparison with it must be
+      # definite. See {#null_convention}.
       #
       # @private
       def explicit_null?(node)
-        @null_representations[node] == :explicit
+        null_convention(node) == :explicit
       end
 
       # The convention a NULL in the node reaches CEL under: its attribute's declaration, else
-      # the call's. Unlike {#explicit_null?}, an undeclared column takes the call's default.
-      # Nil for a computed node: it is NULL only where CEL errors, so it has no convention.
+      # the call's (#592). Nil for a computed node: it is NULL only where CEL errors, so it has
+      # no convention.
       #
       # @private
       def null_convention(node)

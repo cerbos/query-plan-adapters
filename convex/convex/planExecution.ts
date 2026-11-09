@@ -43,10 +43,8 @@ export const isPlanResourcesResponse = (
  */
 export type ExecutionPath = "db" | "split" | "post" | "unconditional";
 
-// Generic over the filter's own types: `ConvexFilter` is a function type, so it is contravariant
-// in `Q` and a result built for a concrete `FilterBuilder` is not assignable to an `unknown` one.
-export const executionPathOf = <Q, R>(
-  translated: QueryPlanToConvexResult<Q, R>,
+export const executionPathOf = (
+  translated: QueryPlanToConvexResult,
 ): ExecutionPath => {
   if (translated.kind !== PlanKind.CONDITIONAL) return "unconditional";
   return translated.path;

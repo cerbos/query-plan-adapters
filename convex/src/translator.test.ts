@@ -3,12 +3,21 @@ import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
 } from "@cerbos/core";
+import type {
+  DataModelFromSchemaDefinition,
+  Expression,
+  FilterBuilder,
+  GenericTableInfo,
+  NamedTableInfo,
+  Query,
+} from "convex/server";
 
 // The mapper the Convex backend translates every conformance case with.
 import { MAPPER } from "../convex/adversarialMapper";
 import { PlanKind, queryPlanToConvex, UnsupportedQueryPlanError } from ".";
 import { evaluate } from "./evaluate";
 import type {
+  ConvexFilter,
   Mapper,
   MapperConfig,
   NullAttributeRepresentation,
@@ -89,7 +98,9 @@ const RECORDER = {
   not: (a: unknown): unknown => record("not", [a]),
 };
 
-type Recorder = typeof RECORDER;
+// Convex's `Expression` is nominal, so a fake builder can only stand in for the real one by cast.
+const RECORDING_BUILDER =
+  RECORDER as unknown as FilterBuilder<GenericTableInfo>;
 
 interface TranslateOptions {
   mapper?: Mapper;
@@ -101,8 +112,8 @@ interface TranslateOptions {
 function translate(
   id: string,
   options: TranslateOptions = {},
-): QueryPlanToConvexResult<Recorder, unknown> {
-  return queryPlanToConvex<Recorder, unknown>({
+): QueryPlanToConvexResult {
+  return queryPlanToConvex({
     queryPlan: planFor(id),
     mapper: options.mapper ?? MAPPER,
     allowPostFilter: options.allowPostFilter ?? true,
@@ -117,7 +128,7 @@ function translate(
 function translated(
   id: string,
   options: TranslateOptions = {},
-): QueryPlanToConvexResult<Recorder, unknown> | "refused" {
+): QueryPlanToConvexResult | "refused" {
   try {
     return translate(id, options);
   } catch (error) {
@@ -127,8 +138,8 @@ function translated(
 }
 
 /** The calls the emitted filter makes against Convex's builder. */
-function recordFilter(label: string, filter: (q: Recorder) => unknown) {
-  const emitted = filter(RECORDER);
+function recordFilter(label: string, filter: ConvexFilter) {
+  const emitted: unknown = filter(RECORDING_BUILDER);
   if (!isRecordedNode(emitted)) {
     throw new Error(
       `${label} returned something other than a builder call: ${JSON.stringify(emitted)}`,
@@ -138,9 +149,7 @@ function recordFilter(label: string, filter: (q: Recorder) => unknown) {
 }
 
 /** What Convex's own engine is handed for a conditional plan: its `filter` or its `prefilter`. */
-function engineHalf(
-  result: QueryPlanToConvexResult<Recorder, unknown>,
-): ((q: Recorder) => unknown) | undefined {
+function engineHalf(result: QueryPlanToConvexResult): ConvexFilter | undefined {
   if (result.kind !== PlanKind.CONDITIONAL) return undefined;
   if (result.path === "db") return result.filter;
   return result.path === "split" ? result.prefilter : undefined;
@@ -148,7 +157,7 @@ function engineHalf(
 
 type Translated = {
   id: string;
-  result: QueryPlanToConvexResult<Recorder, unknown>;
+  result: QueryPlanToConvexResult;
 };
 
 /** Each translatable golden, with the part Convex's own engine is handed, if any. */
@@ -457,7 +466,7 @@ describe("omitted: an undeclared entry is nullable", () => {
     // The default is the convention whose wrong guess fails closed (ADR 0011): a null operand is
     // refused, and an undeclared entry stays off Convex's engine.
     const call = (id: string, mapper: Mapper = MAPPER) =>
-      queryPlanToConvex<Recorder, unknown>({
+      queryPlanToConvex({
         queryPlan: planFor(id),
         mapper,
         allowPostFilter: true,
@@ -488,7 +497,7 @@ describe("omitted: an undeclared entry is nullable", () => {
         { ...config, nullable: config.nullable ?? false },
       ]),
     );
-    const pushedDown = (result: QueryPlanToConvexResult<Recorder, unknown>) => {
+    const pushedDown = (result: QueryPlanToConvexResult) => {
       const half = engineHalf(result);
       return half ? recordFilter("filter", half) : undefined;
     };
@@ -609,7 +618,7 @@ describe("an ordering against a value of another type, on a non-nullable field",
   type PushedOrdering = {
     id: string;
     condition: PlanExpressionOperand;
-    filter: (q: Recorder) => unknown;
+    filter: ConvexFilter;
   };
   let PUSHED_ORDERINGS: PushedOrdering[] = [];
 
@@ -864,7 +873,7 @@ describe("shapes the corpus does not reach yet", () => {
 
 // Type-only API contracts: these assignments stop compiling if an impossible result returns.
 test("result types require the payload declared by each execution path", () => {
-  type Result = QueryPlanToConvexResult<Recorder, unknown>;
+  type Result = QueryPlanToConvexResult;
   type Rejects<T> = T extends Result ? false : true;
   const bareConditional: Rejects<{ kind: PlanKind.CONDITIONAL }> = true;
   const missingDbFilter: Rejects<{ kind: PlanKind.CONDITIONAL; path: "db" }> =
@@ -876,13 +885,13 @@ test("result types require the payload declared by each execution path", () => {
   const missingSplitPostFilter: Rejects<{
     kind: PlanKind.CONDITIONAL;
     path: "split";
-    prefilter: (q: Recorder) => unknown;
+    prefilter: ConvexFilter;
   }> = true;
   // The pushable half of a split is never named `filter`, which is only ever the whole condition.
   const splitHalfAsFilter: Rejects<{
     kind: PlanKind.CONDITIONAL;
     path: "split";
-    filter: (q: Recorder) => unknown;
+    filter: ConvexFilter;
     postFilter: (doc: Record<string, unknown>) => boolean;
   }> = true;
   expect([
@@ -900,4 +909,37 @@ test("result types require the payload declared by each execution path", () => {
     ? true
     : false = true;
   expect(noUnnarrowedFilter).toBe(true);
+});
+
+// Type-only API contracts: the filter's builder and result are Convex's own types, not caller
+// choices, so a caller needs no type argument and cannot pick one the filter does not honour.
+test("the filter is what a table's .filter() takes, and only that", () => {
+  type Adversarial = NamedTableInfo<
+    DataModelFromSchemaDefinition<typeof import("../convex/schema").default>,
+    "adversarial"
+  >;
+  type Accepts<T> = [ConvexFilter] extends [T] ? true : false;
+  const tableFilter: Accepts<Parameters<Query<Adversarial>["filter"]>[0]> =
+    true;
+  const anyTableFilter: Accepts<
+    Parameters<Query<GenericTableInfo>["filter"]>[0]
+  > = true;
+  const tablePredicate: Accepts<
+    (q: FilterBuilder<Adversarial>) => Expression<boolean>
+  > = true;
+  const otherBuilder: Accepts<(q: number) => Expression<boolean>> = false;
+  const otherResult: Accepts<(q: FilterBuilder<Adversarial>) => string> = false;
+  expect([
+    tableFilter,
+    anyTableFilter,
+    tablePredicate,
+    otherBuilder,
+    otherResult,
+  ]).toEqual([true, true, true, false, false]);
+  const callerChosenTypes = () =>
+    // @ts-expect-error the builder and result types are not the caller's to choose
+    queryPlanToConvex<number, string>({
+      queryPlan: { kind: PlanKind.ALWAYS_ALLOWED },
+    });
+  expect(callerChosenTypes).toBeInstanceOf(Function);
 });
