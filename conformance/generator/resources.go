@@ -46,14 +46,6 @@ type Resource struct {
 	ID   string         `json:"id"`
 }
 
-func (d *Dataset) ids() []string {
-	ids := make([]string, len(d.Resources))
-	for i, r := range d.Resources {
-		ids[i] = r.ID
-	}
-	return ids
-}
-
 func decodeJSONFile(path string, v any) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {

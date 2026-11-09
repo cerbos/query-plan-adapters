@@ -16,10 +16,6 @@ inherit_gem:
 
 AllCops:
   Exclude:
-    - bin/rake
-    - bin/rspec
-    - bin/rubocop
-    - bin/yard
     - vendor/**/*
     - example/vendor/**/*
     - example/.bundle-path/**/*
