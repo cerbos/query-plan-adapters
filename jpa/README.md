@@ -724,6 +724,7 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- Fixed an over-grant: an attribute whose Java type is not `Boolean` read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was compared with `true`.
 - New translations, where these used to throw: `has()`, `in` and `exists`/`all` (one- and
   two-variable) over a map-valued attribute mapped per field
   ([Map-valued attributes](#map-valued-attributes)); a `filter()`, `map()`, `except()` or

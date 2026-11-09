@@ -64,6 +64,10 @@
       "status": "unsupported",
       "reason": "Cerbos's intersect() keeps duplicates from whichever list is shorter, so its size depends on comparing the two lengths row by row; the adapter translates intersect() only compared with an empty list (as hasIntersection) and refuses size(intersect(...))."
     },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "Both lists are built from a computed element (`aDouble / 0.0`), and JPA Criteria has no list value to compare, so a `list()` operand of `==` is refused."
+    },
     "comparison/less-than/astral-string-against-high-bmp": {
       "status": "unsupported",
       "reason": "CEL orders strings by code point; H2 compares VARCHAR by UTF-16 code unit (Java's String.compareTo), which sorts a6's astral U+1F680 (high surrogate 0xD83D) before U+FFFD. An ordering against a literal holding a code unit at or above U+D800 is refused, since only such a literal can be ordered differently."
@@ -71,6 +75,10 @@
     "comparison/less-than/negated-astral-string-against-high-bmp": {
       "status": "unsupported",
       "reason": "Same refusal as comparison/less-than/astral-string-against-high-bmp, under negation: a UTF-16 code unit ordering puts the surrogate pair before U+FFFD, so the literal is refused."
+    },
+    "logic/and/non-boolean-operand-in-value-negated": {
+      "status": "unsupported",
+      "reason": "`&&` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."
     },
     "regex/matches/unbounded-count": {
       "status": "unsupported",
