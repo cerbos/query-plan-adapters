@@ -16,26 +16,42 @@ import (
 // Every value that came from the plan is bound as a parameter — no plan data is ever interpolated
 // into the SQL text, so a policy constant cannot become SQL syntax.
 type renderer struct {
-	sb   strings.Builder
-	args []any
-	// offset shifts placeholder numbering so the fragment can be appended to a query that
-	// already binds arguments. Numbering is applied while writing rather than rewritten
-	// afterwards: a regex over finished SQL would also match a `$1` inside a bound string.
-	offset int
+	sb       strings.Builder
+	segments []string
+	args     []any
 }
 
-func render(e queryplan.Expr, offset int) (string, []any, error) {
-	r := &renderer{offset: offset}
+// fragment is rendered SQL split at its placeholders, so it can be numbered from any offset without
+// rewriting finished SQL: a regex over the text would also match a `$1` inside a quoted identifier.
+type fragment struct {
+	segments []string
+	args     []any
+}
+
+func render(e queryplan.Expr) (fragment, error) {
+	r := &renderer{}
 	if err := r.write(e); err != nil {
-		return "", nil, err
+		return fragment{}, err
 	}
-	return r.sb.String(), r.args, nil
+	return fragment{segments: append(r.segments, r.sb.String()), args: r.args}, nil
+}
+
+func (f fragment) number(offset int) string {
+	var sb strings.Builder
+	for i, s := range f.segments {
+		if i > 0 {
+			sb.WriteString("$")
+			sb.WriteString(strconv.Itoa(offset + i))
+		}
+		sb.WriteString(s)
+	}
+	return sb.String()
 }
 
 func (r *renderer) bind(v any) {
 	r.args = append(r.args, v)
-	r.sb.WriteString("$")
-	r.sb.WriteString(strconv.Itoa(r.offset + len(r.args)))
+	r.segments = append(r.segments, r.sb.String())
+	r.sb.Reset()
 	r.sb.WriteString(pgTypeSuffix(v))
 }
 

@@ -28,11 +28,11 @@ All [five usage shapes](../../demo/README.md#the-five-usage-shapes), across all 
 2. **`KIND_ALWAYS_ALLOWED`** — the query runs with no filter.
 3. **`KIND_ALWAYS_DENIED`** — no query runs.
 4. **Pagination** — the fragment first, with the application's `LIMIT`/`OFFSET` numbered after it.
-5. **Composed** — the application's predicate first, with the fragment shifted by
-   `WithPlaceholderOffset`.
+5. **Composed** — the application's predicate first, with the fragment composed by
+   `Result.AppendTo`.
 
-No suite in [`../`](../) composes the fragment — they all hand `Result.Where` straight to a `SELECT`
-of their own — so shapes 4 and 5 run here and nowhere else.
+The conformance harness in [`../`](../) checks `AppendTo` and that `Where` is self-delimiting for
+every case; shapes 4 and 5 are the only places composition runs against a live PDP.
 
 ### Composition: PostgreSQL parameters are ordinal
 
@@ -41,7 +41,7 @@ appear here:
 
 | Direction | Shape | What the application must do |
 | --- | --- | --- |
-| Application predicate **first** | 5, composed | `Translate(…, WithPlaceholderOffset(len(appArgs)))`, then send `append(appArgs, result.Args...)` |
+| Application predicate **first** | 5, composed | `where, args := result.AppendTo(appWhere, appArgs)`, then send `args` |
 | Fragment **first**, application parameters after | 4, paginated | no option: number `LIMIT`/`OFFSET` from `len(result.Args)+1` and send `append(result.Args, pageSize, offset)` |
 
 The statements the program runs, printed on stderr:
@@ -49,7 +49,7 @@ The statements the program runs, printed on stderr:
 ```sql
 -- shape 5, alice/view: the application's two parameters take $1 and $2, so the fragment starts at $3
 SELECT id FROM document WHERE (archived = $1 AND region = $2)
-  AND (("document"."is_public" OR ("document"."owner_id" = $3::text)))
+  AND ("document"."is_public" OR ("document"."owner_id" = $3::text))
   -- args: [false, emea, alice]
 
 -- shape 4, alice/view: the fragment keeps $1, so the application's page parameters start at $2
@@ -67,11 +67,12 @@ The application's parameters sit next to its own columns and can use the plain f
 - **`checkPlaceholders`** runs on every statement a usage shape builds: the statement must reference
   exactly `$1..$n` for its `n` arguments, with no gaps or duplicates. A gap (`$1, $2, $4`) means the
   fragment was shifted too far.
-- **`assertOffsetIsLoadBearing`** is the negative control that keeps shape 5 from passing vacuously.
-  It rebuilds the composed statement without the offset and requires that `checkPlaceholders`
+- **`assertNumberingIsLoadBearing`** checks shape 5 against two statements built by hand. One numbers
+  the fragment with `WithPlaceholderOffset` and must return the rows `AppendTo` did. The other is the
+  negative control: it leaves the fragment numbered from `$1` and requires that `checkPlaceholders`
   rejects it and that executing it anyway does not return the correct rows.
 - **`assertDenialSplicesToNoRows`** splices a denied plan's `FALSE` into the composed statement
-  (`… WHERE (archived = $1 AND region = $2) AND (FALSE)`) and requires it to return no rows. A
+  (`… WHERE (archived = $1 AND region = $2) AND FALSE`) and requires it to return no rows. A
   caller who ignores `Kind` still gets the denial, not the application's own rows.
 
 These two controls are the only code that bypasses `checkPlaceholders`.

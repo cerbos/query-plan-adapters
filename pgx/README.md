@@ -75,18 +75,19 @@ cannot express" from a mapping or configuration error. The corpus cases it refus
 
 ## Composing the fragment with your own predicates
 
-PostgreSQL placeholders are **ordinal**: `$1` is the first argument sent with the statement, not
-the first in the fragment. Once the fragment goes anywhere but straight after `WHERE`, you own the
-numbering, and a mistake is not a compile error.
+`Where` is self-delimiting: it joins any boolean expression with `AND`, `OR` or `NOT`, or takes an
+`IS` test, without parentheses of its own. The conformance harness checks this for every case.
 
-**Your predicate first:** pass `WithPlaceholderOffset(len(yourArgs))` and send the fragment's
-arguments after yours.
+PostgreSQL placeholders are **ordinal**: `$1` is the first argument sent with the statement, not
+the first in the fragment. Once the fragment goes anywhere but straight after `WHERE`, the
+numbering has to account for the arguments ahead of it, and a mistake is not a compile error.
+
+**Your predicate first:** `Result.AppendTo` parenthesises your predicate, ANDs the fragment onto
+it with the fragment's placeholders numbered after your arguments, and returns the arguments to
+send.
 
 ```go
-where, args := `archived = $1 AND region = $2`, []any{false, "emea"}
-
-result, err := cerbospgx.Translate(plan.PlanResourcesResponse, "contact", mapper,
-    cerbospgx.WithPlaceholderOffset(len(args))) // the fragment now starts at $3
+result, err := cerbospgx.Translate(plan.PlanResourcesResponse, "contact", mapper)
 if err != nil {
     return err
 }
@@ -94,13 +95,17 @@ if err != nil {
 if result.Kind == cerbospgx.KindAlwaysDenied {
     return nil // optional: the fragment is FALSE, so the query would return no row
 }
-where += " AND (" + result.Where + ")"
-args = append(args, result.Args...) // Result.Args must follow yours
-rows, err := pool.Query(ctx, `SELECT id FROM contact WHERE `+where, args...)
+where, args := result.AppendTo(`archived = $1 AND region = $2`, []any{false, "emea"})
+rows, err := pool.Query(ctx, `SELECT id FROM contact WHERE `+where, args...) // the fragment starts at $3
 ```
 
-**The fragment first** (pagination is the usual case): there is no option for this side. The
-fragment keeps `$1…`, and you number your parameters from `len(result.Args)+1`:
+`WithPlaceholderOffset(n)` numbers `Result.Where` from `$n+1` for a caller that builds the
+statement another way. It renumbers the fragment's placeholders only: `Result.Args` must sit at
+positions `n+1…` of the slice you send, and two swapped same-typed arguments bind without error and
+answer the wrong question. `AppendTo` ignores the offset.
+
+**The fragment first** (pagination is the usual case): the fragment keeps `$1…`, and you number
+your parameters from `len(result.Args)+1`:
 
 ```go
 stmt := fmt.Sprintf(`SELECT id FROM contact WHERE %s ORDER BY id LIMIT $%d OFFSET $%d`,
@@ -108,14 +113,7 @@ stmt := fmt.Sprintf(`SELECT id FROM contact WHERE %s ORDER BY id LIMIT $%d OFFSE
 rows, err := pool.Query(ctx, stmt, append(slices.Clone(result.Args), limit, offset)...)
 ```
 
-Two things the offset does **not** do:
-
-- **It does not move your arguments.** It renumbers the fragment's placeholders; putting
-  `Result.Args` at positions `n+1…` of the slice you send is up to you. Two swapped same-typed
-  arguments bind without error and answer the wrong question. (A count or type mismatch is refused
-  by pgx or the server.)
-- **It has nothing to renumber on a non-conditional plan.** `Where` is `TRUE` or `FALSE` and `Args`
-  is nil for `KindAlwaysAllowed` and `KindAlwaysDenied`, so the splice above still holds.
+On a non-conditional plan `Where` is `TRUE` or `FALSE` with no `Args`, so both shapes still hold.
 
 [`example/`](example/) runs both directions against a real PostgreSQL server.
 
@@ -351,6 +349,11 @@ tags := &cerbospgx.Relation{
 
 ## Behaviour changes
 
+- `Result.AppendTo(predicate, args)` composes the fragment after a predicate of your own and numbers
+  its placeholders after your arguments, so you no longer count them
+  ([#624](https://github.com/cerbos/query-plan-adapters/issues/624)). `Result.Where` being
+  self-delimiting is now part of its documented contract, checked by the conformance harness for
+  every case. `WithPlaceholderOffset` is unchanged.
 - Newly translated, each proved by the corpus: `matches()` with a constant pattern. The pattern
   is parsed with Go's `regexp/syntax`, the parser CEL matches with, so what is valid and what it
   means are exactly CEL's, and it is lowered only when what it matches can be said with the
@@ -477,9 +480,8 @@ demo/scripts/run-example.sh pgx
 
 It is the only place in this repository where
 [composition](#composing-the-fragment-with-your-own-predicates) runs end to end: an application
-predicate ahead of the fragment with `WithPlaceholderOffset`, and pagination parameters numbered
-after it. It proves usage shapes only, not packaging: it resolves this module through a `replace`
-directive ([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)).
+predicate ahead of the fragment with `AppendTo`, and pagination parameters numbered after it. It
+proves usage shapes only, not packaging: it resolves this module through a `replace` directive ([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)).
 
 ## Development
 

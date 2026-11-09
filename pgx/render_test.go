@@ -22,7 +22,7 @@ import (
 func renderExpr(t *testing.T, e queryplan.Expr) error {
 	t.Helper()
 
-	_, _, err := render(e, 0)
+	_, err := render(e)
 	return err
 }
 
