@@ -17,6 +17,10 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the divisor reads metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and IEEE division by zero gives the infinity of that sign."
     },
+    "arithmetic/add/ternary-selecting-double-beside-int": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `+` over a ternary whose arms are a stored number and int() has a CEL type the plan does not carry, and CEL has no int/double overload."
+    },
     "arithmetic/add/value-first": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
@@ -104,6 +108,10 @@
     "collection/exists/arithmetic-on-outer-attribute": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
+    },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `aDouble / 0.0` divides a stored number by an integral literal the plan ships without saying whether it was an int or a double."
     },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",

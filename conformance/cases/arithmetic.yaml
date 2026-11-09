@@ -101,6 +101,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber / R.attr.aNumber + 1.0 != 2.0'
+- id: 'arithmetic/add/ternary-selecting-double-beside-int'
+  tier: adversarial
+  intent: 'An int() sum whose other operand is a ternary choosing aDouble or int(aNumber), negated (!((aBool ? aDouble : int(aNumber)) + int(aNumber) == 0)).'
+  trap: 'The ternary is int only where aBool is false; where it is true it selects a double, which has no + overload with an int, so every aBool-true row errors and denies. Truncating the double to an int to add it over-grants those rows.'
+  condition:
+    match:
+      expr: '!((R.attr.aBool ? R.attr.aDouble : int(R.attr.aNumber)) + int(R.attr.aNumber) == 0)'
 - id: 'arithmetic/add/value-first'
   tier: adversarial
   intent: 'Constant on the left, arithmetic on the right (2.0 < aNumber + 1.0).'

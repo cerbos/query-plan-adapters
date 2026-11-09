@@ -10,6 +10,13 @@ cases:
   condition:
     match:
       expr: R.attr.aString == R.attr.aOptionalString
+- id: 'comparison/equals/list-holding-nan'
+  tier: adversarial
+  intent: 'A one-element list holding aDouble / 0.0 compared with itself ([aDouble / 0.0] == [aDouble / 0.0]).'
+  trap: 'CEL compares list elements with ==, and NaN equals nothing, so i5 (aDouble -0.0, whose quotient is NaN) is denied while every infinite quotient is allowed; a store that compares the lists as whole values, where NaN equals NaN, over-grants i5.'
+  condition:
+    match:
+      expr: '[R.attr.aDouble / 0.0] == [R.attr.aDouble / 0.0]'
 - id: 'comparison/equals/map-member-by-string-key'
   tier: extended
   intent: 'A map attribute indexed by a string key (obj["inner"] == "one"), as a map indexed by a principal attribute plans once the key folds.'
