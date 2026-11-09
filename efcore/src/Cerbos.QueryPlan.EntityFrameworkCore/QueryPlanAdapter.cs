@@ -35,7 +35,7 @@ public static class QueryPlanAdapter
                 {
                     throw new QueryPlanRefusedException("A conditional plan carries no condition.");
                 }
-                var translator = new Translator(options.Provider, options.Nulls, root, options.Attributes.Entries);
+                var translator = new Translator(options.Provider, options.Nulls, root, options.Attributes.Entries, options.Now ?? DateTimeOffset.UtcNow);
                 var body = translator.TranslateCondition(filter.Condition);
                 return new QueryPlanFilter<TEntity>(FilterKind.Conditional, Expression.Lambda<Func<TEntity, bool>>(body, root));
             default:

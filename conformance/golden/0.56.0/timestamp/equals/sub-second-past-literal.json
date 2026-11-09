@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/equals/sub-second-past-literal",
+  "intent": "timestamp(createdAt) == a whole-second literal that a5 passes by 123456 microseconds.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2020-03-15T10:30:00Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/equals/sub-second-past-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdAt) == timestamp(\"2020-03-15T10:30:00Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Only a1 is equal. Elasticsearch fills the fraction a date literal omits with its largest value at an upper bound, so a term query for …00Z also matches a5."
+}

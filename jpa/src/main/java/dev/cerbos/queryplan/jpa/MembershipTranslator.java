@@ -33,13 +33,15 @@ final class MembershipTranslator {
     private final TriPredicate tri;
     private final LeafTranslator leaf;
     private final ChainSubqueries subqueries;
+    private final ObjectAttributeTranslator objects;
 
     MembershipTranslator(CriteriaBuilder cb, TriPredicate tri, LeafTranslator leaf,
-                         ChainSubqueries subqueries) {
+                         ChainSubqueries subqueries, ObjectAttributeTranslator objects) {
         this.cb = cb;
         this.tri = tri;
         this.leaf = leaf;
         this.subqueries = subqueries;
+        this.objects = objects;
     }
 
     // The planner can emit a null scalar (`null in R.attr.items`), and List.of rejects null.
@@ -74,6 +76,9 @@ final class MembershipTranslator {
                     + Refusals.describeOperand(rawOperands.get(1)));
         }
         String var = fieldOp.getVariable();
+        if (ObjectAttributeTranslator.isObject(scope, var)) {
+            return objects.keyMembership(scope, var, valueOp.getValue());
+        }
         Object val = PlanValues.protoValueToJava(valueOp.getValue());
 
         if (scope.resolve(var) instanceof Scope.ResolvedRelation relRef) {

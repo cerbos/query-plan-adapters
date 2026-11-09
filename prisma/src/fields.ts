@@ -36,6 +36,51 @@ export function buildFieldFilter(
   });
 }
 
+const LIKE_METACHARACTERS = /[%_\\]/;
+
+/**
+ * `column.startsWith(prefix)`, or, when `strict`, the prefix followed by at least one character.
+ *
+ * Prisma's `startsWith` is a LIKE with no ESCAPE clause, so a prefix holding `%`, `_` or `\` is
+ * spelled as the range of strings it bounds instead: every string with that prefix is at least the
+ * prefix and below the prefix with its last code point stepped up, and no other string is, under
+ * the code-point order CEL's own string comparisons already require of the collation. A NULL
+ * column is UNKNOWN under either spelling, as the missing attribute's error requires.
+ */
+export function buildPrefixFilter(
+  fieldRef: ResolvedFieldReference,
+  prefix: string,
+  strict = false
+): PrismaFilter {
+  if (!LIKE_METACHARACTERS.test(prefix)) {
+    return buildFieldFilter(fieldRef, "startsWith", strict ? `${prefix}_` : prefix);
+  }
+  const fieldName = getLeafField(fieldRef.path);
+  const lower = { [fieldName]: { [strict ? "gt" : "gte"]: prefix } };
+  const bound = firstStringPastPrefix(prefix);
+  return wrapInRelations(
+    fieldRef.relations,
+    bound === undefined ? lower : { AND: [lower, { [fieldName]: { lt: bound } }] }
+  );
+}
+
+/**
+ * The least string, in code-point order, above every string that starts with `prefix`: the prefix
+ * with its last code point stepped up, skipping the surrogate range no string holds. A trailing
+ * U+10FFFF has no successor, so it is dropped and the step applied before it; undefined when
+ * nothing is left, where no string is above the prefix.
+ */
+function firstStringPastPrefix(prefix: string): string | undefined {
+  const codePoints = Array.from(prefix, (character) => character.codePointAt(0)!);
+  while (codePoints.length > 0) {
+    const last = codePoints.pop()!;
+    if (last >= 0x10ffff) continue;
+    const next = last + 1 === 0xd800 ? 0xe000 : last + 1;
+    return String.fromCodePoint(...codePoints, next);
+  }
+  return undefined;
+}
+
 /** A filter no row satisfies, spelled on a column the model is known to have. */
 export function buildImpossibleFilter(
   fieldRef: ResolvedFieldReference

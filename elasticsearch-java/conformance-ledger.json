@@ -231,7 +231,7 @@
     },
     "collection/all/nested-three-levels-middle": {
       "status": "unsupported",
-      "reason": "Same one-scope-too-deep refusal as collection/exists/nested-three-levels: the second-level all() over c.subCategories reaches the leaf resolver as a lambda operand inside the outer nested scope, before either the third level or the positive-all emptiness ambiguity is reached"
+      "reason": "The second-level all() over c.subCategories is a positive all, refused as collection/all/empty-collection is: Elasticsearch does not index an empty nested array, so a positive all cannot distinguish an empty collection (true) from a missing collection (CEL error)"
     },
     "collection/concatenate/ternary-list-branches-equals-literal": {
       "status": "unsupported",
@@ -273,10 +273,6 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare a nested field with an outer resource field without scripts"
     },
-    "collection/exists/element-in-literal-list": {
-      "status": "unsupported",
-      "reason": "Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping"
-    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "CEL ranges a macro over a map's keys; parent is an object field in the index, and a query matches its sub-fields' values, never the set of keys the object holds."
@@ -311,15 +307,11 @@
     },
     "collection/exists/nested-over-same-collection": {
       "status": "unsupported",
-      "reason": "The inner lambda compares a nested document with the enclosing nested document of the same path. An Elasticsearch nested query scopes its clauses to one nested document and cannot reference a sibling or enclosing one without scripts, so the adapter refuses the inner lambda where it arrives as a leaf operand"
-    },
-    "collection/exists/nested-three-levels": {
-      "status": "unsupported",
-      "reason": "The adapter lowers a collection macro at the top of the walk only: inside a nested lambda scope the walk admits leaves, so the second-level exists() over c.subCategories reaches the leaf resolver as a lambda operand and is refused there, one scope too deep, before the third level is ever seen. Elasticsearch could express a nested query inside a nested query; this adapter does not lower macros below the first scope"
+      "reason": "The inner lambda reads the enclosing nested document of the same path. An Elasticsearch nested query is scoped to one nested document and sees no field outside it, so a macro whose operands read the enclosing document is refused"
     },
     "collection/exists/nested-with-outer-attribute": {
       "status": "unsupported",
-      "reason": "Elasticsearch nested queries cannot preserve a resource-field correlation across two nested scopes without scripts"
+      "reason": "The inner lambda reads R.attr.aBool. An Elasticsearch nested query is scoped to one nested document and sees no field of the enclosing document, so a macro whose operands read it is refused"
     },
     "collection/exists/outer-collection-inside-lambda": {
       "status": "unsupported",
@@ -451,51 +443,35 @@
     },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL cannot evaluate the non-finite arithmetic operand required by this CEL predicate without scripts"
+      "reason": "The ternary hoists into one comparison per branch, but each branch divides two literals the plan spells as integers: an int division by zero is a CEL error while a double division gives infinity, and the plan cannot tell which, so the literal division is refused"
     },
     "comparison/greater-than/nan-from-ternary": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL cannot reproduce CEL NaN ordering through conditional values without scripts"
+      "reason": "The ternary hoists into one comparison per branch, but the else branch divides two literals the plan spells as integers: an int 0/0 is a CEL error while a double 0.0/0.0 is NaN, and the plan cannot tell which, so the literal division is refused"
     },
     "comparison/less-or-equal/nan-from-ternary-on-both-sides": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL cannot evaluate the non-finite arithmetic operand required by this CEL predicate without scripts"
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary, on both sides: 1/2 truncates as an int division and is 0.5 as a double, and the plan cannot tell which"
     },
     "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides": {
       "status": "unsupported",
-      "reason": "Unexpected if expression in leaf operand"
+      "reason": "Same unfolded literal division as comparison/less-or-equal/nan-from-ternary-on-both-sides, under negation, where NaN and a division error decide differently"
     },
     "comparison/less-than/nan-from-ternary-value-first": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL cannot reproduce CEL NaN ordering through conditional values without scripts"
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary, value-first"
     },
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
       "reason": "ne against a list literal cannot be expressed: a term or range query compares a field against a scalar, and the Query DSL has no whole-list comparison"
     },
-    "composition/derived-role/runtime-effective-derived-roles": {
-      "status": "unsupported",
-      "reason": "runtime.effectiveDerivedRoles plans to a ternary over two list literals, and Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
-    },
     "conditional/ternary/as-whole-exists-body": {
       "status": "unsupported",
-      "reason": "if (CEL ternary) cannot be expressed: Elasticsearch Query DSL has no conditional-value expression without scripts"
-    },
-    "conditional/ternary/boolean-branches": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts. The bare ternary is the whole condition rather than a leaf operand, so it is refused by name at the top of the walk rather than by the leaf resolver"
-    },
-    "conditional/ternary/compared-to-literal": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
-    },
-    "conditional/ternary/expression-condition": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+      "reason": "The ternary inside the exists() lambda reads R.attr.aBool in both branches. An Elasticsearch nested query is scoped to one nested document and sees no field of the enclosing document"
     },
     "conditional/ternary/index-in-untaken-branch": {
       "status": "unsupported",
-      "reason": "Same refusal as conditional/ternary/boolean-branches: Elasticsearch Query DSL has no conditional-value expression without scripts."
+      "reason": "A ternary translates as one query per branch, so the untaken branch is translated too, and its positional read aBoolList[0] has no Query DSL form: a term query matches a value at any position"
     },
     "conditional/ternary/inside-all": {
       "status": "unsupported",
@@ -503,63 +479,15 @@
     },
     "conditional/ternary/inside-exists": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL cannot evaluate a conditional value inside a nested predicate without scripts"
-    },
-    "conditional/ternary/missing-attribute-condition": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+      "reason": "The ternary inside the exists() lambda tests R.attr.aBool. An Elasticsearch nested query is scoped to one nested document and sees no field of the enclosing document"
     },
     "conditional/ternary/missing-attribute-in-untaken-branch": {
       "status": "unsupported",
-      "reason": "Same refusal as conditional/ternary/boolean-branches: Elasticsearch Query DSL has no conditional-value expression without scripts."
-    },
-    "conditional/ternary/negated": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
-    },
-    "conditional/ternary/negated-branch-on-relation": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression for selecting the constant or parent attribute without scripts; the translator refuses the ternary leaf."
+      "reason": "A ternary translates as one query per branch, so the untaken branch is translated too, and its aString.contains(aOptionalString) compares two document fields, which the Query DSL cannot do without scripts"
     },
     "conditional/ternary/negated-collection-condition": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
-    },
-    "conditional/ternary/negated-missing-attribute-condition": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL cannot preserve CEL null/error semantics through a negated conditional value without scripts"
-    },
-    "conditional/ternary/nested-in-both-branches": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
-    },
-    "conditional/ternary/nested-in-condition": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
-    },
-    "conditional/ternary/nested-in-then-branch": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
-    },
-    "conditional/ternary/on-both-sides": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to nested CEL ternaries without scripts"
-    },
-    "conditional/ternary/value-first": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
-    },
-    "hierarchy/ancestor-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "The hierarchy operand parser refuses an empty delimiter before the relation is lowered: a path cannot be split into segments on an empty string, so there is no segment prefix to compare the stored path against"
-    },
-    "hierarchy/descendent-of/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "The hierarchy operand parser refuses an empty delimiter before the relation is lowered: a path cannot be split into segments on an empty string, so there is no segment prefix to compare the stored path against, and the prefix query the descendant test lowers to would match the path itself (a2, never its own descendant)"
-    },
-    "hierarchy/overlaps/empty-delimiter": {
-      "status": "unsupported",
-      "reason": "Same empty-delimiter refusal as hierarchy/ancestor-of/empty-delimiter, reached through overlaps"
+      "reason": "The ternary's condition is a positive all() over tags, refused as collection/all/empty-collection is: Elasticsearch does not index an empty nested array, so all cannot distinguish an empty collection (true) from a missing collection (CEL error)"
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",
@@ -571,11 +499,7 @@
     },
     "identifier/equals/concatenation": {
       "status": "unsupported",
-      "reason": "The value side is a concatenation of a constant with the primary key — a computed operand the Query DSL has no form for. The comparison is refused before the second field it names is reached"
-    },
-    "identifier/equals/concatenation-value-first": {
-      "status": "unsupported",
-      "reason": "Same missing computed operand as identifier/equals/concatenation, in value-first form"
+      "reason": "The concatenation \"prefix:\" + R.id is compared with aOptionalString, another document field: the Query DSL compares a field against a literal, never against another field, without scripts"
     },
     "identifier/equals/field-to-field": {
       "status": "unsupported",
@@ -603,7 +527,7 @@
     },
     "membership/in/list-mixing-literal-and-expression": {
       "status": "unsupported",
-      "reason": "The list literal holds aOptionalString + \"ret\", a value computed from a document field: a terms query matches a field against literal values only, and concatenating a field needs a script"
+      "reason": "The list literal holds aOptionalString + \"ret\", a value computed from a document field, so the membership is aString against another field: the Query DSL compares a field against a literal, never against another field, without scripts"
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
@@ -758,25 +682,9 @@
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
-    "principal/exists-one/duplicate-elements": {
-      "status": "unsupported",
-      "reason": "exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat query."
-    },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "exists_one over a literal collection value is not supported. Only exists() and all() can be folded into a flat query."
-    },
-    "principal/exists/list-of-structs": {
-      "status": "unsupported",
-      "reason": "exists over a computed collection cannot be lowered to a nested query"
-    },
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
-      "reason": "exists over a computed collection cannot be lowered to a nested query"
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "Unsupported size() expression"
+      "reason": "The fold compares aOptionalString with each element's null name, a positive equality with null: Elasticsearch does not index a JSON null, so it cannot distinguish an explicit null attribute (check() allows) from a missing field (CEL error, denies) without an indexed null_value sentinel"
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
@@ -793,10 +701,6 @@
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^one"
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "Elasticsearch Query DSL has no script-free computed operand for a regex predicate used as an equality operand."
     },
     "regex/matches/digit-class": {
       "status": "unsupported",
@@ -949,21 +853,17 @@
       "status": "unsupported",
       "reason": "Same missing-versus-empty ambiguity as relation/size/zero-to-one-chain, reached through the negated positive-count spelling rather than the direct zero-count one"
     },
-    "relation/size/non-empty-string-one-hop": {
-      "status": "unsupported",
-      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
-    },
     "relation/size/non-negative-to-one-chain": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL expresses only emptiness checks over nested collections, not arbitrary count thresholds, so a >= 0 threshold — which is TRUE exactly when the to-one parent exists — has no equivalent"
+      "reason": ">= 0 accepts every count, the empty collection included, and Elasticsearch does not index an empty nested array, so the query cannot tell an empty subCategories (true) from an absent to-one parent (CEL error, denies)"
     },
     "relation/size/string-length-one-hop": {
       "status": "unsupported",
-      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+      "reason": "size(parent.aString) <= 3 needs the string's length, which Elasticsearch Query DSL cannot compare without scripts; over a string field only emptiness translates"
     },
     "relation/size/string-length-two-hops": {
       "status": "unsupported",
-      "reason": "Same refusal as size/greater-than/string-length, over a string field of the parent object: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+      "reason": "size(parent.inner.aString) <= 7 needs the string's length, which Elasticsearch Query DSL cannot compare without scripts; over a string field only emptiness translates"
     },
     "relation/size/zero-to-one-chain": {
       "status": "unsupported",
@@ -971,19 +871,15 @@
     },
     "relation/ternary/to-one-chain-condition": {
       "status": "unsupported",
-      "reason": "Same missing conditional-value expression as conditional/ternary/boolean-branches: the Query DSL has no CEL-ternary equivalent without scripts, so the conditional is rejected at the top of the filter before its chained condition is examined"
+      "reason": "The ternary's else branch needs the condition false, a negated membership in mainCategory.subNames: Elasticsearch does not index an empty array, so a bool.must_not over the collection cannot tell an empty collection from a missing one (CEL error)"
     },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot count only nested elements matching a predicate without scripts"
     },
-    "size/equals/negated-fractional-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
-    },
     "size/equals/string-trailing-space": {
       "status": "unsupported",
-      "reason": "Same refusal as size/greater-than/string-length: Elasticsearch Query DSL cannot compare a string's length without scripts, and size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
+      "reason": "size(aString) == 2 needs the string's length, which Elasticsearch Query DSL cannot compare without scripts; over a string field only emptiness translates"
     },
     "size/greater-or-equal/fractional-threshold": {
       "status": "unsupported",
@@ -997,57 +893,17 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot express arbitrary collection-count thresholds without scripts"
     },
-    "size/greater-than/huge-threshold": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length: aString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the giant threshold is examined"
-    },
-    "size/greater-than/negated-huge-negative-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
-    },
-    "size/greater-than/negated-huge-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
-    },
     "size/greater-than/string-length": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL cannot compare a string's length without scripts, and the adapter is handed a plan rather than a mapping, so it cannot tell size(aString) from size(tagNames): size() over a field the caller has declared neither in nestedPaths nor in collectionFields is refused before the threshold is examined"
-    },
-    "size/greater-than/string-non-empty": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair, reached through the `> 0` spelling a collection-emptiness fast path is keyed on: aString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold is examined — which is exactly what stops the emptiness path from emitting an exists query over a string field"
+      "reason": "size(aString) > 4 needs the string's length, which Elasticsearch Query DSL cannot compare without scripts; over a string field only emptiness, and a threshold every length or no length satisfies, translate"
     },
     "size/less-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
       "reason": "Same arbitrary-count-threshold limitation as size/greater-or-equal/fractional-threshold-on-relation under the opposite ordering: <= 1.5 rounds down to <= 1, still not an emptiness check"
     },
-    "size/less-than/huge-threshold": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and size/greater-than/huge-threshold, under the opposite ordering"
-    },
-    "size/less-than/negated-huge-negative-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
-    },
-    "size/less-than/negated-huge-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
-    },
-    "size/not-equals/negated-fractional-threshold-on-missing-attribute": {
-      "status": "unsupported",
-      "reason": "Same undeclared-collection refusal as size/greater-than/string-length and the size/*/huge-threshold pair: aOptionalString is declared in neither nestedPaths nor collectionFields, so size() over it is refused before the threshold or the negation is examined"
-    },
-    "string/concatenate/dollar-prefixed-literal": {
-      "status": "unsupported",
-      "reason": "Same missing computed operand as string/concatenate/field-to-field: a term query compares a field against a literal, and there is no place to append the suffix to the field first"
-    },
     "string/concatenate/field-to-field": {
       "status": "unsupported",
       "reason": "Same missing computed operand as identifier/equals/concatenation, with both `+` operands document fields rather than one being the primary key. Painless runtime scripts could express it, which is the enhancement #226 tracks"
-    },
-    "string/concatenate/negated-unsatisfiable-equals": {
-      "status": "unsupported",
-      "reason": "Unexpected add expression in leaf operand"
     },
     "string/concatenate/ordering": {
       "status": "unsupported",
@@ -1057,10 +913,6 @@
       "status": "unsupported",
       "reason": "Same missing computed operand as string/concatenate/field-to-field: a term query compares a field against a literal, and there is no place to concatenate aString, the separator and aOptionalString without scripts"
     },
-    "string/concatenate/unsatisfiable-not-equals": {
-      "status": "unsupported",
-      "reason": "Unexpected add expression in leaf operand"
-    },
     "string/contains/field-to-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot use one document field as another field's string-search needle without scripts"
@@ -1069,17 +921,9 @@
       "status": "unsupported",
       "reason": "The needle is a second document field. The Query DSL compares a field against a value, never against another field, so a column-valued LIKE needs a script — the same refusal as the positive string/contains/field-to-field, reached before the negation"
     },
-    "string/contains/value-first": {
-      "status": "unsupported",
-      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts"
-    },
     "string/ends-with/field-to-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot use one document field as another field's string-search needle without scripts"
-    },
-    "string/ends-with/value-first": {
-      "status": "unsupported",
-      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts"
     },
     "string/starts-with/field-to-field": {
       "status": "unsupported",
@@ -1088,14 +932,6 @@
     "string/starts-with/negated-field-to-field": {
       "status": "unsupported",
       "reason": "Same two-document-field comparison as string/contains/negated-field-to-field, reached through startsWith"
-    },
-    "string/starts-with/value-first": {
-      "status": "unsupported",
-      "reason": "This value-first string predicate uses a document field as the search needle against a constant haystack, which Elasticsearch Query DSL cannot express without scripts"
-    },
-    "string/starts-with/value-first-concatenated-literal": {
-      "status": "unsupported",
-      "reason": "After constant folding, this value-first predicate still uses a document field as the search needle against a constant haystack, which requires scripts"
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
@@ -1163,23 +999,15 @@
     },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL cannot evaluate the retained conditional numeric operand without scripts; the translator refuses the ternary before comparing it with the string field."
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary: the else branch's 0/0 is an int division error or a double NaN, and the plan cannot tell which"
     },
     "type-mismatch/less-than/negated-string-field-against-arithmetic": {
       "status": "unsupported",
       "reason": "Same refusal as type-mismatch/less-than/string-field-against-arithmetic, under negation"
     },
-    "type-mismatch/less-than/negated-string-field-against-ternary-number": {
-      "status": "unsupported",
-      "reason": "Same refusal as type-mismatch/less-than/number-field-against-ternary-string, under negation"
-    },
     "type-mismatch/less-than/number-field-against-mixed-ternary": {
       "status": "unsupported",
-      "reason": "Same refusal as type-mismatch/less-than/number-field-against-ternary-string: the ternary is a conditional value the Query DSL cannot evaluate without scripts"
-    },
-    "type-mismatch/less-than/number-field-against-ternary-string": {
-      "status": "unsupported",
-      "reason": "Same missing conditional value as conditional/ternary/compared-to-literal: Elasticsearch Query DSL has no conditional-value expression equivalent to CEL ternary without scripts"
+      "reason": "A ternary translates as one query per branch, and the else branch compares aNumber with aString, two document fields, which the Query DSL cannot do without scripts"
     },
     "type-mismatch/less-than/string-field-against-arithmetic": {
       "status": "unsupported",
@@ -1192,14 +1020,6 @@
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",
       "reason": "Unexpected struct expression in leaf operand"
-    },
-    "type-mismatch/size/boolean-field": {
-      "status": "unsupported",
-      "reason": "size() over a field not declared as a collection: Elasticsearch cannot tell a string's length or a number from an array count, so size(request.resource.attr.aBool) is refused unless 'aBool' is declared in nestedPaths or collectionFields"
-    },
-    "type-mismatch/size/number-field": {
-      "status": "unsupported",
-      "reason": "size() over a field not declared as a collection: Elasticsearch cannot tell a string's length or a number from an array count, so size(request.resource.attr.aNumber) is refused unless 'aNumber' is declared in nestedPaths or collectionFields"
     },
     "type-mismatch/starts-with/number-field-needle": {
       "status": "unsupported",

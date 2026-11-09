@@ -1,43 +1,24 @@
-// Copied from the convex adapter rather than shared: adapters share data, not code
-// (docs/adr/0007-adapters-share-data-not-code.md).
+import { RE2JS } from "re2js";
+
+import { EVALUATION_ERROR } from "./cel";
+import type { EvaluationError } from "./cel";
 
 /**
- * The subset of RE2 the post-filter answers: a literal of plain characters, optionally anchored at
- * either end or followed by a trailing `.*`. The post-filter answers it with plain string
- * comparisons rather than a regex engine, and any other pattern is refused at translation time.
+ * CEL's `matches`: an unanchored RE2 search. The engine is re2js, a port of RE2 with its syntax
+ * and its limits (no lookaround or backreferences, a repeat count of at most 1000, `$` at the
+ * absolute end, `(?i)` by Unicode simple case folding), so the pattern means what it means to the
+ * PDP. A pattern RE2 rejects is an evaluation error, as it is in Cerbos.
  */
-export interface SafeRegexPattern {
-  literal: string;
-  anchoredStart: boolean;
-  anchoredEnd: boolean;
-  trailingWildcard: boolean;
+export interface CompiledRegex {
+  matches: (input: string) => boolean;
 }
 
-const SAFE_REGEX_PATTERN = /^(\^)?([A-Za-z0-9 _:/-]+?)(\.\*)?(\$)?$/;
-
-export const parseSafeRegexPattern = (
-  pattern: string,
-): SafeRegexPattern | undefined => {
-  const match = SAFE_REGEX_PATTERN.exec(pattern);
-  const literal = match?.[2];
-  if (!literal) return undefined;
-  if (match[3] === ".*" && match[4] === "$") return undefined;
-  return {
-    literal,
-    anchoredStart: match[1] === "^",
-    trailingWildcard: match[3] === ".*",
-    anchoredEnd: match[4] === "$",
-  };
-};
-
-export const matchesSafeRegexPattern = (
-  receiver: string,
-  pattern: SafeRegexPattern,
-): boolean => {
-  if (pattern.anchoredStart && pattern.anchoredEnd) {
-    return receiver === pattern.literal;
+export const compileRegex = (pattern: string): CompiledRegex | EvaluationError => {
+  let compiled: RE2JS;
+  try {
+    compiled = RE2JS.compile(pattern);
+  } catch {
+    return EVALUATION_ERROR;
   }
-  if (pattern.anchoredStart) return receiver.startsWith(pattern.literal);
-  if (pattern.anchoredEnd) return receiver.endsWith(pattern.literal);
-  return receiver.includes(pattern.literal);
+  return { matches: (input) => compiled.matcher(input).find() };
 };

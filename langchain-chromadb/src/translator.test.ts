@@ -550,25 +550,26 @@ describe("allowPostFilter", () => {
 
   // The pushdown's fallback — an unmapped path used verbatim as a key — is not the post-filter's:
   // a key no record carries is a missing attribute, which would deny records the PDP allows rather
-  // than refuse the shape.
+  // than refuse the shape. (A reference below a key declared `valueType: "json"` is declared by
+  // that key, which is why `parent.aString` would not do here.)
   test.each([
     [
       "a record mapper without the entry",
       Object.fromEntries(
         Object.entries(FIELD_NAME_MAPPER).filter(
-          ([reference]) => reference !== "request.resource.attr.parent.aString",
+          ([reference]) => reference !== "request.resource.attr.aOptionalString",
         ),
       ),
     ],
     [
       "a function mapper that returns nothing for it",
       ((reference: string) =>
-        reference === "request.resource.attr.parent.aString"
+        reference === "request.resource.attr.aOptionalString"
           ? undefined
           : FIELD_NAME_MAPPER[reference]) as FieldMapper,
     ],
   ])("the post-filter refuses a reference the mapping does not declare: %s", async (_label, mapper) => {
-    const id = "relation/contains/one-hop";
+    const id = "string/contains/field-to-field";
     expect(postFilterOf(await allowing(id))).toBeDefined();
     const raised = await thrownBy(() => allowing(id, mapper));
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);

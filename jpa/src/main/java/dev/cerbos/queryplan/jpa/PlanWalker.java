@@ -37,6 +37,7 @@ final class PlanWalker {
     private final MembershipTranslator membership;
     private final CollectionTranslator collections;
     private final PresenceTranslator presence;
+    private final ObjectAttributeTranslator objects;
     private final int maxMacroDepth;
     /** Current collection-macro nesting depth; maintained by {@link #enterMacro}. */
     private int macroDepth;
@@ -52,10 +53,11 @@ final class PlanWalker {
         ChainSubqueries subqueries = new ChainSubqueries(cb, tri, selectInvocation);
         this.ternary = new TernaryTranslator(cb, tri, this);
         this.comparisons = new ComparisonTranslator(cb, tri, leaf, ternary,
-                new SizeTranslator(cb, tri, this, subqueries));
-        this.membership = new MembershipTranslator(cb, tri, leaf, subqueries);
-        this.collections = new CollectionTranslator(cb, this, subqueries);
+                new SizeTranslator(cb, tri, this, subqueries), this);
         this.presence = new PresenceTranslator(cb, tri, options.nullAttributeRepresentation());
+        this.objects = new ObjectAttributeTranslator(cb, tri, presence, this);
+        this.membership = new MembershipTranslator(cb, tri, leaf, subqueries, objects);
+        this.collections = new CollectionTranslator(cb, this, subqueries, objects);
     }
 
     /**
@@ -118,13 +120,18 @@ final class PlanWalker {
             }
             case "exists", "exists_one", "all" ->
                     collections.handleCollectionOperator(op, operands, scope);
-            // filter() is a list, not a boolean; size(filter(...)) is handled before this.
-            case "filter" -> throw Refusals.unsupported(
-                    "filter() returns a list, not a boolean, so it cannot be a condition on "
-                            + "its own; only size(filter(...)) has a boolean meaning");
-            // List difference has no JPA Criteria translation.
-            case "except" -> throw Refusals.exceptUnsupported();
-            case "has" -> presence.handleHas(operands, scope);
+            // A list where CEL needs a boolean is a no-overload error on every row, which denies
+            // under both polarities. size(filter(...)) and the like never reach here.
+            case "filter", "map", "except", "intersect" -> tri.unknown();
+            case "has" -> {
+                if (operands.size() == 1
+                        && operands.get(0).getNodeCase() == Operand.NodeCase.VARIABLE
+                        && ObjectAttributeTranslator.isObject(scope,
+                                operands.get(0).getVariable())) {
+                    yield objects.present(scope, operands.get(0).getVariable());
+                }
+                yield presence.handleHas(operands, scope);
+            }
             // has_intersection is a deprecated alias the PDP still accepts.
             case "hasIntersection", "has_intersection" ->
                     membership.handleHasIntersection(operands, scope);

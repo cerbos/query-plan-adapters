@@ -27,14 +27,15 @@ query, an Elasticsearch query, and so on) using a mapping you provide from Cerbo
 | Elasticsearch | Java | Build from source (not yet on Maven Central) | [elasticsearch-java](elasticsearch-java/) |
 | ActiveRecord | Ruby | Not released yet | [activerecord](activerecord/) |
 | Sequel | Ruby | Not released yet | [sequel](sequel/) |
+| MongoDB driver / Mongoid | Ruby | Not released yet | [mongodb-ruby](mongodb-ruby/) |
 | Entity Framework Core | C# / .NET | Not released yet (`Cerbos.QueryPlan.EntityFrameworkCore` on NuGet once tagged) | [efcore](efcore/) |
 
 Each adapter's README starts with an install step and a quick-start snippet.
 
 > [!WARNING]
-> **The ActiveRecord and Sequel adapters are work-in-progress prototypes.** They are unreleased,
-> have not been used in production, and their interfaces may change without deprecation. Do not
-> rely on them to enforce access control in a live system yet.
+> **The ActiveRecord, Sequel and MongoDB Ruby adapters are work-in-progress prototypes.** They
+> are unreleased, have not been used in production, and their interfaces may change without
+> deprecation. Do not rely on them to enforce access control in a live system yet.
 
 ## The shape of every integration
 

@@ -4184,6 +4184,24 @@ resourcePolicy:
       condition:
         match:
           expr: timestamp(R.attr.updatedAt) != timestamp("2020-03-15T10:30:00Z")
+    # timestamp/less-or-equal/sub-second-past-literal
+    - actions:
+        - timestamp/less-or-equal/sub-second-past-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00Z")
+    # timestamp/equals/sub-second-past-literal
+    - actions:
+        - timestamp/equals/sub-second-past-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00Z")
     # type-mismatch/contains/number-field-needle
     - actions:
         - type-mismatch/contains/number-field-needle

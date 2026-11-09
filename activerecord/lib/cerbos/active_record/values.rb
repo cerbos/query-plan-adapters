@@ -45,6 +45,10 @@ module Cerbos
       # `filter(collection, lambda)`, held until `size()` consumes it.
       FilteredCollection = Struct.new(:scope, :body)
 
+      # `relation[position]` over an ordered relation of structs, held until `get-field` reads a
+      # member of the element.
+      IndexedElement = Struct.new(:scope, :position)
+
       # `map(collection, lambda)`, held until `hasIntersection()` or `in` consumes it.
       MappedCollection = Struct.new(:scope, :projection)
 

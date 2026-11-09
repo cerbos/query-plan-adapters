@@ -2,7 +2,7 @@
 
 import type { PlanExpressionOperand } from "@cerbos/core";
 
-import { assertStringField, buildFieldFilter } from "./fields";
+import { assertStringField, buildFieldFilter, buildPrefixFilter } from "./fields";
 import type { PrismaFilter } from "./index";
 import {
   isResolvedFieldReference,
@@ -77,9 +77,11 @@ export function handleStringOperator(
     if (typeof value !== "string") {
       throw new UnsupportedQueryPlanError(`${operator} operator requires string value`);
     }
-    // Prisma emits LIKE without an ESCAPE clause and does not escape wildcard characters,
-    // so a needle containing % or _ would match as a pattern instead of literally (e.g.
-    // startsWith("100%") wrongly matches "100xdone"). Fail loudly rather than filter wrong.
+    // A prefix is matched by the range of strings it bounds, so startsWith needs no LIKE escaping
+    // (see buildPrefixFilter). Prisma emits LIKE without an ESCAPE clause and does not escape
+    // wildcard characters, so a contains or endsWith needle containing % or _ would match as a
+    // pattern instead of literally (contains("a_b") wrongly matches "axb"), and a suffix or
+    // substring bounds no range. Fail loudly rather than filter wrong.
     //
     // A backslash is the same hazard reached from the other direction, and only an executed
     // PostgreSQL leg surfaces it (cerbos/query-plan-adapters#320): SQLite's LIKE has no escape
@@ -87,6 +89,9 @@ export function handleStringOperator(
     // DEFAULT escape character even with no ESCAPE clause. `endsWith("\\")` is then a pattern
     // ending in an escape character — a hard error on PostgreSQL — and a `\x` anywhere inside
     // silently drops the backslash, so `contains("a\\b")` matches "ab", a row the PDP denies.
+    if (operator === "startsWith") {
+      return buildPrefixFilter(receiver, value);
+    }
     if (/[%_\\]/.test(value)) {
       throw new UnsupportedQueryPlanError(
         `Cannot translate ${operator} with a needle containing LIKE metacharacters (%, _ or \\): ` +

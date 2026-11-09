@@ -43,7 +43,12 @@ import { negateInterval, solveMonotone } from "./solve";
 import type { DoubleInterval } from "./solve";
 import { tryHandleTernaryComparison } from "./ternary";
 import { roundSubMillisecond } from "./timestamp";
-import { resolveOperand, tryFoldValueExpression } from "./translate";
+import {
+  buildPrismaFilterFromCerbosExpression,
+  resolveOperand,
+  tryFoldValueExpression,
+} from "./translate";
+import { presence } from "./types";
 import { UnsupportedQueryPlanError } from "./errors";
 
 /**
@@ -932,7 +937,11 @@ export function handleInOperator(
     );
   }
 
-  if (isOperatorOperand(collection) && (collection.operator === "list" || collection.operator === "add")) {
+  if (isOperatorOperand(collection) && collection.operator === "list") {
+    return handleListMembership(member, collection.operands, context);
+  }
+
+  if (isOperatorOperand(collection) && collection.operator === "add") {
     throw new UnsupportedQueryPlanError(
       `Membership in a list built by ${collection.operator}(...) from columns: each element is ` +
         "compared with the member, and a Prisma field reference compares two plain columns of " +
@@ -950,4 +959,56 @@ export function handleInOperator(
   throw new UnsupportedQueryPlanError(
     "in requires a field member and literal list, or a literal member and field collection"
   );
+}
+
+/**
+ * `x in [a, b, ...]` over a list the planner could not fold because an element is a column. CEL
+ * builds the list first, which raises an error as soon as one element is a missing attribute, and
+ * then tests `x` against each element for equality, so the membership is the OR of the comparisons
+ * `x == e`, each translated as that comparison would be. With several elements, an element column
+ * the caller omits when NULL gets its presence test ANDed on, TRUE when the value is there and
+ * UNKNOWN when the column is NULL, so a missing element leaves the whole membership UNKNOWN even
+ * where another element matches. One element needs no test: its equality is already UNKNOWN on a
+ * NULL column. An element that is neither a literal nor a column has no presence test, so the
+ * membership is refused rather than let its error be absorbed by a matching sibling.
+ */
+function handleListMembership(
+  member: PlanExpressionOperand,
+  elements: PlanExpressionOperand[],
+  context: TranslationContext
+): PrismaFilter {
+  if (elements.length === 0) {
+    throw new UnsupportedQueryPlanError("Membership in an empty list must be folded by the Cerbos planner");
+  }
+  const equalities = elements.map((element) =>
+    buildPrismaFilterFromCerbosExpression(
+      { operator: "eq", operands: [member, element] },
+      context
+    )
+  );
+  const filter = equalities.length === 1 ? equalities[0]! : { OR: equalities };
+  if (elements.length === 1) return filter;
+
+  const presences: PrismaFilter[] = [];
+  for (const element of elements) {
+    if (isValueOperand(element)) continue;
+    if (!isNamedOperand(element)) {
+      throw new UnsupportedQueryPlanError(
+        "Membership in a list holding an expression beside other elements: building the list " +
+          "raises the expression's error even where another element matches, and no Prisma " +
+          "filter carries that error for an expression"
+      );
+    }
+    const fieldRef = resolveFieldReference(element.name, context);
+    if (isExplicitNullReference(fieldRef)) continue;
+    const test = presence(element, fieldRef);
+    if (test === undefined) {
+      throw new UnsupportedQueryPlanError(
+        `Membership in a list holding ${element.name} beside other elements requires the ` +
+          "column's valueType in the mapper, to spell the presence test a missing element needs"
+      );
+    }
+    presences.push(buildPrismaFilterFromCerbosExpression(test, context));
+  }
+  return presences.length === 0 ? filter : { AND: [...presences, filter] };
 }

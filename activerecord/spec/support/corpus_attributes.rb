@@ -52,16 +52,17 @@ module CorpusAttributes
     "request.resource.attr.parent.inner.aOptionalString" =>
       omitted("parent.inner.a_optional_string"),
 
+    # Each list's rows carry their position, which `order_field` names, so `tags[0]`,
+    # `tagNames == [...]` and two-variable macros have an element order to read.
     "request.resource.attr.tags" => relation(
-      :tags, fields: {"id" => field("tag_id"), "name" => field("name")}
+      :tags, order_field: "position", fields: {"id" => field("tag_id"), "name" => field("name")}
     ),
     # tags[].name as a list. A NULL name stays in the list as a null element.
-    "request.resource.attr.tagNames" => relation(:tags, member_field: "name"),
-
-    # A relation has no order, so the translator refuses indexing these lists at `index`.
-    # Mapped anyway so the refusal names that reason and not a missing mapping.
-    "request.resource.attr.aNumberList" => relation(:number_list_elements, member_field: "value"),
-    "request.resource.attr.aBoolList" => relation(:bool_list_elements, member_field: "value"),
+    "request.resource.attr.tagNames" => relation(:tags, member_field: "name", order_field: "position"),
+    "request.resource.attr.aNumberList" =>
+      relation(:number_list_elements, member_field: "value", order_field: "position"),
+    "request.resource.attr.aBoolList" =>
+      relation(:bool_list_elements, member_field: "value", order_field: "position"),
 
     "request.resource.attr.categories" => relation(:categories, fields: {
       "name" => field("name"),

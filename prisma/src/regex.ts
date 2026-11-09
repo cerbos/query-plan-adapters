@@ -2,8 +2,9 @@
 // filters decides exactly. Everything else is refused.
 
 import type { PlanExpressionOperand } from "@cerbos/core";
+import { RE2JS } from "re2js";
 
-import { assertStringField, buildFieldFilter } from "./fields";
+import { assertStringField, buildFieldFilter, buildPrefixFilter } from "./fields";
 import type { PrismaFilter } from "./index";
 import { isResolvedFieldReference, resolveFieldReference } from "./mapping";
 import type { ResolvedFieldReference, TranslationContext } from "./mapping";
@@ -26,7 +27,10 @@ type Node =
   | { kind: "end" }
   | { kind: "repeat"; node: Node; min: number; max: number };
 
-/** A pattern RE2 itself rejects: evaluating it is a CEL error. */
+/**
+ * A pattern RE2 itself rejects, as the parser below sees it. Whether RE2 rejects a pattern is
+ * decided by re2js (isInvalidPattern), not by this parser, whose refusals are always safe.
+ */
 export class InvalidRegexError extends Error {}
 
 function refuse(pattern: string, why: string): never {
@@ -213,9 +217,31 @@ class Parser {
     const char = this.next();
     if (char === undefined) throw new InvalidRegexError("trailing backslash");
     if (char === "d") return { kind: "char", chars: DIGITS };
-    if (/[1-9]/.test(char)) throw new InvalidRegexError("backreference");
+    const octal = this.octalEscape(char);
+    if (octal !== undefined) return this.literal(octal);
     if (/[A-Za-z0-9]/.test(char)) refuse(this.pattern, `the escape \\${char}`);
     return this.literal(char);
+  }
+
+  /**
+   * The character of an octal escape whose first digit was just read, as Go's regexp/syntax reads
+   * it: `\0` on its own, and `\1` to `\7` only when another octal digit follows (alone, each is
+   * a backreference, which RE2 rejects); up to three digits in all. `\11` is a tab.
+   */
+  private octalEscape(first: string): string | undefined {
+    const isOctal = (c: string | undefined): c is string => c !== undefined && c >= "0" && c <= "7";
+    if (!isOctal(first)) {
+      if (/[89]/.test(first)) throw new InvalidRegexError(`invalid escape sequence: \\${first}`);
+      return undefined;
+    }
+    if (first !== "0" && !isOctal(this.peek())) {
+      throw new InvalidRegexError(`invalid escape sequence: \\${first}`);
+    }
+    let code = Number(first);
+    for (let digits = 1; digits < 3 && isOctal(this.peek()); digits++) {
+      code = code * 8 + Number(this.next());
+    }
+    return String.fromCodePoint(code);
   }
 
   private characterClass(): Node {
@@ -241,8 +267,13 @@ class Parser {
           DIGITS.forEach((digit) => chars.add(digit));
           continue;
         }
-        if (/[A-Za-z0-9]/.test(escaped)) refuse(this.pattern, `the escape \\${escaped}`);
-        from = escaped;
+        const octal = this.octalEscape(escaped);
+        if (octal !== undefined) {
+          from = octal;
+        } else {
+          if (/[A-Za-z0-9]/.test(escaped)) refuse(this.pattern, `the escape \\${escaped}`);
+          from = escaped;
+        }
       }
       if (this.peek() === "-" && this.peek(1) !== "]") {
         this.index++;
@@ -363,12 +394,14 @@ function alternativeFilter(
   const likeText = tokens
     .map((token) => ("char" in token ? token.char : "any" in token ? "_" : "%"))
     .join("");
+  // A prefix is matched as a range, so it needs no escaping (see buildPrefixFilter).
+  if (literal !== undefined && begin) return buildPrefixFilter(fieldRef, literal);
   const literals = tokens.flatMap((token) => ("char" in token ? [token.char] : []));
   if (literals.some((char) => LIKE_METACHARACTERS.test(char))) {
     refuse(pattern, "a literal LIKE metacharacter (%, _ or \\), which Prisma does not escape");
   }
   if (literal !== undefined) {
-    return buildFieldFilter(fieldRef, begin ? "startsWith" : end ? "endsWith" : "contains", literal);
+    return buildFieldFilter(fieldRef, end ? "endsWith" : "contains", literal);
   }
   if (!begin || !end) {
     refuse(pattern, "a wildcard in a pattern not anchored at both ends");
@@ -400,15 +433,21 @@ function alternativeFilter(
 }
 
 /**
- * Whether the pattern is one RE2 rejects, so that `matches()` raises an error on every row. A
- * pattern this adapter cannot translate is not invalid; it is refused when translated.
+ * Whether the pattern is one RE2 rejects, so that `matches()` raises an error on every row: what
+ * re2js, a port of RE2, refuses to compile. A pattern this adapter cannot translate is not invalid;
+ * it is refused when translated.
  */
 export function isInvalidPattern(pattern: string): boolean {
+  return re2Rejection(pattern) !== undefined;
+}
+
+/** RE2's reason for rejecting the pattern, or undefined when it compiles. */
+function re2Rejection(pattern: string): string | undefined {
   try {
-    expandPattern(pattern);
-    return false;
+    RE2JS.compile(pattern);
+    return undefined;
   } catch (error) {
-    return error instanceof InvalidRegexError;
+    return error instanceof Error ? error.message : String(error);
   }
 }
 
@@ -435,6 +474,8 @@ export function handleMatchesOperator(
     throw new UnsupportedQueryPlanError("matches() requires a column receiver");
   }
   assertStringField(fieldRef, "matches");
+  const rejection = re2Rejection(pattern);
+  if (rejection !== undefined) refuse(pattern, `RE2 rejects it (${rejection})`);
   let expansions: Expansion[];
   try {
     expansions = expandPattern(pattern);

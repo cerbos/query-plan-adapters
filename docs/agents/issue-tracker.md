@@ -30,6 +30,7 @@ plus one or more scope labels.
 | `sqlalchemy` | SQLAlchemy (Python) |
 | `activerecord` | ActiveRecord (Ruby) |
 | `sequel` | Sequel (Ruby) |
+| `mongodb-ruby` | MongoDB driver (Ruby) |
 | `ent` | Ent (Go) |
 | `pgx` | pgx / PostgreSQL (Go) |
 | `elasticsearch-java` | Elasticsearch (Java) |

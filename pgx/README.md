@@ -141,6 +141,7 @@ tags := &cerbospgx.Relation{
     Table:        "contact_tag",
     SourceColumn: "id",         // column on the parent row
     TargetColumn: "contact_id", // matching column on contact_tag
+    Position:     "position",   // optional: each element's zero-based position, for tags[0]
     Field:        &cerbospgx.Entry{Column: "name"},                     // scalar elements
     Fields:       map[string]cerbospgx.Entry{"name": {Column: "name"}}, // object elements (t.name)
 }
@@ -161,6 +162,12 @@ flattened chain such as `R.attr.mainCategory.subCategories` joins its intermedia
 subquery while only the resource row correlates outwards. Those subqueries read the mapped table
 bare; if your own reads apply a predicate, declare it as `SubqueryFilter` (see
 [Mapping hazards](#mapping-hazards)).
+
+A related table has no row order, so `R.attr.tags[0]` and an ordered list equality
+(`R.attr.tagNames == ["a", "b"]`) need `Position`: the column holding each element's zero-based
+position for its parent, `0, 1, 2, …` with no gaps. `list[k]` then reads the element row at `k`,
+and a position past the end, negative or fractional is CEL's error: UNKNOWN, so the row is
+excluded under both polarities. Without `Position` those shapes are refused.
 
 ### Declaring value types
 
@@ -272,8 +279,8 @@ PDP's goldens (0.55.0) are replayed too.
 | Tier | Passed / total (PDP 0.57.0) |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 79 / 102 |
-| adversarial | 285 / 373 |
+| extended | 97 / 102 |
+| adversarial | 334 / 375 |
 
 The total is every golden case in the tier for PDP 0.57.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
@@ -344,6 +351,26 @@ tags := &cerbospgx.Relation{
 
 ## Behaviour changes
 
+- Newly translated, each proved by the corpus: `matches()` with a constant pattern. The pattern
+  is parsed with Go's `regexp/syntax`, the parser CEL matches with, so what is valid and what it
+  means are exactly CEL's, and it is lowered only when what it matches can be said with the
+  predicates the adapter already emits exactly: a finite set of literals under anchors (`IN`, or
+  escaped `LIKE` prefix, suffix and substring tests), every character from a small set
+  (`^[ab]+$`, a `REPLACE` per character), a run of non-newline characters (`^.+$`, `^.{8,}$`) and
+  a prefix and suffix around one (`^a.*b$`). RE2's `(?i)` folds as RE2 does (`k` matches KELVIN
+  SIGN), a pattern RE2 rejects is UNKNOWN, as CEL's evaluation error is, and any other pattern
+  (a negated class, a word boundary, `(?s)`, `(?m)`) fails closed with `ErrUnsupported`. No
+  pattern reaches PostgreSQL's own regex engine, whose dialect is not RE2. Also newly translated:
+  `hierarchy(x, "")`, whose empty delimiter makes one segment per character; `==`/`!=` between a
+  column declared `NullConventionExplicit` and one on the omitted convention, UNKNOWN where the
+  omitted side is NULL and definite otherwise; a map literal compared with a column declared
+  `ValueString`, `ValueNumber` or `ValueBool`, unequal wherever the column is present; and a list or
+  map literal as the needle of `in` or an element of `hasIntersection()` against a relation whose
+  element type is declared, which no stored scalar equals (`regex/matches/*`,
+  `hierarchy/*/empty-delimiter`, `null/not-equals/field-to-field-mixed-null-conventions`,
+  `type-mismatch/*/string-field-against-map-literal*`,
+  `type-mismatch/in/list-literal-in-resource-string-list`,
+  `type-mismatch/has-intersection/resource-string-list-against-map-element`).
 - **Breaking:** `Result.Where` is never empty. It is `FALSE` for `KindAlwaysDenied`, where it was
   empty and a builder that skips an empty `WHERE` returned every row, and `TRUE` for
   `KindAlwaysAllowed` ([#494](https://github.com/cerbos/query-plan-adapters/issues/494),
@@ -419,6 +446,14 @@ tags := &cerbospgx.Relation{
 - `!("x" in R.attr.list)` over a relation whose element is declared `NullConventionExplicit` keeps
   a row whose list holds a null and no `"x"`: CEL's `"x" == null` is false, where SQL's `=` was
   UNKNOWN and dropped the row (`membership/in/negated-literal-in-resource-list`).
+- Newly translated, each proved by the corpus: `list[k]` and `list[k].field` over a relation
+  declaring `Position`, as the element row at that position; `R.attr.list == [v1, …]` (and `!=`),
+  also over `map(t, t.f)` and `except(list, [...])` compared with at most one element, as the size
+  and the elements at each position; `exists_one()`, `filter()` inside `size()`, and `map()` over
+  a literal list (the planner's spelling of a principal list past its unrolling threshold), as the
+  strict count of their bodies; `size(except(a, b))` and `size(intersect(a, b))` for a stored list
+  against a literal list; and a list in boolean position (`R.attr.tags.filter(t, …)` as a
+  condition), which CEL rejects on every row and so is UNKNOWN.
 - Newly translated, each proved by the corpus: a ternary yielding a list, lifted above the
   comparison or membership it feeds; `+` between list literals, and `x in R.attr.list + [...]`
   as a disjunction of memberships; `x in [e1, …]` and `exists()`/`all()` over a list of computed

@@ -56,6 +56,11 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
 
     AbstractQuery<?> parentQuery();
 
+    /** The mapping the root of this scope chain was built with; empty when there is none. */
+    default Map<String, AttributeMapping> rootMapping() {
+        return Map.of();
+    }
+
     /** What a Cerbos plan variable denotes in a scope: a scalar value, or a relation. */
     sealed interface Resolution permits ResolvedScalar, ResolvedRelation {}
 
@@ -128,6 +133,11 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     record RootScope(From<?, ?> from, AbstractQuery<?> parentQuery, Map<String, AttributeMapping> mapper)
             implements Scope {
         @Override
+        public Map<String, AttributeMapping> rootMapping() {
+            return mapper;
+        }
+
+        @Override
         public Resolution resolve(String cerbosVar) {
             if (mapper.get(cerbosVar) instanceof AttributeMapping.Field f) {
                 return new ResolvedScalar(traversePath(from, f.jpaPath()), f);
@@ -153,6 +163,11 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     record LambdaScope(From<?, ?> from, AbstractQuery<?> parentQuery,
                        AttributeMapping.Relation relation, String lambdaVar,
                        Scope outer) implements Scope {
+
+        @Override
+        public Map<String, AttributeMapping> rootMapping() {
+            return outer == null ? Map.of() : outer.rootMapping();
+        }
 
         private boolean isLambdaRef(String cerbosVar) {
             return cerbosVar.equals(lambdaVar) || cerbosVar.startsWith(lambdaVar + ".");

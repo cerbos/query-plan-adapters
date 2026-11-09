@@ -261,14 +261,6 @@
       "status": "unsupported",
       "reason": "The literal-list fold accepts only exists/all; a principal-list difference with a resource-dependent second list has no SQL lowering."
     },
-    "principal/exists-one/duplicate-elements": {
-      "status": "unsupported",
-      "reason": "Only exists/all have a literal-list fold; exists_one over a principal list has no SQL lowering."
-    },
-    "principal/exists-one/long-list": {
-      "status": "unsupported",
-      "reason": "Only exists/all have a literal-list fold; exists_one over a principal list has no SQL lowering."
-    },
     "principal/exists/list-of-structs": {
       "status": "unsupported",
       "reason": "The planner emits list/struct constructors for the principal's objects; a constructed list is folded only over scalar attribute and expression elements, and a struct element is a map, which SQL has no value to hold."
@@ -276,114 +268,6 @@
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
       "reason": "The planner emits list/struct constructors for the principal's objects; a constructed list is folded only over scalar attribute and expression elements, and a struct element is a map, which SQL has no value to hold."
-    },
-    "principal/filter/size-of-filtered-long-list": {
-      "status": "unsupported",
-      "reason": "Only exists/all have a literal-list fold; filter over a principal list has no SQL lowering."
-    },
-    "principal/map/membership-in-mapped-list": {
-      "status": "unsupported",
-      "reason": "Only exists/all have a literal-list fold; map over a principal list has no SQL lowering."
-    },
-    "regex/matches/anchored-prefix": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/bounded-repetition": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/brace-without-count-is-literal": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/case-fold-kelvin-and-long-s": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/case-insensitive-flag": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/compared-to-true": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/digit-class": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/dot-excludes-newline": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/dot-plus-excludes-empty-and-newline": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/end-anchor-before-final-newline": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/grouped-alternation": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/leading-zero-count-is-literal": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/literal-brace": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/lookahead-from-principal": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/lucene-reserved-characters-in-class": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/negated-invalid-patterns-from-principal": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/posix-character-class": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/posix-class-and-range-bounded": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/top-level-alternation-prefix-or-suffix": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/top-level-alternation-single-characters": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/unanchored": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/unanchored-quantifiers": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/unbounded-count": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
-    },
-    "regex/matches/whitespace-class": {
-      "status": "unsupported",
-      "reason": "Regex matches() has no default lowering: SQL regex dialects do not share CEL's RE2 matching and error semantics. A caller whose database is known to agree can supply a `matches` operator override."
     },
     "relation/equals/negated-one-hop-against-explicit-null-field": {
       "status": "unsupported",
@@ -432,18 +316,6 @@
       "status": "unsupported",
       "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
     },
-    "type-mismatch/equals/string-field-against-list-literal": {
-      "status": "unsupported",
-      "reason": "A SQL column holds one scalar, and a list literal bound as a parameter would be compared by the driver's coercion (or rejected by it) rather than CEL's typed equality, so comparing a scalar column with a list or map literal is refused."
-    },
-    "type-mismatch/equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
-    },
-    "type-mismatch/equals/string-field-against-map-literal-with-null-value": {
-      "status": "unsupported",
-      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
-    },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
       "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
@@ -452,17 +324,9 @@
       "status": "unsupported",
       "reason": "A relation member is scalar; a list-valued membership needle cannot be bound as one SQL value."
     },
-    "type-mismatch/in/string-field-in-list-of-lists": {
-      "status": "unsupported",
-      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
-    },
     "type-mismatch/less-than/string-field-against-timestamp": {
       "status": "unsupported",
       "reason": "A bare temporal attribute is the RFC 3339 string the application sent, which a stored SQL timestamp no longer spells, and CEL has no string-against-timestamp overload; the translator refuses a DateTime column read outside timestamp() rather than compare it as an instant."
-    },
-    "type-mismatch/not-equals/string-field-against-map-literal": {
-      "status": "unsupported",
-      "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
     }
   }
 }

@@ -68,6 +68,7 @@
     "@cerbos/core": "^0.32.0 || ^0.33.0"
   },
   "dependencies": {
-    "chromadb": "^3.2.2"
+    "chromadb": "^3.2.2",
+    "re2js": "^2.9.1"
   }
 }

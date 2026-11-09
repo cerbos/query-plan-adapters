@@ -13,7 +13,6 @@ module Cerbos
           unless operands.length == 2
             raise InvalidPlanError, "#{operator} takes a collection and a lambda"
           end
-          reject_two_variable_lambda(operator, operands[1])
 
           collection = evaluate(operands[0], environment)
           if collection.is_a?(Array)
@@ -21,8 +20,9 @@ module Cerbos
           end
 
           scope = require_collection(operator, collection)
-          body_node, iterator = lambda_parts(operands[1])
+          body_node, iterator, position = lambda_parts(operands[1])
           inner = environment.bind(iterator, scope)
+          inner = inner.bind(position, element_position(operator, scope)) if position
 
           case operator
           when "map"
@@ -73,8 +73,12 @@ module Cerbos
         # Expands the body per element and joins with OR (`exists`) or AND (`all`). SQL's
         # three-valued OR/AND already match how CEL's quantifiers treat errors.
         def value_list_macro(operator, values, lambda_node, environment)
-          body_node, iterator = lambda_parts(lambda_node)
-          bodies = values.map { |value| predicate(body_node, environment.bind(iterator, value)) }
+          body_node, iterator, position = lambda_parts(lambda_node)
+          bind = ->(value, index) {
+            bound = environment.bind(iterator, value)
+            position ? bound.bind(position, index) : bound
+          }
+          bodies = values.each_with_index.map { |value, index| predicate(body_node, bind.call(value, index)) }
 
           quantified =
             case operator
@@ -83,7 +87,7 @@ module Cerbos
             when "exists_one" then exactly_one_of(bodies)
             when "filter" then return Values::ConstantList.new(elements: values, keeps: bodies)
             when "map"
-              projections = values.map { |value| evaluate(body_node, environment.bind(iterator, value)) }
+              projections = values.each_with_index.map { |value, index| evaluate(body_node, bind.call(value, index)) }
               projections.each do |projection|
                 reject_double_text("map", projection)
                 reject_collection("map", projection)
@@ -102,16 +106,17 @@ module Cerbos
         end
 
         # CEL's two-variable comprehensions bind an element's position (over a list) or a key
-        # (over a map) beside its value. A relation's rows have no position, and a row's
-        # columns are not a map whose keys SQL can enumerate, so neither binding has a
-        # translation.
-        def reject_two_variable_lambda(operator, node)
-          return unless node.is_a?(Plan::Expression) && node.operator == "lambda" && node.operands.length == 3
+        # (over a map) beside its value. A relation gives a row its position only through an
+        # `order_field`; a row's columns are not a map whose keys SQL can enumerate.
+        def element_position(operator, scope)
+          unless scope.ordered?
+            raise UnsupportedOperatorError,
+              "#{operator} with two variables binds each element's list position or map key: a " \
+              "relation's rows have no position without order_field on the mapping, and SQL " \
+              "cannot enumerate a row's columns as map keys"
+          end
 
-          raise UnsupportedOperatorError,
-            "#{operator} with two variables binds each element's list position or map key: a " \
-            "relation's rows have no position, and SQL cannot enumerate a row's columns as map " \
-            "keys, so only one-variable comprehensions are translated"
+          record_cel_type(scope.rank, :int)
         end
 
         # `left.except(right)`: the elements of `left` that no element of `right` equals, by CEL
@@ -208,17 +213,19 @@ module Cerbos
           )
         end
 
+        # The body, the element variable and, for a two-variable lambda, the position variable:
+        # `list.exists(i, v, ...)` arrives as `lambda(body, i, v)`.
         def lambda_parts(node)
-          unless node.is_a?(Plan::Expression) && node.operator == "lambda" && node.operands.length == 2
+          unless node.is_a?(Plan::Expression) && node.operator == "lambda" && (2..3).cover?(node.operands.length)
             raise InvalidPlanError, "Expected a lambda operand, got #{node.inspect}"
           end
 
-          body, iterator = node.operands
-          unless iterator.is_a?(Plan::Variable)
-            raise InvalidPlanError, "Lambda iterator must be a variable, got #{iterator.inspect}"
+          body, *variables = node.operands
+          unless variables.all?(Plan::Variable)
+            raise InvalidPlanError, "Lambda iterator must be a variable, got #{variables.inspect}"
           end
 
-          [body, iterator.name]
+          [body, variables.last.name, (variables.length == 2) ? variables.first.name : nil]
         end
 
         def require_collection(operator, value)

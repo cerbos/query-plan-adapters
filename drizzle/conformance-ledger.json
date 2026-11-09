@@ -15,11 +15,11 @@
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
-      "reason": "double() cast over a string column — same whole-string-versus-leading-digits divergence as the int() cast over a string: Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
+      "reason": "double() cast over a string column \u2014 same whole-string-versus-leading-digits divergence as the int() cast over a string: Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics \u2014 it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
     },
     "cast/double/negated-malformed-string": {
       "status": "unsupported",
-      "reason": "Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics — it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
+      "reason": "Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics \u2014 it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
     },
     "cast/int/string-beyond-double-precision": {
       "status": "unsupported",
@@ -29,10 +29,6 @@
       "status": "unsupported",
       "reason": "string() over int(): string() is lowered only over a string or boolean column, or a number column compared with a string constant, each without a CAST. A CAST would render the number in the store's own format, and no cast target is shared by SQLite, PostgreSQL and MySQL (TEXT is a syntax error on MySQL, CHAR is character(1) on PostgreSQL), so string() of an int() conversion is refused."
     },
-    "cast/string/from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "Same refusal as `cast/string/from-int-beyond-double-precision`: string() of an int() conversion has no CAST-free lowering, and CEL renders an int in plain decimal (\"1000000\") where it renders the double it came from as \"1e+06\", so the number-column inversion does not apply."
-    },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",
       "reason": "string() over a ternary: string() is lowered only over a string or boolean column, or a number column compared with a string constant, each without a CAST. The ternary's int literals reach the plan as bare numbers, and CEL renders the int 1000000 as \"1000000\" where the double renders \"1e+06\", so there is no column to invert and no CAST that spells either rendering on SQLite, PostgreSQL and MySQL."
@@ -40,26 +36,6 @@
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "string() of a double column compared with \"-0\": CEL keeps the sign of -0.0 and prints \"-0\", but SQL compares -0.0 equal to 0.0 and SQLite stores -0.0 as 0, so no filter can pick out the negative zero."
-    },
-    "cast/string/from-ternary-with-int-branch": {
-      "status": "unsupported",
-      "reason": "Same refusal as `cast/string/from-integral-ternary`: string() over a ternary, here of an int() conversion and an int literal, has no CAST-free lowering."
-    },
-    "cast/string/negated-from-boolean-expression": {
-      "status": "unsupported",
-      "reason": "string() is lowered only over a string, boolean or number column, each without a CAST. A boolean-valued comparison is not a column, so there is nothing to spell as CEL's \"true\"/\"false\", and a CAST of the comparison renders 1/0 on SQLite and MySQL, where CEL says \"true\"."
-    },
-    "cast/string/negated-from-boolean-ternary": {
-      "status": "unsupported",
-      "reason": "string() is lowered only over a string, boolean or number column, each without a CAST. A ternary is not a column, so there is nothing to spell as CEL's \"true\"/\"false\", and a CAST of the CASE renders a boolean arm as 1/0 on SQLite and MySQL, where CEL says \"true\"."
-    },
-    "cast/string/negated-from-boolean-through-relation": {
-      "status": "unsupported",
-      "reason": "The to-one parent is a relation, which this adapter reads only as a relation filter (an EXISTS over the related row), never as a scalar value expression, so string() over parent.aBool has no operand to convert."
-    },
-    "cast/string/negated-from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "Same refusal as `cast/string/from-int-past-exponent-threshold`, under negation."
     },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",
@@ -72,10 +48,6 @@
     "cast/timestamp/negated-malformed-string": {
       "status": "unsupported",
       "reason": "'timestamp' field 'request.resource.attr.createdBy' requires a mapping with valueType: \"timestamp\"."
-    },
-    "collection/except/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "Unsupported value-expression operator: except."
     },
     "collection/exists/map-keys": {
       "status": "unsupported",
@@ -93,21 +65,9 @@
       "status": "unsupported",
       "reason": "A two-variable comprehension binds an element's position in the list, or a map's key, as well as its value. The adapter evaluates a macro as a correlated subquery whose one variable is the element row (a JSON array element, or a related row), and neither a JSON array element's index nor an attribute name of the row is a column it reads, so a two-variable macro is refused."
     },
-    "collection/index/first-element-of-object-list": {
-      "status": "unsupported",
-      "reason": "List indexing (tags[0].name): Unsupported value-expression operator: get-field."
-    },
-    "collection/index/negated-first-element-of-object-list": {
-      "status": "unsupported",
-      "reason": "List indexing under negation (!(tags[0].name == \"public\")): Unsupported value-expression operator: get-field."
-    },
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
       "reason": "size(intersect(L, K)): Cerbos's intersect() keeps the duplicates of whichever list is shorter, so the size depends on comparing the stored list's length with the literal's on every row before counting matches. The adapter has no SQL form for that comparison, so it refuses the shape instead of counting a set."
-    },
-    "collection/map/equals-list-literal": {
-      "status": "unsupported",
-      "reason": "map() translates only inside hasIntersection, where the projection becomes the inner column of an EXISTS. Comparing the ordered projection itself to a literal list has no SQL form the adapter builds."
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",

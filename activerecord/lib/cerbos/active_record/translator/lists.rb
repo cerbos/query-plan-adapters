@@ -180,7 +180,10 @@ module Cerbos
           # Both shapes come first, even under an override of `index`: the generic walk below
           # would refuse each before an override saw it (`struct` and `set-field` have no
           # translation, and the container is unmapped).
-          return map_literal_lookup(evaluate(container, environment), evaluate(key, environment)) if map_literal?(container)
+          if map_literal?(container)
+            key_value = evaluate(key, environment)
+            return guard_positions([key_value], map_literal_lookup(evaluate(container, environment), key_value))
+          end
 
           if container.is_a?(Plan::Variable) && key.is_a?(Plan::Value) && key.value.is_a?(::String) &&
               attributes[container.name].nil? && attributes["#{container.name}.#{key.value}"].is_a?(AttributeMapping::Field)
@@ -188,6 +191,131 @@ module Cerbos
           end
 
           apply("index", operands.map { |operand| evaluate(operand, environment) })
+        end
+
+        # `list[position]` over a relation that declares `order_field`. The element is the
+        # projection of the row at that position in the column's order, as a scalar subquery. A
+        # position past the end is CEL's out-of-range error, so the element carries a guard
+        # that {Translator#guard_positions} puts around every operator over it. A negative or
+        # fractional position is that error on every row.
+        def list_element(container, key)
+          unless container.is_a?(Values::Collection)
+            raise UnsupportedOperatorError,
+              "index into #{describe(container)}: only a relation mapped with order_field, or " \
+              "a map literal keyed by a string attribute, is translated. Supply an operator " \
+              "override if the database can express it faithfully."
+          end
+          unless key.is_a?(Numeric)
+            raise UnsupportedOperatorError,
+              "index by #{describe(key)}: only a constant position into a relation is translated"
+          end
+          return cel_type_error unless key.finite? && key == key.truncate && key >= 0
+
+          scope = container.scope
+          position = key.to_i
+          scope.order_column
+          return Values::IndexedElement.new(scope: scope, position: position) unless scope.mapping.member_field
+
+          element = scope.element_at(scope.member_column, position)
+          register_column_type(element, scope.model, scope.mapping.member_field)
+          register_null_representation(element, :explicit)
+          @position_guards[element] = in_range(scope, position)
+          element
+        end
+
+        # The guard of a position: the hops to the list exist, and the list is long enough.
+        def in_range(scope, position, *conditions)
+          scope.guarded(ArelSupport.comparison("gt", scope.count(*conditions), position))
+        end
+
+        # `list[position].field`: the member's column read from the element row. A missing
+        # field on a struct element is CEL's no-such-field error, so the column keeps its
+        # mapping's convention, as a macro body reads it.
+        def field_access(operands, environment)
+          unless operands.length == 2 && operands[1].is_a?(Plan::Variable)
+            raise InvalidPlanError, "get-field takes a container and a field name, got #{operands.inspect}"
+          end
+
+          container = evaluate(operands[0], environment)
+          unless container.is_a?(Values::IndexedElement)
+            raise UnsupportedOperatorError,
+              "get-field over #{describe(container)}: only a member of an element read by " \
+              "position from a relation of structs is translated"
+          end
+
+          scope = container.scope
+          name = operands[1].name
+          mapping = scope.mapping.fields[name]
+          unless mapping.is_a?(AttributeMapping::Field) && mapping.segments.length == 1
+            raise UnsupportedOperatorError,
+              "Relation #{scope.mapping.association.inspect} maps member field #{name.inspect} to " \
+              "#{mapping.nil? ? "nothing" : "a relation or a path"}: an element read by " \
+              "position gives up only a column of its own row"
+          end
+
+          element = scope.element_at(scope.table[mapping.path], container.position)
+          register_column_type(element, scope.model, mapping.path)
+          register_null_representation(element, mapping.null_representation)
+          @position_guards[element] = in_range(scope, container.position)
+          element
+        end
+
+        # `relation == [constants]` and its `!=` over an ordered relation: the same length, and
+        # the element at each position equal to the literal's, as CEL compares lists. A relation
+        # of scalar members holds a null as a value; a `map()` projection or a `filter()` body
+        # that is NULL is an element's error, which errors the whole list.
+        def ordered_list_equality(operator, value, literal)
+          scope, projection, body = ordered_list_parts(value)
+          unless literal.all? { |element| deep_constant?(element) }
+            raise UnsupportedOperatorError,
+              "#{operator} of #{describe(value)} against a list holding a column is not translated"
+          end
+
+          errors = []
+          errors << scope.exists(ArelSupport.is_null(body)) unless body.nil?
+          null_is_value = value.is_a?(Values::MappedCollection) ? null_convention(projection) == :explicit : true
+          errors << scope.exists(ArelSupport.and_node([body, ArelSupport.is_null(projection)].compact)) unless null_is_value
+          kind = value.is_a?(Values::MappedCollection) ? scalar_kind(projection) : member_kind(scope)
+
+          matches = literal.each_with_index.map { |expected, position|
+            element = scope.element_at(projection, position, body)
+            if expected.nil?
+              null_is_value ? ArelSupport.comparison("eq", element, nil) : false
+            elsif composite?(expected) || cross_type_literal?(expected, kind)
+              false
+            elsif kind.nil?
+              raise UnsupportedOperatorError,
+                "#{operator} of #{describe(value)} against #{expected.inspect}: the elements' " \
+                "type is not known, so the store could compare them across types"
+            else
+              ArelSupport.and_node([ArelSupport.comparison("ne", element, nil), ArelSupport.comparison("eq", element, expected)])
+            end
+          }
+          equal = ArelSupport.and_node([ArelSupport.comparison("eq", scope.count(body), literal.length), *matches])
+          result = (operator == "ne") ? ArelSupport.not_node(equal) : equal
+          scope.guarded(unknown_if_any(errors, result))
+        end
+
+        def ordered_list_parts(value)
+          case value
+          when Values::Collection then [value.scope, value.scope.member_column, nil]
+          when Values::FilteredCollection then [value.scope, value.scope.member_column, value.body]
+          when Values::MappedCollection
+            unless ArelSupport.arel_node?(value.projection)
+              raise UnsupportedOperatorError,
+                "== over a map() whose projection is #{describe(value.projection)}: only a " \
+                "projection to a scalar value is translated"
+            end
+            [value.scope, value.projection, nil]
+          end
+        end
+
+        # True for a list value whose order an `order_field` gives.
+        def ordered_list?(value)
+          case value
+          when Values::Collection, Values::FilteredCollection, Values::MappedCollection then value.scope.ordered?
+          else false
+          end
         end
 
         def map_literal?(node)

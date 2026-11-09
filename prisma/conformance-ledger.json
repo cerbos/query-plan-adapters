@@ -46,7 +46,7 @@
     },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
-      "reason": "Prisma filters have no column arithmetic at all, and `mod` is not in the translator's operator set — the same gap the whole arithmetic/divide group hits, reached here through the modulo operator"
+      "reason": "Prisma filters have no column arithmetic at all, and `mod` is not in the translator's operator set \u2014 the same gap the whole arithmetic/divide group hits, reached here through the modulo operator"
     },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
@@ -80,10 +80,6 @@
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: string() over int() has no column to solve for, and CEL's exact decimal rendering of an int past 2^53 has no filter form."
     },
-    "cast/string/from-int-past-exponent-threshold": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no cast operator: string() over int() has no column to solve for, and CEL renders the int as \"1000000\" where the double it came from would be \"1e+06\", so it cannot be solved as a string() over the number column."
-    },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator, and string() of a ternary over the boolean column has no column to solve a where-filter against; the plan also ships the int literals as bare numbers, so CEL's \"1000000\" cannot be told from the double's \"1e+06\"."
@@ -92,21 +88,9 @@
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: string() of a ternary whose one branch is int() has no column to solve a where-filter against."
     },
-    "cast/string/negated-from-boolean-expression": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no cast operator: string(column) == literal is solved for the column it wraps, and string() over a boolean-valued comparison has no column to solve for."
-    },
-    "cast/string/negated-from-boolean-ternary": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no cast operator: string(column) == literal is solved for the column it wraps, and string() over a ternary has no column to solve for."
-    },
-    "cast/string/negated-from-boolean-through-relation": {
-      "status": "unsupported",
-      "reason": "Prisma filters have no cast operator, and string(column) == literal is solved for the column only on a root field, not on a field reached through a relation filter such as the to-one parent."
-    },
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
-      "reason": "Same refusal as `cast/string/from-int-past-exponent-threshold`, under negation."
+      "reason": "string(int(aDouble)) == \"1000000\" is solved as int(aDouble) == 1000000, and an int() equality is translated only outside a negation: under one, the rows where int() overflows int64 (g1) would have to stay UNKNOWN, which needs the \u00b12^63 bound spelled on the column, and an Int column rejects it."
     },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",
@@ -142,15 +126,7 @@
     },
     "collection/exists/literal-list-element-as-contains-needle": {
       "status": "unsupported",
-      "reason": "The planner unrolls the exists over the literal list into one contains() per element, and the \"%_o\" needle carries LIKE metacharacters: the same limitation as string/starts-with/percent-in-needle, since Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, so the adapter throws instead of matching \"%_o\" as a pattern"
-    },
-    "collection/exists/map-keys": {
-      "status": "unsupported",
-      "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. Prisma's relation filters (is, some, every) test related rows, not attribute names, so a macro over a to-one relation is refused."
-    },
-    "collection/exists/negated-map-keys": {
-      "status": "unsupported",
-      "reason": "Same refusal as `collection/exists/map-keys`: a macro over the to-one `parent` ranges over its attribute names, which no Prisma relation filter enumerates."
+      "reason": "The planner unrolls the exists over the literal list into one contains() per element, and the \"%_o\" needle carries LIKE metacharacters: Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, and a substring, unlike a prefix, bounds no range of the column."
     },
     "collection/exists/negated-nested-over-same-collection": {
       "status": "unsupported",
@@ -178,11 +154,11 @@
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
-      "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
+      "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal \u2014 the same site as collection/index/first-element-of-string-list"
     },
     "collection/index/first-element-of-number-list": {
       "status": "unsupported",
-      "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
+      "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal \u2014 the same site as collection/index/first-element-of-string-list"
     },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
@@ -202,11 +178,11 @@
     },
     "collection/index/negated-first-element-of-boolean-list": {
       "status": "unsupported",
-      "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
+      "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal \u2014 the same site as collection/index/first-element-of-string-list"
     },
     "collection/index/negated-first-element-of-number-list": {
       "status": "unsupported",
-      "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
+      "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal \u2014 the same site as collection/index/first-element-of-string-list"
     },
     "collection/index/negated-first-element-of-object-list": {
       "status": "unsupported",
@@ -230,7 +206,7 @@
     },
     "collection/map/equals-list-literal": {
       "status": "unsupported",
-      "reason": "Prisma can feed a map() projection into hasIntersection, which becomes a relation `some` filter, but list EQUALITY needs the whole ordered projection materialised and compared — there is no Prisma filter that compares a relation projection to a literal list"
+      "reason": "Prisma can feed a map() projection into hasIntersection, which becomes a relation `some` filter, but list EQUALITY needs the whole ordered projection materialised and compared \u2014 there is no Prisma filter that compares a relation projection to a literal list"
     },
     "comparison/equals/whole-list-literal": {
       "status": "unsupported",
@@ -252,33 +228,13 @@
       "status": "unsupported",
       "reason": "Same refusal as string/contains/field-to-field: the else branch is contains() with a column-valued needle, which would need per-row LIKE escaping Prisma filters cannot express."
     },
-    "hierarchy/descendent-of/bracket-in-path": {
-      "status": "unsupported",
-      "reason": "Hierarchy prefixes containing [ cannot be matched literally: Prisma emits LIKE without an ESCAPE clause, and [ opens a character class on SQL Server even when one is declared"
-    },
-    "hierarchy/descendent-of/like-metacharacters-in-path": {
-      "status": "unsupported",
-      "reason": "Hierarchy descendant prefixes require literal LIKE matching, but Prisma string filters cannot escape % or _; the adapter throws instead of treating them as wildcards"
-    },
-    "hierarchy/overlaps/like-metacharacters-in-path": {
-      "status": "unsupported",
-      "reason": "The inclusive overlap union ends in a descendant prefix LIKE on '50%:a_b:'; Prisma emits LIKE without an ESCAPE clause, so % and _ in that prefix stay wildcards and would wrongly admit 50x:a_b:y and 50%:aXb:y — the adapter throws instead"
-    },
     "identifier/equals/concatenation": {
       "status": "unsupported",
       "reason": "Both operands carry a column: a_optional_string is compared against a concatenation of a constant with the primary key. Prisma's arithmetic solving inverts the constant off the VALUE side to reach a plain column filter, which requires the other side to be a value; a concatenation involving a second column has no Prisma filter form"
     },
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",
-      "reason": "Two independent limitations sit in this predicate, and the adapter reports the one its walk reaches first: startsWith(aString, '100%') in the left branch hits the same LIKE-metacharacter limitation as string/starts-with/percent-in-needle, before the right branch's cross-model element-vs-outer column comparison (t.name == R.attr.aString) — which collection/exists/element-field-to-outer-field covers on its own — is ever visited"
-    },
-    "membership/in/explicit-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/field-in-list-of-field`: the list literal holds the `coOwner` attribute."
-    },
-    "membership/in/field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "A Prisma `in` filter takes a list of values, never a field reference, so the adapter translates `in` only as a field against a list of constants or a constant against a mapped collection, and refuses a list literal holding another attribute (#574)."
+      "reason": "`t.name == R.attr.aString` inside the exists compares a tag column with a root column, which is cross-model: Prisma field references only compare fields of the same model, so the macro is refused before the negation is pushed through."
     },
     "membership/in/field-in-resource-list": {
       "status": "unsupported",
@@ -286,27 +242,11 @@
     },
     "membership/in/list-mixing-literal-and-expression": {
       "status": "unsupported",
-      "reason": "The list element aOptionalString + \"ret\" makes the membership a comparison of aString with an expression over another column, and a Prisma field reference compares two plain columns of one model, never a column with a concatenation"
-    },
-    "membership/in/map-attribute-keys": {
-      "status": "unsupported",
-      "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. Prisma's relation filters (is, some, every) test related rows, not attribute names, so `in` over a to-one relation is refused."
-    },
-    "membership/in/negated-explicit-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/explicit-field-in-list-of-field`, under negation."
-    },
-    "membership/in/negated-field-in-list-of-field": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/field-in-list-of-field`, under negation."
+      "reason": "The list element aOptionalString + \"ret\" is an expression over a column, so its equality with aString has no constant to solve the concatenation against, and a Prisma filter cannot compare a column with an expression over another column."
     },
     "membership/in/negated-field-in-resource-list": {
       "status": "unsupported",
       "reason": "Same cross-model correlated comparison limitation as membership/in/field-in-resource-list, under negation"
-    },
-    "membership/in/negated-map-attribute-keys": {
-      "status": "unsupported",
-      "reason": "Same refusal as `membership/in/map-attribute-keys`, under negation."
     },
     "membership/in/resource-list-plus-literal-list": {
       "status": "unsupported",
@@ -330,7 +270,7 @@
     },
     "regex/matches/lucene-reserved-characters-in-class": {
       "status": "unsupported",
-      "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: matches."
+      "reason": "Prisma has no regex filter, and the translator lowers only patterns a combination of LIKE filters decides exactly: `[ab@#&~<>]+` is a repeated class, an unbounded repetition with no LIKE spelling."
     },
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",
@@ -386,23 +326,19 @@
     },
     "string/contains/negated-field-to-field": {
       "status": "unsupported",
-      "reason": "The needle is a COLUMN, so its LIKE metacharacters would have to be escaped per row. Prisma's filters cannot do that, and the negation reaches the same refusal as the positive string/contains/field-to-field — the rejection is decided by the column needle before three-valued logic under the NOT is ever considered"
+      "reason": "The needle is a COLUMN, so its LIKE metacharacters would have to be escaped per row. Prisma's filters cannot do that, and the negation reaches the same refusal as the positive string/contains/field-to-field \u2014 the rejection is decided by the column needle before three-valued logic under the NOT is ever considered"
     },
     "string/contains/underscore-in-needle": {
       "status": "unsupported",
-      "reason": "Same LIKE-wildcard limitation as string/starts-with/percent-in-needle"
+      "reason": "Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, so the `_` in the needle would match any one character; a substring, unlike a prefix, bounds no range of the column that could replace the LIKE."
     },
     "string/ends-with/backslash-in-needle": {
       "status": "unsupported",
-      "reason": "A backslash is a LIKE metacharacter on some providers and not others, so the same needle cannot mean the same thing on all of them: SQLite's LIKE has no escape character and matches a backslash literally, while PostgreSQL and MySQL treat it as the DEFAULT escape character with no ESCAPE clause present. endsWith('\\\\') is then a pattern ending in an escape character, which PostgreSQL rejects outright (SQLSTATE 22025), and a backslash anywhere inside a needle silently escapes the next character so contains('a\\\\b') would match 'ab' — a row the PDP denies. Prisma emits no ESCAPE clause and cannot escape the backslash, so the adapter throws instead of filtering differently per provider"
+      "reason": "A backslash is a LIKE metacharacter on some providers and not others, so the same needle cannot mean the same thing on all of them: SQLite's LIKE has no escape character and matches a backslash literally, while PostgreSQL and MySQL treat it as the DEFAULT escape character with no ESCAPE clause present. endsWith('\\\\') is then a pattern ending in an escape character, which PostgreSQL rejects outright (SQLSTATE 22025), and a backslash anywhere inside a needle silently escapes the next character so contains('a\\\\b') would match 'ab' \u2014 a row the PDP denies. Prisma emits no ESCAPE clause and cannot escape the backslash, so the adapter throws instead of filtering differently per provider"
     },
     "string/ends-with/field-to-field": {
       "status": "unsupported",
       "reason": "Same column-needle LIKE limitation as string/contains/field-to-field"
-    },
-    "string/starts-with/concatenated-literal-needle": {
-      "status": "unsupported",
-      "reason": "The folded needle is '100%', hitting the same LIKE-wildcard limitation as string/starts-with/percent-in-needle"
     },
     "string/starts-with/field-to-field": {
       "status": "unsupported",
@@ -411,10 +347,6 @@
     "string/starts-with/negated-field-to-field": {
       "status": "unsupported",
       "reason": "Same column-valued needle as string/contains/negated-field-to-field: escaping per row is what Prisma cannot express, and the negation never gets far enough for the NULL-needle question to arise"
-    },
-    "string/starts-with/percent-in-needle": {
-      "status": "unsupported",
-      "reason": "Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, so a needle containing % or _ cannot be matched literally; the adapter throws instead of filtering wrong"
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
@@ -427,14 +359,6 @@
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-number-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its number element meets the boolean literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
-    },
-    "type-mismatch/less-than/negated-string-field-against-arithmetic": {
-      "status": "unsupported",
-      "reason": "Same refusal as `type-mismatch/less-than/string-field-against-arithmetic`, under negation."
-    },
-    "type-mismatch/less-than/string-field-against-arithmetic": {
-      "status": "unsupported",
-      "reason": "aNumber + 1 has a second column on the other side of the comparison, so no constant is left to solve the sum against, and a Prisma where-filter cannot compare a column with column arithmetic; the translator refuses before it could tell that CEL has no string-vs-number ordering either way."
     }
   }
 }

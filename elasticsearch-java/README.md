@@ -257,11 +257,21 @@ and negated empty checks are safe and translate.
 
 ### Size checks
 
-`size()` lowers to a presence query — `nested` + `match_all` for a `nestedPaths` field, `exists` for
-a `collectionFields` field — and only for the emptiness spellings: `> 0`, `>= 1`, `!= 0` (count on
-either side), and their negations where the polarity is safe. Any other threshold throws.
+The Query DSL counts nothing, so a `size()` comparison translates only when the sizes it accepts
+need no count: every one, none, zero alone, or every one but zero. Over a collection — `nested` +
+`match_all` for a `nestedPaths` field, `exists` for a `collectionFields` field — only "every one but
+zero" is a query, the emptiness spellings `> 0`, `>= 1`, `!= 0` (count on either side) and their
+negations where the polarity is safe: Elasticsearch does not index an empty array, so "zero alone"
+and "every one" would match a missing collection, which CEL errors on. Any other threshold throws.
 
-A `size()` over a field in neither set throws, before the threshold is checked. The plan looks the
+Over a field declared `STRING` in `scalarTypes`, zero is a `term` on the empty string, which
+Elasticsearch indexes, so all four answers translate: `size(s) > 0` is `exists` + `bool.must_not`
+of that term, `size(s) == 0` the term, `size(s) < 4294967296` is `exists` (Lucene indexes no term
+over 32766 bytes), `size(s) > 4294967296` and `size(s) == 1.5` are `match_none`. A threshold inside
+that range needs the string's length and throws. Over a field declared `NUMBER`, `BOOLEAN` or
+`TIMESTAMP`, `size()` is a CEL error, so the query is `match_none`.
+
+A `size()` over a field declared nowhere throws, before the threshold is checked. The plan looks the
 same for `size(tagNames)` (array count), `size(aString)` (string length) and `size(aNumber)` (a CEL
 type error), and `exists` would match the indexed empty string and every number — rows the PDP
 denies.
@@ -399,11 +409,18 @@ silently by returning documents the PDP denies.
 | `timestamp()` in comparisons | `term` / `range` against a `date` field, millisecond-exact values only |
 | `hasIntersection` | `terms` (array overlap) |
 | `descendentOf` / `ancestorOf` / `overlaps` against a constant path | `prefix` / `terms` (or `match_none`) / `bool.should` of both plus a `term` |
-| `size()` emptiness checks | `nested` + `match_all`, or `exists` |
+| `size()` emptiness checks | `nested` + `match_all`, or `exists`; over a string field, `exists` + `bool.must_not` + `term` on `""` (or that `term` for emptiness) |
+| `size()` with a threshold every length or no length satisfies | `exists` (a string field) or `match_none` |
+| `c ? p : q`, as a condition or inside a comparison operand | `bool.should` of `c` with `p` and of `not c` with `q`, each a `bool.must` |
+| a predicate compared with a boolean literal (`R.attr.s.matches("^h") == true`) | the predicate, or its negation |
+| `"literal".startsWith(field)` / `endsWith` / `contains` | `terms` over the literal's prefixes / suffixes / substrings (at most 1024) |
+| `"p" + field + "s"` compared with a string literal (`==`, `!=`, `in`) | `term` / `terms` on the literal less the concatenated parts, or `match_none` / `exists` when none fits |
+| `exists_one(t, t == field)` over a literal list | `terms` over the elements that occur once |
+| `size(L.filter(t, t == field)) > 0` over a literal list | the `exists` fold; `== 0` its negation |
 | `exists` / negated `all` over a nested collection | `nested` + inner query / `nested` + definitely-false inner query |
 | `hasIntersection` + `map` | `nested` + `terms` |
 | `exists` / `all` over a literal value list | `bool.should` / `bool.must` of the substituted body |
-| `exists` / `all` over a list built from scalar fields (`[R.attr.a, R.attr.b].exists(s, …)`) | the same fold, plus an `exists` on every field element |
+| `exists` / `all` over a list built from scalar fields or map literals (`[R.attr.a, {"name": "x"}].exists(s, …)`) | the same fold, plus an `exists` on every field element |
 | `"x" in R.attr.tags.map(t, t.name)` over a nested path | `nested` + `terms`, as `hasIntersection` + `map` |
 | `x["key"]`, a map index by a string literal | the field `x.key` |
 | `{"k": v, …}[field] == x` / `!=` | `terms` on the keys whose value equals (or differs from) `x` |
@@ -436,8 +453,11 @@ A macro over a collection the PDP resolves at plan time — typically a principa
 of the threshold give the same query. `t` becomes the element and `t.name` drills into it; results
 combine with `bool.should` (`exists`) or `bool.must` (`all`). Because the list is fully known,
 positive `all` and negated `exists` translate too. An empty list keeps CEL identity: `exists` is
-`match_none`, `all` is `match_all`, each flipping under negation. `exists_one`, `filter`, `map`, and
-a `t.path` the element does not carry throw.
+`match_none`, `all` is `match_all`, each flipping under negation. `exists_one` folds only when its
+body is `t == field`: exactly one element equals the field, so the field is one of the elements that
+occur once, and the comparison errors for every element alike (a missing field), as `exists_one`
+requires. `filter`, `map`, any other `exists_one` body, and a `t.path` the element does not carry
+throw.
 
 `except(list, list)` is a two-list function, not a macro, and has no Query DSL form. It throws by
 name wherever it appears, suggesting the macro spelling instead:
@@ -447,7 +467,9 @@ name wherever it appears, suggesting the macro spelling instead:
 
 Map the path field as `keyword`. The delimiter comes from the plan (`hierarchy(R.attr.scope, ":")`)
 and only the constant side is split; the stored value is compared as a raw string, and `%`, `_`, `[`
-match literally.
+match literally. An empty delimiter splits the constant into code points, as Cerbos does, so the
+relations become string-prefix relations: the empty string is then the ancestor of every other path,
+and a strict descendant is a `prefix` match that is not the equal `term`.
 
 | Relation | Query |
 |---|---|
@@ -459,28 +481,33 @@ Which row applies depends on operand order, not the operator name (`descendentOf
 with operands swapped). Two constant operands are decided at translation time: `match_all` if true;
 if false the planner should have folded it, so it throws. Negated overlap translates as `exists` +
 `bool.must_not`, excluding missing fields and absent to-one parents. Negated `ancestorOf` /
-`descendentOf`, an empty delimiter, and a path built by `list()` from a document field throw.
+`descendentOf` and a path built by `list()` from a document field throw.
 
 ### Unsupported shapes
 
 These throw `UnsupportedPlanShapeException`. The adapter never generates Painless scripts, which
 would change the security and performance profile of every filter.
 
-- field-to-field comparisons; a constant string receiver with a field argument
-- arithmetic over fields, `int()` / `double()` / `string()` casts, conditional values (CEL ternary, as a
-  condition or an operand)
+- field-to-field comparisons, a string concatenation of two fields or compared with a field
+- arithmetic over fields, a division of two literals the plan spells as integers (`0.0 / 0.0` and
+  `0 / 0` arrive alike, and one is NaN where the other is an error), `int()` / `double()` /
+  `string()` casts
+- a ternary, or a macro, inside a collection macro that reads a field of the enclosing document:
+  a `nested` query sees only the nested document
 - `except()`; `intersect()`; `isSubset()`; `filter()` / `map()` used as a condition or as a
-  computed list, except membership in a plain `map()` field projection over a nested path;
-  `exists_one`; a macro over an object field (a CEL map, whose keys the macro ranges over, which
-  no query can enumerate); a two-variable macro (`exists(i, v, …)`), whose index or key no query
-  reads
+  computed list, except membership in a plain `map()` field projection over a nested path and
+  `size()` of a `filter()` over a literal list; `exists_one` over a document collection, or over a
+  literal list with a body other than `t == field`; a macro over an object field (a CEL map, whose
+  keys the macro ranges over, which no query can enumerate); a two-variable macro
+  (`exists(i, v, …)`), whose index or key no query reads
 - list concatenation (`R.attr.tagNames + ["x"]`), a list literal holding a computed element, and
   `timeSince()`, which is measured from the PDP's request time the plan does not carry
-- counts other than emptiness; `size()` over an undeclared field; collection-empty checks
+- counts other than emptiness, and a string length other than zero; `size()` over an undeclared
+  field; collection-empty checks
 - ordered array indexing (`R.attr.tagNames[0] == "public"`) — a `term` matches any position
 - positive `all` and negated `exists` over a document collection; negated membership in, or
   negated `hasIntersection` over, a document collection
-- negated strict hierarchy relations; paths built from a field or split on an empty delimiter
+- negated strict hierarchy relations; paths built from a field
 - list/map literals where a scalar is expected; non-finite numbers; unsupported regex syntax;
   sub-millisecond timestamps
 - positive comparisons with `null`, and membership or intersection that would need an explicit null
@@ -498,8 +525,8 @@ the current PDP (0.57.0), where the total is every golden case in the tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 29 / 30 |
-| extended | 38 / 102 |
-| adversarial | 130 / 373 |
+| extended | 50 / 102 |
+| adversarial | 165 / 375 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
@@ -561,6 +588,18 @@ applies to every field, and quietly returns more rows.
 
 ## Behaviour changes
 
+- 45 corpus shapes that threw now translate, none of them with a script. A CEL ternary, as a
+  condition or inside a comparison operand, is one query per branch guarded by the condition and
+  its negation; a predicate compared with a boolean literal is the predicate; `size()` over a
+  string field answers emptiness and the thresholds every length or no length satisfies, and over
+  a number or boolean is `match_none`; a literal receiver with a field argument
+  (`"haystack".startsWith(R.attr.s)`) is a `terms` over the literal's prefixes, suffixes or
+  substrings; a concatenation of one field with literals compared with a literal is the field
+  compared with what is left; a hierarchy constant with an empty delimiter splits into code points
+  as Cerbos does; `exists_one` over a literal list with a `t == field` body, `size()` of a
+  `filter()` over a literal list, and a `list()` holding map literals fold; and a collection macro
+  inside a nested lambda lowers to a `nested` query inside the enclosing one.
+  [`conformance-ledger.json`](conformance-ledger.json) lists each remaining refusal.
 - **Breaking ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)).** `matches()`
   refuses a repetition count with a leading zero (`^one{01}$`), which RE2 reads as literal text and
   Lucene as `{1}`, and nested counts whose copies multiply past 1000 (`^(a{2}){600}$`), which RE2

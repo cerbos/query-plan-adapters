@@ -5,7 +5,7 @@
 import type { PlanExpressionOperand } from "@cerbos/core";
 
 import { literalList, literalValue } from "./literals";
-import { resolveFieldReference } from "./mapping";
+import { lookupElementFields, namesToOneRelation, resolveFieldReference } from "./mapping";
 import type { TranslationContext } from "./mapping";
 import { isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
@@ -29,6 +29,7 @@ export function rewriteFunctionCalls(
   return (
     constantPresence(node, context) ??
     memberRead(node, context) ??
+    keyTest(node, context) ??
     emptinessComparison(node) ??
     subsetTest(node) ??
     membershipOfDerivedList(node, context) ??
@@ -80,6 +81,72 @@ function memberRead(
   const { relations } = resolveFieldReference(subject.name, context);
   if (relations?.some((relation) => relation.type === "many")) return undefined;
   return { name: `${subject.name}.${key.value}` };
+}
+
+/**
+ * `"key" in m` and `m.exists(k, k == "key")` (and `k in ["k1", "k2"]`), with `m` a to-one relation:
+ * CEL reads the related row as a map, and both test whether it carries the key, which is
+ * `has(m.key)` — the row exists and sends that attribute. Only a key the mapper declares under the
+ * relation's `fields` can be tested, since presence follows the declared column's null convention;
+ * any other key, and any other body, is left for the translator to refuse.
+ */
+function keyTest(
+  node: OperatorOperand,
+  context: TranslationContext
+): PlanExpressionOperand | undefined {
+  let map: NamedOperand;
+  let keys: string[];
+  if (node.operator === "in" && node.operands.length === 2) {
+    const [key, container] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+    if (!isNamedOperand(container) || !isValueOperand(key) || typeof key.value !== "string") {
+      return undefined;
+    }
+    [map, keys] = [container, [key.value]];
+  } else if (node.operator === "exists" && node.operands.length === 2) {
+    const [container, lambda] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+    if (
+      !isNamedOperand(container) ||
+      !isOperatorOperand(lambda) ||
+      lambda.operator !== "lambda" ||
+      lambda.operands.length !== 2
+    ) {
+      return undefined;
+    }
+    const [body, variable] = lambda.operands as [PlanExpressionOperand, PlanExpressionOperand];
+    if (!isNamedOperand(variable)) return undefined;
+    const tested = keysTested(body, variable.name);
+    if (tested === undefined) return undefined;
+    [map, keys] = [container, tested];
+  } else {
+    return undefined;
+  }
+  if (!namesToOneRelation(context.mapper, map.name)) return undefined;
+  const declared = lookupElementFields(context.mapper, map.name);
+  if (declared === undefined || !keys.every((key) => key in declared)) return undefined;
+  const tests: PlanExpressionOperand[] = keys.map((key) => ({
+    operator: "has",
+    operands: [{ name: `${map.name}.${key}` }],
+  }));
+  return tests.length === 1 ? tests[0]! : { operator: "or", operands: tests };
+}
+
+/** The key literals `body` tests the bare variable against, when it is such a test. */
+function keysTested(body: PlanExpressionOperand, variable: string): string[] | undefined {
+  if (!isOperatorOperand(body) || body.operands.length !== 2) return undefined;
+  const [first, second] = body.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const isVariable = (operand: PlanExpressionOperand): boolean =>
+    isNamedOperand(operand) && operand.name === variable;
+  if (body.operator === "eq") {
+    const literal = isVariable(first) ? second : isVariable(second) ? first : undefined;
+    return literal !== undefined && isValueOperand(literal) && typeof literal.value === "string"
+      ? [literal.value]
+      : undefined;
+  }
+  if (body.operator === "in" && isVariable(first)) {
+    const values = literalList(second);
+    return values?.every((value) => typeof value === "string") ? (values as string[]) : undefined;
+  }
+  return undefined;
 }
 
 /**

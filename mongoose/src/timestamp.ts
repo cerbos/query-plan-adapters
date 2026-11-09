@@ -41,3 +41,36 @@ export const isRfc3339Timestamp = (value: string): boolean => {
     instant <= MAX_CEL_TIMESTAMP_MILLISECONDS
   );
 };
+
+const RFC3339_NANOSECOND_TIMESTAMP_PATTERN =
+  /^((?!0000)\d{4}-\d{2}-\d{2}[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d)(?:\.(\d{1,9}))?([Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+
+/**
+ * A CEL timestamp literal finer than a millisecond as the two BSON Dates around it: the last
+ * instant a Date can hold before it and the first after it. A stored date is never between the
+ * two, so an ordering against the literal is the same ordering against one of them: `d < t` is
+ * `d < ceil(t)`, `d <= t` is `d <= floor(t)`. Undefined for a literal a Date holds exactly, or
+ * that is not a timestamp CEL accepts.
+ */
+export const subMillisecondTimestampBounds = (
+  value: string,
+): { floor: Date; ceil: Date } | undefined => {
+  const match = RFC3339_NANOSECOND_TIMESTAMP_PATTERN.exec(value);
+  if (!match) {
+    return undefined;
+  }
+  const [, head, fraction = "", offset] = match;
+  if (fraction.length <= 3 || /^\d{3}0*$/.test(fraction)) {
+    return undefined;
+  }
+  const milliseconds = `${head}.${fraction.slice(0, 3)}${offset}`;
+  if (!isRfc3339Timestamp(milliseconds)) {
+    return undefined;
+  }
+  const floor = new Date(milliseconds);
+  const ceil = new Date(floor.getTime() + 1);
+  if (ceil.getTime() > MAX_CEL_TIMESTAMP_MILLISECONDS) {
+    return undefined;
+  }
+  return { floor, ceil };
+};

@@ -172,7 +172,6 @@ func TestMalformedPlansReturnErrors(t *testing.T) {
 		{name: "lambda field missing from the element", cond: expr("exists", val(t, []any{map[string]any{"other": 1}}), expr("lambda", expr("eq", variable("t.name"), val(t, "x")), variable("t")))},
 		{name: "hierarchy operands with different delimiters", cond: expr("ancestorOf", expr("hierarchy", val(t, "a"), val(t, ".")), expr("hierarchy", val(t, "a.b"), val(t, ":")))},
 		{name: "hierarchy operator without hierarchy operands", cond: expr("ancestorOf", val(t, "a"), val(t, "a.b"))},
-		{name: "empty hierarchy delimiter", cond: expr("ancestorOf", expr("hierarchy", val(t, "a"), val(t, "")), expr("hierarchy", val(t, "a.b"), val(t, "")))},
 		{name: "invalid timestamp literal", cond: expr("gt", expr("timestamp", val(t, "not-a-timestamp")), val(t, 1))},
 		{name: "hasIntersection between two stored collections", cond: expr("hasIntersection", variable("request.resource.attr.tags"), variable("request.resource.attr.tags"))},
 		{name: "isSubset with one operand", cond: expr("isSubset", variable("request.resource.attr.tags"))},

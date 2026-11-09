@@ -105,6 +105,7 @@ CREATE TABLE adversarial_tag (
 	pk           integer PRIMARY KEY AUTOINCREMENT,
 	tag_id       text NOT NULL,
 	name         text,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_category (
@@ -141,11 +142,13 @@ CREATE TABLE adversarial_inner (
 CREATE TABLE adversarial_number_elem (
 	pk           integer PRIMARY KEY AUTOINCREMENT,
 	value        real,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_bool_elem (
 	pk           integer PRIMARY KEY AUTOINCREMENT,
 	value        integer,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 `
@@ -170,6 +173,7 @@ CREATE TABLE adversarial_tag (
 	pk           bigserial PRIMARY KEY,
 	tag_id       text NOT NULL,
 	name         text,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_category (
@@ -206,11 +210,13 @@ CREATE TABLE adversarial_inner (
 CREATE TABLE adversarial_number_elem (
 	pk           bigserial PRIMARY KEY,
 	value        double precision,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_bool_elem (
 	pk           bigserial PRIMARY KEY,
 	value        boolean,
+	position     integer NOT NULL,
 	resource_id  text NOT NULL REFERENCES adversarial_resource(id)
 );
 `
@@ -255,6 +261,7 @@ CREATE TABLE adversarial_tag (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
 	tag_id       varchar(64) COLLATE utf8mb4_0900_bin NOT NULL,
 	name         varchar(255) COLLATE utf8mb4_0900_bin,
+	position     int NOT NULL,
 	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_category (
@@ -291,11 +298,13 @@ CREATE TABLE adversarial_inner (
 CREATE TABLE adversarial_number_elem (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
 	value        double,
+	position     int NOT NULL,
 	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_bool_elem (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
 	value        boolean,
+	position     int NOT NULL,
 	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
 );
 `
@@ -392,7 +401,8 @@ func buildMapper() cerbosent.Mapper {
 	tags := &cerbosent.Relation{
 		Table:        tagTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
-		Field: &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString},
+		Position: "position",
+		Field:    &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString},
 		Fields: map[string]cerbosent.Entry{
 			"id": {Column: "tag_id"},
 			// Declared, like every other string column: `t.name == 0` is false in CEL, and an
@@ -601,18 +611,16 @@ func (s *store) seed(t *testing.T, corpus *Corpus) {
 			}
 		}
 
-		for _, tag := range seed.Tags {
-			s.exec(t, tagTable, []string{"tag_id", "name", "resource_id"},
-				tag.ID, nullableString(tag.Name), seed.ID)
+		// Each list keeps its order in a position column, which is what `index` reads.
+		for i, tag := range seed.Tags {
+			s.exec(t, tagTable, []string{"tag_id", "name", "position", "resource_id"},
+				tag.ID, nullableString(tag.Name), i, seed.ID)
 		}
-
-		// A relation has no row order, which is why `index` over these lists stays refused;
-		// membership and hasIntersection are position-blind and need none.
-		for _, element := range seed.ANumberList {
-			s.exec(t, numberElemTable, []string{"value", "resource_id"}, nullableFloat(element), seed.ID)
+		for i, element := range seed.ANumberList {
+			s.exec(t, numberElemTable, []string{"value", "position", "resource_id"}, nullableFloat(element), i, seed.ID)
 		}
-		for _, element := range seed.ABoolList {
-			s.exec(t, boolElemTable, []string{"value", "resource_id"}, nullableBool(element), seed.ID)
+		for i, element := range seed.ABoolList {
+			s.exec(t, boolElemTable, []string{"value", "position", "resource_id"}, nullableBool(element), i, seed.ID)
 		}
 
 		catID := categoryID(seed)
@@ -682,7 +690,8 @@ func elementList(table string, element cerbosent.Entry) *cerbosent.Relation {
 	return &cerbosent.Relation{
 		Table:        table,
 		SourceColumn: "id", TargetColumn: "resource_id",
-		Field: &element,
+		Position: "position",
+		Field:    &element,
 	}
 }
 

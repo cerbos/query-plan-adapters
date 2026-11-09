@@ -426,11 +426,15 @@ describe("timestamp literals", () => {
       mapper: MAPPER,
     });
 
-  // The nanosecond instant the PDP actually folds is refused — that, and nothing else, is why the
-  // two `timestamp/*/relative-window*` cases are `unsupported` in conformance-ledger.json.
-  test("the nanosecond instant the PDP folds is refused", async () => {
-    await expect(at("2026-08-11T09:13:39.123456789Z")).rejects.toThrow(
-      UnsupportedQueryPlanError,
+  // The nanosecond instant the PDP actually folds lies between two BSON Dates, and a stored date
+  // is never between them: `< t` is `< the next millisecond`.
+  test("the nanosecond instant the PDP folds is rounded to the next millisecond", async () => {
+    const result = await at("2026-08-11T09:13:39.123456789Z");
+    expect(JSON.stringify(filtersOf(result))).toContain(
+      '"$lt":[{"$let"',
+    );
+    expect(JSON.stringify(filtersOf(result))).toContain(
+      '"2026-08-11T09:13:39.124Z"',
     );
   });
 
@@ -446,14 +450,13 @@ describe("timestamp literals", () => {
 
   // Each of these is refused rather than coerced: a BSON Date built from a lenient string would
   // compare against the field as some other instant, which is a filter that returns documents the
-  // PDP denies rather than an error the caller can see. A BSON Date holds milliseconds, so the
-  // sub-millisecond cases are refused even when the extra digits are zeros — the value would be
-  // silently truncated, and truncation is what makes the relative-window cases unsupported in the first place.
+  // PDP denies rather than an error the caller can see. A sub-millisecond literal is rounded only
+  // under an ordering, where the rounding keeps the answer; one whose extra digits are zeros is a
+  // millisecond instant spelled otherwise, and stays refused.
   test.each([
     ["a date with no time part", "2024-01-01"],
     ["a year outside CEL's instant range", "0000-01-01T00:00:00Z"],
     ["a day that does not exist", "2024-02-30T00:00:00Z"],
-    ["sub-millisecond precision", "2024-01-01T00:00:00.1234Z"],
     ["excess fractional digits, even when zero", "2026-08-11T09:13:39.123000Z"],
     [
       "an offset that pushes past the maximum instant",
