@@ -195,10 +195,10 @@ passed:
 | --- | --- |
 | core | 30 / 30 |
 | extended | 98 / 102 |
-| adversarial | 352 / 379 |
+| adversarial | 355 / 383 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json). All 20 are `unsupported`: the adapter throws
+[`conformance-ledger.json`](conformance-ledger.json). All 21 are `unsupported`: the adapter throws
 `QueryPlanRefusedException` rather than emit a predicate, identically on all three stores. None is
 `divergent`, and none is a wrong answer.
 
