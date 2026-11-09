@@ -9,6 +9,10 @@
       "status": "unsupported",
       "reason": "Same int() refusal as `arithmetic/add/int-beside-double-field`, under negation."
     },
+    "arithmetic/add/ternary-selecting-double-beside-int": {
+      "status": "unsupported",
+      "reason": "The ternary's int arm is int() over a number column, which is not lowered: SQL CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates."
+    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A zero divisor makes CEL's quotient an infinity carrying the zero's sign, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign cannot be read; a column divisor is refused unless zero can only give NaN (the numerator is the divisor itself or a constant zero)."
@@ -220,6 +224,10 @@
     "collection/map/equals-list-literal": {
       "status": "unsupported",
       "reason": "The map() override returns a deferred collection for an enclosing hasIntersection or size to consume; compared directly to a literal list it reaches the default equality unconsumed, which cannot lower a collection."
+    },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "A list constructed from attributes is lowered only as the range of exists()/all() or the right operand of in: SQL has no list value."
     },
     "comparison/equals/whole-list-literal": {
       "status": "unsupported",
