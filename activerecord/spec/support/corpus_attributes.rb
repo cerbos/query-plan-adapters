@@ -6,7 +6,8 @@
 #
 # Null conventions (ADR 0004): a nullable scalar that resources.json omits when NULL declares
 # `:omitted`, and one it sends as an explicit null declares `:explicit`. The collections carry
-# null elements as explicit nulls, which is the call's default.
+# null elements as explicit nulls, which is the call's default; a struct element omits a NULL
+# field, so each struct field declares `:omitted`.
 module CorpusAttributes
   def self.field(path, **kwargs) = Cerbos::ActiveRecord.field(path, **kwargs)
 
@@ -55,7 +56,7 @@ module CorpusAttributes
     # Each list's rows carry their position, which `order_field` names, so `tags[0]`,
     # `tagNames == [...]` and two-variable macros have an element order to read.
     "request.resource.attr.tags" => relation(
-      :tags, order_field: "position", fields: {"id" => field("tag_id"), "name" => field("name")}
+      :tags, order_field: "position", fields: {"id" => omitted("tag_id"), "name" => omitted("name")}
     ),
     # tags[].name as a list. A NULL name stays in the list as a null element.
     "request.resource.attr.tagNames" => relation(:tags, member_field: "name", order_field: "position"),
@@ -65,10 +66,10 @@ module CorpusAttributes
       relation(:bool_list_elements, member_field: "value", order_field: "position"),
 
     "request.resource.attr.categories" => relation(:categories, fields: {
-      "name" => field("name"),
+      "name" => omitted("name"),
       "subCategories" => relation(:sub_categories, fields: {
-        "name" => field("name"),
-        "labels" => relation(:labels, fields: {"name" => field("name")})
+        "name" => omitted("name"),
+        "labels" => relation(:labels, fields: {"name" => omitted("name")})
       })
     }),
 
@@ -79,7 +80,7 @@ module CorpusAttributes
     # with no children, so `all`, `!exists` and counts would return the category-less rows the
     # PDP denies (#309).
     "request.resource.attr.mainCategory" => relation(:categories, fields: {
-      "subCategories" => relation(:sub_categories, fields: {"name" => field("name")}),
+      "subCategories" => relation(:sub_categories, fields: {"name" => omitted("name")}),
       "subNames" => relation(:sub_categories, member_field: "name")
     })
   }.freeze
