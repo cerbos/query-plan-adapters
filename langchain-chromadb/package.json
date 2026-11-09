@@ -5,7 +5,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/cerbos/query-plan-adapters",
-    "directory": "packages/langchain-chromadb"
+    "directory": "langchain-chromadb"
   },
   "bugs": {
     "url": "https://github.com/cerbos/query-plan-adapters/issues"
@@ -38,9 +38,6 @@
     "build": "tsc --build",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "prepare": "npm run build",
-    "preversion": "npm run lint",
-    "version": "git add -A src",
-    "postversion": "git push && git push --tags",
     "test": "jest",
     "test:adversarial": "jest --config jest.adversarial.config.js",
     "chroma": "docker run --rm -p 8234:8000 \"$(cat CHROMA_IMAGE)\""
@@ -61,7 +58,6 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
     "ts-jest": "^29.4.6",
-    "ts-node": "^10.4.0",
     "typescript": "^6.0.0"
   },
   "peerDependencies": {
