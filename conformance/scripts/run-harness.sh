@@ -14,6 +14,7 @@
 #   convex              convex
 #   sqlalchemy          all                      (one pytest run covers every store)
 #   activerecord        sqlite postgres mysql    (ACTIVERECORD_VERSION / RUBY_VERSION pass through)
+#   sequel              sqlite postgres mysql    (SEQUEL_VERSION / RUBY_VERSION pass through)
 #   mongodb-ruby        mongo mongo-next         (Ruby and Bundler from the host)
 #   ent, pgx            all                      (the Go harness starts its own containers)
 #   elasticsearch-java  elasticsearch elasticsearch-next
@@ -53,7 +54,7 @@ stores_for() {
     langchain-chromadb) echo "chroma" ;;
     convex) echo "convex" ;;
     sqlalchemy | ent | pgx) echo "all" ;;
-    activerecord) echo "sqlite postgres mysql" ;;
+    activerecord | sequel) echo "sqlite postgres mysql" ;;
     mongodb-ruby) echo "mongo mongo-next" ;;
     elasticsearch-java) echo "elasticsearch elasticsearch-next" ;;
     jpa) echo "h2 postgres mysql mysql-server-prep" ;;
@@ -166,7 +167,8 @@ run_leg() { # <adapter> <store>
       return "${status}"
       ;;
 
-    activerecord:sqlite | activerecord:postgres | activerecord:mysql)
+    activerecord:sqlite | activerecord:postgres | activerecord:mysql \
+      | sequel:sqlite | sequel:postgres | sequel:mysql)
       ADAPTER_TEST_DB="${store}" ./scripts/test.sh spec/conformance_spec.rb ;;
 
     # scripts/test.sh starts and removes its own MongoDB, on a port Docker picks.
