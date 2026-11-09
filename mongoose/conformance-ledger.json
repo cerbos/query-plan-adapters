@@ -13,6 +13,14 @@
       "status": "unsupported",
       "reason": "A denominator that is a second field can be zero for some documents, and $divide aborts the query rather than denying just those; the adapter requires a non-zero constant denominator"
     },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/divide/int-truncates`: int() and the int division over it are refused, here beside a divisor whose int or double type the plan does not carry."
+    },
+    "arithmetic/divide/int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/divide/int-truncates`: int() and the int division over it are refused, here beside a divisor whose int or double type the plan does not carry."
+    },
     "arithmetic/divide/int-truncates": {
       "status": "unsupported",
       "reason": "Same refusal of int() as `cast/int/negative-fraction`: $convert rounds a double where CEL truncates toward zero, so the int the division would divide is never lowered"
@@ -20,6 +28,10 @@
     "arithmetic/divide/int-truncates-toward-zero": {
       "status": "unsupported",
       "reason": "Same refusal of int() as `arithmetic/divide/int-truncates`, reached through a negative dividend"
+    },
+    "arithmetic/divide/negated-int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `arithmetic/divide/int-truncates`: int() and the int division over it are refused, here beside a divisor whose int or double type the plan does not carry."
     },
     "arithmetic/divide/negated-int-truncates": {
       "status": "unsupported",

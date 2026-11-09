@@ -53,6 +53,14 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
     },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "Same scriptless-arithmetic limitation as arithmetic/divide/int-truncates: the int division is a computed operand the Query DSL cannot compare."
+    },
+    "arithmetic/divide/int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Same scriptless-arithmetic limitation as arithmetic/divide/int-truncates: the int division is a computed operand the Query DSL cannot compare."
+    },
     "arithmetic/divide/int-truncates": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts, and int() over the field is a computed operand too."
@@ -60,6 +68,10 @@
     "arithmetic/divide/int-truncates-toward-zero": {
       "status": "unsupported",
       "reason": "Same scriptless-arithmetic limitation as arithmetic/divide/int-truncates: int(field) / 2 is a computed operand the Query DSL cannot compare."
+    },
+    "arithmetic/divide/negated-int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Same scriptless-arithmetic limitation as arithmetic/divide/int-truncates: the int division is a computed operand the Query DSL cannot compare."
     },
     "arithmetic/divide/negated-int-truncates": {
       "status": "unsupported",

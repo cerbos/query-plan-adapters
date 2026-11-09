@@ -16,6 +16,14 @@
       "reason": "A zero column denominator gives an infinity whose sign is the stored zero's sign, and SQL cannot read it: SQLite stores -0.0 as 0 and no dialect has a portable sign-bit function, so a comparison that sign decides is refused.",
       "status": "unsupported"
     },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates: a SQL CAST rounds where CEL truncates toward zero, so the int division over it is never reached."
+    },
+    "arithmetic/divide/int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates: a SQL CAST rounds where CEL truncates toward zero, so the int division over it is never reached."
+    },
     "arithmetic/divide/int-truncates": {
       "reason": "int() cannot be lowered to a SQL CAST, which on PostgreSQL and MySQL rounds to nearest where CEL truncates toward zero, so the int division over it is never reached.",
       "status": "unsupported"
@@ -23,6 +31,10 @@
     "arithmetic/divide/int-truncates-toward-zero": {
       "reason": "Same int() refusal as arithmetic/divide/int-truncates: a SQL CAST rounds where CEL truncates toward zero, so the int division over it is never reached.",
       "status": "unsupported"
+    },
+    "arithmetic/divide/negated-int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Same int() refusal as arithmetic/divide/int-truncates: a SQL CAST rounds where CEL truncates toward zero, so the int division over it is never reached."
     },
     "arithmetic/divide/negated-int-truncates": {
       "reason": "Same int() refusal as arithmetic/divide/int-truncates, under negation.",

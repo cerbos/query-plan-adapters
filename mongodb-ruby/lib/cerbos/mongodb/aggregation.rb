@@ -905,13 +905,21 @@ module Cerbos
         end
       end
 
+      # Whether +operand+ may stand beside a CEL int: an int-typed expression, a numeric literal,
+      # or a ternary whose branches all are, which CEL's checker types int beside an int.
+      def int_operand?(operand)
+        return true if int_typed?(operand) || (value?(operand) && number?(operand.value))
+
+        expression?(operand) && operand.operator == "if" && operand.operands.drop(1).all? { |branch| int_operand?(branch) }
+      end
+
       # CEL int arithmetic over int64. A literal beside an int is an int; an attribute beside
       # one is a double, which has no overload with an int, so the whole expression raises and
       # is null here. Overflow raises in CEL, where MongoDB widens a long to a double; division
       # and `%` by zero raise; division truncates toward zero, spelled exactly as
       # (n - n % d) / d while both are within 2^53 and null (denied) beyond.
       def build_int_arithmetic(operator, operands, mapper)
-        return nil unless operands.all? { |op| int_typed?(op) || (value?(op) && number?(op.value)) }
+        return nil unless operands.all? { |op| int_operand?(op) }
 
         operands.each do |op|
           next unless value?(op) && !integral?(op.value)

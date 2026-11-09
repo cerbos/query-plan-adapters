@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `postFilter` reads a ternary whose branches are ints, or an element of a constant list of
+  integral numbers, as a CEL int beside `int()`: `int(x) / (flag ? 2 : 1)` truncates as the PDP
+  does, where it used to divide as JavaScript numbers and the negation over-granted
+  ([#567](https://github.com/cerbos/query-plan-adapters/issues/567)).
+
+- **Breaking:** arithmetic between `int()` and an operand whose numeric type the plan does not
+  carry, such as a lambda binding, throws at translation. It used to compute JavaScript numbers,
+  where CEL does int arithmetic over an int and errors over a double
+  ([#567](https://github.com/cerbos/query-plan-adapters/issues/567)).
+
 - `postFilter` evaluates `matches()` with [re2js](https://github.com/le0pard/re2js), a port of
   RE2 and a new dependency, in place of the literal, anchor and trailing `.*` subset. Every pattern
   is matched as the PDP matches it. A pattern RE2 rejects (a lookaround, a backreference, a

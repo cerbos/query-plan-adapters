@@ -8,6 +8,18 @@
       "status": "unsupported",
       "reason": "A column divisor that may hold a signed zero: CEL divides a non-zero dividend by -0.0 into -Infinity and by 0.0 into +Infinity, and SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
     },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "Arithmetic operands are typed from int(), size(), attributes and literals; an index() into a list inside an arithmetic comparison has no type the translator infers, so it is refused."
+    },
+    "arithmetic/divide/int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Arithmetic operands are typed from int(), size(), attributes and literals; a ternary inside an arithmetic comparison is not, so the int division by it is refused."
+    },
+    "arithmetic/divide/negated-int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Arithmetic operands are typed from int(), size(), attributes and literals; a ternary inside an arithmetic comparison is not, so the int division by it is refused."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The divisor aDouble / aNumber is zero with the sign of aDouble's zero, and CEL's quotient is an infinity of that sign; SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."

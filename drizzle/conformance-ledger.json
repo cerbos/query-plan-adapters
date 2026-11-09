@@ -5,6 +5,18 @@
       "status": "unsupported",
       "reason": "A division by a double column that may hold -0.0: CEL divides a positive number by -0.0 to -Infinity and by 0.0 to +Infinity, and `> 0.0` tells them apart, but SQLite stores -0.0 as 0 and no SQL dialect has a portable way to read the sign of a zero. The adapter refuses a zero-capable column denominator whenever the two infinities answer the comparison differently."
     },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "Index access into a literal list: the adapter indexes only a mapped collection at a constant position."
+    },
+    "arithmetic/divide/int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Int division by a ternary over int literals: the adapter lowers CEL's truncating int division only for int() of an integer column divided by a non-zero whole constant, and refuses any other divisor."
+    },
+    "arithmetic/divide/negated-int-by-ternary": {
+      "status": "unsupported",
+      "reason": "Int division by a ternary over int literals: the adapter lowers CEL's truncating int division only for int() of an integer column divided by a non-zero whole constant, and refuses any other divisor."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "Nested division cannot be lowered safely: SQL may evaluate an inner zero divisor before the outer non-finite comparison guards."
