@@ -53,8 +53,8 @@ Three kinds of material live only there, and they are not equal:
 - A harness passes corpus data through verbatim: one mapping and one set of options for every case,
   over the whole dataset.
 - **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/src/corpus.ts`,
-  `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`, the Java
-  `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**,
+  `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`,
+  `mongodb-ruby/spec/support/conformance_corpus.rb`, the Java `Corpus.java` files, `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**,
   so every adapter stays standalone: a loader fix lands in each copy that needs it. Flag a diff that
   extracts a shared loader or adds a drift check between the copies. The vendored Go *translator*
   trees follow the opposite rule: byte-identical. See
