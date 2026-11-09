@@ -25,6 +25,7 @@ query, an Elasticsearch query, and so on) using a mapping you provide from Cerbo
 | JPA (Hibernate, Quarkus, Jakarta EE, Micronaut) | Java | Build from source (not yet on Maven Central) | [jpa](jpa/) |
 | Spring Data JPA | Java | Build from source (not yet on Maven Central) | [spring-data](spring-data/) |
 | Elasticsearch | Java | Build from source (not yet on Maven Central) | [elasticsearch-java](elasticsearch-java/) |
+| Exposed (alpha) | Kotlin | Build from source (not yet on Maven Central) | [exposed](exposed/) |
 | ActiveRecord | Ruby | Not released yet | [activerecord](activerecord/) |
 | Sequel | Ruby | Not released yet | [sequel](sequel/) |
 | MongoDB driver / Mongoid | Ruby | Not released yet | [mongodb-ruby](mongodb-ruby/) |
