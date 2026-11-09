@@ -75,10 +75,7 @@ type ApplicationFilter = Infer<typeof applicationFilterValidator>;
 const translate = (
   queryPlan: unknown,
 ): { kind: PlanKind; filter: Predicate | undefined } => {
-  const result = queryPlanToConvex<
-    FilterBuilder<Documents>,
-    Expression<boolean>
-  >({
+  const result = queryPlanToConvex({
     queryPlan: queryPlan as PlanResourcesResponse,
     mapper: MAPPER,
   });

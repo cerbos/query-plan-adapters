@@ -2,7 +2,13 @@ import type {
   PlanExpressionOperand,
   PlanExpressionValue,
   PlanExpressionVariable,
+  Value,
 } from "@cerbos/core";
+import type {
+  Expression,
+  FilterBuilder,
+  GenericTableInfo,
+} from "convex/server";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper } from "./index";
@@ -24,19 +30,13 @@ import type { ComparisonOperator } from "./operands";
  * on a node its `accepts` passed, so adding a pushable operator is adding one entry.
  */
 
-/** The subset of Convex's `FilterBuilder` the emitted filter calls. */
-export interface FilterQ {
-  eq: (a: unknown, b: unknown) => unknown;
-  neq: (a: unknown, b: unknown) => unknown;
-  lt: (a: unknown, b: unknown) => unknown;
-  lte: (a: unknown, b: unknown) => unknown;
-  gt: (a: unknown, b: unknown) => unknown;
-  gte: (a: unknown, b: unknown) => unknown;
-  and: (...args: unknown[]) => unknown;
-  or: (...args: unknown[]) => unknown;
-  not: (a: unknown) => unknown;
-  field: (name: string) => unknown;
-}
+/**
+ * The builder of any table. Mapped field names are runtime strings, so the filter is built over
+ * every table's field paths; `FilterBuilder<T>` of a concrete table is assignable to it.
+ */
+export type AnyFilterBuilder = FilterBuilder<GenericTableInfo>;
+
+type Field = ReturnType<AnyFilterBuilder["field"]>;
 
 interface PushdownRule {
   accepts: (operands: PlanExpressionOperand[], mapper: Mapper) => boolean;
@@ -48,21 +48,27 @@ interface PushdownRule {
    */
   emit: (
     operands: PlanExpressionOperand[],
-    q: FilterQ,
+    q: AnyFilterBuilder,
     mapper: Mapper,
     operator: string,
     negated: boolean,
-  ) => unknown;
+  ) => Expression<boolean>;
 }
 
-const CONVEX_COMPARISON = {
-  eq: "eq",
-  ne: "neq",
-  lt: "lt",
-  le: "lte",
-  gt: "gt",
-  ge: "gte",
-} as const satisfies Record<ComparisonOperator, keyof FilterQ>;
+type Comparison = (
+  q: AnyFilterBuilder,
+  field: Field,
+  literal: Value,
+) => Expression<boolean>;
+
+const CONVEX_COMPARISON: Record<ComparisonOperator, Comparison> = {
+  eq: (q, field, literal) => q.eq(field, literal),
+  ne: (q, field, literal) => q.neq(field, literal),
+  lt: (q, field, literal) => q.lt(field, literal),
+  le: (q, field, literal) => q.lte(field, literal),
+  gt: (q, field, literal) => q.gt(field, literal),
+  ge: (q, field, literal) => q.gte(field, literal),
+};
 
 /** `5 < x` is `x > 5`: the comparison that holds once the operands are swapped. */
 const MIRRORED_COMPARISON: Record<ComparisonOperator, ComparisonOperator> = {
@@ -98,7 +104,7 @@ const fieldAndLiteral = (
 /** `in` with the field first and a literal list second. */
 const fieldInList = (
   operands: PlanExpressionOperand[],
-): { field: PlanExpressionVariable; values: unknown[] } | undefined => {
+): { field: PlanExpressionVariable; values: Value[] } | undefined => {
   const [needle, haystack] = operands;
   if (!needle || !haystack) return undefined;
   if (
@@ -127,7 +133,11 @@ const INT64_MAX = 2n ** 63n - 1n;
  * error, which denies the document under either polarity. Each guard is bounded by the values
  * just outside the literal's own type in that order.
  */
-const sameTypeAs = (literal: unknown, q: FilterQ, field: unknown): unknown => {
+const sameTypeAs = (
+  literal: Value,
+  q: AnyFilterBuilder,
+  field: Field,
+): Expression<boolean> | undefined => {
   switch (typeof literal) {
     case "number":
       return q.and(q.gt(field, INT64_MAX), q.lt(field, false));
@@ -140,10 +150,10 @@ const sameTypeAs = (literal: unknown, q: FilterQ, field: unknown): unknown => {
   }
 };
 
-/** The field and the Convex method that compares it with the literal, operand order resolved. */
+/** The field and the Convex comparison of it with the literal, operand order resolved. */
 const comparisonParts = (
   operands: PlanExpressionOperand[],
-  q: FilterQ,
+  q: AnyFilterBuilder,
   mapper: Mapper,
   operator: string,
 ) => {
@@ -154,10 +164,10 @@ const comparisonParts = (
     );
   }
   const cel = operator as ComparisonOperator;
-  const method =
+  const compare =
     CONVEX_COMPARISON[pair.swapped ? MIRRORED_COMPARISON[cel] : cel];
   const field = q.field(resolveField(pair.field.name, mapper));
-  return { field, literal: pair.literal.value, method };
+  return { field, literal: pair.literal.value, compare };
 };
 
 /** `==` and `!=`: CEL equality across types is false, never an error, exactly as in Convex. */
@@ -167,13 +177,13 @@ const equalityRule: PushdownRule = {
     return pair !== undefined && !isNullableField(pair.field.name, mapper);
   },
   emit: (operands, q, mapper, operator, negated) => {
-    const { field, literal, method } = comparisonParts(
+    const { field, literal, compare } = comparisonParts(
       operands,
       q,
       mapper,
       operator,
     );
-    const compared = q[method](field, literal);
+    const compared = compare(q, field, literal);
     return negated ? q.not(compared) : compared;
   },
 };
@@ -190,7 +200,7 @@ const orderingRule: PushdownRule = {
     return pair !== undefined && !isNullableField(pair.field.name, mapper);
   },
   emit: (operands, q, mapper, operator, negated) => {
-    const { field, literal, method } = comparisonParts(
+    const { field, literal, compare } = comparisonParts(
       operands,
       q,
       mapper,
@@ -199,7 +209,7 @@ const orderingRule: PushdownRule = {
     const guard = sameTypeAs(literal, q, field);
     // Ordering against null, a list or a map is an error for every document: false either way.
     if (guard === undefined) return q.eq(true, false);
-    const compared = q[method](field, literal);
+    const compared = compare(q, field, literal);
     return q.and(guard, negated ? q.not(compared) : compared);
   },
 };
@@ -256,7 +266,7 @@ const PUSHDOWN_RULES: Record<string, PushdownRule> = {
           ? q.eq(true, false)
           : values.length === 1
             ? q.eq(q.field(field), values[0])
-            : q.or(...values.map((v: unknown) => q.eq(q.field(field), v)));
+            : q.or(...values.map((v) => q.eq(q.field(field), v)));
       return negated ? q.not(built) : built;
     },
   },
@@ -288,17 +298,18 @@ export const canPushToDb = (
 /** The builder calls for an expression `canPushToDb` accepted. */
 export const translateExpression = (
   expression: PlanExpressionOperand,
-  q: FilterQ,
+  q: AnyFilterBuilder,
   mapper: Mapper,
-): unknown => emitExpression(expression, q, mapper, false);
+): Expression<boolean> => emitExpression(expression, q, mapper, false);
 
 const emitExpression = (
   expression: PlanExpressionOperand,
-  q: FilterQ,
+  q: AnyFilterBuilder,
   mapper: Mapper,
   negated: boolean,
-): unknown => {
-  const polarised = (built: unknown) => (negated ? q.not(built) : built);
+): Expression<boolean> => {
+  const polarised = (built: Expression<boolean>) =>
+    negated ? q.not(built) : built;
   if (isValue(expression)) {
     if (typeof expression.value === "boolean") {
       return polarised(q.eq(true, expression.value));
@@ -331,13 +342,14 @@ const emitExpression = (
 /** `and`/`or` over operands that each carry the enclosing polarity. */
 const junction = (
   operands: PlanExpressionOperand[],
-  q: FilterQ,
+  q: AnyFilterBuilder,
   mapper: Mapper,
   negated: boolean,
   combine: "and" | "or",
-): unknown => {
+): Expression<boolean> => {
   if (operands.length === 0) return q.eq(true, combine === "and");
   const emitted = operands.map((op) => emitExpression(op, q, mapper, negated));
-  if (emitted.length === 1) return emitted[0];
+  const [only] = emitted;
+  if (emitted.length === 1 && only) return only;
   return q[combine](...emitted);
 };
