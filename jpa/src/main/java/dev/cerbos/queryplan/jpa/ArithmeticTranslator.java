@@ -21,16 +21,9 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * Lowers arithmetic ({@code add}/{@code sub}/{@code mult}/{@code div}) in a comparison operand
- * to SQL, in IEEE double space.
- *
- * <p>Columns are cast to a real double ({@link #toIeeeDouble}), constant subtrees fold in Java,
- * and constants mixed into SQL bind as double parameters. A zero divisor is guarded with
- * {@code NULLIF}, and a comparison against a possibly-zero division is rewritten
- * ({@link #tryDivisionByZeroComparison}) so NaN and infinities compare as they do in CEL.
- *
- * <p>A subtree {@code int()} makes int-typed is lowered by {@link IntArithmetic} instead, and
- * one mixing the two types is a CEL error on every row.
+ * Lowers arithmetic in a comparison operand to SQL, in IEEE double space: columns cast to a real
+ * double, constant subtrees fold in Java, constants bind as doubles. {@code int()}-typed subtrees go
+ * to {@link IntArithmetic}.
  */
 final class ArithmeticTranslator {
 
@@ -58,20 +51,9 @@ final class ArithmeticTranslator {
     }
 
     /**
-     * Translates {@code cmp(arith(...), other)}, e.g. {@code R.attr.aNumber + 1.0 > 2.0}, by
-     * emitting the arithmetic in SQL and comparing.
-     *
-     * <p>Everything is computed in double space because attribute values are always CEL
-     * doubles at check time, and the wire plan does not distinguish int from double.
-     *
-     * <p>A side that is int-typed through {@code int()} goes to {@link IntArithmetic}; a side that
-     * mixes an int with a double, or applies {@code mod} to a double, is a CEL no-overload error
-     * on every row, so the comparison is UNKNOWN under both polarities.
-     *
-     * <p>An {@link OperatorFunction} override is consulted when one side is a constant; it
-     * receives the arithmetic expression and the constant as a {@link Double} (a {@link Long}
-     * for an int-typed expression). Expression against expression comparisons do not consult
-     * overrides.
+     * Translates {@code cmp(arith(...), other)} in double space, since attribute values are CEL doubles.
+     * Mixing int and double, or {@code mod} on a double, is UNKNOWN. An {@link OperatorFunction} override
+     * is consulted only when one side is a constant.
      */
     Predicate numericComparison(String op, List<Operand> operands, Scope scope) {
         IntArithmetic.CelType left = IntArithmetic.typeOf(operands.get(0), scope);
@@ -93,21 +75,8 @@ final class ArithmeticTranslator {
     }
 
     /**
-     * Rewrites a comparison against a division that may divide by zero, or returns
-     * {@code null} when the shape does not apply.
-     *
-     * <p>In CEL {@code 0/0} is NaN and {@code x/0} is a signed infinity. The {@code NULLIF}
-     * guard alone would make every comparison UNKNOWN, which is wrong for an inequality:
-     * {@code NaN != 1.0} is TRUE. So the comparison becomes nested ternaries:
-     *
-     * <pre>{@code
-     * if (d == 0) { if (n == 0) NaN op v else if (n > 0) +Inf op v else -Inf op v }
-     * else { n / d op v }
-     * }</pre>
-     *
-     * <p>Each non-finite arm folds in Java, so no NaN or infinity is bound. A NULL numerator or
-     * denominator makes every condition UNKNOWN, so the row stays excluded under both
-     * polarities.
+     * Rewrites a comparison against a possibly-zero division into nested ternaries over the divisor and
+     * numerator, so NaN and infinities compare as in CEL; {@code null} when the shape does not apply.
      */
     private Predicate tryDivisionByZeroComparison(
             String op, List<Operand> operands, Scope scope) {
@@ -458,18 +427,9 @@ final class ArithmeticTranslator {
     }
 
     /**
-     * Resolves an operand to double space. Database decimal arithmetic is not IEEE: H2 and
-     * PostgreSQL type {@code 0.1} as exact NUMERIC, so {@code aNumber * 0.1 == 0.3} would match
-     * rows CEL denies. So:
-     * <ul>
-     *   <li>columns go through {@link #toIeeeDouble};</li>
-     *   <li>constant subtrees fold in Java;</li>
-     *   <li>constants mixed into SQL bind as double parameters.</li>
-     * </ul>
-     *
-     * <p>A column divisor is wrapped in {@code NULLIF(d, 0)}, because SQL fails the whole query
-     * on a zero divisor. A constant zero divisor becomes a NULL literal. This is only correct
-     * for ordered comparisons; see {@link #tryDivisionByZeroComparison}.
+     * Resolves an operand to double space ({@code 0.1} is NUMERIC on H2 and PostgreSQL). A column divisor
+     * becomes {@code NULLIF(d, 0)} and a constant zero divisor a NULL literal; see
+     * {@link #tryDivisionByZeroComparison}.
      */
     NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
         switch (operand.getNodeCase()) {

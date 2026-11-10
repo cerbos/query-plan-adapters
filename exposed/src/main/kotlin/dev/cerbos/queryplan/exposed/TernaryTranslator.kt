@@ -5,15 +5,8 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import org.jetbrains.exposed.v1.core.Op
 
 /**
- * The CEL ternary, `if(condition, whenTrue, whenFalse)`, in both positions. Both are REWRITES, not
- * lowerings to `CASE`: the branches are substituted back into the surrounding shape and walked
- * again, so a branch translates exactly as the same condition written directly, and the three
- * predicates are combined with [TriLogic.ternary].
- *
- * Rewriting rather than emitting `CASE WHEN` is what keeps every typed leaf path — field-first
- * normalisation, the `size()` handling, the `add` fold, double-space comparison — reachable from
- * inside a ternary. Nesting, and a ternary on the other side of the comparison, then come for
- * free through the recursion.
+ * The CEL ternary in both positions, as a rewrite: each branch is substituted into the surrounding
+ * shape and walked again, then combined with [TriLogic.ternary].
  */
 internal class TernaryTranslator(private val translation: Translation) {
 
@@ -22,14 +15,8 @@ internal class TernaryTranslator(private val translation: Translation) {
         translateTernary(operands, scope) { branch -> translation.walker.traverse(branch, scope) }
 
     /**
-     * A comparison or `in` with a ternary operand, or `null` when neither operand holds one. Called
-     * FIRST, on raw operands, because it must see source order: each branch is substituted back
-     * into the comparison AS WRITTEN and walked again, and mirroring first would substitute into a
-     * comparison the policy never had.
-     *
-     * The ternary may sit under list or string `+` (`["a"] + (c ? ["b"] : []) == [...]`): `+`
-     * evaluates both its operands, so substituting a branch in place keeps CEL's meaning, and a
-     * substituted `add(list, list)` of constants is folded into the list it concatenates.
+     * A comparison or `in` with a ternary operand, or `null`. Runs first, on raw operands, so branches
+     * substitute into the comparison as written. Under list or string `+` the substitution is still exact.
      */
     fun tryTernaryComparison(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
         if ((operator !in ComparisonTranslator.COMPARISON_OPERATORS && operator != "in") || operands.size != 2) {
@@ -70,15 +57,7 @@ internal class TernaryTranslator(private val translation: Translation) {
         return Operand.newBuilder().setExpression(rebuilt).build()
     }
 
-    /**
-     * The rewrite itself. A CONSTANT boolean condition folds to a single branch, and only that
-     * branch is translated — so an untranslatable dead branch cannot fail the whole plan.
-     *
-     * Null semantics and the third arm belong to [TriLogic.ternary]: a NULL condition column is a
-     * CEL evaluation error, which denies, so the predicate has to be UNKNOWN there rather than
-     * FALSE — two false branches would otherwise collapse it to FALSE and an enclosing negation
-     * would readmit the row.
-     */
+    /** The rewrite. A constant condition translates only its live branch. */
     private fun translateTernary(
         operands: List<Operand>,
         scope: Scope,

@@ -207,8 +207,7 @@ class TriLogicTest {
     @Test
     fun `every composition renders under every dialect`() {
         // UnknownOp spells SQL UNKNOWN as a comparison against a NULL literal rather than a bound
-        // parameter, because PostgreSQL cannot type a bare placeholder in `? IS NULL`. Rendering it
-        // under all four is what says the spelling needs no dialect knowledge.
+        // parameter, because PostgreSQL cannot type a bare placeholder in `? IS NULL`.
         val composed = TriLogic.or(
             TriLogic.ternary(unknownLeaf(), knownTrue(), knownFalse()),
             TriLogic.baseUnlessUnknown(knownFalse(), TriLogic.determined(knownTrue())),

@@ -28,12 +28,7 @@ import kotlin.math.floor
 
 /**
  * `size(x) op N`: string length over a column, element count over a relation chain, and the strict
- * `size(filter(...))` count. Owns the threshold arithmetic for fractional and out-of-range
- * constants, and the choice between the two-valued `EXISTS` emptiness shortcuts and the tri-state
- * count.
- *
- * It is a STEP of the comparison pipeline rather than a resolved-operand case: its SQL shapes are
- * subquery translations pinned by the differential oracle, not a (column, constant) pair.
+ * `size(filter(...))` count, with the threshold arithmetic for fractional and out-of-range constants.
  */
 internal class SizeTranslator(private val translation: Translation) {
 
@@ -72,14 +67,8 @@ internal class SizeTranslator(private val translation: Translation) {
         }
 
     /**
-     * `size(string)`. The threshold arithmetic is decided statically rather than truncated: a
-     * character count is integral, so a fractional constant can never be hit exactly, and
-     * `LENGTH(s) >= 1` is a strictly wider filter than `size(s) >= 1.5` asks for.
-     *
-     * The vacuous arms are NOT unconditional. A NULL column is a missing attribute (or, under the
-     * explicit convention, a null value with no `size()` overload), so CEL raises an evaluation
-     * error and denies; folding to a constant TRUE would return those rows, and folding to a
-     * constant FALSE would return them under a negation.
+     * `size(string)`. A vacuous threshold still keeps a NULL column UNKNOWN, because `size()` of a
+     * missing attribute raises.
      */
     private fun stringLength(target: Resolution.Scalar, comparison: Threshold): Op<Boolean> {
         // `size()` counts characters, and CEL has no overload counting the characters of a number
@@ -144,12 +133,7 @@ internal class SizeTranslator(private val translation: Translation) {
         return compare(translation.subqueries.chainCount(collection), comparison)
     }
 
-    /**
-     * `size(collection.filter(x, body))`. CEL's `filter` has NO error absorption: one element whose
-     * body errors errors the whole expression, even when the count comparison would otherwise hold.
-     * The strict counter goes SQL NULL whenever any element body is UNKNOWN, so every comparison
-     * built on it is UNKNOWN and the row stays excluded under both polarities.
-     */
+    /** `size(collection.filter(x, body))`: the strict counter is NULL when any body is UNKNOWN, as `filter` absorbs no error. */
     private fun filtered(target: SizeTarget.Filtered, comparison: Threshold, scope: Scope): Op<Boolean> {
         val resolved = scope.resolve(target.variable)
         if (resolved !is Resolution.Collection) {
@@ -178,12 +162,7 @@ internal class SizeTranslator(private val translation: Translation) {
         }
     }
 
-    /**
-     * `size([literal list].filter(x, body))`: one body per element POSITION, substituted and walked
-     * like the `exists`/`all` fold. The count is `Σ CASE WHEN b THEN 1 ELSE 0 END` plus a poison
-     * term per element that is SQL NULL when its body is UNKNOWN — `filter` has no error absorption,
-     * so one erroring element errors the size, and NULL is absorbing under `+`.
-     */
+    /** `size([literal list].filter(x, body))`: one body per position, each with a NULL poison term when UNKNOWN. */
     private fun filteredLiteral(target: SizeTarget.FilteredLiteral, comparison: Threshold, scope: Scope): Op<Boolean> =
         translation.walker.enterMacro("size(filter(...))") {
             val bodies = target.elements.map { element ->
@@ -296,14 +275,7 @@ internal class SizeTranslator(private val translation: Translation) {
         }
     }
 
-    /**
-     * A `size()` comparison reduced to an integral threshold.
-     *
-     * A count and a character length are both integral, so a fractional constant never lands on
-     * one: `eq 1.5` is always false, `ne 1.5` always true, and `>= 1.5` is `>= 2` — rounding, not
-     * truncating. Truncating `>= 1.5` to `>= 1` returns rows the PDP denies, which is the bug the
-     * corpus's fractional actions exist to catch.
-     */
+    /** A `size()` comparison reduced to an integral threshold: `>= 1.5` rounds up to `>= 2`, `eq 1.5` is vacuous. */
     private class Threshold(val operator: String, val value: Long, val vacuous: Boolean?) {
         companion object {
             fun of(operator: String, raw: Double): Threshold {

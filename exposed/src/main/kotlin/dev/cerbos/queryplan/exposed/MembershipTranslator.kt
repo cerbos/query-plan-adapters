@@ -11,16 +11,9 @@ import org.jetbrains.exposed.v1.core.IsNullOp
 import org.jetbrains.exposed.v1.core.Op
 
 /**
- * `in` and `hasIntersection`, over a scalar column, a relation chain, or a `map()` projection.
- *
- * Owns CEL's null-element semantics: a null list element is an `IS NULL` disjunct, never an
- * `IN (…, NULL)` that SQL silently drops. It also owns the two VIEWS of a NULL member column that
- * decide which one applies — under the scalar-projection view a NULL member IS the null element,
- * while under member ACCESS through `map()` it is a missing element attribute and therefore an
- * UNKNOWN row.
- *
- * Every existence test over a chain goes through [Subqueries.chainContains], so an absent to-one
- * parent stays UNKNOWN under both polarities.
+ * `in` and `hasIntersection`, over a scalar column, a relation chain, or a `map()` projection. A null
+ * list element is an `IS NULL` disjunct. A NULL member column is the null element under scalar
+ * projection, but a missing attribute (UNKNOWN) under `map()` member access.
  */
 internal class MembershipTranslator(private val translation: Translation) {
 
@@ -46,12 +39,8 @@ internal class MembershipTranslator(private val translation: Translation) {
         if (member.nodeCase != Operand.NodeCase.VARIABLE || constant === PlanValues.NotConstant) {
             throw RelationRefusals.membershipOperands("in")
         }
-        // Value-first, `<constant> in collection`, the constant is ONE element, not a list of
-        // candidates: `["public"] in tagNames` asks whether the list `["public"]` is itself an
-        // element. Spreading it into its elements would answer `"public" in tagNames` instead and
-        // return every row holding that tag. A list or map equals no scalar element, null elements
-        // included, so over a collection of scalars the membership is a definite FALSE — the
-        // never-matching body [collectionContainsAny] already gives an empty list.
+        // `<list constant> in collection` asks whether the list itself is an element, which no scalar
+        // element equals: a definite FALSE.
         if (operands[0].nodeCase != Operand.NodeCase.VARIABLE && (constant is List<*> || constant is Map<*, *>)) {
             val resolved = scope.resolve(member.variable) as? Resolution.Collection
                 ?: throw RelationRefusals.structuredMember("in")
@@ -67,13 +56,8 @@ internal class MembershipTranslator(private val translation: Translation) {
     }
 
     /**
-     * `attribute in [literal list].map(t, expr)`: the membership in the projected list, as the
-     * disjunction `OR_i attribute == expr[t := L_i]` walked like any written-out comparison. That
-     * is exact under three-valued logic: the projection raises only where `expr` does, and then
-     * every equality over it is UNKNOWN too, so no disjunct can be TRUE; a missing attribute makes
-     * every disjunct UNKNOWN. `map()` itself absorbs nothing, which an OR of UNKNOWNs preserves.
-     * The empty list projects to `[]`, where [scalarIsAnyOf] owns the answer. `null` when the
-     * container is not that shape.
+     * `attribute in [literal list].map(t, expr)` as `OR_i attribute == expr[t := L_i]`, exact under
+     * three-valued logic. `null` when the container is not that shape.
      */
     private fun mappedLiteralMembership(member: Operand, container: Operand, scope: Scope): Op<Boolean>? {
         if (member.nodeCase != Operand.NodeCase.VARIABLE ||
@@ -138,20 +122,12 @@ internal class MembershipTranslator(private val translation: Translation) {
     }
 
     /**
-     * Membership of a scalar in a literal list, as the disjunction of the equalities CEL itself
-     * evaluates.
-     *
-     * Every element goes through [LeafTranslator.applyLeaf] under `eq`, which is what gives the
-     * fold the same null convention, the same definite-equality handling and the same value-typed
-     * binding a written-out `x == a || x == b` gets. Exposed's own `inList` is not used: it binds
-     * every element through the COLUMN's type, and an empty list it rewrites to a constant.
+     * Membership of a scalar in a literal list, as the OR of [LeafTranslator.applyLeaf] `eq`s. Not
+     * Exposed's `inList`, which binds through the column type.
      */
     private fun scalarIsAnyOf(target: Resolution.Scalar, values: List<Any?>): Op<Boolean> {
-        // CEL membership in an empty list is FALSE for a row whose attribute is PRESENT, and an
-        // empty SQL `IN ()` is a syntax error on every store here. It is not definite, though: a
-        // missing attribute makes CEL raise before it ever looks at the list, so the witness has to
-        // survive into the constant — unless the caller declares the explicit-null convention, in
-        // which case the NULL is a null VALUE and `null in []` really is a definite FALSE.
+        // `x in []` is FALSE for a present attribute but CEL raises on a missing one, so the NULL witness
+        // stays unless the attribute is explicit-null.
         if (values.isEmpty()) {
             if (translation.leaf.isExplicitNull(target)) return Op.FALSE
             return TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(target.expression))
@@ -160,22 +136,13 @@ internal class MembershipTranslator(private val translation: Translation) {
     }
 
     /**
-     * `in`/`hasIntersection` against a stored collection: an existence test whose body matches the
-     * element column against the constants.
-     *
-     * A related row whose member column is NULL is an explicitly-null ELEMENT under the
-     * scalar-projection view, which is the convention the corpus pins (`null in tagNames` is TRUE
-     * for a row with a NULL tag name). SQL's `= NULL` never matches it, so the null constant
-     * becomes an `IS NULL` disjunct inside the subquery body.
+     * `in`/`hasIntersection` against a stored collection. A NULL element column is the null element, so
+     * a null constant becomes an `IS NULL` disjunct.
      */
     private fun collectionContainsAny(collection: Resolution.Collection, values: List<Any?>): Op<Boolean> {
         val element = collection.tail.element
             ?: throw RelationRefusals.noElementColumn(collection.variable, collection.tail)
-        // An empty list is a NEVER-MATCHING BODY, not a short circuit. `Subqueries.chainContains`
-        // is the only place the absent-parent guard lives, so answering `Op.FALSE` before reaching
-        // it left a row with no parent at all — a missing-path deny — returned by the negation. An
-        // empty list is not an authoring mistake either: it is what `P.attr.<something>` folds to
-        // for a principal who holds none of whatever the list enumerates.
+        // An empty list is a never-matching body, so [Subqueries.chainContains] still guards an absent parent.
         return translation.subqueries.chainContains(collection) { alias ->
             if (values.isEmpty()) {
                 Op.FALSE
@@ -186,14 +153,8 @@ internal class MembershipTranslator(private val translation: Translation) {
     }
 
     /**
-     * `in(attribute, collection-attribute)`: the member column compared against the element column
-     * inside the subquery.
-     *
-     * Under the EXPLICIT convention a NULL on either side is a null VALUE, so a null member and a
-     * null element are equal and a null on one side alone is a definite mismatch — which plain `=`
-     * cannot say, because it answers UNKNOWN to both and the row then survives the negation it
-     * should not. Under the OMITTED convention a NULL column carries no attribute at all, CEL
-     * raises a missing-attribute error and denies, and plain equality's UNKNOWN is exactly that.
+     * `in(attribute, collection-attribute)`. Under EXPLICIT, nulls on both sides are equal values and
+     * one alone is a definite mismatch; under OMITTED, plain `=`'s UNKNOWN is CEL's error.
      */
     private fun attributeInAttribute(memberVar: String, collectionVar: String, scope: Scope): Op<Boolean> {
         val collection = scope.resolve(collectionVar) as? Resolution.Collection
@@ -210,11 +171,7 @@ internal class MembershipTranslator(private val translation: Translation) {
                 element.column,
             )
         }
-        // THE declared owner of that question, with no fallback of its own. Reading
-        // `field.nullAttributeRepresentation ?: options.nullAttributeRepresentation` here handed
-        // a call-level EXPLICIT to an attribute that declares nothing, so one
-        // mapping got the definite reading for `in` and the omitted one for `eq`
-        // (docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+        // The declared convention, with no call-level fallback (docs/adr/0004).
         val explicitNulls = translation.leaf.isExplicitNull(member)
         val contains = translation.subqueries.chainContains(collection) { alias ->
             val elementColumn = alias[element.column]
@@ -229,29 +186,14 @@ internal class MembershipTranslator(private val translation: Translation) {
             }
         }
         if (explicitNulls) return contains
-        // A NULL MEMBER under the omitted convention sends no attribute at all, so CEL raises and
-        // `check()` denies under BOTH polarities. Over a chain the count guard already carries
-        // that; over a DIRECT relation the existence test is a plain `EXISTS`, which is two-valued
-        // — it reads the UNKNOWN body as "no element matched" and answers FALSE, and `NOT FALSE`
-        // hands the row back. Only the row-level witness keeps both polarities excluding it, the
-        // same shape [projectionIntersects] uses for its own NULL witness. A NULL ELEMENT needs no
-        // guard: under the scalar-projection view it IS the null element, so CEL's own answer for
-        // it is a definite FALSE and the `EXISTS` collapse is exactly right.
+        // An omitted-convention NULL member makes CEL raise; a plain EXISTS over a direct relation would read
+        // that as FALSE, so the row-level witness keeps it UNKNOWN.
         return TriLogic.baseUnlessUnknown(contains, IsNullOp(member.expression))
     }
 
     /**
-     * `hasIntersection(map(collection, lambda), [values])`.
-     *
-     * CEL's `map()` has NO error absorption: a NULL projected column is a missing element
-     * attribute, so the whole intersection is an evaluation error even when another element would
-     * intersect. That is [TriLogic.baseUnlessUnknown] with a null-witness subquery as the detector.
-     *
-     * A null element in the constant list is inert here, which is the opposite of
-     * [collectionContainsAny] and is the second of the two views of a NULL member column: member
-     * ACCESS can never yield an explicit null from a column model, so a null constant is stripped
-     * rather than rendered as a never-matching `IN (…, NULL)`, while NULL-projection rows stay
-     * UNKNOWN.
+     * `hasIntersection(map(collection, lambda), [values])`. `map()` absorbs no error, so a NULL projected
+     * column makes the whole intersection UNKNOWN; a null constant is stripped.
      */
     private fun projectionIntersects(
         projection: PlanResourcesFilter.Expression,
@@ -301,29 +243,14 @@ internal class MembershipTranslator(private val translation: Translation) {
     }
 
     /**
-     * The subquery body of a membership test: the element column against each constant.
-     *
-     * EVERY element is type-checked against the column. A constant of a recognised family other
-     * than the column's is a definite FALSE in CEL and drops out; a column of an unrecognised
-     * family refuses the WHOLE membership, for the reason [ScalarRefusals.constantTypeMismatch]
-     * gives — a number tested against a text element column is an almost-total match on MySQL.
-     * A null element is inert to the check: it renders as `IS NULL`, which coerces nothing.
-     *
-     * Dropping EVERY mismatched element — on the argument that CEL answers that one equality
-     * `false`, so `x OR false` is `x` under either polarity — was tried and reverted. The argument
-     * only holds where the adapter KNOWS what CEL would answer, and it does not for the column
-     * kinds [ScalarColumnTypes.familyOf] reads as unrecognised: there `accepts` is false for
-     * EVERY value, so `["<uuid>", null]` against a `UUIDTable` id kept the null alone, emitted
-     * `IS NULL` by itself, and `NOT (id IS NULL)` handed back every row the PDP denies.
+     * The subquery body of a membership test. A constant of another recognised type drops out; a column
+     * of an unrecognised type refuses the whole membership, since dropping there over-granted.
      */
     private fun matchesAnyOf(reference: String, element: Column<*>, values: List<Any?>): Op<Boolean> {
         val arms = values.mapNotNull { value ->
             when {
                 value == null -> IsNullOp(element)
-                // A constant CEL KNOWS to be of another type than every element: that equality is
-                // a definite FALSE for every element, null elements included, so it drops out of
-                // the disjunction under either polarity. Only where both families are recognised:
-                // see the note above on why an unrecognised column still refuses.
+                // A constant CEL knows to be of another type: a definite FALSE, so it drops out.
                 ScalarColumnTypes.knownMismatch(element, value) -> null
                 !ScalarColumnTypes.accepts(element, value) ->
                     throw ScalarRefusals.constantTypeMismatch("in", reference, element, value)
@@ -333,13 +260,7 @@ internal class MembershipTranslator(private val translation: Translation) {
         return if (arms.isEmpty()) Op.FALSE else TriLogic.or(arms)
     }
 
-    /**
-     * A plan constant as the list of elements the operator ranges over.
-     *
-     * A scalar stays a one-element list — `null in R.attr.items` is planner-emitted and the wrapper
-     * has to tolerate it. A STRUCT is CEL's map, whose `in` tests its KEYS, so it contributes its
-     * key set rather than being compared as a value.
-     */
+    /** A plan constant as the elements the operator ranges over; a struct contributes its keys. */
     private fun elementsOf(value: Any?): List<Any?> = when (value) {
         is List<*> -> value
         is Map<*, *> -> value.keys.toList()

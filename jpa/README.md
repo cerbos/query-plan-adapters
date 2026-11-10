@@ -209,7 +209,7 @@ QueryPlanFilter allowed = JpaQueryPlanAdapter.toFilter(plan, options);
 | mapping | — (required) | [Field mapping](#field-mapping) |
 | `withOperatorOverrides` | none | [Operator overrides](#operator-overrides) |
 | `withNullAttributeRepresentation` | `OMITTED` | [NULL attribute representation](#null-attribute-representation) |
-| `withMaxMacroDepth` | 5, or the `dev.cerbos.queryplan.jpa.maxMacroDepth` system property | [Nested collection macros](#nested-collection-macros-multiply-correlated-subqueries--depth-is-bounded) |
+| `withMaxMacroDepth` | 5 | [Nested collection macros](#nested-collection-macros-multiply-correlated-subqueries--depth-is-bounded) |
 
 Collections are copied on construction and each `with…` returns a new instance, so build an
 `Options` once and share it across threads.
@@ -326,13 +326,14 @@ through `META-INF/services`, registers the collations below, and every string `=
 `contains`/`startsWith`/`endsWith`, `hasIntersection`, `hierarchy(...)`, `matches(...)`,
 `int()` of a string, `string()` and `+` comparison reads its string side through them:
 
-- **MySQL 8.0.17+:** `(convert(x using utf8mb4) collate utf8mb4_0900_bin)`, byte-exact and NO PAD,
+- **MySQL:** `(convert(x using utf8mb4) collate utf8mb4_0900_bin)`, byte-exact and NO PAD,
   so the default `utf8mb4_0900_ai_ci` no longer matches `'Finance'` for `'finance'`, and
   `utf8mb4_0900_as_cs` no longer ignores a soft hyphen
   ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). A comparison over a column
-  whose own collation differs cannot use that column's index. MariaDB and MySQL before 8.0.17
-  get no collation: give their string columns a byte-exact NO PAD collation yourself, such as
-  MariaDB's `utf8mb4_nopad_bin`.
+  whose own collation differs cannot use that column's index. It is
+  registered whatever server version Hibernate reports, so it holds with JDBC metadata access
+  off; MySQL before 8.0.17 rejects the query. MariaDB gets no collation: give its string columns
+  a byte-exact NO PAD collation yourself, such as `utf8mb4_nopad_bin`.
 - **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
   string ordering (`<`, `<=`, `>`, `>=`) runs under `collate "C"`, since a linguistic collation
   such as `en_US.utf8` sorts `'One'` after `'a'`
@@ -451,7 +452,7 @@ total but not as passed:
 | --- | --- |
 | core | 31 / 31 |
 | extended | 106 / 110 |
-| adversarial | 457 / 518 |
+| adversarial | 458 / 519 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 21 are `unsupported`, where the adapter
@@ -545,16 +546,13 @@ evaluate it as exact decimal, where `3 * 0.1 == 0.3` is TRUE but CEL says FALSE 
 - Connector/J's default client-side prepared statements inline doubles as `DECIMAL` literals.
 
 The adapter ships `MySqlDoubleCastFunctionContributor` (auto-discovered via `META-INF/services`),
-which on MySQL 8.0.17+ renders `cast(col as double)` for every arithmetic column. That keeps both
+which on MySQL renders `cast(col as double)` for every arithmetic column. That keeps both
 prepared-statement modes correct with **no JDBC settings**. H2 and PostgreSQL are unaffected.
 
 Set `useServerPrepStmts=true` in the JDBC URL if any of these apply:
 
-- MySQL older than 8.0.17.
 - MariaDB.
 - A non-Hibernate JPA provider (the adapter falls back to `cast(col as float(53))`).
-- `hibernate.boot.allow_jdbc_metadata_access=false` with only `hibernate.dialect` set (the
-  version-gated registration is skipped).
 
 CI's MySQL leg runs client-side mode so `arithmetic/multiply/inexact-fraction-equals` catches a regression;
 `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true` runs it server-side. Both must pass.
@@ -641,12 +639,7 @@ folds count as levels too. The cap counts macro nesting, not expression size. To
 Options.of(MAPPING).withMaxMacroDepth(8)
 ```
 
-```
--Ddev.cerbos.queryplan.jpa.maxMacroDepth=8
-```
-
-`Options` wins over the property, which wins over the default. The property is read per translation
-and must be a positive integer (otherwise a plain `IllegalArgumentException`).
+A value below 1 throws a plain `IllegalArgumentException`.
 
 ### Division by a column: zero divisors compare as CEL's NaN and infinities
 
@@ -711,6 +704,12 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- **Breaking:** the `dev.cerbos.queryplan.jpa.maxMacroDepth` system property and
+  `JpaQueryPlanAdapter.MAX_MACRO_DEPTH_PROPERTY` are gone; set the bound with
+  `Options.withMaxMacroDepth`. `Options.maxMacroDepth()` is an `int`.
+- Fixed an over-grant: on MySQL the byte-exact string collation and the IEEE double cast were
+  skipped when Hibernate built its dialect without JDBC metadata access (it then reports 8.0.0), so
+  string comparisons ran under the column's case-insensitive collation.
 - Fixed an over-grant: an attribute whose Java type is not `Boolean` read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was compared with `true`.
 - New translations, where these used to throw: `has()`, `in` and `exists`/`all` (one- and
   two-variable) over a map-valued attribute mapped per field

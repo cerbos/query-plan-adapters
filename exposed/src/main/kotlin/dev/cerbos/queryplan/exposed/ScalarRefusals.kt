@@ -4,14 +4,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import org.jetbrains.exposed.v1.core.Column
 
-/**
- * The scalar side's named refusals: the ones raised from more than one place, and the ones whose
- * wording is load-bearing because `conformance/actions.json` pins it and a harness asserts it.
- *
- * Every one of them delegates to [Refusals], so the classification (malformed plan, mapping
- * shortfall, inexpressible shape) still belongs to the factory rather than to the text. Spelling
- * a message once here is what keeps the corpus pin and the code from drifting apart.
- */
+/** The scalar side's named refusals: raised from more than one place, or pinned by the corpus. */
 internal object ScalarRefusals {
 
     /**
@@ -32,10 +25,8 @@ internal object ScalarRefusals {
         }
 
     /**
-     * A null comparison operand under [NullAttributeRepresentation.OMITTED]: a NULL column then
-     * sends no attribute, so CEL raises a missing-attribute error and `check()` denies the row,
-     * while a NULL-selecting filter would return it
-     * (https://github.com/cerbos/query-plan-adapters/issues/302).
+     * A null comparison operand under [NullAttributeRepresentation.OMITTED]: CEL denies a missing
+     * attribute, which a NULL-selecting filter would return (#302).
      */
     fun nullOperandUnderOmitted(operator: String): UnsupportedPlanShapeException = Refusals.unsupported(
         "Cannot translate `$operator` against a null operand under " +
@@ -46,18 +37,8 @@ internal object ScalarRefusals {
     )
 
     /**
-     * A column operand of a string match or of `size()` whose declared type is not text.
-     *
-     * THE ONE FACTORY for that requirement: the haystack and the column needle of `contains`,
-     * `startsWith` and `endsWith`, the column a hierarchy path is read from, and the argument of
-     * `size()` all raise it, so the reasoning is stated once.
-     *
-     * CEL has no such overload for a number, a boolean or a timestamp, so at check time the
-     * expression raises a no-overload error and `check()` DENIES. SQL does not agree and does not
-     * agree with itself: MySQL and SQLite coerce the column and MATCH (`123 LIKE '%2%'` is TRUE,
-     * `CHAR_LENGTH(1)` is 1) while PostgreSQL aborts the statement, so the same policy is a silent
-     * over-grant on one store and a runtime failure on another. [ArithmeticTranslator] refuses the
-     * symmetric case — a non-numeric column in arithmetic — for the same reason.
+     * A column operand of a string match or of `size()` whose declared type is not text. CEL has no
+     * such overload and denies, while MySQL and SQLite coerce and match.
      */
     fun textColumnRequired(operator: String, variable: String, column: Column<*>): UnmappedAttributeException =
         Refusals.unmapped(
@@ -68,13 +49,8 @@ internal object ScalarRefusals {
         )
 
     /**
-     * A plan constant whose TYPE is not one the mapped column holds.
-     *
-     * `R.attr.aString == P.attr.level` is legal CEL and arrives as `eq(variable, value)` with
-     * nothing in it naming a type. CEL answers it from the VALUES alone — equality is a definite
-     * FALSE for a present attribute and every ordering is a no-overload error — where SQL has to
-     * coerce one side, and MySQL coerces the COLUMN: `'abc' = 0` is TRUE there, so the filter
-     * returns every row the PDP denies. Reports the constant's TYPE only; values never leak.
+     * A plan constant whose type the mapped column does not hold. MySQL coerces the column
+     * (`'abc' = 0` is TRUE). Reports the constant's type only.
      */
     fun constantTypeMismatch(
         operator: String,
@@ -90,16 +66,8 @@ internal object ScalarRefusals {
     )
 
     /**
-     * `timestamp(a) op timestamp(b)` over two columns that both pin an absolute instant but SPELL
-     * it differently: one carries an offset, the other does not.
-     *
-     * Deliberately not [columnTypeMismatch], which this branch used to borrow. Nothing here is a
-     * coercion and nothing here is a CEL problem: CEL compares two timestamps with no overload
-     * error at all, there is no text operand for MySQL to coerce, and its advice — wrap both sides
-     * in `timestamp()` — is what the caller has already done. The divergence is the STORE's own:
-     * a `timestamp` compared with a `timestamptz` is resolved through the session's time zone, so
-     * the same filter selects different rows in two sessions of one application, and a session
-     * setting is not a property of the filter.
+     * `timestamp(a) op timestamp(b)` where one column carries an offset and the other does not: the
+     * store resolves that through the session time zone.
      */
     fun timestampRepresentationMismatch(
         operator: String,
@@ -133,25 +101,12 @@ internal object ScalarRefusals {
             "returns rows the PDP denies. $TRANSLATABLE_KINDS",
     )
 
-    /**
-     * What to do about a type mismatch, in terms of the kinds this adapter actually compares.
-     *
-     * "Map the attribute onto a column of the constant's type" was not actionable for a column
-     * whose kind is unrecognised — a `UUIDTable` id is an `EntityIDColumnType(UUIDColumnType)`, so
-     * `request.resource.id == "…"` refuses and there is no "column of the constant's type" to reach
-     * for. Naming the kinds says which remappings exist, the way [textCastUnsupported] does.
-     */
     private const val TRANSLATABLE_KINDS =
         "Compare it against a value of the column's own type, or map the attribute onto one of the " +
             "kinds this adapter compares: text, integer, floating-point, decimal or boolean. A " +
             "temporal column is compared by wrapping both sides in timestamp()."
 
-    /**
-     * CEL's `int()` and `double()`. SQL `CAST` is not a CEL conversion in either direction: CEL
-     * reads a WHOLE string or raises (and an error denies the row) while `CAST` reads whatever
-     * numeric prefix parses, and CEL's `int()` truncates toward zero where PostgreSQL and MySQL
-     * round to nearest.
-     */
+    /** CEL's `int()` and `double()`: SQL `CAST` reads numeric prefixes and rounds where CEL raises or truncates. */
     fun numericCastUnsupported(operator: String): UnsupportedPlanShapeException = Refusals.unsupported(
         "Cannot translate $operator(): SQL CAST reads the numeric prefix of a string where CEL " +
             "requires the whole string and raises otherwise, and PostgreSQL and MySQL round where " +
@@ -159,13 +114,8 @@ internal object ScalarRefusals {
     )
 
     /**
-     * `string()` over a column whose SQL text rendering is not CEL's. A boolean column is lowered
-     * portably (see [LeafTranslator]); this covers the rest — a DECIMAL renders its declared
-     * scale (`1.50`) where CEL renders the shortest round-tripping decimal (`1.5`), a
-     * floating-point column renders `1000000.0` or `1.0E6` where CEL prints Go's shortest `%g`
-     * form (`1e+06`, `2`) and prints a stored `-0.0` as `-0`, which SQL cannot tell from `0.0`
-     * (equality against a non-zero literal is solved for the column instead), and a binary or
-     * temporal column has no CEL text form at all.
+     * `string()` over a column whose SQL text is not CEL's: DECIMAL scale, double formatting and `-0`,
+     * binary and temporal columns. Booleans are lowered in [LeafTranslator].
      */
     fun textCastUnsupported(columnType: String): UnsupportedPlanShapeException = Refusals.unsupported(
         "Cannot translate string() over a $columnType column: CEL renders a number as Go's " +
@@ -198,12 +148,7 @@ internal object ScalarRefusals {
             "sign bit. Divide by an integer or decimal column, or by a constant.",
     )
 
-    /**
-     * CEL `%` has no double overload, so on attribute values — which Cerbos always transports as
-     * doubles — a bare `attr % n` always errors and denies. A satisfiable policy has to cast with
-     * `int()` first, and that cast is itself unlowerable, which is why the rejection stands either
-     * way (https://github.com/cerbos/query-plan-adapters/issues/387).
-     */
+    /** CEL `%` has no double overload, and attribute numbers are always doubles (#387). */
     fun modUnsupported(): UnsupportedPlanShapeException = Refusals.unsupported(
         "mod is not supported in comparisons: CEL % is integer-only while attribute values are " +
             "always doubles at check time, so a satisfiable policy must cast with int() first — " +
@@ -212,13 +157,8 @@ internal object ScalarRefusals {
     )
 
     /**
-     * A NaN or an infinity that reached the one place this adapter binds a constant.
-     *
-     * The backstop under [nonFiniteInArithmetic], which is where a non-finite value is actually
-     * produced. This one makes "no statement this adapter emits binds a non-finite double" true at
-     * the binder rather than only along the paths that were audited: SQL has no literal for either
-     * value, PostgreSQL accepts `'NaN'` and then orders it ABOVE every number where CEL orders it
-     * below nothing, and MySQL's driver rejects the parameter and fails the query outright.
+     * A NaN or infinity reaching the binder. SQL has no literal for it; PostgreSQL orders `'NaN'` above
+     * every number and MySQL's driver rejects it.
      */
     fun nonFiniteConstant(): UnsupportedPlanShapeException = Refusals.unsupported(
         "a NaN or infinity constant cannot be bound into SQL: no store has a literal for either, " +
@@ -227,14 +167,8 @@ internal object ScalarRefusals {
     )
 
     /**
-     * A NaN or a signed infinity — what CEL division by zero produces — that would have to be
-     * combined with a COLUMN by `+`, `-`, `*` or `/`.
-     *
-     * The division itself stays symbolic ([ArithmeticValues]), and every arm folds while the other
-     * operand is a constant: `NaN + 1.0` is NaN, `+Infinity + 1.0` is +Infinity. A column operand
-     * ends that. There is no literal to bind, and no single constant to fold to either — an
-     * infinity times a column is +Infinity, -Infinity or NaN according to that column's sign, and
-     * the sign is not known until the row is read.
+     * A NaN or infinity combined with a column by arithmetic: no literal to bind, and its result depends
+     * on the column's sign.
      */
     fun nonFiniteInArithmetic(): UnsupportedPlanShapeException = Refusals.unsupported(
         "arithmetic between a column and the NaN or infinity a zero denominator produces is not " +
@@ -243,13 +177,7 @@ internal object ScalarRefusals {
             "column's sign. Compare the division itself, or keep the composition constant.",
     )
 
-    /**
-     * Cerbos `except()`, wherever the scalar side meets it: in condition position, and as a
-     * comparison operand. Delegates, because [RelationRefusals.exceptUnsupported] raises it for
-     * `size(x.except(y))` and one shape must not have three spellings — the message is what a
-     * caller matches on, and a reader comparing two of them would conclude the adapter distinguishes
-     * cases it does not.
-     */
+    /** Cerbos `except()`, with the same message [RelationRefusals.exceptUnsupported] uses. */
     fun exceptUnsupported(): UnsupportedPlanShapeException = RelationRefusals.exceptUnsupported()
 
     /** A cast, a `size()` or a macro inside an arithmetic operand: legal CEL, no double-space form. */
@@ -260,12 +188,7 @@ internal object ScalarRefusals {
             Refusals.unsupported("Unexpected $operator() expression inside an arithmetic comparison operand")
         }
 
-    /**
-     * A CEL list or map literal compared against a scalar column — `R.attr.tags == ["a", "b"]`
-     * arrives as `eq(variable, value-list)` verbatim. No scalar column comparison exists for it,
-     * and binding the structure would die inside the JDBC driver with a coercion error instead of
-     * this adapter's named contract. Reports the SHAPE only: element values never leak.
-     */
+    /** A list or map literal compared against a scalar column. Reports the shape only. */
     fun structuredConstant(operator: String, variable: String, value: Any): UnsupportedPlanShapeException {
         val shape = when (value) {
             is List<*> -> "list of ${value.size} element${if (value.size == 1) "" else "s"}"

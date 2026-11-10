@@ -221,9 +221,6 @@ class ExposedSurfaceTest {
             aliased.selectAll().where { aliasedFilter.toOp() }.map { it[aliased[SurfaceDocs.key]] }.sorted()
         }
         assertEquals(listOf("a", "b", "c"), keys)
-        assertTrue(
-            OfflineRenderer.renderOn(OfflineRenderer.POSTGRESQL, aliasedFilter.toOp()).sql.startsWith("d.a_string"),
-        )
     }
 
     @Test

@@ -7,19 +7,8 @@ import org.jetbrains.exposed.v1.core.Table
 
 /**
  * Where a plan variable is looked up: the root resource, or the element of an enclosing lambda.
- *
- * [path] is the one classifier: it places a variable on storage (the scope owning it, the relation
- * hops it passes through, the column it ends at) or throws naming why. [resolve] reads that place
- * as a value and is TOTAL: every variable lands in one of [Resolution]'s two arms. There is no null
- * return and no second classifier.
- *
- * Three rules live here and only here:
- *  - **longest-prefix chain walking** — a dotted variable is matched against the longest MAPPED
- *    prefix and the remainder walked through nested [AttributeMapping.Relation.fields];
- *  - **lambda delegation** — a [LambdaScope] resolves its own variable against the element alias
- *    and delegates everything else OUTWARD, keeping the outer scope as the owner;
- *  - **owner anchoring** — a [Resolution.Collection] carries the scope that owns its first hop,
- *    which is where a subquery over it must correlate.
+ * [path] places a variable on storage or throws; [resolve] is total. Owns longest-prefix chain
+ * walking, lambda delegation outward, and anchoring a collection to the scope owning its first hop.
  */
 internal sealed interface Scope {
     fun resolve(variable: String): Resolution
@@ -31,15 +20,7 @@ internal sealed interface Scope {
      */
     fun path(variable: String): AttributePath
 
-    /**
-     * A column of THIS scope's own table, as SQL reads it here: bare at the root, through the
-     * element alias inside a lambda.
-     *
-     * [AttributeMapping.Relation.from] is a column on the PARENT scope's table, so a subquery over
-     * a relation declared inside a lambda has to correlate against the alias rather than the bare
-     * table. Reading it bare still builds and still returns rows — the wrong ones, from whichever
-     * row of the outer table the planner's optimiser happens to pair it with.
-     */
+    /** A column of this scope's table: bare at the root, through the element alias inside a lambda. */
     fun read(column: Column<*>): Column<*>
 
     /** [resolve], for a position that needs one value per row. */
@@ -61,14 +42,8 @@ internal sealed interface Scope {
 
 internal sealed interface Resolution {
     /**
-     * One value per row of the resolving scope.
-     *
-     * [expression] is what goes into SQL: the column itself, the same column read through a
-     * subquery alias, or a correlated scalar subquery when the variable reaches through a to-one
-     * relation (NULL when no row correlates, which is already CEL's missing-attribute error).
-     *
-     * [column] is the DECLARED column whatever [expression] is. It carries the type knowledge the
-     * plan does not: `column.columnType` says boolean, text, numeric or temporal.
+     * One value per row. [expression] goes into SQL (possibly a correlated subquery through a to-one
+     * relation); [column] is the declared column, for its type.
      */
     class Scalar(
         val variable: String,
@@ -78,13 +53,8 @@ internal sealed interface Resolution {
     ) : Resolution
 
     /**
-     * A collection reached through one or more relations, outermost first; the last hop's table is
-     * the element table.
-     *
-     * [owner] is the scope that OWNS the first hop, which is not always the scope that resolved
-     * the variable: `request.resource.attr.tags` inside a `categories` lambda belongs to the root.
-     * Anchoring the subquery to the wrong scope still builds and still returns rows, the wrong
-     * ones, so the owner travels with the resolution rather than being re-derived.
+     * A collection reached through one or more relations, outermost first. [owner] owns the first hop,
+     * which is where its subquery correlates.
      */
     class Collection(
         val variable: String,
@@ -216,25 +186,12 @@ internal class AttributePath(
     }
 }
 
-/**
- * A dotted reference walked onto storage: the relation [hops] it passes through, and the [leaf]
- * column it ends at when it ends at one rather than at a relation.
- *
- * [hops] is relative to the scope that walked it — [ChainWalk.from] never includes the relation it
- * started from, and [RootScope] prepends the mapped head itself.
- */
+/** A dotted reference walked onto storage: its relation [hops], relative to the walking scope, and [leaf]. */
 internal class ChainWalk(
     val hops: List<AttributeMapping.Relation>,
     val leaf: AttributeMapping.Field?,
 ) {
-    /**
-     * The resolution this walk denotes, anchored at [owner].
-     *
-     * A path that reaches a to-many relation is a COLLECTION; one that ends at a column having
-     * passed only through to-one relations is a scalar read through a correlated subquery. The
-     * two are not interchangeable: an aggregate over a to-one hop and a scalar projection through
-     * it differ exactly where a corpus action discriminates them.
-     */
+    /** The resolution anchored at [owner]: a collection if any hop is to-many, else a scalar subquery. */
     fun resolveAt(translation: Translation, owner: Scope, variable: String): Resolution {
         if (leaf == null) {
             val tail = hops.last()
@@ -289,13 +246,7 @@ internal class ChainWalk(
     }
 }
 
-/**
- * The column standing for one member of [relation]'s elements: the named one, or the element
- * column itself when the member is unnamed (`t` rather than `t.name`).
- *
- * A member the mapping does not declare is refused rather than guessed at a column name: guessing
- * is how a subquery ends up comparing the wrong column and returning rows the PDP denies.
- */
+/** The column for one member of [relation]'s elements. An undeclared member is refused. */
 internal fun relationMemberColumn(
     relation: AttributeMapping.Relation,
     member: String,

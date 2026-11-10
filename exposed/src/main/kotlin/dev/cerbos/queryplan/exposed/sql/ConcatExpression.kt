@@ -9,18 +9,8 @@ import org.jetbrains.exposed.v1.core.vendors.MysqlDialect
 import org.jetbrains.exposed.v1.core.vendors.currentDialect
 
 /**
- * String concatenation that PROPAGATES NULL, which is what CEL's `+` over strings does: an operand
- * that is a missing attribute is an evaluation error, and the row must stay excluded under both
- * polarities.
- *
- * Not Exposed's own [org.jetbrains.exposed.v1.core.Concat], and not PostgreSQL's `CONCAT()`: both
- * SKIP a NULL argument, so `aString + aOptionalString == "oneset"` would compare `"one"` and match
- * a row whose second operand is absent — exactly the rows `check()` denies. MySQL's `CONCAT()`
- * does propagate NULL and is the right spelling there and only there, because `||` is logical OR
- * on MySQL outside `PIPES_AS_CONCAT` and would collapse the whole expression to a boolean.
- *
- * Self-parenthesising: the `||` form is an operator chain, and it lands inside comparisons and
- * LIKE patterns where precedence would otherwise bite.
+ * String concatenation that propagates NULL, as CEL's `+` does. Exposed's `Concat` and PostgreSQL
+ * `CONCAT()` skip NULLs; MySQL needs `CONCAT()` because `||` is OR there. Self-parenthesising.
  */
 internal class ConcatExpression(private val parts: List<Expression<*>>) : Function<String>(TextColumnType()) {
     init {

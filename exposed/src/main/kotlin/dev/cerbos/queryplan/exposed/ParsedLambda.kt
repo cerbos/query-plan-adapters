@@ -3,14 +3,8 @@ package dev.cerbos.queryplan.exposed
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 
 /**
- * A parsed CEL lambda operand: its body and the name of its iteration variable.
- *
- * Three operator families unpack a lambda — the collection macros, `size(filter(...))` and
- * `hasIntersection(map(...), …)` — and each keeps its own wording for the same three wire-contract
- * violations, so the messages are caller-supplied and only the shape check is shared. The
- * CLASSIFICATION is not caller-supplied: every failure here but one is the planner's `lambda(body,
- * variable)` contract being violated, which no Cerbos planner output produces. The exception is a
- * two-variable lambda, which the planner does emit and this adapter refuses.
+ * A parsed CEL lambda operand: body and iteration variable. Callers supply their own messages; every
+ * failure is a malformed plan except a two-variable lambda, which is refused.
  */
 internal class ParsedLambda private constructor(val body: Operand, val variable: String) {
     companion object {

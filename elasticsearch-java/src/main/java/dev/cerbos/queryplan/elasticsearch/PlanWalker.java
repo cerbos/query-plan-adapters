@@ -299,7 +299,9 @@ final class PlanWalker {
                 }
             }
         }
-        return polarity.holds() ? Queries.exists(field) : Queries.notExists(field);
+        // `_ignored` lists a field whose value is in _source but unindexed (ignore_above, ignore_malformed).
+        return polarity.holds() ? Queries.exists(field) : Map.of("bool", Map.of("must_not",
+                List.of(Queries.exists(field), Queries.term("_ignored", field))));
     }
 
     private static void requireUnary(String operator, List<Operand> operands) {

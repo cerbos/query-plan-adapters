@@ -163,13 +163,8 @@ tasks.test {
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("mysqlImage")
 
-    // Two tags mark suites that start containers of their OWN to ask a question that does not
-    // depend on the store the harness runs on: `server-cross-check` (OfflineRendererTest checking
-    // its stub JDBC metadata against real PostgreSQL and MySQL servers) and `docker`
-    // (ReviewOperandTypeTest showing a coercion on a real MySQL). Each is a property of the Exposed
-    // release or the server image, so it is answered on the default store leg and excluded on the
-    // others, and on a leg that sets ADAPTER_TEST_CONTAINER_SUITES=skip. Both skip themselves where
-    // there is no Docker at all. The conformance harness carries neither tag.
+    // `docker` marks ReviewOperandTypeTest, which starts its own MySQL. It runs on the default store
+    // leg only, and not where ADAPTER_TEST_CONTAINER_SUITES=skip.
     val selectedStore = System.getProperty("adapter.test.db") ?: System.getenv("ADAPTER_TEST_DB")
     val containerSuites = System.getProperty("adapter.test.containerSuites")
         ?: System.getenv("ADAPTER_TEST_CONTAINER_SUITES")
@@ -182,7 +177,7 @@ tasks.test {
     }
     inputs.property("adapterTestContainerSuites", containerSuites)
     if (containerSuites == "skip" || (selectedStore != null && selectedStore != "h2")) {
-        useJUnitPlatform { excludeTags("server-cross-check", "docker") }
+        useJUnitPlatform { excludeTags("docker") }
     }
 
     // The store behind the conformance harness: h2 (default), sqlite, postgres or mysql. Forwarded

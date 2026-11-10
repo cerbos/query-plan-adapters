@@ -14,14 +14,8 @@ import org.jetbrains.exposed.v1.core.vendors.PostgreSQLDialect
 import org.jetbrains.exposed.v1.core.vendors.currentDialect
 
 /**
- * A string under the collation CEL's semantics need, whatever the column's or the connection's:
- * byte-exact and NO PAD on MySQL, whose default `utf8mb4_0900_ai_ci` folds case and accents
- * (cerbos/query-plan-adapters#474), and, for an [ordering], code-point order on PostgreSQL, where a
- * linguistic collation is not (#489). One collated side decides a comparison's collation. Elsewhere,
- * and on MariaDB, which has no `utf8mb4_0900_bin`, the expression renders as it is.
- *
- * Self-parenthesising where it collates. The dialect is read inside [toQueryBuilder] because
- * translation happens outside any transaction.
+ * A string under the collation CEL needs: `utf8mb4_0900_bin` on MySQL (#474) and, for an [ordering],
+ * code point order on PostgreSQL (#489). Unchanged elsewhere and on MariaDB. Read at render time.
  */
 internal class ExactString<T>(
     private val expression: Expression<T>,

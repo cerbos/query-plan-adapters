@@ -36,18 +36,9 @@ final class ChainSubqueries {
     }
 
     /**
-     * Scores each element for {@code exists} (true 2, false 0) and {@code all} (true 0,
-     * false 2):
-     *
-     * <pre>{@code CASE WHEN body THEN trueScore WHEN NOT body THEN falseScore ELSE 1 END}</pre>
-     *
-     * An UNKNOWN body takes neither branch and scores 1. The subquery selects
-     * {@code NULLIF(COALESCE(MAX(score), 0), 1)}: an empty collection gives 0, and an UNKNOWN
-     * element that dominates gives NULL. Comparing the result with 2 or 0 then gives TRUE,
-     * FALSE or UNKNOWN as the CEL macro does.
-     *
-     * <p>The body is translated twice, once per polarity (see {@link TriPredicate}), so nested
-     * macros grow as {@code 2^depth}.
+     * Scores each element ({@code CASE WHEN body THEN t WHEN NOT body THEN f ELSE 1 END}) and selects
+     * {@code NULLIF(COALESCE(MAX(score), 0), 1)}, so an undetermined element that dominates is NULL. The
+     * body is translated once per polarity, so nesting grows as {@code 2^depth}.
      */
     Subquery<Integer> macroScoreSubquery(Scope scope, Scope.ResolvedRelation ref,
                                          SubqueryBodyBuilder bodyBuilder,
@@ -61,15 +52,7 @@ final class ChainSubqueries {
         return cs.sub();
     }
 
-    /**
-     * Counts elements whose body is true, for {@code exists_one} and
-     * {@code size(filter(...))}:
-     *
-     * <pre>{@code COALESCE(SUM(CASE WHEN body THEN 1 ELSE 0 END), 0) + poisonTerm}</pre>
-     *
-     * These CEL macros error if any element errors, so {@link #undeterminedPoisonTerm} makes
-     * the count NULL when any body is UNKNOWN. An empty collection counts 0.
-     */
+    /** Counts elements whose body is true, NULL when any body is UNKNOWN ({@link #undeterminedPoisonTerm}). */
     Subquery<Long> strictMatchCountSubquery(Scope scope, Scope.ResolvedRelation ref,
                                             SubqueryBodyBuilder bodyBuilder) {
         ChainSubquery<Long> cs = chainSubquery(Long.class, scope, ref);
@@ -145,12 +128,9 @@ final class ChainSubqueries {
         From<?, ?> joinedFrom = correlated;
         Predicate anchor = null;
         if (rejoinsAnEnclosingElement(scope, ref)) {
-            // Hibernate 7 gives every correlated copy of a From the original's alias and a fresh
-            // join counter, so a chain joined off it here gets the very navigable path the
-            // enclosing lambda's element join got in ITS subquery — `tags.exists(t,
-            // tags.exists(u, u.name != t.name))` renders `t2_0.name<>t2_0.name` and compares each
-            // tag with itself (#509). A fresh range variable over the owner's entity, pinned to
-            // the correlated row by identity, starts a path of its own on every Hibernate major.
+            // Hibernate 7 gives a correlated From the original's alias, so a chain joined off it could reuse
+            // the enclosing element join's path and compare an element with itself (#509). A fresh range
+            // variable pinned to the correlated row avoids that.
             if (!(correlated instanceof Root<?> owner)) {
                 throw Refusals.unsupported("Cannot nest a collection macro over '"
                         + ref.chain().stream()

@@ -9,32 +9,13 @@ import org.jetbrains.exposed.v1.core.IntegerColumnType
 import org.jetbrains.exposed.v1.core.QueryBuilder
 import org.jetbrains.exposed.v1.core.intLiteral
 
-/**
- * `NULLIF(fold, 1)`: the state where only undetermined elements scored, mapped to SQL NULL.
- *
- * 1 is the score [ScoreCase] gives an undetermined element, and it is deliberately the LOWEST of
- * the three: it can only dominate a `MAX` when nothing else scored, which is exactly the state CEL
- * calls an error. Exposed has no `NULLIF` of its own, and the spelling is standard on every store
- * this adapter is executed against.
- */
+/** `NULLIF(fold, 1)`: only undetermined elements scored (1, the lowest score), which CEL calls an error. */
 internal fun nullIfUndetermined(fold: Expression<Int>): ExpressionWithColumnType<Int> =
     CustomFunction("NULLIF", IntegerColumnType(), fold, intLiteral(1))
 
 /**
- * Scores ONE element of a collection into the three states CEL distinguishes, in a single pass.
- *
- * ```sql
- * CASE WHEN (body) THEN <whenTrue> WHEN NOT (body) THEN <whenFalse> ELSE <whenUndetermined> END
- * ```
- *
- * An UNKNOWN body takes neither `WHEN` — SQL treats an UNKNOWN condition as not taken — so an
- * element whose lambda body touched a NULL lands in the `ELSE` rather than being collapsed onto
- * the FALSE case. That collapse is the authorization bug the whole shape exists to stop: under a
- * plain `EXISTS` an undetermined element silently fails to match, the macro reads FALSE, and an
- * enclosing `NOT` turns it into a row the PDP denies.
- *
- * The scores are the adapter's own constants, not plan values, so they are rendered inline: a
- * bound parameter here would buy nothing and would give the driver a type to guess at.
+ * Scores one element: `CASE WHEN (body) THEN <whenTrue> WHEN NOT (body) THEN <whenFalse> ELSE
+ * <whenUndetermined> END`. An UNKNOWN body takes the `ELSE` rather than collapsing to FALSE.
  */
 internal class ScoreCase(
     private val body: Expression<Boolean>,
@@ -61,15 +42,7 @@ internal class ScoreCase(
     }
 }
 
-/**
- * [value], unless [guard] fails, in which case SQL NULL: `CASE WHEN guard THEN value END`.
- *
- * The missing `ELSE` is the whole point. A chained collection whose intermediate to-one parent is
- * absent must stay excluded under BOTH polarities, and only UNKNOWN does that — `NOT NULL` is
- * still NULL, while `NOT FALSE` is TRUE and readmits the row. Guarding the VALUE rather than
- * ANDing a guard beside the comparison is what makes every comparison built on it inherit the
- * requirement, including the negated spellings.
- */
+/** [value], or SQL NULL when [guard] fails: `CASE WHEN guard THEN value END`, with no `ELSE` on purpose. */
 internal class ScoreGuard<T>(
     private val guard: Expression<Boolean>,
     private val value: Expression<T>,

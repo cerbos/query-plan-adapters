@@ -269,12 +269,8 @@ final class MembershipTranslator {
             throw Refusals.unmapped(
                     "map can only be applied to a collection mapped as Relation: " + collectionVar);
         }
-        // A NULL projected column is a missing element attribute, and map() does not absorb
-        // errors, so any NULL projection makes the whole result UNKNOWN, even when another
-        // element intersects.
-        //
-        // A column cannot hold an explicitly-null member, so null list elements never match
-        // and are dropped.
+        // map() absorbs no error, so a NULL projection makes the result UNKNOWN; null list elements can
+        // never match a column and are dropped.
         List<?> nonNull = values.stream().filter(Objects::nonNull).toList();
         Predicate base = nonNull.isEmpty()
                 ? cb.disjunction()

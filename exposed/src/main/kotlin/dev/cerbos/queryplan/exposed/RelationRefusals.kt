@@ -1,14 +1,8 @@
 package dev.cerbos.queryplan.exposed
 
 /**
- * The relation side's named refusals, each delegating to [Refusals] so the classification stays a
- * property of the walk.
- *
- * Every message names the MECHANISM that makes the shape inexpressible — the thing a reader has to
- * change to get a filter — rather than restating the operator. Each one is pinned in
- * `conformance/actions.json` and asserted by every harness, so changing the text is a deliberate
- * corpus edit. None of them names a constant VALUE: a plan constant can carry a folded principal
- * attribute, and an exception message is logged.
+ * The relation side's named refusals. Each message names the mechanism, is pinned by the corpus, and
+ * never includes a constant value.
  */
 internal object RelationRefusals {
 
@@ -86,15 +80,7 @@ internal object RelationRefusals {
             "a mapped attribute or filter(collection, lambda)",
     )
 
-    /**
-     * `size(x) op NaN` — the NaN a zero denominator produces, as a `size()` threshold.
-     *
-     * Not policy-reachable: CEL has no NaN literal and the planner does not fold `div(0, 0)` (the
-     * `nan-ord-*` wire fixtures ship it unfolded), so the only way in is a hand-built plan. It is
-     * refused rather than folded because the fold has no right answer to pick: every rounding of
-     * NaN is a different comparison, and narrowing it silently yields 0, which turned
-     * `size(x) > NaN` into the always-true `size(x) >= 0`.
-     */
+    /** `size(x) op NaN`, only from a hand-built plan; no rounding of NaN is the right threshold. */
     fun nanSizeThreshold(): UnsupportedPlanShapeException = Refusals.unsupported(
         "size() compared against a NaN threshold is not supported: a character count and an " +
             "element count are both integral, and NaN has no integral bound to round to — " +

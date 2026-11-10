@@ -7,22 +7,12 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 internal object PlanValues {
     private const val TWO_POW_63 = 9.223372036854775808E18
 
-    /**
-     * Largest magnitude at which every `Long` is exactly an IEEE double (2^53). CEL attribute
-     * arithmetic is always double-typed at check time, so beyond this bound the check-time
-     * arithmetic has gaps between representable integers and a long-space solve could disagree
-     * with what the PDP evaluates.
-     */
+    /** 2^53: beyond it a long-space solve can disagree with the PDP's double arithmetic. */
     private const val MAX_EXACT_DOUBLE_LONG = 1L shl 53
 
     /**
-     * A plan constant as a Kotlin value: `String`, `Long`, `Double`, `Boolean`, `null`,
-     * `List<Any?>` or `Map<String, Any?>`.
-     *
-     * A whole number becomes a `Long` only inside `[-2^63, 2^63)`: converting a double outside that
-     * range saturates to `Long.MIN_VALUE` / `MAX_VALUE` and silently changes the constant.
-     * Out-of-range values stay doubles. So does negative zero, whose sign a `Long` cannot hold and
-     * IEEE division depends on.
+     * A plan constant as a Kotlin value. A whole number becomes a `Long` only inside `[-2^63, 2^63)`, and
+     * negative zero stays a double.
      */
     fun toKotlin(value: Value): Any? = when (value.kindCase) {
         Value.KindCase.STRING_VALUE -> value.stringValue
@@ -88,12 +78,7 @@ internal object PlanValues {
     /** The marker [builtConstant] answers for an operand that is not built from constants alone. */
     object NotConstant
 
-    /**
-     * A `list(...)` or `struct(set-field(...)...)` expression the planner assembled from constants
-     * alone, as the Kotlin `List` / `Map` it denotes; a plain value as itself; or [NotConstant]
-     * when anything inside it is not a constant. A list holding an attribute is NOT a constant: the
-     * attribute may be missing, and CEL raises building the list before it compares it.
-     */
+    /** A `list(...)` or `struct(...)` built from constants alone, or [NotConstant]. A list holding an attribute is not constant. */
     fun builtConstant(operand: PlanResourcesFilter.Expression.Operand): Any? = when (operand.nodeCase) {
         PlanResourcesFilter.Expression.Operand.NodeCase.VALUE -> toKotlin(operand.value)
         PlanResourcesFilter.Expression.Operand.NodeCase.EXPRESSION -> {
@@ -123,12 +108,7 @@ internal object PlanValues {
         else -> NotConstant
     }
 
-    /**
-     * Folds `add(left, right)` where both operands are constants: strings concatenate, numbers add.
-     *
-     * Reports TYPES, never values: a plan constant can carry a folded principal attribute. Any
-     * other pairing is a CEL no-overload error the planner keeps, so it is refused.
-     */
+    /** Folds constant `add(left, right)`. Reports types, never values. */
     fun foldAdd(left: Any?, right: Any?): Any {
         if (left == null || right == null) {
             throw Refusals.unsupported("add requires non-null operands, got ${typeName(left)} + ${typeName(right)}")
@@ -143,16 +123,8 @@ internal object PlanValues {
     }
 
     /**
-     * Whether `field + addConstant eq/ne comparisonValue` has to be lowered to SQL-side double
-     * arithmetic instead of being solved algebraically here.
-     *
-     * IEEE subtraction does not invert IEEE addition: `fl(fl(t - c) + c) != t` for many double
-     * pairs — `t = 0.1, c = 0.7` solves to exactly `-0.6`, yet `-0.6 + 0.7` is
-     * `0.09999999999999998` — so a pre-solved `field = -0.6` filter returns rows the PDP's
-     * `check()` denies, and the `ne` mirror hides rows it allows. Only long/long pairs whose
-     * solution also stays within ±2^53 remain on the solve path: there the solve and the
-     * check-time double arithmetic are both exact. Non-numeric pairings return `false` so
-     * [solveAdd] keeps owning string concatenation and its own type-mismatch messages.
+     * Whether `field + c eq/ne v` must be lowered to SQL double arithmetic: IEEE subtraction does not
+     * invert addition, so only long pairs within ±2^53 are solved here.
      */
     fun requiresSqlLowering(comparisonValue: Any?, addConstant: Any?): Boolean {
         if (comparisonValue !is Number || addConstant !is Number) return false
@@ -192,15 +164,7 @@ internal object PlanValues {
         )
     }
 
-    /**
-     * Escapes `LIKE` wildcards; pair with an explicit `\` escape character.
-     *
-     * `[` is escaped because SQL Server and Sybase `LIKE` treat `[...]` as a character class even
-     * when an `ESCAPE` clause is declared, so an unescaped `'[SEC]%'` matches one character from
-     * `{S,E,C}` instead of the literal prefix. With the escape declared, `\[` is a literal `[` on
-     * every dialect this adapter targets, where `[` is otherwise inert. `]` needs no escaping: it
-     * is only special as the closer of a class, and no class can open once every `[` is escaped.
-     */
+    /** Escapes `LIKE` wildcards and `[` (a class on SQL Server); pair with an explicit `\` escape. */
     fun escapeLike(value: String): String =
         value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("[", "\\[")
 

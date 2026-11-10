@@ -15,7 +15,6 @@ import com.google.protobuf.Value;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.OptionalInt;
 import java.util.Set;
 
 /**
@@ -45,18 +44,10 @@ import java.util.Set;
 public final class JpaQueryPlanAdapter {
 
     /**
-     * System property bounding collection-macro nesting depth ({@code exists}, {@code all},
-     * {@code filter} and so on). Each level multiplies the correlated subqueries in the filter.
-     * Deeper plans throw {@link UnsupportedPlanShapeException}.
-     *
-     * <p>{@link Options#withMaxMacroDepth(int)} takes precedence; without either,
-     * {@value #DEFAULT_MAX_MACRO_DEPTH} applies. A value that is not a positive integer throws
-     * {@link IllegalArgumentException}.
+     * Default collection-macro nesting bound ({@code exists}, {@code all}, {@code filter} and so
+     * on). Each level multiplies the correlated subqueries; deeper plans throw
+     * {@link UnsupportedPlanShapeException}. Change it with {@link Options#withMaxMacroDepth(int)}.
      */
-    public static final String MAX_MACRO_DEPTH_PROPERTY =
-            "dev.cerbos.queryplan.jpa.maxMacroDepth";
-
-    /** Default value of {@link #MAX_MACRO_DEPTH_PROPERTY}. */
     public static final int DEFAULT_MAX_MACRO_DEPTH = 5;
 
     /**
@@ -69,37 +60,35 @@ public final class JpaQueryPlanAdapter {
      *        {@link OperatorFunction} for where they apply
      * @param nullAttributeRepresentation the NULL-column convention for attributes whose mapping
      *        does not declare one
-     * @param maxMacroDepth the collection-macro nesting bound for this call; when empty,
-     *        {@link #MAX_MACRO_DEPTH_PROPERTY} and then {@link #DEFAULT_MAX_MACRO_DEPTH} apply
+     * @param maxMacroDepth the collection-macro nesting bound, a positive integer
      */
     public record Options(
             Map<String, AttributeMapping> mapping,
             Map<String, OperatorFunction> operatorOverrides,
             NullAttributeRepresentation nullAttributeRepresentation,
-            OptionalInt maxMacroDepth) {
+            int maxMacroDepth) {
 
         public Options {
             mapping = Map.copyOf(Objects.requireNonNull(mapping, "mapping"));
             operatorOverrides = Map.copyOf(
                     Objects.requireNonNull(operatorOverrides, "operatorOverrides"));
             Objects.requireNonNull(nullAttributeRepresentation, "nullAttributeRepresentation");
-            Objects.requireNonNull(maxMacroDepth, "maxMacroDepth");
-            if (maxMacroDepth.isPresent() && maxMacroDepth.getAsInt() < 1) {
+            if (maxMacroDepth < 1) {
                 throw new IllegalArgumentException(
-                        "maxMacroDepth must be a positive integer, got " + maxMacroDepth.getAsInt());
+                        "maxMacroDepth must be a positive integer, got " + maxMacroDepth);
             }
         }
 
         /**
          * Options with only a mapping: no overrides, {@link NullAttributeRepresentation#OMITTED},
-         * and no macro-depth bound of their own.
+         * and {@link #DEFAULT_MAX_MACRO_DEPTH}.
          *
          * @param mapping maps each plan variable to a JPA path or relation
          * @return the options
          */
         public static Options of(Map<String, AttributeMapping> mapping) {
             return new Options(mapping, Map.of(), NullAttributeRepresentation.OMITTED,
-                    OptionalInt.empty());
+                    DEFAULT_MAX_MACRO_DEPTH);
         }
 
         public Options withMapping(Map<String, AttributeMapping> mapping) {
@@ -116,8 +105,7 @@ public final class JpaQueryPlanAdapter {
         }
 
         /**
-         * Bounds collection-macro nesting for this call, overriding
-         * {@link #MAX_MACRO_DEPTH_PROPERTY}.
+         * Bounds collection-macro nesting for this call.
          *
          * @param maxMacroDepth a positive integer
          * @return new options with the bound set
@@ -125,12 +113,7 @@ public final class JpaQueryPlanAdapter {
          */
         public Options withMaxMacroDepth(int maxMacroDepth) {
             return new Options(mapping, operatorOverrides, nullAttributeRepresentation,
-                    OptionalInt.of(maxMacroDepth));
-        }
-
-        /** The declared bound, else the system property, else the default. */
-        int effectiveMaxMacroDepth() {
-            return maxMacroDepth.orElseGet(JpaQueryPlanAdapter::readMaxMacroDepth);
+                    maxMacroDepth);
         }
     }
 
@@ -316,28 +299,5 @@ public final class JpaQueryPlanAdapter {
                     .anyMatch(element -> element.getKindCase() == Value.KindCase.NULL_VALUE);
             default -> false;
         };
-    }
-
-    /**
-     * {@link #MAX_MACRO_DEPTH_PROPERTY} as an integer, or the default when unset. A bad value
-     * is a configuration error, so it throws a plain {@link IllegalArgumentException}.
-     */
-    static int readMaxMacroDepth() {
-        String raw = System.getProperty(MAX_MACRO_DEPTH_PROPERTY);
-        if (raw == null) {
-            return DEFAULT_MAX_MACRO_DEPTH;
-        }
-        int value;
-        try {
-            value = Integer.parseInt(raw.trim());
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got '" + raw + "'", e);
-        }
-        if (value < 1) {
-            throw new IllegalArgumentException(
-                    MAX_MACRO_DEPTH_PROPERTY + " must be a positive integer, got " + value);
-        }
-        return value;
     }
 }

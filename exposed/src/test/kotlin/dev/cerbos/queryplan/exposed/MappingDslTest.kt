@@ -327,8 +327,8 @@ class MappingDslTest {
 
         val first = relation.visibleWhenFor("cerbos_1")
         val second = relation.visibleWhenFor("cerbos_2")
-        assertTrue(OfflineRenderer.renderOn(OfflineRenderer.POSTGRESQL, first).sql.startsWith("cerbos_1."))
-        assertTrue(OfflineRenderer.renderOn(OfflineRenderer.POSTGRESQL, second).sql.startsWith("cerbos_2."))
+        assertTrue(OfflineRenderer.renderOn(OfflineRenderer.H2, first).sql.startsWith("cerbos_1."))
+        assertTrue(OfflineRenderer.renderOn(OfflineRenderer.H2, second).sql.startsWith("cerbos_2."))
     }
 
     private fun AttributeMapping.Relation.visibleWhenFor(alias: String): Op<Boolean> =

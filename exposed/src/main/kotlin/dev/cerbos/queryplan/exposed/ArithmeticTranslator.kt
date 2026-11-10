@@ -9,23 +9,8 @@ import com.google.protobuf.Value
 import org.jetbrains.exposed.v1.core.Op
 
 /**
- * `add` / `sub` / `mult` / `div` as a comparison operand, lowered to SQL in IEEE double space.
- *
- * Owns the double space: every column goes through a real cast ([IeeeDoubleCast]), every constant
- * subtree folds with IEEE semantics, and every constant mixed into SQL arithmetic binds as a double
- * parameter rather than a decimal literal. This is not a convenience. Cerbos transports every
- * attribute number as a protobuf double, so the only arithmetic that evaluates without a CEL
- * no-overload error at check time is double-typed — while H2 and PostgreSQL type a bare `0.1` as
- * exact NUMERIC and evaluate `intCol * 0.1 == 0.3` to TRUE where CEL says `0.30000000000000004`.
- *
- * This class is the PLAN side of that: it turns one operand subtree into an [ArithmeticValue] and
- * owns the refusals a plan shape earns. [ArithmeticValues] owns the algebra, including the whole
- * zero-denominator story — why a division stays symbolic, and how its NaN and infinity arms reach
- * the comparison instead of SQL NULL.
- *
- * Only [ComparisonTranslator.dispatch] routes here, and only for arithmetic-rooted shapes it did
- * not consume as the `add` fold, the eq/ne solve, or a string concatenation — none of those enter
- * double space.
+ * `add` / `sub` / `mult` / `div` as a comparison operand, lowered in IEEE double space: columns cast
+ * through [IeeeDoubleCast], constants bound as doubles. [ArithmeticValues] owns the algebra.
  */
 internal class ArithmeticTranslator(comparisons: ComparisonTranslator) {
 

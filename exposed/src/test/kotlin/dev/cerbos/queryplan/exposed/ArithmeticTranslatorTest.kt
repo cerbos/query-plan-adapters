@@ -231,13 +231,7 @@ class ArithmeticTranslatorTest {
             }
             if (filter !is QueryPlanFilter.Conditional) return false
             OfflineRenderer.render(filter.op).forEach { (dialect, rendered) ->
-                // `RenderedParam.of` is the one owner of which doubles JSON cannot hold, and it
-                // records each as its own text. Reading that text back — rather than listing the
-                // three names here — is what keeps this from being a second copy of that rule; the
-                // fourth stand-in, `-0.0`, is FINITE and belongs in a statement.
-                val nonFinite = rendered.normalisedParams
-                    .map { rendered.params[it] }
-                    .filterNot { it.normalisedFrom!!.toDouble().isFinite() }
+                val nonFinite = rendered.params.filter { (it.value as? Number)?.toDouble()?.isFinite() == false }
                 assertTrue(
                     nonFinite.isEmpty(),
                     "$label bound $nonFinite under $dialect: ${rendered.sql}",

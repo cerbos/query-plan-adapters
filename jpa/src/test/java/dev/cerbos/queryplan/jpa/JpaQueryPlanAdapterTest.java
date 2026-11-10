@@ -934,8 +934,6 @@ class JpaQueryPlanAdapterTest {
     @Nested
     class MacroDepthGuard {
 
-        private static final String DEPTH_PROPERTY = "dev.cerbos.queryplan.jpa.maxMacroDepth";
-
         // The subCategories/labels many-to-many pair allows join chains of any depth.
         private static final Map<String, AttributeMapping> DEEP_MAPPER = Map.of(
                 "request.resource.attr.categories", AttributeMapping.relation("categories", Map.of(
@@ -978,6 +976,21 @@ class JpaQueryPlanAdapterTest {
             return runCount(cond, DEEP_MAPPER, Map.of());
         }
 
+        private void translateDeep(Operand cond, int maxMacroDepth) {
+            EntityManager em = emf.createEntityManager();
+            try {
+                CriteriaBuilder cb = em.getCriteriaBuilder();
+                CriteriaQuery<ResourceEntity> query = cb.createQuery(ResourceEntity.class);
+                Root<ResourceEntity> root = query.from(ResourceEntity.class);
+                JpaQueryPlanAdapter.toFilter(
+                        buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, cond),
+                        JpaQueryPlanAdapter.Options.of(DEEP_MAPPER).withMaxMacroDepth(maxMacroDepth))
+                        .toPredicate(root, query, cb);
+            } finally {
+                em.close();
+            }
+        }
+
         @Test
         void literalFoldCountsAgainstTheCallLevelDepthBound() {
             PlanResourcesResponse plan = Corpus.plan("principal/exists/shadowed-lambda-variable");
@@ -1012,24 +1025,8 @@ class JpaQueryPlanAdapterTest {
                     () -> runDeep(existsChain(6)));
             assertTrue(ex.getMessage().contains("nesting depth 6 exceeds the maximum of 5")
                             && ex.getMessage().contains("exists")
-                            && ex.getMessage().contains(DEPTH_PROPERTY),
+                            && ex.getMessage().contains("withMaxMacroDepth"),
                     "unexpected message: " + ex.getMessage());
-        }
-
-        @Test
-        void propertyRaisesAndLowersTheLimit() {
-            System.setProperty(DEPTH_PROPERTY, "2");
-            try {
-                assertEquals(0, runDeep(existsChain(2)));
-                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                        () -> runDeep(existsChain(3)));
-                assertTrue(ex.getMessage().contains("nesting depth 3 exceeds the maximum of 2"),
-                        "unexpected message: " + ex.getMessage());
-                System.setProperty(DEPTH_PROPERTY, "6");
-                assertEquals(0, runDeep(existsChain(6)));
-            } finally {
-                System.clearProperty(DEPTH_PROPERTY);
-            }
         }
 
         @Test
@@ -1039,34 +1036,10 @@ class JpaQueryPlanAdapterTest {
                     var("request.resource.attr.categories"),
                     lambda("v1", existsLevel(2, 2, "v1.subCategories")));
             Operand cond = exprOp("gt", exprOp("size", filtered), nval(0));
-            System.setProperty(DEPTH_PROPERTY, "1");
-            try {
-                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                        () -> runDeep(cond));
-                assertTrue(ex.getMessage().contains("nesting depth 2 exceeds the maximum of 1"),
-                        "unexpected message: " + ex.getMessage());
-            } finally {
-                System.clearProperty(DEPTH_PROPERTY);
-            }
-        }
-
-        @Test
-        void invalidPropertyValuesThrowNamedErrors() {
-            System.setProperty(DEPTH_PROPERTY, "not-a-number");
-            try {
-                IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                        () -> runDeep(existsChain(1)));
-                assertTrue(ex.getMessage().contains(DEPTH_PROPERTY)
-                                && ex.getMessage().contains("positive integer"),
-                        "unexpected message: " + ex.getMessage());
-                System.setProperty(DEPTH_PROPERTY, "0");
-                IllegalArgumentException zero = assertThrows(IllegalArgumentException.class,
-                        () -> runDeep(existsChain(1)));
-                assertTrue(zero.getMessage().contains("positive integer"),
-                        "unexpected message: " + zero.getMessage());
-            } finally {
-                System.clearProperty(DEPTH_PROPERTY);
-            }
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> translateDeep(cond, 1));
+            assertTrue(ex.getMessage().contains("nesting depth 2 exceeds the maximum of 1"),
+                    "unexpected message: " + ex.getMessage());
         }
     }
 

@@ -8,17 +8,8 @@ import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import org.jetbrains.exposed.v1.core.Expression
 
 /**
- * CEL's `+` over strings.
- *
- * A plan names no operand types, and CEL overloads `+` on strings, so an adapter looking at
- * `add(x, y)` cannot tell concatenation from arithmetic by shape alone. Guessing arithmetic is
- * wrong in the dangerous direction: `text + text` is a hard error on PostgreSQL, `0` on SQLite and
- * `0` on MySQL, where the string constant on the other side coerces to `0` with it and the filter
- * matches almost every row (https://github.com/cerbos/query-plan-adapters/issues/391).
- *
- * The MAPPED COLUMN TYPES settle it here, which is what this adapter has and a type-blind query
- * builder does not: one text operand — a string constant or a text column — proves the whole
- * expression is a concatenation, because CEL has no mixed-type `+`.
+ * CEL's `+` over strings. One text operand, a string constant or a text column, makes the whole
+ * expression a concatenation, since CEL has no mixed-type `+` (#391).
  */
 internal object ConcatTranslator {
 
@@ -29,13 +20,7 @@ internal object ConcatTranslator {
             operand.expression.operandsCount == 2 &&
             hasTextOperand(operand, scope)
 
-    /**
-     * One side of a comparison as a text expression: a bound string constant, a text column, or a
-     * NULL-propagating concatenation of them.
-     *
-     * Every leaf has to be text. A numeric one would mean CEL had no overload at all and the check
-     * errored, so translating it would return rows the PDP denies.
-     */
+    /** One side of a comparison as text: a bound string, a text column, or their NULL-propagating concatenation. */
     fun textExpression(operand: Operand, scope: Scope): Expression<*> = when (operand.nodeCase) {
         Operand.NodeCase.VALUE -> {
             val value = PlanValues.toKotlin(operand.value)

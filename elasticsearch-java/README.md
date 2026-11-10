@@ -6,45 +6,26 @@ into an [Elasticsearch](https://www.elastic.co/elasticsearch) Query DSL clause, 
 
 ## Install
 
-The adapter is not published to Maven Central. Copy the package into your project:
+The adapter is **not published to Maven Central yet**. Build it and install it into your local
+Maven repository, from a checkout of this repository:
 
-1. Copy the whole directory [`src/main/java/dev/cerbos/queryplan/elasticsearch/`](src/main/java/dev/cerbos/queryplan/elasticsearch/)
-   (16 files; the adapter needs all of them) and adjust each file's `package` declaration.
-2. Add the dependencies below.
+```bash
+cd elasticsearch-java
+./gradlew publishToMavenLocal   # needs JDK 17+
+```
+
+Then depend on it, with `mavenLocal()` among your Gradle repositories:
 
 ```kotlin
-// Gradle
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
-    implementation("com.google.protobuf:protobuf-java:4.35.1")
+    implementation("dev.cerbos:cerbos-elasticsearch:0.1.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1") // to call the PDP
 }
 ```
 
-```xml
-<!-- Maven -->
-<dependency>
-    <groupId>dev.cerbos</groupId>
-    <artifactId>cerbos-sdk-java</artifactId>
-    <version>0.20.1</version>
-</dependency>
-<dependency>
-    <groupId>com.google.protobuf</groupId>
-    <artifactId>protobuf-java</artifactId>
-    <version>4.35.1</version>
-</dependency>
-```
-
-The public surface is five files: `ElasticsearchQueryPlanAdapter` (the entry point, with its
-`Options`, `Result` and `ScalarType` types), `OperatorFunction`, and the three exceptions
-`UnsupportedPlanShapeException`, `UnmappedAttributeException` and `MalformedPlanException`. The
-other files are package-private collaborators (`PlanWalker`, `Scope`, `Polarity`,
-`LeafTranslator`, `CollectionTranslator`, `HierarchyTranslator`, `SizeTranslator`,
-`RegexTranslator`, `Queries`, `PlanValues`, `Refusals`).
-
-The build configures `publishToMavenLocal` only so [`example/`](example/) can resolve
-`dev.cerbos:cerbos-elasticsearch` as a real Maven coordinate
-([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)). That is not a release: no
-POM metadata or signing for Maven Central is configured.
+The public surface is `ElasticsearchQueryPlanAdapter` (with its `Options`, `Result` and
+`ScalarType` types), `OperatorFunction`, and the exceptions `UnsupportedPlanShapeException`,
+`UnmappedAttributeException` and `MalformedPlanException`.
 
 ### Requirements
 
@@ -172,10 +153,9 @@ Options options = Options.of(fieldMap)
 | `operatorOverrides` | plan operator | You need a different lowering. See [Custom operator overrides](#custom-operator-overrides) |
 | `explicitNullAttributes` | plan attribute | You send NULL columns to `check()` as explicit `null`. See [Attributes you send as explicit nulls](#attributes-you-send-as-explicit-nulls) |
 
-Positional convenience overloads exist — `toElasticsearchQuery(plan, fieldMap)`, and forms adding
-`operatorOverrides`, `nestedPaths` and `explicitNullAttributes` — for both input types. They are the
-`Options` form with everything else empty, **including `scalarTypes`**, so they translate a
-comparison only where an operator override owns the operator.
+`toElasticsearchQuery(plan, fieldMap)` is `Options.of(fieldMap)`: everything else is empty,
+**including `scalarTypes`**, so it translates a comparison only where an operator override owns the
+operator.
 
 ### Field map
 
@@ -392,6 +372,9 @@ silently by returning documents the PDP denies.
   field and send the original string to Cerbos: the unindexed value is then excluded by a comparison
   and by its negation, matching CEL's conversion error. Without it Elasticsearch rejects the whole
   document. The corpus proves both polarities with an invalid date string.
+- **Unindexed values.** A value Elasticsearch keeps in `_source` but does not index (over
+  `ignore_above`, or rejected under `ignore_malformed`) is not found by `exists`; `!has()` also
+  excludes the fields `_ignored` lists, so such a document counts as present.
 - **Hierarchy paths** must be `keyword` (see [Hierarchy relations](#hierarchy-relations)).
 
 ## Supported operators
@@ -526,7 +509,7 @@ the current PDP (0.57.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 30 / 31 |
 | extended | 51 / 110 |
-| adversarial | 203 / 518 |
+| adversarial | 204 / 519 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
@@ -588,6 +571,11 @@ applies to every field, and quietly returns more rows.
 
 ## Behaviour changes
 
+- **Breaking.** The positional overloads that took `operatorOverrides`, `nestedPaths` or
+  `explicitNullAttributes`, and the five-argument `Options` constructor, are gone; build `Options`
+  with its `with…` methods.
+- Fixed an over-grant: `!has(x)` returned a document whose value Elasticsearch kept in `_source`
+  but did not index (over `ignore_above`, or rejected under `ignore_malformed`).
 - 45 corpus shapes that threw now translate, none of them with a script. A CEL ternary, as a
   condition or inside a comparison operand, is one query per branch guarded by the condition and
   its negation; a predicate compared with a boolean literal is the predicate; `size()` over a
@@ -607,8 +595,8 @@ applies to every field, and quietly returns more rows.
   negation matched every document (over-grant fixes).
 - **Breaking.** A comparison against a field with no `scalarTypes` declaration throws
   `UnmappedAttributeException` instead of emitting a query Elasticsearch would coerce
-  ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). The positional overloads
-  carry no scalar types, so they translate comparisons only through overrides.
+  ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). `Options.of(fieldMap)`
+  carries no scalar types, so it translates comparisons only through overrides.
 - **Breaking.** Collection membership (`x in R.attr.list`) and `hasIntersection`, flat or over a
   `map()` projection, need the collection's element type in `scalarTypes` too, and drop a literal
   of the wrong type instead of letting Elasticsearch coerce it (`"2"` matched a `double` element 2.0).

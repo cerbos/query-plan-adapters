@@ -27,22 +27,13 @@ public sealed interface AttributeMapping {
     public class Field internal constructor(
         public val column: Column<*>,
         /**
-         * This attribute's NULL convention, or `null` when nothing is declared. Declaring it
-         * asserts two things at once: that the column can be NULL, and how that NULL reaches
-         * `check()`.
+         * This attribute's NULL convention, or `null` when nothing is declared.
          *
-         * - [NullAttributeRepresentation.EXPLICIT]: the NULL is sent as a null VALUE, so the
-         *   equality family (`eq`, `ne`, `in`) renders DEFINITELY and a negation includes the NULL
-         *   rows CEL allows.
-         * - [NullAttributeRepresentation.OMITTED]: the NULL sends no attribute, so a null operand
-         *   against this attribute is refused whatever the call-level option says.
-         * - `null`: the column renders the way an undeclared column always has, as if NOT NULL, and
-         *   [Options.nullAttributeRepresentation] decides only whether a null OPERAND is refused.
-         *
-         * `null` does NOT mean "inherit the call-level option" for rendering, and must not: a
-         * call-level EXPLICIT would then hand definite equality to every undeclared column and
-         * return NULL rows the PDP denies for an attribute the caller omits.
-         * The fix is opt-in per column (docs/adr/0004).
+         * - [NullAttributeRepresentation.EXPLICIT]: the NULL is sent as a null value, so `eq`, `ne`
+         *   and `in` render definitely.
+         * - [NullAttributeRepresentation.OMITTED]: a null operand against this attribute is refused.
+         * - `null`: the column renders as if NOT NULL. It does not inherit the call-level option
+         *   (docs/adr/0004).
          */
         public val nullAttributeRepresentation: NullAttributeRepresentation?,
     ) : AttributeMapping {

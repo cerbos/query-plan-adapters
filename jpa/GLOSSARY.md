@@ -86,9 +86,8 @@ Terms used by this adapter's code, tests, and reviews, and by `spring-data`, whi
   adapter: the mapping, the operator overrides, the call-level NULL convention,
   and the macro-depth bound. Collections are copied on construction and each
   `with…` returns a new instance, so it can be built once and shared.
-  `toFilter(plan, mapping)`, and spring-data's positional `toSpecification`
-  overloads, are this record with the rest at its defaults. Macro depth has a precedence: a value declared here wins, the
-  `maxMacroDepth` system property applies when none is, the default when neither.
+  `toFilter(plan, mapping)` and spring-data's `toSpecification(plan, mapping)`
+  are this record with the rest at its defaults.
 - **Refusal** — the adapter declining to translate, as opposed to translating
   wrongly: a wrong filter is an authorization bug, a throw is a bug report. Every
   refusal goes through the package-private `Refusals` factory, which makes its

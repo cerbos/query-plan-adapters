@@ -4,15 +4,8 @@ import com.google.protobuf.Value
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 
 /**
- * The eager pre-walk scan behind [NullAttributeRepresentation.OMITTED]: a plan that compares an
- * attribute against a null constant is refused BEFORE anything is built, when the attribute's
- * convention (its own declaration, else the call-level option) is OMITTED.
- *
- * It matches on the OPERAND, never on an operator allowlist, and is deliberately wider than the
- * over-granting shapes: negation is applied around a built predicate, so a leaf cannot know whether
- * an enclosing `not` will flip it. It is eager, and not deferred to the leaf that would emit
- * `IS NULL`, because the refusal is a property of the whole plan under the caller's declaration —
- * a caller who gets a filter back should not have to run it to discover the plan was untranslatable.
+ * Refuses, before anything is built, a plan comparing an attribute against null when that attribute's
+ * convention is OMITTED. Matches on the operand, because a leaf cannot know about an enclosing `not`.
  */
 internal object NullOperandScan {
 
@@ -55,12 +48,7 @@ internal object NullOperandScan {
         operands.forEach { assertTranslatable(it, options) }
     }
 
-    /**
-     * The declared NULL convention of the attribute a binary comparison names, or `null` when the
-     * node is not a comparison between one mapped attribute and one literal. Anything else — a
-     * collection macro, `hasIntersection`, a string match — keeps using the call-level default,
-     * because a declaration says nothing about what its null means there.
-     */
+    /** The declared convention of the attribute a binary comparison names, or `null` for any other node. */
     private fun declaredForComparedAttribute(
         operator: String,
         operands: List<Operand>,
@@ -76,12 +64,7 @@ internal object NullOperandScan {
         return declaredField(variable.variable, mapping)?.nullAttributeRepresentation
     }
 
-    /**
-     * The field [variable] names, directly or at the end of a chain of to-one relations — the same
-     * longest-prefix walk [RootScope] resolves with. A relation-reached field carries its own
-     * declaration, and reading only the whole-name mapping would miss it and fall back to the
-     * call-level default.
-     */
+    /** The field [variable] names, directly or through to-one relations, by the same walk [RootScope] uses. */
     private fun declaredField(variable: String, mapping: AttributeResolver): AttributeMapping.Field? {
         when (val direct = mapping.resolve(variable)) {
             is AttributeMapping.Field -> return direct

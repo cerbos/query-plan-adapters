@@ -9,25 +9,15 @@ import org.jetbrains.exposed.v1.core.doubleParam
 import org.jetbrains.exposed.v1.core.longParam
 
 /**
- * Binds a plan constant BY THE VALUE'S TYPE, never by the column's.
- *
- * Exposed's own `column eq value` binds through the column type, which coerces: `1.5` against an
- * integer column becomes `1`, and `aNumber >= 1.5` then returns rows the PDP denies. A constant is
- * what the plan says it is, so its SQL type comes from the constant.
- *
- * NULL is never bound: see [UnknownOp] and [NullLiteral].
+ * Binds a plan constant by the value's type, never the column's: binding through an integer column
+ * turns `1.5` into `1`. NULL is never bound ([UnknownOp], [NullLiteral]).
  */
 internal object Params {
     fun of(value: Any): Expression<*> = when (value) {
         is String -> ExactString.param(value)
         is Long -> longParam(value)
         is Int -> longParam(value.toLong())
-        // A NaN or an infinity is refused here rather than bound, so "no statement this adapter
-        // emits binds a non-finite double" is true BY CONSTRUCTION at the one place that binds
-        // one, instead of resting on an argument about what the planner can ship. It is the same
-        // rule `ArithmeticValues.sqlOf` applies on the arithmetic path, which is the path that can
-        // actually produce one: PostgreSQL accepts `x > 'NaN'` and orders NaN above every number,
-        // while MySQL's driver rejects the parameter outright.
+        // A NaN or infinity is refused rather than bound.
         is Double ->
             if (value.isFinite()) doubleParam(value) else throw ScalarRefusals.nonFiniteConstant()
         is Boolean -> booleanParam(value)
@@ -35,13 +25,7 @@ internal object Params {
     }
 }
 
-/**
- * The SQL `NULL` keyword.
- *
- * Rendered, never bound: PostgreSQL cannot infer a type for a bare `$1` in a position that gives
- * it nothing to infer from, and a keyword needs no dialect knowledge. Its one use is a `THEN NULL`
- * arm, where the value has to be absent rather than merely unknown.
- */
+/** The SQL `NULL` keyword, rendered rather than bound because PostgreSQL cannot type a bare `$1`. */
 internal object NullLiteral : Expression<Any?>() {
     override fun toQueryBuilder(queryBuilder: QueryBuilder) {
         queryBuilder.append("NULL")

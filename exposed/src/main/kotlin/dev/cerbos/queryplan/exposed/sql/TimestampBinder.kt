@@ -12,28 +12,9 @@ import java.time.ZoneOffset
 import kotlin.time.ExperimentalTime
 
 /**
- * Binds a parsed instant through the MAPPED COLUMN'S OWN column type.
- *
- * The column type is the only thing that knows how this database stores time, and it is also the
- * one converter guaranteed to agree with what the application wrote: binding a `java.time.Instant`
- * against a column the caller declared with `exposed-kotlin-datetime` would otherwise go through a
- * different conversion from the insert's.
- *
- * Nothing here references either datetime module. `InstantColumnType` and `OffsetDateTimeColumnType`
- * are the abstract bases in `exposed-core`, and `exposed-java-time`'s `timestamp()` /
- * `timestampWithTimeZone()` and `exposed-kotlin-datetime`'s extend them — so one check covers
- * `java.time.Instant`, `kotlin.time.Instant` and `java.time.OffsetDateTime` columns, and a
- * consumer needs neither module for this class to load.
- *
- * **Column-type contract.** Only a type that unambiguously denotes an absolute instant is
- * translated. A local date-time carries no zone, so the stored wall-clock reading could mean any
- * instant; a string column orders lexicographically, which agrees with chronology only for one
- * fixed-width zone-normalised layout. Guessing a zone would silently include rows the PDP denies,
- * so those fail closed with a MAPPING error — the plan is fine, the mapping does not say enough.
- *
- * The column type is read through [ScalarColumnTypes.unwrap], the declared owner of "the type that
- * actually decides the SQL". Reading `column.columnType` raw refused a DAO-id or `transform`ed
- * instant column here while every other path in the adapter accepted it — one column, two answers.
+ * Binds a parsed instant through the mapped column's own type, read via [ScalarColumnTypes.unwrap].
+ * Only a column that denotes an absolute instant translates; a local date-time or string column is a
+ * mapping error, since guessing a zone could over-grant.
  */
 internal object TimestampBinder {
 
@@ -43,14 +24,7 @@ internal object TimestampBinder {
      */
     private enum class Representation { INSTANT, OFFSET_DATE_TIME }
 
-    /**
-     * THE enumeration of the representations, asked by everything else here.
-     *
-     * One `when` rather than one per question: [storesAbsoluteInstant] used to carry its own copy
-     * of the type list beside [bind]'s, so a third representation would have had to be added in two
-     * places and a reader could not tell which of them was authoritative. Adding one here now makes
-     * [bind]'s `when` non-exhaustive, which is a compile error rather than a silent omission.
-     */
+    /** The representation of [column]'s instant; [bind]'s `when` is exhaustive over it. */
     private fun representationOf(column: Column<*>): Representation? =
         when (ScalarColumnTypes.unwrap(column)) {
             is InstantColumnType<*> -> Representation.INSTANT
@@ -61,14 +35,7 @@ internal object TimestampBinder {
     /** Whether [column] unambiguously denotes an absolute instant, by the contract above. */
     fun storesAbsoluteInstant(column: Column<*>): Boolean = representationOf(column) != null
 
-    /**
-     * Whether two columns that both pin an absolute instant pin it the SAME way.
-     *
-     * Compared as REPRESENTATIONS, never as column-type names: `exposed-java-time`'s `timestamp()`
-     * and `exposed-kotlin-datetime`'s declare different classes and both extend
-     * [InstantColumnType], so they store the same thing and compare correctly. Reading the class
-     * name instead refused that pair for no reason while claiming to be about time zones.
-     */
+    /** Whether two absolute-instant columns use the same representation, whichever datetime module declared them. */
     fun sameRepresentation(left: Column<*>, right: Column<*>): Boolean {
         val representation = representationOf(left) ?: return false
         return representation == representationOf(right)

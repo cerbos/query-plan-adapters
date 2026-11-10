@@ -12,26 +12,14 @@ import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.doubleParam
 
 /**
- * One arithmetic operand, resolved as far as SQL can take it.
- *
- * SQL has no NaN and no infinity, and CEL produces both: attribute arithmetic is double-typed
- * (Cerbos transports every number as a protobuf double), so `0.0/0.0` is NaN and `x/0.0` is a
- * signed infinity, and each of those goes on to flow through `+`, `-` and `*`. A division is
- * therefore NOT lowered to SQL where its denominator may be zero. It stays a [Branch] — a ternary
- * over the denominator, then the numerator — whose arms are IEEE constants, and the enclosing
- * arithmetic and comparison distribute over it until each arm is something SQL can state.
+ * One arithmetic operand. SQL has no NaN or infinity, so a division whose denominator may be zero
+ * stays a [Branch] over the IEEE outcomes, which the enclosing operations distribute over.
  */
 internal sealed interface ArithmeticValue {
     /** A constant, possibly non-finite: a division arm is NaN or a signed infinity. */
     class Constant(val value: Double) : ArithmeticValue
 
-    /**
-     * A SQL expression in double space, already cast by [IeeeDoubleCast] where it is a column.
-     *
-     * [unsignedZero] is true only for a direct read of an integral or decimal column: the one
-     * operand whose zero is certainly `+0.0` on the check side. A floating-point column can store
-     * `-0.0`, and computed arithmetic can produce it (`-1.0 * 0.0`), and SQL cannot read the sign.
-     */
+    /** A SQL expression in double space. [unsignedZero] marks an integral or decimal column read, whose zero is `+0.0`. */
     class Sql(val expr: Expression<*>, val unsignedZero: Boolean = false) : ArithmeticValue
 
     /**
@@ -47,18 +35,8 @@ internal sealed interface ArithmeticValue {
 }
 
 /**
- * CEL's arithmetic and comparison over [ArithmeticValue], in IEEE double space.
- *
- * Every operation distributes over a [ArithmeticValue.Branch] before it does anything else, so a
- * non-finite division arm reaches the leaf as a constant and is FOLDED there rather than asked for
- * a SQL form it does not have. That is the whole mechanism: `R.attr.aNumber / R.attr.aNumber + 1.0`
- * becomes four arms — `NaN + 1.0`, `+Infinity + 1.0`, `-Infinity + 1.0`, and the guarded quotient —
- * of which only the last reaches the database. Lowering the division to SQL instead turns the sum
- * into `NULL + 1`, and `NULL <> 2.0` is UNKNOWN where CEL's `NaN != 2.0` is TRUE: the row the PDP
- * allows would be dropped.
- *
- * [ComparisonTranslator] owns the leaf comparisons themselves, so the IEEE constant folding here is
- * the same one every other constant comparison in the adapter goes through.
+ * CEL's arithmetic and comparison over [ArithmeticValue], in IEEE double space. Every operation
+ * distributes over a [ArithmeticValue.Branch] first, so non-finite arms fold to constants.
  */
 internal class ArithmeticValues(private val comparisons: ComparisonTranslator) {
 
@@ -121,27 +99,14 @@ internal class ArithmeticValues(private val comparisons: ComparisonTranslator) {
         return comparisons.compare(operator, sqlOf(left), sqlOf(right))
     }
 
-    /**
-     * CEL division, kept symbolic wherever a zero denominator is possible.
-     *
-     * The finite arm still carries a `NULLIF` guard even though it can never be SELECTED for a
-     * zero denominator: [TriLogic.ternary] emits a predicate, not a `CASE`, so SQL is free to
-     * evaluate both arms and an unguarded division would abort the whole query on the zero row —
-     * a data-dependent failure rather than a filter.
-     */
+    /** CEL division, kept symbolic where a zero denominator is possible; the finite arm keeps `NULLIF` since SQL may evaluate both. */
     private fun divide(dividend: ArithmeticValue, divisor: ArithmeticValue): ArithmeticValue {
         if (divisor is ArithmeticValue.Constant) {
             if (divisor.value != 0.0) {
                 if (dividend is ArithmeticValue.Constant) {
                     return ArithmeticValue.Constant(dividend.value / divisor.value)
                 }
-                // Through [sqlOf], never `doubleParam` directly: `NaN != 0.0` is TRUE under IEEE,
-                // so a NaN or an infinite DIVISOR reaches here — `R.attr.aNumber / (0.0/0.0)` and
-                // the arms of `a / (b / c)` both do — and binding one is the over-grant this
-                // adapter's every other arm routes through [sqlOf] to prevent. PostgreSQL accepts
-                // `x / 'NaN'`, answers NaN, and orders NaN ABOVE every number, so `> 0` is TRUE
-                // where CEL says FALSE; MySQL's driver rejects the parameter outright, failing a
-                // filter the adapter reported as translatable.
+                // Through [sqlOf], which refuses a non-finite divisor rather than binding it.
                 return ArithmeticValue.Sql(
                     CustomOperator("/", DoubleColumnType(), sqlOf(dividend), sqlOf(divisor)),
                 )
@@ -172,12 +137,7 @@ internal class ArithmeticValues(private val comparisons: ComparisonTranslator) {
         )
     }
 
-    /**
-     * The quotient of [dividend] by a zero of [zeroDenominator]'s sign: NaN for a zero numerator,
-     * and otherwise the infinity the two signs give.
-     *
-     * A NULL numerator leaves both conditions UNKNOWN, which is the CEL missing-attribute deny.
-     */
+    /** The quotient of [dividend] by a signed zero: NaN for a zero numerator, else an infinity. */
     private fun nonFiniteQuotient(dividend: ArithmeticValue, zeroDenominator: Double): ArithmeticValue {
         if (dividend is ArithmeticValue.Constant) {
             return ArithmeticValue.Constant(dividend.value / zeroDenominator)
@@ -194,15 +154,7 @@ internal class ArithmeticValues(private val comparisons: ComparisonTranslator) {
         )
     }
 
-    /**
-     * A NaN or an infinity against a SQL expression.
-     *
-     * Both compare the same way against every FINITE number, so `0.0` stands in for the value and
-     * only its NULL-ness has to survive: [TriLogic.baseUnlessUnknown] drives the arm to UNKNOWN for
-     * a NULL, which keeps the row excluded under BOTH polarities. A stored value that is itself an
-     * infinity is outside what the stand-in states; no engine here produces one from a translated
-     * expression, since every division that could is folded above rather than executed.
-     */
+    /** A NaN or infinity against a SQL expression: `0.0` stands in, keeping only the NULL-ness. */
     private fun nonFiniteComparison(
         operator: String,
         nonFinite: Double,

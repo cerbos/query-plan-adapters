@@ -17,19 +17,9 @@ import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.intLiteral
 
 /**
- * The collection macros `exists`, `all` and `exists_one`, lowered to ONE scoring subquery each,
- * never a plain `EXISTS`: an element whose body is UNKNOWN silently fails to match under `EXISTS`,
- * which collapses CEL's error case to FALSE, and an enclosing NOT then readmits the row.
- *
- * The truth tables the scores encode are CEL's, not SQL's:
- *  - `exists` is OR with error absorption — TRUE if any element matches, ERROR if none matches and
- *    at least one errors, FALSE otherwise (including the empty collection);
- *  - `all` is AND with error absorption — FALSE if any element fails, ERROR if none fails and at
- *    least one errors, TRUE otherwise (including the empty collection);
- *  - `exists_one` is STRICT — any erroring element errors the whole macro, otherwise exactly one
- *    match.
- *
- * ERROR becomes SQL UNKNOWN, so the row stays excluded under both polarities.
+ * `exists`, `all` and `exists_one`, each lowered to one scoring subquery rather than `EXISTS`, which
+ * collapses an UNKNOWN body to FALSE. `exists` and `all` absorb errors as CEL does; `exists_one` is
+ * strict. ERROR becomes SQL UNKNOWN.
  */
 internal class CollectionTranslator(private val translation: Translation) {
 
@@ -48,16 +38,8 @@ internal class CollectionTranslator(private val translation: Translation) {
             ParsedLambda.parse(lambdaOperand, "", "", "")
         }
 
-        // A literal value-list collection arrives when the planner could not unroll the macro
-        // itself: at 10 elements or fewer it folds exists/all into an or/and chain, above that the
-        // lambda ships with the folded list as its collection operand. Applying the same fold here
-        // is what keeps the translation independent of which side of that threshold it landed on.
-        //
-        // It costs a macro level like any other. The fold emits no subquery of its own, but it
-        // DUPLICATES everything under it once per element, so two three-element folds over one
-        // relation macro emit nine correlated subqueries and an eleven-element pair emits 121.
-        // Reaching it before [PlanWalker.enterMacro] left the emitted expression unbounded whatever
-        // [Options.maxMacroDepth] was set to.
+        // The planner ships a literal list past its 10-element unroll threshold; fold it the same way. It
+        // counts as a macro level, because the fold duplicates the body per element.
         if (collectionOperand.nodeCase == Operand.NodeCase.VALUE) {
             return translation.walker.enterMacro(operator) {
                 foldKnownValues(operator, collectionOperand.value, lambdaOperand, scope)
@@ -103,12 +85,8 @@ internal class CollectionTranslator(private val translation: Translation) {
     }
 
     /**
-     * `NULLIF(COALESCE(MAX(CASE WHEN body THEN t WHEN NOT body THEN f ELSE 1 END), 0), 1) = witness`.
-     *
-     * One scan, one pair of scores. The scores are chosen so the macro's own witness state
-     * dominates the MAX: 2 for the state that decides the macro outright, 0 for its opposite, and
-     * 1 for undetermined — which therefore only wins when no element decided anything, and NULLIF
-     * turns that win into the UNKNOWN the row has to inherit.
+     * `NULLIF(COALESCE(MAX(CASE WHEN body THEN t WHEN NOT body THEN f ELSE 1 END), 0), 1) = witness`:
+     * 2 decides, 0 is the opposite, 1 is undetermined and becomes UNKNOWN through NULLIF.
      */
     private fun scored(
         collection: Resolution.Collection,
@@ -131,13 +109,8 @@ internal class CollectionTranslator(private val translation: Translation) {
     }
 
     /**
-     * `COALESCE(SUM(CASE WHEN body THEN 1 ELSE 0 END), 0) + <poison> = 1`.
-     *
-     * `exists_one` has no error absorption: one undetermined element errors the whole macro even
-     * when the count would otherwise hold. The poison term is 0 when every element is determined
-     * and SQL NULL otherwise, and NULL is absorbing under addition, so the comparison goes UNKNOWN
-     * exactly when CEL errors. The empty collection yields 0 + 0 = 0, which compares FALSE — which
-     * is what CEL's `exists_one` over an empty list is.
+     * `COALESCE(SUM(CASE WHEN body THEN 1 ELSE 0 END), 0) + <poison> = 1`; the poison is NULL when any
+     * element is undetermined, since `exists_one` absorbs no error.
      */
     private fun strictlyOne(
         collection: Resolution.Collection,
@@ -161,14 +134,7 @@ internal class CollectionTranslator(private val translation: Translation) {
         return EqOp(total, intLiteral(1))
     }
 
-    /**
-     * The lambda body, translated against the element the subquery ranges over.
-     *
-     * The element scope delegates every non-lambda variable outward, so an outer reference inside
-     * the body resolves against the scope the macro appeared in and reaches the subquery as an
-     * ordinary correlation. The body is built ONCE and shared between the polarities a score needs:
-     * an Exposed expression tree is immutable, so a node is safe to appear twice.
-     */
+    /** The lambda body against the subquery's element; outer references correlate through delegation. */
     private fun translateBody(
         collection: Resolution.Collection,
         lambda: ParsedLambda,
@@ -179,15 +145,7 @@ internal class CollectionTranslator(private val translation: Translation) {
         LambdaScope(translation, alias, collection.tail, lambda.variable, scope),
     )
 
-    /**
-     * Fold a macro whose collection operand is a literal value list: substitute each element into
-     * the lambda body and walk the combined `or`/`and` expression, which is the same fold the
-     * planner applies below its own unroll threshold.
-     *
-     * Element comparisons produced by the fold flow through the ordinary comparison translation, so
-     * a NULL column keeps its SQL-UNKNOWN reading exactly as it does in a chain the planner
-     * unrolled itself.
-     */
+    /** Folds a macro over a literal value list into the `or`/`and` the planner would have unrolled. */
     private fun foldKnownValues(
         operator: String,
         collection: Value,
@@ -227,10 +185,8 @@ internal class CollectionTranslator(private val translation: Translation) {
     }
 
     /**
-     * `exists` or `all` over a list built from expressions (`[R.attr.a, R.attr.b].exists(s, s ==
-     * "x")`): each element is substituted into the body and the results are folded by
-     * [PlanWalker.overComputedList], which keeps the row UNKNOWN when any element raises. A body
-     * reading a member of the element (`s.f`) is refused: the element is an expression, not a row.
+     * `exists` or `all` over a list built from expressions, folded by [PlanWalker.overComputedList]. A
+     * body reading a member of the element is refused.
      */
     private fun overComputedList(
         operator: String,
@@ -289,16 +245,8 @@ internal class CollectionTranslator(private val translation: Translation) {
         }
 
     /**
-     * `exists_one` over a literal list, from one body per element POSITION (a repeated element is
-     * two positions, and two TRUE bodies are not "exactly one").
-     *
-     * `OR_i (b_i AND AND_{j != i} NOT b_j)` is exact while every body is two-valued. CEL's
-     * `exists_one` has no error absorption, so one erroring element errors the macro whatever the
-     * others say; the pairwise form can instead read FALSE there (two TRUE bodies beside an UNKNOWN
-     * one), which a negation would flip. The witness `OR_i NOT (b_i OR NOT b_i)` is FALSE when every
-     * body is determined and UNKNOWN otherwise, and [TriLogic.baseUnlessUnknown] turns an UNKNOWN
-     * witness into an UNKNOWN macro. The pairwise form is quadratic in the list, so a list past
-     * [EXISTS_ONE_FOLD_LIMIT] elements is refused rather than emitted.
+     * `exists_one` over a literal list: `OR_i (b_i AND AND_{j != i} NOT b_j)`, made UNKNOWN when any body
+     * is. Quadratic, so lists past [EXISTS_ONE_FOLD_LIMIT] are refused.
      */
     private fun exactlyOneOf(bodies: List<Op<Boolean>>): Op<Boolean> {
         if (bodies.size > EXISTS_ONE_FOLD_LIMIT) {
@@ -317,14 +265,7 @@ internal class CollectionTranslator(private val translation: Translation) {
         return TriLogic.baseUnlessUnknown(exactlyOne, undetermined)
     }
 
-    /**
-     * Substitute a lambda's iteration variable with one concrete element.
-     *
-     * A bare reference becomes the element; a dotted one drills into it. A nested macro that
-     * REBINDS the same variable name shadows this one, so substitution only descends into its
-     * collection operand — otherwise the inner macro's own elements would be replaced by the outer
-     * fold's.
-     */
+    /** Substitutes a lambda's iteration variable with one element, stopping at a nested macro that rebinds it. */
     fun substitute(operand: Operand, variable: String, element: Value): Operand =
         when (operand.nodeCase) {
             Operand.NodeCase.VARIABLE -> {

@@ -324,7 +324,7 @@ class ElasticsearchQueryPlanAdapterTest {
                 "eq", (field, value) -> Map.of("match", Map.of(field, value)));
 
         Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                conditionalPlan(condition), FIELD_MAP, overrides);
+                conditionalPlan(condition), Options.of(FIELD_MAP).withOperatorOverrides(overrides));
 
         assertEquals(Map.of("match", Map.of("department", "engineering")),
                 ((Result.Conditional) result).query());
@@ -450,11 +450,11 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * {@link Options} copies every collection on the way in, each {@code with…} returns a new
-     * instance, and the positional overloads equal the {@link Options} form with the rest empty.
+     * {@link Options} copies every collection on the way in, and each {@code with…} returns a new
+     * instance.
      */
     @Test
-    void optionsAreImmutableAndTheConvenienceOverloadsDelegateToThem() {
+    void optionsAreImmutable() {
         Map<String, String> mutable = new HashMap<>(FIELD_MAP);
         Options options = Options.of(mutable);
         mutable.clear();
@@ -476,20 +476,6 @@ class ElasticsearchQueryPlanAdapterTest {
         assertThrows(NullPointerException.class, () -> options.withScalarTypes(null));
         assertThrows(NullPointerException.class, () -> Options.of(null));
         assertThrows(NullPointerException.class, () -> options.withCollectionFields(null));
-
-        // The positional overloads carry no scalar types, so compare through an `eq` override,
-        // which needs no declaration.
-        Map<String, OperatorFunction> overrides = Map.of(
-                "eq", (field, value) -> Map.of("custom_eq", Map.of(field, value)));
-        Operand condition = expressionOperand("exists",
-                variableOperand("request.resource.attr.tagObjects"),
-                lambdaOperand("t", expressionOperand("eq",
-                        variableOperand("t.name"), stringValueOperand("public"))));
-        assertEquals(
-                ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                        conditionalPlan(condition), FIELD_MAP, overrides, NESTED_PATHS, Set.of()),
-                ElasticsearchQueryPlanAdapter.toElasticsearchQuery(
-                        conditionalPlan(condition), widened.withOperatorOverrides(overrides)));
     }
 
     /**
