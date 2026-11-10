@@ -695,7 +695,7 @@ internal sealed class Translator
         };
     }
 
-    private static Expression CompareValues(string op, Expression a, Expression b, ScalarKind kind)
+    private Expression CompareValues(string op, Expression a, Expression b, ScalarKind kind)
     {
         if (kind == ScalarKind.Bool)
         {
@@ -711,6 +711,8 @@ internal sealed class Translator
         }
         if (kind == ScalarKind.String)
         {
+            // A linguistic PostgreSQL collation does not order by code point, as CEL does.
+            if (_provider == DatabaseProvider.PostgreSql) a = Ex.Collate(a, "C");
             a = Ex.CompareStrings(a, b);
             b = Expression.Constant(0);
         }

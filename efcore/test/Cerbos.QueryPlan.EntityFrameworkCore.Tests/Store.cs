@@ -44,9 +44,9 @@ public sealed class Store : IAsyncLifetime
                 break;
             case "postgres":
                 Provider = DatabaseProvider.PostgreSql;
-                // CEL orders strings by code point; the image's default libc collation orders them linguistically.
+                // ICU's linguistic en-US order, as a managed service's default: the adapter orders strings by code point itself.
                 _postgres = new PostgreSqlBuilder(Image("POSTGRES_IMAGE"))
-                    .WithEnvironment("POSTGRES_INITDB_ARGS", Environment.GetEnvironmentVariable("ADAPTER_TEST_POSTGRES_INITDB_ARGS") ?? "--lc-collate=C")
+                    .WithEnvironment("POSTGRES_INITDB_ARGS", Environment.GetEnvironmentVariable("ADAPTER_TEST_POSTGRES_INITDB_ARGS") ?? "--locale-provider=icu --icu-locale=en-US")
                     .Build();
                 await _postgres.StartAsync();
                 builder.UseNpgsql(_postgres.GetConnectionString());
