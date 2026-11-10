@@ -868,7 +868,7 @@ final class ComparisonTranslator {
         private final Expression<String> s;
 
         IntText(Expression<String> s) {
-            this.s = s;
+            this.s = ExactStrings.exact(cb, s);
         }
 
         private Predicate negative() {
@@ -1479,6 +1479,8 @@ final class ComparisonTranslator {
     Predicate comparePredicate(String op,
                                Expression left,
                                Expression right) {
+        left = ExactStrings.forOperator(cb, op, left);
+        right = ExactStrings.forOperator(cb, op, right);
         return switch (op) {
             case "eq" -> cb.equal(left, right);
             case "ne" -> cb.notEqual(left, right);
@@ -1521,6 +1523,6 @@ final class ComparisonTranslator {
                 cb.<String>selectCase()
                         .when(cb.isNull(needle), cb.nullLiteral(String.class))
                         .otherwise(pattern);
-        return cb.like(haystack.as(String.class), guardedPattern, '\\');
+        return cb.like(ExactStrings.exact(cb, haystack.as(String.class)), guardedPattern, '\\');
     }
 }

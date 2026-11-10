@@ -17,8 +17,8 @@ npm install @cerbos/grpc   # or @cerbos/http — any Cerbos client that can call
 - The adapter depends on no Cerbos client, so an HTTP application does not pull in gRPC.
 - Stores executed in CI: SQLite, PostgreSQL, MySQL 8.0.17+. PlanetScale emits the same SQL as MySQL
   but is **not executed anywhere**, so the conformance contract does not cover it.
-- String columns need a byte-exact collation — see
-  [Database collation requirement](#database-collation-requirement).
+- String comparisons run byte-exact whatever the column's collation — see
+  [Collations](#collations).
 
 ## Quick start
 
@@ -373,46 +373,28 @@ See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 > access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because that access already denies a row
 > without `x`.
 
-## Database collation requirement
+## Collations
 
-> **Every mapped string column must use a byte-exact collation.** CEL compares strings byte for
-> byte. With a case-insensitive collation, a filter can return `"Finance"` for a policy that
-> allowed only `"finance"` — an over-grant.
+CEL compares strings byte for byte, so the adapter does not trust the column's collation:
 
-- **MySQL / PlanetScale:** use `utf8mb4_0900_bin` (MySQL 8.0.17+), which is byte-exact and NO PAD.
-  Case-sensitive is not enough: `utf8mb4_0900_as_cs` ignores a soft hyphen (`'o­ne' = 'one'`),
-  and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '`). Replaying the corpus on `mysql:8.4`, the default
-  `utf8mb4_0900_ai_ci` makes **62 of the 268 compared cases** disagree with the PDP, and
-  `utf8mb4_0900_as_cs` makes **16** disagree, all on the soft-hyphen seed `h6`
-  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-- **PostgreSQL:** every collation is deterministic by default, so equality is exact, but **string
-  ordering** (`<`, `<=`, `>`, `>=`) needs a byte-order collation, `"C"`. CEL orders strings by
-  code point; a linguistic collation such as glibc's `en_US.UTF-8` (the usual default on Debian
-  images and managed services) or ICU's `en-US` sorts `"One"` after `"a"`, so
-  `R.attr.name > "a"` over-grants it
-  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Create the database with
-  `LC_COLLATE 'C'`, or declare `COLLATE "C"` on each column a policy orders. Do not use
-  nondeterministic ICU collations or `citext` for mapped attributes.
-- **SQLite:** do not apply `COLLATE NOCASE` to mapped columns. The default `BINARY` orders by code
-  point, as CEL does.
+- **MySQL / PlanetScale:** every comparison over a `varchar`, `char`, `text` or `enum` column runs
+  under `COLLATE utf8mb4_0900_bin`, which is byte-exact and NO PAD. The default
+  `utf8mb4_0900_ai_ci` would otherwise return `"Finance"` for a policy that allowed only
+  `"finance"`. String columns must use the `utf8mb4` character set (MySQL 8's default), and a
+  comparison over a column whose own collation differs cannot use that column's index.
+- **PostgreSQL:** equality is exact under any deterministic collation, so it is left alone. Every
+  ordering (`<`, `<=`, `>`, `>=`) over a `text`, `varchar` or `char` column runs under
+  `COLLATE "C"`, since a linguistic collation such as `en_US.UTF-8` sorts `"One"` after `"a"`.
+  Avoid nondeterministic ICU collations and `citext` for mapped attributes.
+- **SQLite:** the default `BINARY` collation is exact. Do not declare `COLLATE NOCASE` on a mapped
+  column.
 
-This covers equality, ordering, `in`, intersections and hierarchy comparisons. `utf8mb4_0900_bin`
-orders by code point too.
+Columns of other types, such as a `customType` or a datetime in string mode, keep their own
+collation. The conformance MySQL leg runs under the server default `utf8mb4_0900_ai_ci`, and the
+PostgreSQL leg under ICU's `en-US`, so the corpus proves this on every run.
 
-The conformance PostgreSQL leg initialises its database with `--lc-collate=C` rather than trusting
-the Alpine image, whose musl libc orders by byte only by accident. To reproduce the over-grant,
-`ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" npm run
-test:adversarial:postgres` fails both `comparison/*/string-code-point-order` cases.
-
-`contains` / `startsWith` / `endsWith` do not depend on it: they are lowered to `REPLACE` (so a
-column-valued needle is never read as `LIKE` pattern syntax), which is case-sensitive on all three
-stores. That also avoids SQLite's `LIKE`, which is ASCII case-insensitive regardless of collation.
-
-`string()` over a boolean column produces the literals `'true'` / `'false'`. On MySQL a literal
-compares in the *connection's* collation (mysql2 defaults to `utf8mb4_unicode_ci`), so the adapter
-renders them as `_utf8mb4'true' COLLATE utf8mb4_0900_bin`. That explicit collation also applies to
-the other operand, so `string(R.attr.flag) == R.attr.label` compares `label` byte-exactly. SQLite
-and PostgreSQL literals carry no collation.
+`contains` is lowered to `REPLACE`, so a column-valued needle is never read as `LIKE` pattern
+syntax, which also avoids SQLite's case-insensitive `LIKE`.
 
 ### `matches()`
 
@@ -469,7 +451,7 @@ its declaration, stays a plain `Error`. The shapes this adapter refuses are list
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real Drizzle
-queries over the corpus's 44 seed rows on SQLite, PostgreSQL and MySQL (under `utf8mb4_0900_bin`).
+queries over the corpus's 44 seed rows on SQLite, PostgreSQL and MySQL, each under its default collation.
 Passed cases on the current PDP, 0.57.0, identical on all three stores. The total is every golden
 case in the tier; planner-divergence cases are skipped, not run, and count as not passed:
 
@@ -768,7 +750,7 @@ gitignored and leaves the tests out; `npm run typecheck` is the check that cover
 | `npm run typecheck` | Type-checks `src/` and the tests | Node only |
 | `npm run test:adversarial` | The rows each recorded plan returns on real SQLite equal the recorded `check()` decisions, for both pinned PDPs | Node only |
 | `npm run test:adversarial:postgres` | The same corpus on real PostgreSQL, plus the list cases under `pgArray` and plain `json` storage | Docker |
-| `npm run test:adversarial:mysql` | The same corpus on real MySQL under `utf8mb4_0900_bin`. Set `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci` to measure MySQL's default | Docker |
+| `npm run test:adversarial:mysql` | The same corpus on real MySQL under its default `utf8mb4_0900_ai_ci`; `ADAPTER_TEST_MYSQL_COLLATION` overrides it | Docker |
 
 No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` and applies
 [`conformance-ledger.json`](conformance-ledger.json): a case with no entry must return exactly the

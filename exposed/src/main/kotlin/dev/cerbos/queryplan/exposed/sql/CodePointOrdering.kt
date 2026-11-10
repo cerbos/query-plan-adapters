@@ -22,7 +22,7 @@ import org.jetbrains.exposed.v1.core.vendors.currentDialect
  * `STRINGTOUTF8(a) < STRINGTOUTF8(b)`: UTF-8 preserves code point order and H2 compares binary
  * values as unsigned bytes. PostgreSQL under the `C` collation, MySQL under `utf8mb4_0900_bin` and
  * SQLite's BINARY collation already compare UTF-8 bytes, so the comparison is left as it is there
- * (the collation requirement every ordering already carries). Any other dialect raises when the
+ * (under the collation [ExactString] gives the left side). Any other dialect raises when the
  * statement is rendered rather than guess at its collation.
  *
  * The dialect is read inside [toQueryBuilder] because translation happens outside any transaction.

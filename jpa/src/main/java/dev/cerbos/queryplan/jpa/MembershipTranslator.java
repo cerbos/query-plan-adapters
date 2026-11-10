@@ -160,8 +160,8 @@ final class MembershipTranslator {
             Path<?> element = Scope.memberPath(tailJoin, ref.tail(), null);
             // Resolved through the rebased scope to be a legal correlation reference.
             Path<?> outer = rebased.path(memberVar);
-            return explicit ? cb.or(cb.equal(element, outer),
-                    cb.and(cb.isNull(element), cb.isNull(outer))) : cb.equal(element, outer);
+            return explicit ? cb.or(cb.equal(ExactStrings.exact(cb, element), outer),
+                    cb.and(cb.isNull(element), cb.isNull(outer))) : cb.equal(ExactStrings.exact(cb, element), outer);
         });
         return explicit ? membership : tri.baseUnlessUnknown(membership, () -> cb.isNull(member));
     }
@@ -184,7 +184,7 @@ final class MembershipTranslator {
             // False for a present value, UNKNOWN for a NULL column, like `path IN (...)`.
             return tri.baseUnlessUnknown(cb.disjunction(), () -> cb.isNull(path));
         }
-        Predicate membership = path.in(comparable);
+        Predicate membership = ExactStrings.exact(cb, path).in(comparable);
         return hasNull ? cb.or(membership, cb.isNull(path)) : membership;
     }
 
@@ -281,7 +281,7 @@ final class MembershipTranslator {
                 : subqueries.existsSubquery(scope, ref, (sub, tailJoin, rebased) -> {
                     Path<?> member = Scope.memberPath(tailJoin, ref.tail(), memberField);
                     List<?> comparable = comparableTo(member, nonNull);
-                    return comparable.isEmpty() ? cb.disjunction() : member.in(comparable);
+                    return comparable.isEmpty() ? cb.disjunction() : ExactStrings.exact(cb, member).in(comparable);
                 });
         return tri.baseUnlessUnknown(
                 base,
@@ -305,7 +305,8 @@ final class MembershipTranslator {
                 return hasNull ? cb.isNull(field) : cb.disjunction();
             }
             Predicate match = comparable.size() == 1
-                    ? cb.equal(field, comparable.get(0)) : field.in(comparable);
+                    ? cb.equal(ExactStrings.exact(cb, field), comparable.get(0))
+                    : ExactStrings.exact(cb, field).in(comparable);
             return hasNull ? cb.or(match, cb.isNull(field)) : match;
         });
     }

@@ -20,6 +20,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Enum,
     Float,
     Integer,
     Numeric,
@@ -170,6 +171,120 @@ def _as_double(value: Any) -> Any:
     ):
         return _AsDouble(value)
     return value
+
+
+class _ExactString(FunctionElement):
+    """A string read the way CEL compares strings: byte for byte.
+
+    MySQL's default ``utf8mb4_0900_ai_ci`` folds case and accents, so MySQL compares it under
+    ``utf8mb4_0900_bin``, which is byte-exact and NO PAD. An explicit COLLATE on one operand
+    decides the comparison.
+    """
+
+    name = "cerbos_exact_string"
+    type = String()
+    inherit_cache = True
+
+
+class _ExactOrdering(FunctionElement):
+    """A string ordered by code point: also ``"C"`` on PostgreSQL, whose linguistic collations
+    such as ``en_US.UTF-8`` sort ``"One"`` after ``"a"``."""
+
+    name = "cerbos_exact_ordering"
+    type = String()
+    inherit_cache = True
+
+
+class _ExactBound(FunctionElement):
+    """A bound string literal under the exact collation, whatever the connection's charset."""
+
+    name = "cerbos_exact_bound"
+    type = String()
+    inherit_cache = True
+
+
+class _ExactOrderedBound(FunctionElement):
+    """A bound string literal ordered by code point."""
+
+    name = "cerbos_exact_ordered_bound"
+    type = String()
+    inherit_cache = True
+
+
+@compiles(_ExactString)
+@compiles(_ExactOrdering)
+@compiles(_ExactBound)
+@compiles(_ExactOrderedBound)
+def _exact_default(element, compiler, **kw):
+    return compiler.process(element.clauses, **kw)
+
+
+@compiles(_ExactString, "mysql")
+@compiles(_ExactString, "mariadb")
+@compiles(_ExactOrdering, "mysql")
+@compiles(_ExactOrdering, "mariadb")
+def _exact_mysql(element, compiler, **kw):
+    return f"({compiler.process(element.clauses, **kw)} COLLATE utf8mb4_0900_bin)"
+
+
+@compiles(_ExactBound, "mysql")
+@compiles(_ExactBound, "mariadb")
+@compiles(_ExactOrderedBound, "mysql")
+@compiles(_ExactOrderedBound, "mariadb")
+def _exact_bound_mysql(element, compiler, **kw):
+    return (
+        f"(CONVERT({compiler.process(element.clauses, **kw)} USING utf8mb4) "
+        "COLLATE utf8mb4_0900_bin)"
+    )
+
+
+@compiles(_ExactOrdering, "postgresql")
+@compiles(_ExactOrderedBound, "postgresql")
+def _exact_ordering_postgresql(element, compiler, **kw):
+    return f'({compiler.process(element.clauses, **kw)} COLLATE "C")'
+
+
+def _is_text(value: Any) -> bool:
+    type_ = _base_type(getattr(value, "type", None))
+    return isinstance(type_, String) and not isinstance(type_, Enum)
+
+
+def exact(value: Any, *, ordering: bool = False) -> Any:
+    """Read a string operand byte for byte: a column under the exact collation, a literal
+    bound under it. Anything else is left alone."""
+    if isinstance(value, str):
+        return (_ExactOrderedBound if ordering else _ExactBound)(literal(value, String))
+    type_ = getattr(value, "type", None)
+    if isinstance(type_, _UpperAsciiString) or not isinstance(
+        _base_type(type_), String
+    ):
+        return value
+    wrapped = (
+        _ExactOrdering(value) if ordering and _is_text(value) else _ExactString(value)
+    )
+    return type_coerce(wrapped, type_)
+
+
+def _eq(left: Any, right: Any) -> Any:
+    left, right = exact_pair(left, right)
+    return left == right
+
+
+def _exact_in(needle: Any, members: list[Any]) -> Any:
+    wrapped = exact(needle)
+    if wrapped is not needle:
+        return wrapped.in_(members)
+    return needle.in_([exact(member) for member in members])
+
+
+def exact_pair(left: Any, right: Any, *, ordering: bool = False) -> tuple[Any, Any]:
+    """Both sides of a string comparison, with one explicit collation: the column's where
+    there is one, so a literal still binds against the column's own type."""
+    if isinstance(right, str) and exact(left, ordering=ordering) is not left:
+        return exact(left, ordering=ordering), right
+    if isinstance(left, str) and exact(right, ordering=ordering) is not right:
+        return left, exact(right, ordering=ordering)
+    return exact(left, ordering=ordering), exact(right, ordering=ordering)
 
 
 def _arithmetic(op_fn: Callable[[Any, Any], Any]) -> Callable[[Any, Any], Any]:
@@ -376,6 +491,7 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
             pattern = literal("%", String) + pattern
         if suffix:
             pattern = pattern + literal("%", String)
+    receiver, pattern = exact_pair(receiver, pattern)
     return receiver.like(pattern, escape=_LIKE_ESCAPE_CHAR)
 
 
@@ -415,7 +531,7 @@ def _matches(receiver: Any, pattern: Any) -> Any:
     for plan in plans:
         if isinstance(plan, Literals):
             if plan.kind == "equals":
-                conditions.append(receiver.in_(list(plan.literals)))
+                conditions.append(_exact_in(receiver, list(plan.literals)))
             else:
                 prefix, suffix = {
                     "startsWith": (False, True),
@@ -515,7 +631,7 @@ def _upper_ascii_equals(receiver: Any, text: str) -> Any:
     if any(ch in _ASCII_LOWER for ch in text):
         return case((receiver.isnot(None), false()))
     letters = "".join(sorted({ch.lower() for ch in text} & set(_ASCII_LOWER)))
-    return _replace_ascii_letters(receiver, letters) == text
+    return _eq(_replace_ascii_letters(receiver, letters), text)
 
 
 class _UpperAsciiString(String):
@@ -746,6 +862,13 @@ def _modulo(*_: Any) -> NoReturn:
 
 
 def _apply_comparison(operator: str, left: Any, right: Any) -> Any:
+    upper = any(
+        isinstance(getattr(value, "type", None), _UpperAsciiString)
+        for value in (left, right)
+    )
+    if not upper and "string" in (scalar_kind(left), scalar_kind(right)):
+        ordering = operator not in ("eq", "ne")
+        left, right = exact_pair(left, right, ordering=ordering)
     if operator == "eq":
         return left == right
     if operator == "ne":
@@ -921,7 +1044,12 @@ def _in(c: Any, values: Any) -> Any:
     ]
     predicates = []
     if comparable:
-        predicates.append(c.in_(comparable))
+        if any(isinstance(member, str) for member in comparable) and not isinstance(
+            getattr(c, "type", None), _UpperAsciiString
+        ):
+            predicates.append(_exact_in(c, comparable))
+        else:
+            predicates.append(c.in_(comparable))
     elif non_nulls and hasattr(c, "isnot"):
         # All members dropped: FALSE if present, NULL if absent, like `c IN (...)`.
         predicates.append(case((c.isnot(None), false())))
@@ -1041,7 +1169,7 @@ def _ancestor_of(left: Any, right: Any) -> Any:
         prefixes = [delimiter.join(parts[:i]) for i in range(1, len(parts))]
         if not prefixes:
             return case((ancestor_value.isnot(None), false()))
-        return ancestor_value.in_(prefixes)
+        return _exact_in(ancestor_value, prefixes)
     if isinstance(ancestor_value, str):
         return _string_match(
             descendent_value,
@@ -1069,7 +1197,7 @@ def _hierarchy_overlaps(left: Any, right: Any) -> Any:
             or _ancestor_of(right_hierarchy, left_hierarchy)
         )
     return or_(
-        left_value == right_value,
+        _eq(left_value, right_value),
         _ancestor_of(left_hierarchy, right_hierarchy),
         _ancestor_of(right_hierarchy, left_hierarchy),
     )

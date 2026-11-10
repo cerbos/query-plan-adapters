@@ -1,5 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import org.jetbrains.exposed.v1.core.CustomFunction
 import org.jetbrains.exposed.v1.core.EqOp
@@ -9,7 +10,6 @@ import org.jetbrains.exposed.v1.core.LikeEscapeOp
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.TextColumnType
-import org.jetbrains.exposed.v1.core.stringParam
 import java.util.TreeSet
 
 /**
@@ -87,12 +87,12 @@ internal class RegexTranslator(private val translation: Translation) {
                     "REPLACE",
                     TextColumnType(),
                     rest,
-                    stringParam(String(Character.toChars(member))),
-                    stringParam(""),
+                    ExactString.param(String(Character.toChars(member))),
+                    ExactString.param(""),
                 )
             }
-            val onlyMembers = EqOp(rest, stringParam(""))
-            return if (only.min == 0) onlyMembers else TriLogic.and(onlyMembers, NeqOp(column, stringParam("")))
+            val onlyMembers = EqOp(rest, ExactString.param(""))
+            return if (only.min == 0) onlyMembers else TriLogic.and(onlyMembers, NeqOp(column, ExactString.param("")))
         }
 
         // Finite segments separated by .* / .+ wildcards.
@@ -113,7 +113,7 @@ internal class RegexTranslator(private val translation: Translation) {
         if (wildcards.isEmpty()) {
             val strings = segments[0]
             if ("" in strings && !(start && end)) return null
-            if (start && end) return TriLogic.or(strings.map { EqOp(column, stringParam(it)) })
+            if (start && end) return TriLogic.or(strings.map { EqOp(column, ExactString.param(it)) })
             return TriLogic.or(
                 strings.map { like(column, (if (start) "" else "%") + PlanValues.escapeLike(it) + (if (end) "" else "%")) },
             )
@@ -138,7 +138,7 @@ internal class RegexTranslator(private val translation: Translation) {
     }
 
     private fun like(column: Expression<*>, pattern: String): Op<Boolean> =
-        LikeEscapeOp(column, stringParam(pattern), true, LikeEscaping.ESCAPE_CHAR)
+        LikeEscapeOp(column, ExactString.param(pattern), true, LikeEscaping.ESCAPE_CHAR)
 
     private fun containsAnchor(node: Node): Boolean = when (node) {
         is Node.Begin, is Node.End -> true

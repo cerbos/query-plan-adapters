@@ -53,7 +53,8 @@ Requirements:
 - Jakarta Persistence 3.1 or 3.2 (`jakarta.persistence:jakarta.persistence-api`), supplied by
   your application, with Hibernate ORM 6.6 or 7. CI runs every suite on both pairs (see
   [Building](#building)). Other providers (EclipseLink, OpenJPA) are untested.
-- String columns the mapping references need a byte-exact collation — see
+- The adapter collates strings itself on MySQL and PostgreSQL; on SQL Server and MariaDB, string
+  columns the mapping references need a byte-exact collation — see
   [Database collation requirements](#database-collation-requirements).
 
 ## Quick start
@@ -318,60 +319,46 @@ and [ADR 0004](../docs/adr/0004-the-null-convention-is-a-property-of-the-attribu
 
 ## Database collation requirements
 
-> **⚠️ Hard requirement: every string column referenced by an `AttributeMapping` MUST use a
-> byte-exact collation.**
->
-> - MySQL: `utf8mb4_0900_bin` (MySQL 8.0.17+). Case-sensitive is not enough.
-> - SQL Server: a `*_CS_AS` collation (e.g. `Latin1_General_100_CS_AS`).
-> - PostgreSQL: equality is exact by default, but string ordering (`<`, `>`, `<=`, `>=`) follows
->   the column collation, and a linguistic default such as `en_US.utf8` does not order by code
->   point (`'OneSet' < 'b'` is false, `'One' > 'a'` is true). Use `"C"` for columns compared by ordering, and avoid
->   case-insensitive behaviour (nondeterministic ICU collations, `citext`).
-> - H2, Oracle: safe by default, unless you opt into case-insensitive behaviour. H2 orders strings
->   by UTF-16 code unit (Java's `String.compareTo`), not by code point as CEL does, so on every
->   store the adapter refuses an ordering against a literal holding a character at or above
->   U+D800 (an astral character, or U+E000–U+FFFF): only such a literal can be ordered
->   differently by the two.
+CEL compares strings byte for byte and orders them by code point:
+`R.attr.department == "finance"` denies a row holding `"Finance"`. Under Hibernate the adapter
+does not trust the column's collation for that. `ExactStringFunctionContributor`, discovered
+through `META-INF/services`, registers the collations below, and every string `==`, `!=`, `in`,
+`contains`/`startsWith`/`endsWith`, `hasIntersection`, `hierarchy(...)`, `matches(...)`,
+`int()` of a string, `string()` and `+` comparison reads its string side through them:
 
-CEL string comparison is exact: `R.attr.department == "finance"` denies a row holding `"Finance"`.
-The adapter emits string predicates without collation control, so the column collation decides.
-MySQL's default `utf8mb4_0900_ai_ci` and SQL Server's CI defaults are case- and accent-insensitive,
-so `WHERE department = 'finance'` returns the `'Finance'` row the PDP denied — **a silent
-authorization over-grant**. Role and tenancy checks (`'admin'` vs `'Admin'`, hierarchy prefixes
-`LIKE 'a:b:%'` vs `'A:B:x'`) are the highest-risk shapes.
+- **MySQL 8.0.17+:** `(convert(x using utf8mb4) collate utf8mb4_0900_bin)`, byte-exact and NO PAD,
+  so the default `utf8mb4_0900_ai_ci` no longer matches `'Finance'` for `'finance'`, and
+  `utf8mb4_0900_as_cs` no longer ignores a soft hyphen
+  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). A comparison over a column
+  whose own collation differs cannot use that column's index. MariaDB and MySQL before 8.0.17
+  get no collation: give their string columns a byte-exact NO PAD collation yourself, such as
+  MariaDB's `utf8mb4_nopad_bin`.
+- **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
+  string ordering (`<`, `<=`, `>`, `>=`) runs under `collate "C"`, since a linguistic collation
+  such as `en_US.utf8` sorts `'One'` after `'a'`
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Avoid nondeterministic ICU
+  collations and `citext`.
+- **SQL Server:** nothing is registered. Use a `*_CS_AS` collation (e.g.
+  `Latin1_General_100_CS_AS`) on every string column the mapping references; the CI defaults are
+  case- and accent-insensitive, so `WHERE department = 'finance'` returns the `'Finance'` row the
+  PDP denied, a silent over-grant.
+- **H2, Oracle:** safe by default, unless you opt into case-insensitive behaviour. H2 orders strings
+  by UTF-16 code unit (Java's `String.compareTo`), not by code point as CEL does, so on every
+  store the adapter refuses an ordering against a literal holding a character at or above
+  U+D800 (an astral character, or U+E000–U+FFFF): only such a literal can be ordered
+  differently by the two.
 
-**Case-sensitive is not byte-exact.** `utf8mb4_0900_as_cs` still gives default-ignorable code points
-like SOFT HYPHEN (U+00AD) no weight, so `'o­ne' = 'one'` is TRUE: `==`/`in` over-grant and `!=`
-under-grants ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). `utf8mb4_bin` is
-byte-exact but PAD SPACE (`'a' = 'a '` is TRUE). `utf8mb4_0900_bin` is both byte-exact and NO PAD.
+An `OperatorFunction` override builds its own predicate, so it compares under the column's
+collation unless it collates itself.
 
-Affected predicates: `eq`/`ne`, string `lt`/`gt`/`le`/`ge`, `contains`/`startsWith`/`endsWith`
-(including constant-receiver and field-to-field forms), `in`, `hasIntersection` (direct and
-`map(...)`), `hierarchy(...)`, `matches(...)`, and `string()` and `+` comparisons.
-`OperatorFunction` overrides can't cover all of them (for example `hasIntersection` over a plain
-field never consults one), so fix the collation in the schema.
-
-`string()` over a boolean or numeric column has no string predicate in SQL — the constant is
-inverted in Java and the column compared with the result — because a literal-vs-literal comparison
-would use the **connection** collation, which MySQL Connector/J sets to `utf8mb4_0900_ai_ci` by
-default.
-
-CI runs the conformance suite on PostgreSQL and MySQL with mixed-case and soft-hyphen (`h6`) seeds;
-the PostgreSQL database is initialised with `--lc-collate=C` and the MySQL schema uses
-`utf8mb4_0900_bin`. Reproduce locally:
+CI runs the conformance suite on PostgreSQL initialised under ICU's `en-US` and on MySQL under its
+default `utf8mb4_0900_ai_ci`, with mixed-case and soft-hyphen (`h6`) seeds. Reproduce locally:
 
 ```bash
-ADAPTER_TEST_DB=postgres ./gradlew test --tests AdversarialConformanceTest   # passes
-ADAPTER_TEST_DB=mysql    ./gradlew test --tests AdversarialConformanceTest   # passes (utf8mb4_0900_bin)
-
-# MySQL's DEFAULT collation — FAILS, reproducing the over-grant
-ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci \
-  ./gradlew test --tests AdversarialConformanceTest
-# Case-sensitive but not byte-exact — FAILS on seed h6
+ADAPTER_TEST_DB=postgres ./gradlew test --tests AdversarialConformanceTest
+ADAPTER_TEST_DB=mysql    ./gradlew test --tests AdversarialConformanceTest
+# Another server collation, e.g. case-sensitive but not byte-exact
 ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
-  ./gradlew test --tests AdversarialConformanceTest
-# PostgreSQL's linguistic glibc default — FAILS both comparison/*/string-code-point-order cases (#489)
-ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.utf8 \
   ./gradlew test --tests AdversarialConformanceTest
 ```
 
@@ -421,7 +408,7 @@ ADAPTER_TEST_DB=postgres ADAPTER_TEST_POSTGRES_INITDB_ARGS=--lc-collate=en_US.ut
 | `timestamp(R.attr.t) + duration(d) <op> timestamp(c)` (also `- duration`) | Solved for the column, `t <op> c - d`; UNKNOWN where `t + d` would leave CEL's year 1 to 9999 range, as CEL errors |
 | `timestamp(R.attr.t).timeSince() <op> duration(d)` | `t <op'> now - d`, with `now` read when the filter builds its predicate (see [Gotchas](#timestamp-comparisons-plan-time-now-and-only-unambiguous-column-types)) |
 | `R.attr.x <op> timestamp(c)`, `<op>` an ordering | UNKNOWN: an attribute is never a CEL timestamp, so the ordering has no overload |
-| `R.attr.s.upperAscii() <op> "text"` | 26 nested `REPLACE`s of each lowercase ASCII letter by its capital, compared under the column's collation; SQL `UPPER` would fold non-ASCII letters too (`é`), which CEL's `upperAscii()` leaves alone |
+| `R.attr.s.upperAscii() <op> "text"` | 26 nested `REPLACE`s of each lowercase ASCII letter by its capital, compared byte for byte; SQL `UPPER` would fold non-ASCII letters too (`é`), which CEL's `upperAscii()` leaves alone |
 | `string(R.attr.x) == "text"` / `!=` | By column type: a `String` column is compared as it stands; a `Boolean` column is `col = true`, `col = false`, or no row for any other constant; a `Double`/`Integer`/`Long` column is compared with the one double CEL renders as `text` (Go's shortest `%g`: `"-0.6"`, `"1e+06"`), or no row when none does. NULL excluded under both polarities |
 | `hierarchy(...).overlaps / ancestorOf / descendentOf` | `IN` over ancestor prefixes; `LIKE 'a:b:%'` for descendants. With an empty delimiter (one segment per character) between a column and a constant: `IN` over character prefixes, `''` included, and `LIKE 'ab_%'` for strict descendants |
 | A scalar against a list or map literal (`R.attr.s == {"a": 1}`, `R.attr.s in [["x"]]`) | Decided: CEL equality across types is false, so `==` matches no row and `!=` every present one; the planner's `list(...)` / `struct(...)` literal expressions are folded to constants first |
@@ -862,7 +849,7 @@ checkout of the **whole repository**; the conformance suite needs Docker on Post
 |---|---|---|
 | `ADAPTER_TEST_DB` | `h2` (default), `postgres`, `mysql` | Database for the conformance suite |
 | `ADAPTER_TEST_ORM` | `baseline` (default), `next` | Hibernate 6.6 / Jakarta Persistence 3.1, or Hibernate 7 / Jakarta Persistence 3.2 (declared in [`build.gradle.kts`](build.gradle.kts)); unknown values fail |
-| `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_ai_ci` | Override the MySQL leg's `utf8mb4_0900_bin` |
+| `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_as_cs` | Override the MySQL leg's server default `utf8mb4_0900_ai_ci` |
 | `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS` | `true` | Run the MySQL leg with server-side prepared statements |
 
 Hibernate 7 needs no translation change, and CI runs the conformance suite on H2, PostgreSQL and

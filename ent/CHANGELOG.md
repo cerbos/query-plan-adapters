@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed over-grants on a default-configured database: on MySQL every string literal is bound as `CONVERT(? USING utf8mb4) COLLATE utf8mb4_0900_bin` and a string column compared with another column is read under it, and on PostgreSQL every string ordering runs under `COLLATE "C"`. MySQL's `utf8mb4_0900_ai_ci` no longer matches `"Finance"` for `== "finance"`, and a linguistic PostgreSQL collation no longer orders strings out of code-point order. A MySQL string comparison over a column with another collation can no longer use that column's index.
 - Fixed: `size()` of a `filter()` over a to-one chain (`size(R.attr.mainCategory.subCategories.filter(...))`) is UNKNOWN where the chain's parent is absent, as the unfiltered count already was. A negated comparison over it returned every parentless row (`relation/size/negated-filtered-fractional-equals-to-one-chain`).
 - Fixed: a column declared `ValueString`, `ValueNumber` or `ValueTimestamp` read where CEL needs a boolean (`!R.attr.aString`) renders as one UNKNOWN, CEL's type error, where PostgreSQL rejected the query and SQLite and MySQL over-granted.
 - Newly translated, each proved by the corpus: `matches()` with a constant pattern. The pattern

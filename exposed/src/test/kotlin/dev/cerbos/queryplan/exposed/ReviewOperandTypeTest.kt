@@ -161,7 +161,7 @@ class ReviewOperandTypeTest {
             val container = MySQLContainer(DatabaseTestImages.MYSQL)
                 .withCommand(
                     "--character-set-server=utf8mb4",
-                    "--collation-server=${TestStore.DEFAULT_MYSQL_COLLATION}",
+                    "--collation-server=utf8mb4_0900_bin",
                 )
             container.start()
             try {

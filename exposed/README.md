@@ -42,7 +42,7 @@ You'll also need:
   deliberate: JetBrains promises that code built against an older 1.x keeps working on a newer one
   and promises nothing in the other direction, so compiling against the floor is the only
   arrangement where a green build proves the claim for the artifact you actually install
-  ([ADR 0011](../docs/adr/0011-the-exposed-adapter-is-jdbc-first-and-returns-a-sealed-result.md)).
+  ([ADR 0015](../docs/adr/0015-the-exposed-adapter-is-jdbc-first-and-returns-a-sealed-result.md)).
   Exposed 0.x is out of scope: 1.0 moved every symbol from `org.jetbrains.exposed.sql.*` to
   `org.jetbrains.exposed.v1.*`, so one artifact cannot serve both.
 - **Kotlin 2.2 or later** and **JVM 17 or later**. The adapter's language and API levels are pinned
@@ -512,42 +512,31 @@ capture the outer correlation. **Do not give a table in your own query an alias 
 
 ## Database collation and case sensitivity
 
-> **⚠️ Hard requirement: every string column a mapping references must compare byte-exactly, and
-> `LIKE` must be case-sensitive.**
+CEL compares strings byte for byte and orders them by code point: with
+`R.attr.department == "finance"`, a `check()` for a resource holding `"Finance"` returns **DENY**.
+The adapter does not trust the column's collation for that:
 
-CEL string comparison at the PDP is exact and byte-sensitive: with `R.attr.department == "finance"`,
-a `check()` for a resource holding `"Finance"` returns **DENY**. The adapter emits the comparison
-with no collation control, so the store decides what matches. Where the store is more permissive
-than CEL, the filter returns rows the policy denies — an over-grant, with nothing to notice it by.
-Both of the following are store configuration, not adapter limitations:
-
-- **MySQL.** The default `utf8mb4_0900_ai_ci` is case- *and* accent-insensitive, so `=` itself
-  over-grants. Use `utf8mb4_0900_bin` (MySQL 8.0.17+) on every string column a mapping references.
-  Case-sensitive is not enough: `utf8mb4_0900_as_cs` is still a Unicode collation, which gives a
-  default-ignorable code point such as SOFT HYPHEN (U+00AD) no weight, so `'o\u00ADne' = 'one'` is
-  TRUE under it and `==` and `in` over-grant while `!=` under-grants
-  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). `utf8mb4_bin` is byte-exact but
-  PAD SPACE, so `'a' = 'a '` is TRUE under it. `utf8mb4_0900_bin` is the one MySQL collation that is
-  both byte-exact and NO PAD. The conformance harness creates its MySQL schema with it for exactly
-  this reason: its mixed-case seeds return rows the PDP denies under the default, and its
-  soft-hyphen seed (`h6`) under `utf8mb4_0900_as_cs`.
+- **MySQL.** Every string constant is bound as `(CONVERT(? USING utf8mb4) COLLATE utf8mb4_0900_bin)`,
+  and a string column compared with another column is read under the same collation, so `==`,
+  `in`, `contains`, `startsWith`, `endsWith`, hierarchy and ordering are byte-exact and NO PAD even
+  under the default `utf8mb4_0900_ai_ci`, which folds case and accents, and `utf8mb4_0900_as_cs`,
+  which gives a soft hyphen no weight ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+  String columns must use the `utf8mb4` character set, and a comparison over a column whose own
+  collation differs cannot use that column's index. MariaDB has no `utf8mb4_0900_bin`, so nothing
+  is collated there: give its string columns a byte-exact NO PAD collation such as
+  `utf8mb4_nopad_bin`.
+- **PostgreSQL.** `=` is exact under any deterministic collation and is left alone. Every ordering
+  over a string runs under `COLLATE "C"`, since a linguistic collation such as `en_US.utf8` sorts
+  `"One"` after `"a"` ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Avoid
+  nondeterministic ICU collations and `citext`.
 - **SQLite.** `LIKE` is case-insensitive for ASCII by default, and this adapter lowers string
   matching (`contains` / `startsWith` / `endsWith`, and hierarchy prefix tests) to `LIKE`. Set
   `PRAGMA case_sensitive_like = ON` on the connection, as the harness does.
 
-- **PostgreSQL.** `=` is byte-exact under any deterministic collation, but `<`, `>` and their
-  siblings order strings by the database's collation, and CEL orders them by code point. Under the
-  image default `en_US.utf8`, `"One" > "a"` is TRUE, so a string ordering returns rows the PDP denies
-  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Use the `C` collation on every
-  string column a mapping orders (`--lc-collate=C` at `initdb`, or `COLLATE "C"` on the column). The
-  harness initialises its PostgreSQL database with `--lc-collate=C`;
-  `ADAPTER_TEST_POSTGRES_INITDB_ARGS` overrides it to reproduce the over-grant.
-
-H2 is case-sensitive and orders by code point by default. PostgreSQL and H2 are safe for `=` and
-`LIKE` unless you opt into case-insensitive behaviour (a nondeterministic ICU collation, `citext`).
-
-Role and tenancy checks are the highest-risk shapes: `'admin'` versus `'Admin'` under `eq` and `in`,
-and hierarchy descendant checks. Treat collation as part of your policy contract.
+H2 is case-sensitive and orders by code point by default, unless you opt into case-insensitive
+behaviour. The conformance harness runs MySQL under its default `utf8mb4_0900_ai_ci` and
+PostgreSQL under ICU's `en-US`, so its mixed-case, soft-hyphen (`h6`) and code-point-order seeds
+prove the adapter's own collation.
 
 ## Conformance contract
 
@@ -664,7 +653,7 @@ refuse:
 
 | Case | What it is, and what settles it |
 | --- | --- |
-| `cast/string/from-boolean`, `cast/string/from-boolean-case-changed-literal` | `string()` over a boolean column. Deliberately not a `CAST`: SQLite and MySQL store a boolean as 1/0 and would render `"1"` where CEL and PostgreSQL render `"true"`. Against a string literal under `==` or `!=` it is solved for the column (`"true"` is `x = TRUE`, any other spelling such as `"True"` matches no row), which also keeps the comparison out of MySQL's case-insensitive connection collation. Anywhere else it is lowered to a `CASE` with an explicit NULL arm, so a NULL column stays NULL rather than falling through to the `ELSE`, and every engine says the same thing |
+| `cast/string/from-boolean`, `cast/string/from-boolean-case-changed-literal` | `string()` over a boolean column. Deliberately not a `CAST`: SQLite and MySQL store a boolean as 1/0 and would render `"1"` where CEL and PostgreSQL render `"true"`. Against a string literal under `==` or `!=` it is solved for the column (`"true"` is `x = TRUE`, any other spelling such as `"True"` matches no row). Anywhere else it is lowered to a `CASE` with an explicit NULL arm, so a NULL column stays NULL rather than falling through to the `ELSE`, and every engine says the same thing |
 | `cast/string/from-double`, `cast/string/from-double-spellings` | `string()` over a floating-point column compared with `==` or `!=`, which CEL renders as Go's shortest `%g` form (`1e+06`, `2`, `-9.5e+18`) and no SQL `CAST` does. Exactly one double prints as a given string, so the comparison is **solved** for the column: `string(x) == "1e+06"` is `x = 1000000.0`, and a literal that is not CEL's spelling of any double matches no row. `"0"` and `"-0"` are refused, since SQL cannot tell `-0.0` from `0.0` (`cast/string/from-negative-zero-double`), and so is an ordering over it. A `DECIMAL` column is refused, because it renders its declared scale (`1.50`) where CEL renders `1.5` |
 | `identifier/equals/concatenation`, `string/concatenate/field-to-field` | CEL's `+` over strings — against a constant, and between two columns. One text operand, a string constant or a text column, settles the whole expression, because CEL has no mixed-type `+`. The emitted operator **propagates** NULL: `||`, and `CONCAT()` on MySQL alone, where `||` is logical OR outside `PIPES_AS_CONCAT`. Exposed's own `Concat` and PostgreSQL's `CONCAT()` *skip* a NULL argument, which would compare a partial string and match rows `check()` denies |
 | `hierarchy/overlaps/path-built-from-identifier` | A hierarchy path constructed by `list()` rather than read from a column — a shape several SQL adapters refuse |
@@ -700,8 +689,8 @@ CEL's `size(string)` counts Unicode code points. The adapter lowers it to `CHAR_
 text value. MySQL's `LENGTH` counts **bytes** and is never emitted: measuring a multibyte string in
 bytes would compare it against the wrong threshold and return rows the PDP denies.
 
-String **ordering** follows CEL's code point order on every store. PostgreSQL (`C`), MySQL
-(`utf8mb4_0900_bin`) and SQLite compare UTF-8 bytes, which is code point order; H2 compares UTF-16
+String **ordering** follows CEL's code point order on every store. PostgreSQL and MySQL, under the
+collations the adapter applies (`C`, `utf8mb4_0900_bin`), and SQLite compare UTF-8 bytes, which is code point order; H2 compares UTF-16
 code units, which puts an astral character before U+E000–U+FFFF. So an ordering against a literal
 holding a character at or above U+D800 is rendered on H2 as `STRINGTOUTF8(col) < STRINGTOUTF8(?)`,
 and raises when rendered on a dialect outside those four. Two columns ordered against each other
@@ -791,8 +780,8 @@ in one of them. Treat them as constraints on the policies you write.
 | --- | --- | --- |
 | H2 | the default (`ADAPTER_TEST_DB=h2`), in process | Case-sensitive by default |
 | SQLite | `ADAPTER_TEST_DB=sqlite`, in process | Needs `PRAGMA case_sensitive_like = ON`; no boolean and no temporal type, so both are stored as text or integers; a multi-row scalar subquery does not raise |
-| PostgreSQL | `ADAPTER_TEST_DB=postgres`, Testcontainers, initialised with `--lc-collate=C` | Needs a code-point collation for string ordering; real `boolean` and `timestamptz`; cannot type a bound `NULL` (`$1 IS NULL` is an error), which is why the adapter renders NULL as a literal |
-| MySQL | `ADAPTER_TEST_DB=mysql`, Testcontainers, **twice** — once per Connector/J prepared-statement mode | Needs a case- and accent-sensitive collation; no boolean type; `LIKE` backslash handling and cast spellings differ; coerces a *string* when a comparison mixes types |
+| PostgreSQL | `ADAPTER_TEST_DB=postgres`, Testcontainers, initialised under ICU's `en-US` | Orders strings linguistically unless told otherwise; real `boolean` and `timestamptz`; cannot type a bound `NULL` (`$1 IS NULL` is an error), which is why the adapter renders NULL as a literal |
+| MySQL | `ADAPTER_TEST_DB=mysql`, Testcontainers, **twice** — once per Connector/J prepared-statement mode | Runs its default case- and accent-insensitive collation; no boolean type; `LIKE` backslash handling and cast spellings differ; coerces a *string* when a comparison mixes types |
 
 These are not the same test four times, which is the point: collation, LIKE escaping, cast targets
 and parameter typing are all translator behaviour, so a dialect the harness does not execute is a
@@ -858,9 +847,9 @@ and MySQL:
 | `ADAPTER_TEST_DB` | `h2` (default), `sqlite`, `postgres`, `mysql` | The store the conformance suite runs on. See [Dialects](#dialects) |
 | `ADAPTER_TEST_ORM` | `baseline` (default), `floor` | Exposed 1.5.0, the release `example/` pins, or 1.0.0, the release the published jar compiles against (declared in [`build.gradle.kts`](build.gradle.kts)) |
 | `ADAPTER_TEST_CONTAINER_SUITES` | `run` (default), `skip` | Whether the suites that start containers of their own run (below) |
-| `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_ai_ci` | Override the MySQL leg's `utf8mb4_0900_bin` |
+| `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_as_cs` | Override the MySQL leg's server default `utf8mb4_0900_ai_ci` |
 | `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS` | `true` | Run the MySQL leg with server-side prepared statements |
-| `ADAPTER_TEST_POSTGRES_INITDB_ARGS` | e.g. `--lc-collate=en_US.utf8` | Override the PostgreSQL leg's `--lc-collate=C` |
+| `ADAPTER_TEST_POSTGRES_INITDB_ARGS` | e.g. `--lc-collate=C` | Override the PostgreSQL leg's `--locale-provider=icu --icu-locale=en-US` |
 
 An unknown value fails rather than falling back to the default.
 

@@ -40,7 +40,7 @@ module Cerbos
         Arel::Nodes::Matches.new(
           ArelSupport.quote(receiver),
           pattern,
-          ArelSupport.quote(ESCAPE_CHAR),
+          Arel::Nodes.build_quoted(ESCAPE_CHAR),
           # Case-sensitive, like CEL. False would make PostgreSQL use ILIKE.
           true
         )

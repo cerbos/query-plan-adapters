@@ -763,7 +763,7 @@ func TestExplicitNullLeavesOtherOperatorsAlone(t *testing.T) {
 
 	result := translateWith(t, explicitNullMapper(),
 		expr("gt", variable("request.resource.attr.owner"), val(t, "x")))
-	require.Equal(t, `("resource"."owner" > $1::text)`, result.Where)
+	require.Equal(t, `("resource"."owner" > ($1::text COLLATE "C"))`, result.Where)
 
 	// An undeclared entry keeps the historical rendering, so declaring the convention on one
 	// attribute cannot change the SQL emitted for any other mapping.

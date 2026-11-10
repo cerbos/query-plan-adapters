@@ -5,6 +5,7 @@ import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { PgColumn } from "drizzle-orm/pg-core";
 
+import { exactPgOrdering } from "./collation";
 import { UnsupportedQueryPlanError } from "./errors";
 import {
   ARITHMETIC_OPERATORS,
@@ -812,6 +813,17 @@ const scalarType = (
 
 const SCALAR_TYPES = new Set(["string", "number", "boolean"]);
 
+const isOrdering = (operator: LeafComparisonOperator): boolean =>
+  operator !== "eq" && operator !== "ne";
+
+/** Every column the operands read, however deeply nested. */
+const operandColumns = (operands: PlanExpressionOperand[], mapper: Mapper): AnyColumn[] =>
+  operands.flatMap((operand) =>
+    isExpressionOperand(operand)
+      ? operandColumns(operand.operands, mapper)
+      : [columnForOperand(operand, mapper)].filter((column) => column !== undefined),
+  );
+
 /** Two fields, each possibly behind a relation. */
 const buildFieldToFieldComparison = (
   context: ComparisonContext,
@@ -832,10 +844,21 @@ const buildFieldToFieldComparison = (
     );
   }
 
+  const [leftExpr, rightExpr] = isOrdering(operator)
+    ? exactPgOrdering(
+        [columnForOperand({ name: left.name }, mapper), columnForOperand({ name: right.name }, mapper)],
+        buildColumnExpression(leftResolved.mapping, left.name),
+        buildColumnExpression(rightResolved.mapping, right.name),
+      )
+    : [
+        buildColumnExpression(leftResolved.mapping, left.name),
+        buildColumnExpression(rightResolved.mapping, right.name),
+      ];
+
   const comparison = applyComparisonWithExpression(
     operator,
-    buildColumnExpression(leftResolved.mapping, left.name),
-    buildColumnExpression(rightResolved.mapping, right.name),
+    leftExpr,
+    rightExpr,
     mappingNullRepresentation(leftResolved.mapping) === "explicit",
     mappingNullRepresentation(rightResolved.mapping) === "explicit",
   );
@@ -1124,11 +1147,15 @@ export const buildComparisonFilter = (
   let filter: SQL;
 
   if (isExpressionOperand(left) || isExpressionOperand(right)) {
-    filter = applyComparisonWithExpression(
-      operator,
-      buildValueExpression(left, mapper, options),
-      buildValueExpression(right, mapper, options),
-    );
+    const leftExpr = buildValueExpression(left, mapper, options);
+    const rightExpr = buildValueExpression(right, mapper, options);
+
+    const [l, r] =
+      isOrdering(operator) && (leftType === "string" || rightType === "string")
+        ? exactPgOrdering(operandColumns([left, right], mapper), leftExpr, rightExpr)
+        : [leftExpr, rightExpr];
+
+    filter = applyComparisonWithExpression(operator, l, r);
   } else if (isNameOperand(left) && isNameOperand(right)) {
     filter = buildFieldToFieldComparison(context, left, right);
   } else if (isNameOperand(left) && isValueOperand(right)) {

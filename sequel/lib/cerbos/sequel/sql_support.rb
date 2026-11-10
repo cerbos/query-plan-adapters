@@ -100,14 +100,71 @@ module Cerbos
           return BooleanExpression.new(:"IS NOT", left, nil)
         end
 
-        BooleanExpression.new(sql_operator, bindable(left), bindable(right))
+        BooleanExpression.new(sql_operator, *exact_operands(operator, bindable(left), bindable(right)))
       end
 
       # A Ruby value about to go into SQL, refused if Sequel would literalize it as another
-      # value. A Time keeps six fractional digits there. See {Timestamps.assert_bindable}.
+      # value. A Time keeps six fractional digits there. See {Timestamps.assert_bindable}. A
+      # string on MySQL carries the byte-exact collation, whatever the column's or the
+      # connection's is.
       def bindable(value)
         Timestamps.assert_bindable(value) if value.is_a?(::Time)
+        return exact_mysql(::Sequel.lit("CONVERT(? USING utf8mb4)", value)) if value.is_a?(::String) && !value.is_a?(::Sequel::LiteralString) && current_dialect&.mysql?
+
         value
+      end
+
+      # The dialect of the translation in progress, so every string literal and string ordering
+      # is built for it: CEL compares strings byte for byte and orders them by code point, which
+      # MySQL's default collation and PostgreSQL's linguistic ones do not.
+      def with_dialect(dialect, column_type)
+        previous = Thread.current[:cerbos_sequel_dialect]
+        Thread.current[:cerbos_sequel_dialect] = [dialect, column_type]
+        yield
+      ensure
+        Thread.current[:cerbos_sequel_dialect] = previous
+      end
+
+      def current_dialect
+        Thread.current[:cerbos_sequel_dialect]&.first
+      end
+
+      ORDERING_OPERATORS = %w[lt gt le ge].freeze
+
+      # A collated operand, so a comparison can tell that one side already carries a collation.
+      class Collated < ::Sequel::SQL::PlaceholderLiteralString; end
+
+      def exact_mysql(node)
+        Collated.new(["(", " COLLATE utf8mb4_0900_bin)"], [node])
+      end
+
+      def code_point_order(node)
+        Collated.new(["(", ' COLLATE "C")'], [node])
+      end
+
+      def string_operand?(node)
+        return true if node.is_a?(Collated) || node.is_a?(::String)
+        return true if node.is_a?(::Sequel::SQL::StringExpression) && node.op == :"||"
+
+        column_type = Thread.current[:cerbos_sequel_dialect]&.last
+        column_type&.call(node) == :string
+      end
+
+      # A string comparison under one explicit collation: MySQL's byte-exact one on a string
+      # column when no literal already carries it, and "C" on PostgreSQL for an ordering.
+      def exact_operands(operator, left, right)
+        dialect = current_dialect
+        sides = [left, right]
+        return sides unless dialect && sides.any? { |side| string_operand?(side) }
+
+        if dialect.mysql?
+          return sides if sides.any? { |side| side.is_a?(Collated) }
+
+          return sides.map { |side| string_operand?(side) ? exact_mysql(side) : side }
+        end
+        return sides unless dialect.postgres? && ORDERING_OPERATORS.include?(operator)
+
+        sides.map { |side| string_operand?(side) ? code_point_order(side) : side }
       end
 
       def infix(operator, left, right)

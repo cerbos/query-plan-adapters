@@ -51,17 +51,13 @@ internal class TestStore(
         const val COLLATION_PROPERTY: String = "adapter.test.mysql.collation"
         const val SERVER_PREP_STMTS_PROPERTY: String = "adapter.test.mysql.serverPrepStmts"
         const val POSTGRES_INITDB_ARGS_PROPERTY: String = "adapter.test.postgres.initdbArgs"
-        const val DEFAULT_POSTGRES_INITDB_ARGS: String = "--lc-collate=C"
+        const val DEFAULT_POSTGRES_INITDB_ARGS: String = "--locale-provider=icu --icu-locale=en-US"
 
         /**
-         * MySQL's own default, `utf8mb4_0900_ai_ci`, makes `=` itself case- and accent-insensitive
-         * while CEL's is byte-exact. That is a store misconfiguration, not an adapter limitation,
-         * so the leg pins the byte-exact NO PAD collation; overriding it with the default
-         * reproduces the documented over-grant and measures what it costs. Case- and
-         * accent-sensitive is not enough: `utf8mb4_0900_as_cs` gives a soft hyphen no weight, so
-         * seed h6 (`"o\u00ADne"`) equals `"one"` under it (cerbos/query-plan-adapters#474).
+         * MySQL's own default, which folds case and accents, so the corpus proves the adapter
+         * compares strings byte for byte itself (cerbos/query-plan-adapters#474).
          */
-        const val DEFAULT_MYSQL_COLLATION: String = "utf8mb4_0900_bin"
+        const val DEFAULT_MYSQL_COLLATION: String = "utf8mb4_0900_ai_ci"
 
         fun selected(): String = System.getProperty(PROPERTY, "h2")
 
@@ -117,11 +113,8 @@ internal class TestStore(
         }
 
         /**
-         * Byte-order collation by default. CEL orders strings by code point; the image's default
-         * `en_US.utf8` orders linguistically, so `"One" > "a"` is true there and a string ordering
-         * returns a row the PDP denies (cerbos/query-plan-adapters#489). Override
-         * `adapter.test.postgres.initdbArgs` (`ADAPTER_TEST_POSTGRES_INITDB_ARGS`), for example with
-         * `--lc-collate=en_US.utf8`, to reproduce the over-grant.
+         * ICU's linguistic en-US order, as a managed service's default, so the corpus proves the
+         * adapter orders strings by code point itself (cerbos/query-plan-adapters#489).
          */
         private fun postgres(): TestStore {
             val initdbArgs = System.getProperty(POSTGRES_INITDB_ARGS_PROPERTY, DEFAULT_POSTGRES_INITDB_ARGS)

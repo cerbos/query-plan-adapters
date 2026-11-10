@@ -241,7 +241,9 @@ module Cerbos
         @cel_errors = {}.compare_by_identity
         @position_guards = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
-        model.where(predicate(normalised.condition, environment))
+        ArelSupport.with_dialect(dialect, method(:column_type)) do
+          model.where(predicate(normalised.condition, environment))
+        end
       end
 
       # @private

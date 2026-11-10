@@ -12,7 +12,7 @@ Every adapter workflow runs `validate-corpus.sh` and its conformance harness **i
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. Two kinds of job start a PDP: each adapter's example job, through `demo/scripts/run-example.sh` (the `current` pin), and `conformance.yaml`, which starts both pinned PDPs to replan every case. That workflow runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator, and runs `go -C conformance/generator run . -check`.
 
-`fuzz.yaml` is the one workflow that is neither PR-triggered nor scheduled: it runs only when someone starts it with `workflow_dispatch` ([ADR 0011](adr/0011-fuzzing-finds-cases-the-corpus-keeps-them.md)). Its record job starts both pinned PDPs, as `conformance.yaml` does, and records generated cases into an artifact; one replay job per store leg, listed by `run-harness.sh --list`, runs that adapter's harness with `QPA_FUZZ_DIR` set; the report job fails the run on any adapter failure and writes the report to the step summary. Give it no `pull_request` or `schedule` trigger: a run draws new cases every time, so it cannot gate a merge, and a scheduled run nobody reads only spends minutes. A new adapter needs no edit here, only its `run-harness.sh` leg and fuzz mode in its harness (conformance/README.md, "Fuzzing").
+`fuzz.yaml` is the one workflow that is neither PR-triggered nor scheduled: it runs only when someone starts it with `workflow_dispatch` ([ADR 0014](adr/0014-fuzzing-finds-cases-the-corpus-keeps-them.md)). Its record job starts both pinned PDPs, as `conformance.yaml` does, and records generated cases into an artifact; one replay job per store leg, listed by `run-harness.sh --list`, runs that adapter's harness with `QPA_FUZZ_DIR` set; the report job fails the run on any adapter failure and writes the report to the step summary. Give it no `pull_request` or `schedule` trigger: a run draws new cases every time, so it cannot gate a merge, and a scheduled run nobody reads only spends minutes. A new adapter needs no edit here, only its `run-harness.sh` leg and fuzz mode in its harness (conformance/README.md, "Fuzzing").
 
 `typescript-lint.yaml` runs the vendored [anti-slop](../tools/oxlint/anti-slop/UPSTREAM.md) oxlint rules over the five TypeScript adapters, their tests and their examples, with `--deny-warnings`. It installs only `tools/oxlint`, so it caches nothing and has no `warm-caches.yaml` entry. Run it locally with `npm ci && npm run lint` in `tools/oxlint`; `npm run lint:fix` applies the spacing rule's autofix.
 
@@ -27,8 +27,10 @@ packaged example succeed. Adapter test workflows run directly on pull requests a
 `workflow_call` for releases, so a release runs the checks once. Keep the publish workflow
 filenames stable: npm trusted publishing is configured against them.
 
-Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` and `sequel/v*` -> RubyGems, `efcore/v*` -> NuGet (trusted
-publishing, configured against `efcore-publish.yaml`, which checks the tag against the project's `<Version>`); `ent/v*` and `pgx/v*` are Go
+Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` and `sequel/v*` -> RubyGems (each checks the tag against the gem's
+version), `efcore/v*` -> NuGet (trusted publishing, configured against `efcore-publish.yaml`, which checks the tag against the
+project's `<Version>`). Their publish workflows call the adapter's test workflow the same way and publish only after it
+passes. `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository. `elasticsearch-java/v*`, `jpa/v*`, `spring-data/v*` and `exposed/v*` only run that adapter's CI
 workflow: none of those builds configures a Maven Central release (all are `publishToMavenLocal` only, and their `publishing` blocks
 say what wiring a release still needs), so no Maven Central publish is wired yet. `spring-data` depends on `cerbos-jpa` at the same

@@ -12,9 +12,8 @@ on:
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this
       # result. A negation must come after every pattern it narrows.
       - "!**/*.md"
-  push:
-    tags:
-      - sequel/v*
+  # Release tags invoke these same checks through the publish workflow.
+  workflow_call:
 
 # A newer push to the same pull request makes this run's result moot, so cancel it rather than
 # let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.
@@ -81,7 +80,7 @@ jobs:
       # renders and the store it runs on, not the Ruby version, so it runs on the baseline leg
       # and on the low end of the Sequel range, once per store. scripts/test.sh starts the store
       # from docker-compose.yaml (images pinned in POSTGRES_IMAGE and MYSQL_IMAGE; PostgreSQL
-      # with --lc-collate=C, MySQL on utf8mb4_0900_bin).
+      # under ICU en-US, MySQL on its default collation).
       - name: Run the conformance suite (${{ matrix.database }})
         if: (matrix.ruby-version == '4.0' && matrix.sequel-version == '') || matrix.sequel-version == '= 5.69.0'
         env:

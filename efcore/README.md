@@ -133,9 +133,10 @@ does the same; otherwise the database decides differently from the PDP, which is
   counts by code point. The adapter handles the rest of SQL Server itself: `=`, `LEN` and `LIKE`
   ignore trailing spaces, so every string comparison appends a sentinel character, and `[`, `]` and
   `^` are escaped in every `LIKE` pattern.
-- **PostgreSQL.** Mapped string columns need the `"C"` collation (or a database initialised with
-  `--lc-collate=C`). A linguistic default such as `en_US.utf8` does not order by code point.
-  Avoid `citext` and nondeterministic ICU collations.
+- **PostgreSQL.** Equality is exact under any deterministic collation. Every string ordering runs
+  under `COLLATE "C"`, since a linguistic collation such as `en_US.utf8` does not order by code
+  point ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Avoid `citext` and
+  nondeterministic ICU collations.
 - **SQLite.** The default `BINARY` collation is exact. Do not declare `NOCASE` on a mapped column.
   The adapter avoids `LIKE`, which is case-insensitive in SQLite, and matches with `substr` and
   `instr` instead. A mapped string must not hold a NUL character: SQLite's `length` and `substr`
@@ -237,7 +238,7 @@ SQL Server and PostgreSQL legs need Docker; Testcontainers starts them from the 
 ```bash
 # From efcore/:
 dotnet test                                   # SQLite, in memory
-ADAPTER_TEST_DB=postgres dotnet test          # PostgreSQL, initialised with --lc-collate=C
+ADAPTER_TEST_DB=postgres dotnet test          # PostgreSQL, initialised under ICU en-US
 ADAPTER_TEST_DB=sqlserver dotnet test         # SQL Server, Latin1_General_100_BIN2_UTF8
 ```
 
@@ -247,7 +248,7 @@ Or, from the repository root, `conformance/scripts/run-harness.sh efcore [sqlite
 | --- | --- | --- |
 | `ADAPTER_TEST_DB` | `sqlite` (default), `postgres`, `sqlserver` | The store the conformance suite runs on |
 | `ADAPTER_TEST_SQLSERVER_COLLATION` | e.g. `SQL_Latin1_General_CP1_CI_AS` | Override the SQL Server database collation |
-| `ADAPTER_TEST_POSTGRES_INITDB_ARGS` | e.g. `--lc-collate=en_US.utf8` | Override the PostgreSQL initdb arguments |
+| `ADAPTER_TEST_POSTGRES_INITDB_ARGS` | e.g. `--lc-collate=C` | Override the PostgreSQL leg's `--locale-provider=icu --icu-locale=en-US` |
 
 `ConformanceTests` is the only suite: every recorded golden plan of both PDPs, replayed against the
 store. A case passes when the returned ids equal the recorded `check()` decisions; a ledger

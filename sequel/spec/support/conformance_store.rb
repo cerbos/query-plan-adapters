@@ -106,8 +106,8 @@ module ConformanceStore
     seed!
   end
 
-  # A column or a session left on MySQL's default collation would pass the case-sensitivity
-  # cases only where no seed happens to discriminate, so check both before any case runs.
+  # The columns and the session must both be on MySQL's case-folding default, or the corpus
+  # would not prove the adapter's own collation.
   def verify_mysql_collation!
     columns = DB.fetch(<<~SQL).map(:collation_name)
       SELECT DISTINCT collation_name AS collation_name FROM information_schema.columns

@@ -208,7 +208,7 @@ class TestOperatorOverrides:
             "sqlite",
         )
         assert statement.endswith("WHERE adversarial_resource.a_string = ?")
-        assert params == {"a_string_1": "public"}
+        assert list(params.values()) == ["public"]
 
 
 class TestDeclaredCollectionStorage:

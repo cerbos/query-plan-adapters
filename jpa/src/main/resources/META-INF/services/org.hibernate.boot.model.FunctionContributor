@@ -1,2 +1,3 @@
 dev.cerbos.queryplan.jpa.MySqlDoubleCastFunctionContributor
 dev.cerbos.queryplan.jpa.H2CodePointLengthFunctionContributor
+dev.cerbos.queryplan.jpa.ExactStringFunctionContributor

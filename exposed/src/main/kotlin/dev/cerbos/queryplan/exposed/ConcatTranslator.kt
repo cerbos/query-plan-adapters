@@ -1,11 +1,11 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.ConcatExpression
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import org.jetbrains.exposed.v1.core.Expression
-import org.jetbrains.exposed.v1.core.stringParam
 
 /**
  * CEL's `+` over strings.
@@ -45,7 +45,7 @@ internal object ConcatTranslator {
                         "CEL has no mixed-type `+`, so this comparison errors at check time and denies",
                 )
             }
-            stringParam(value)
+            ExactString.param(value)
         }
         Operand.NodeCase.VARIABLE -> {
             val target = scope.scalar(operand.variable)

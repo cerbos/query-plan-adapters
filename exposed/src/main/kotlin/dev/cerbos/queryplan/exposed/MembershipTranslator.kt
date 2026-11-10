@@ -1,5 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.Params
@@ -217,7 +218,7 @@ internal class MembershipTranslator(private val translation: Translation) {
         val explicitNulls = translation.leaf.isExplicitNull(member)
         val contains = translation.subqueries.chainContains(collection) { alias ->
             val elementColumn = alias[element.column]
-            val equality = EqOp(elementColumn, member.expression)
+            val equality = EqOp(ExactString.of(elementColumn, "eq"), member.expression)
             if (!explicitNulls) {
                 equality
             } else {
