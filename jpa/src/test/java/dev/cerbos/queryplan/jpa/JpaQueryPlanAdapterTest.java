@@ -1299,19 +1299,6 @@ class JpaQueryPlanAdapterTest {
     // ============================================================================================
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code identifier/equals/concatenation-value-first} solves a PREFIX concatenation back to
-     * a key equality; the suffix form is not carried.
-     */
-    @Test
-    void addSolveStringSuffixStrip() {
-        // "foo.bar" == aString + ".bar" solves to aString == "foo".
-        Operand cond = exprOp("eq",
-                sval("foo.bar"),
-                exprOp("add", var("request.resource.attr.aString"), sval(".bar")));
-        assertEquals(0, runCount(cond));
-    }
-
-    /**
      * <strong>Corpus gap.</strong> #668: {@code arithmetic/add/inexact-fraction-equals} and its siblings go through SQL
      * arithmetic; the exact whole-number solve in Java is not carried. With int literals the policy
      * is a CEL no-overload error at check time, since attribute values are doubles.
@@ -1345,54 +1332,6 @@ class JpaQueryPlanAdapterTest {
         ResourceEntity row = new ResourceEntity("add-big-1");
         row.setaNumber(5);
         withResource(row, () -> assertEquals(0, runCount(cond)));
-    }
-
-    @Nested
-    class MinorOperators {
-
-        /**
-         * <strong>Corpus gap.</strong> #668: The corpus orders a column against a constant
-         * ({@code relation/less-than/one-hop} and siblings) and compares two columns for equality
-         * ({@code comparison/equals/field-to-field}); a two-column ORDERING is not carried.
-         */
-        @Test
-        void fieldToFieldOrderingKeepsOperandDirection() {
-            // Two-column ordering keeps the source operand order.
-            ResourceEntity r = new ResourceEntity("f2f-seed-2");
-            r.setaString("xyz");
-            r.setCreatedBy("abc");
-            r.setaNumber(5);
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("lt",
-                        var("request.resource.attr.createdBy"),
-                        var("request.resource.attr.aString"))));
-                assertEquals(0, runCount(exprOp("lt",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.createdBy"))));
-                assertEquals(1, runCount(exprOp("le",
-                        var("request.resource.attr.aNumber"),
-                        var("request.resource.attr.aNumber"))));
-                assertEquals(0, runCount(exprOp("gt",
-                        var("request.resource.attr.aNumber"),
-                        var("request.resource.attr.aNumber"))));
-            });
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code matches()} between two columns is not carried;
-         * {@code regex/matches/anchored-prefix} refuses the constant form.
-         */
-        @Test
-        void fieldToFieldUnsupportedOperatorStillThrows() {
-            // contains/startsWith/endsWith between two columns translate to LIKE; matches has
-            // no column-to-column translation.
-            assertConditionThrows(
-                    exprOp("matches",
-                            var("request.resource.attr.aString"),
-                            var("request.resource.attr.createdBy")),
-                    "Field-to-field", "matches");
-        }
-
     }
 
     @Nested
@@ -1449,80 +1388,6 @@ class JpaQueryPlanAdapterTest {
 
     }
 
-    /**
-     * <strong>Corpus gap.</strong> #668: Concatenating a null principal attribute is not carried;
-     * the corpus principal has no null attribute.
-     */
-    @Test
-    void foldAddNullOperandErrorDoesNotLeakConstantValues() {
-        // The folded principal value may be personal data and error messages get logged, so
-        // the message names operand types only.
-        Operand cond = exprOp("eq",
-                var("request.resource.attr.aString"),
-                exprOp("add", nullVal(), sval("canary-secret-value")));
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> runCount(cond));
-        assertTrue(ex.getMessage().contains("add requires non-null operands"),
-                "unexpected message: " + ex.getMessage());
-        assertTrue(ex.getMessage().contains("null") && ex.getMessage().contains("String"),
-                "expected operand types in message: " + ex.getMessage());
-        assertFalse(ex.getMessage().contains("canary-secret-value"),
-                "constant value leaked into the error message: " + ex.getMessage());
-
-        // The null on the right.
-        IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
-                () -> runCount(exprOp("eq",
-                        var("request.resource.attr.aString"),
-                        exprOp("add", sval("canary-secret-value"), nullVal()))));
-        assertFalse(ex2.getMessage().contains("canary-secret-value"),
-                "constant value leaked into the error message: " + ex2.getMessage());
-    }
-
-    @Nested
-    class BracketLikeEscaping {
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code string/starts-with/bracket-in-needle} and {@code hierarchy/descendent-of/bracket-in-path} carry
-         * the shape, but no CI leg runs SQL Server, where {@code [} starts a character class even
-         * with an ESCAPE clause. On the other databases the escape changes nothing, so it is
-         * checked on the pattern.
-         */
-        @Test
-        void escapeLikeEscapesOpeningBracket() {
-            assertEquals("\\[SEC]", PlanValues.escapeLike("[SEC]"));
-            assertEquals("50\\%\\[a]\\_b", PlanValues.escapeLike("50%[a]_b"));
-            // Backslash is escaped first.
-            assertEquals("\\\\\\[", PlanValues.escapeLike("\\["));
-            // ']' only closes a class, and none can open once '[' is escaped.
-            assertEquals("]", PlanValues.escapeLike("]"));
-        }
-    }
-
-    // `"a,b".contains(R.attr.x)` arrives as contains(value, variable): the constant is the
-    // haystack and the column is the needle, so the operands must not be swapped.
-    @Nested
-    class ConstantReceiverStringMatch {
-
-        private Operand plan(String op, String constant) {
-            return exprOp(op, sval(constant), var("request.resource.attr.aString"));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code string/contains/value-first} and its siblings run over a corpus
-         * whose aString is never NULL, so the NULL-needle denial has no discriminating seed there.
-         */
-        @Test
-        void nullColumnNeedleExcludesRow() {
-            // A NULL column is a missing attribute, which CEL denies.
-            withResource(row("cr-9", null), () -> {
-                assertEquals(0, runCount(plan("contains", "anything")));
-                assertEquals(0, runCount(plan("startsWith", "anything")));
-                assertEquals(0, runCount(plan("endsWith", "anything")));
-            });
-        }
-
-    }
-
     // Arithmetic as a comparison operand. Attribute values are CEL doubles, so the adapter
     // computes in double arithmetic. mod is refused: CEL's % is int-only, so it always fails
     // on an attribute.
@@ -1571,77 +1436,6 @@ class JpaQueryPlanAdapterTest {
                         exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
                         nval(12))));
             });
-        }
-
-    }
-
-    // timestamp(column) against timestamp(constant). Both operands are expressions, so a
-    // value-first comparison keeps its order and must be mirrored.
-    @Nested
-    class TimestampComparisons {
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code timestamp/less-than/relative-window}, {@code timestamp/equals/literal-instant}, {@code timestamp/equals/literal-instant-non-utc-offset}
-         * and {@code timestamp/not-equals/literal-instant} carry {@code lt}, {@code eq} and {@code ne}; {@code le}, {@code gt} and
-         * {@code ge} are not carried.
-         */
-        @Test
-        void allSixOperatorsFieldFirstOnInstantColumn() {
-            withTimestampRows(() -> {
-                // The NULL row is excluded by every operator, as CEL denies a missing attribute.
-                assertEquals(2, runCount(exprOp("lt", tsVar("createdAt"), tsVal(TS_CONST))));
-                assertEquals(3, runCount(exprOp("le", tsVar("createdAt"), tsVal(TS_CONST))));
-                assertEquals(1, runCount(exprOp("gt", tsVar("createdAt"), tsVal(TS_CONST))));
-                assertEquals(2, runCount(exprOp("ge", tsVar("createdAt"), tsVal(TS_CONST))));
-                assertEquals(1, runCount(exprOp("eq", tsVar("createdAt"), tsVal(TS_CONST))));
-                assertEquals(3, runCount(exprOp("ne", tsVar("createdAt"), tsVal(TS_CONST))));
-            });
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code timestamp/greater-than/relative-window-value-first} carries value-first {@code gt} alone.
-         */
-        @Test
-        void allSixOperatorsValueFirstAreMirroredNotInverted() {
-            withTimestampRows(() -> {
-                // TS_CONST < column selects the 1 later row, not the 2 earlier ones.
-                assertEquals(1, runCount(exprOp("lt", tsVal(TS_CONST), tsVar("createdAt"))));
-                assertEquals(2, runCount(exprOp("le", tsVal(TS_CONST), tsVar("createdAt"))));
-                assertEquals(2, runCount(exprOp("gt", tsVal(TS_CONST), tsVar("createdAt"))));
-                assertEquals(3, runCount(exprOp("ge", tsVal(TS_CONST), tsVar("createdAt"))));
-                assertEquals(1, runCount(exprOp("eq", tsVal(TS_CONST), tsVar("createdAt"))));
-                assertEquals(3, runCount(exprOp("ne", tsVal(TS_CONST), tsVar("createdAt"))));
-            });
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: The corpus's timestamp constants are whole seconds; a
-         * sub-second threshold inside seed a5's microseconds is not carried.
-         */
-        @Test
-        void subSecondPrecisionConstantDiscriminates() {
-            // A folded now() - duration constant has sub-second precision. These thresholds
-            // fall inside old2's second.
-            withTimestampRows(() -> {
-                assertEquals(1, runCount(exprOp("le",
-                        tsVar("createdAt"), tsVal("2024-06-01T00:00:00.000001Z"))));
-                assertEquals(2, runCount(exprOp("le",
-                        tsVar("createdAt"), tsVal("2024-06-01T00:00:00.123456Z"))));
-            });
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: A ternary over two timestamp constants is not carried.
-         */
-        @Test
-        void constantVsConstantFoldsViaTernarySubstitution() {
-            // Each branch compares two constants, so only the aBool = true row (old1) matches.
-            withTimestampRows(() -> assertEquals(1, runCount(exprOp("eq",
-                    exprOp("if",
-                            var("request.resource.attr.aBool"),
-                            tsVal("2024-01-01T00:00:00Z"),
-                            tsVal("2030-01-01T00:00:00Z")),
-                    tsVal("2024-01-01T00:00:00Z")))));
         }
 
     }

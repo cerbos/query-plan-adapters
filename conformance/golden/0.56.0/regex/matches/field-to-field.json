@@ -1,0 +1,54 @@
+{
+  "allowed": [
+    "a3",
+    "a5",
+    "a6",
+    "a9",
+    "b2",
+    "b4",
+    "d1",
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/field-to-field",
+  "intent": "matches() whose pattern is another string attribute (aString.matches(aOptionalString)).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/field-to-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(R.attr.aOptionalString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The pattern is a column, so a store must compile each row's value as RE2: b3 \"back\\slash\" does not match \"k\\s\" (k then whitespace) and d1 \"[SEC]ret\" matches the class [SEC]. A substring test over-grants b3; a missing or null pattern is a CEL error that denies."
+}

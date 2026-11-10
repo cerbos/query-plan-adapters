@@ -223,6 +223,11 @@ def _additive(sign: int) -> Callable[[Any, Any], Any]:
     numeric = _arithmetic((lambda c, v: c + v) if sign > 0 else (lambda c, v: c - v))
 
     def apply(c: Any, v: Any) -> Any:
+        if c is None or v is None:
+            raise UnsupportedPlanError(
+                "arithmetic over a null constant has no CEL overload, and SQL would "
+                "carry it as NULL instead of an error"
+            )
         if isinstance(c, timedelta) and isinstance(v, timedelta):
             return c + v if sign > 0 else c - v
         if isinstance(v, timedelta):

@@ -537,6 +537,10 @@
       "status": "unsupported",
       "reason": "Same unfolded literal division as comparison/less-or-equal/nan-from-ternary-on-both-sides, under negation, where NaN and a division error decide differently"
     },
+    "comparison/less-than/field-to-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
     "comparison/less-than/infinity-on-both-sides": {
       "status": "unsupported",
       "reason": "Same unfolded literal division as comparison/greater-than/infinity-from-ternary: a division by zero is an int error or a double infinity, and the plan cannot tell which"
@@ -802,6 +806,10 @@
       "status": "unsupported",
       "reason": "Unexpected map expression in leaf operand"
     },
+    "regex/matches/anchored-prefix-dot-star": {
+      "status": "unsupported",
+      "reason": "Lucene regexp . matches a newline where RE2's does not, so the RE2-to-Lucene translator refuses the . in ^a.*."
+    },
     "regex/matches/brace-without-count-is-literal": {
       "status": "unsupported",
       "reason": "matches regex has a brace at index 1 that does not begin a {n}, {n,} or {n,m} repetition, which Lucene rejects at query time: a{,2}"
@@ -814,9 +822,17 @@
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^one"
     },
+    "regex/matches/case-insensitive-non-ascii": {
+      "status": "unsupported",
+      "reason": "Lucene regexp has no inline (?i) flag, and the RE2-to-Lucene translator reads no flag group, so the pattern is refused."
+    },
     "regex/matches/digit-class": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: \\d"
+    },
+    "regex/matches/dot-all-flag": {
+      "status": "unsupported",
+      "reason": "Lucene regexp has no inline (?s) flag, and the RE2-to-Lucene translator reads no flag group, so the pattern is refused."
     },
     "regex/matches/dot-excludes-newline": {
       "status": "unsupported",
@@ -825,6 +841,22 @@
     "regex/matches/dot-plus-excludes-empty-and-newline": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .+ \u2014 Lucene's . matches a newline where RE2's does not"
+    },
+    "regex/matches/empty-alternative": {
+      "status": "unsupported",
+      "reason": "matches regex has a top-level alternation: RE2 searches for either branch anywhere, while Lucene matches the whole field, and the empty branch has no anchored spelling, so the pattern is refused."
+    },
+    "regex/matches/end-anchor-mid-pattern": {
+      "status": "unsupported",
+      "reason": "The RE2-to-Lucene translator reads ^ and $ only at the ends of the pattern; Lucene has no anchors to place one mid-pattern, so it is refused."
+    },
+    "regex/matches/escaped-dot": {
+      "status": "unsupported",
+      "reason": "The RE2-to-Lucene translator does not read a (?:...) group, so the pattern is refused."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts; a regexp query takes a constant pattern."
     },
     "regex/matches/leading-zero-count-is-literal": {
       "status": "unsupported",
@@ -842,9 +874,21 @@
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 3: (a)\\1 \u2014 the invalid patterns are refused rather than handed to Lucene, and the disjunction with them"
     },
+    "regex/matches/negated-malformed-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix, so the fallback branch ^h is the first pattern refused; the malformed patterns are never reached."
+    },
     "regex/matches/negated-nested-repetition-over-budget-from-principal": {
       "status": "unsupported",
       "reason": "matches regex has a repetition at index 6 whose nested copies exceed RE2's bound of 1000, so RE2 rejects the pattern and CEL's matches() errors; Lucene would accept it: (a{2}){600}"
+    },
+    "regex/matches/non-capturing-group-optional-suffix": {
+      "status": "unsupported",
+      "reason": "The RE2-to-Lucene translator does not read a (?:...) group, so the pattern is refused."
+    },
+    "regex/matches/non-digit-class": {
+      "status": "unsupported",
+      "reason": "Lucene regexp has no \\D, and the RE2-to-Lucene translator does not spell its complement, so the pattern is refused."
     },
     "regex/matches/posix-character-class": {
       "status": "unsupported",
@@ -862,9 +906,17 @@
       "status": "unsupported",
       "reason": "matches regex has a top-level alternation at index 1: RE2 reads ^a|b$ as two separately anchored alternatives, while Lucene matches the whole field against a|b, so the alternation must be parenthesised as ^(a|b)$: a|b"
     },
+    "regex/matches/two-dot-star-gaps": {
+      "status": "unsupported",
+      "reason": "Lucene regexp . matches a newline where RE2's does not, so the RE2-to-Lucene translator refuses .* in a pattern."
+    },
     "regex/matches/unanchored": {
       "status": "unsupported",
       "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix"
+    },
+    "regex/matches/unanchored-dot": {
+      "status": "unsupported",
+      "reason": "Lucene regexp . matches a newline where RE2's does not, so the RE2-to-Lucene translator refuses the . in a.b."
     },
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",
@@ -877,6 +929,10 @@
     "regex/matches/whitespace-class": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: \\s*"
+    },
+    "regex/matches/word-boundary": {
+      "status": "unsupported",
+      "reason": "Lucene regexp has no \\b, so the RE2-to-Lucene translator refuses it."
     },
     "relation/all/to-one-chain": {
       "status": "unsupported",
@@ -1101,6 +1157,10 @@
       "status": "unsupported",
       "reason": "Same missing computed operand as identifier/equals/concatenation, with both `+` operands document fields rather than one being the primary key. Painless runtime scripts could express it, which is the enhancement #226 tracks"
     },
+    "string/concatenate/negated-null-principal-attribute": {
+      "status": "unsupported",
+      "reason": "A Query DSL leaf compares one document field against a literal; add over a field and a null constant is no literal, and CEL has no overload for it, so it is refused."
+    },
     "string/concatenate/ordering": {
       "status": "unsupported",
       "reason": "Same missing computed operand as string/concatenate/field-to-field: a range query compares a field against a literal, and there is no place to concatenate two fields first"
@@ -1140,6 +1200,14 @@
     "timestamp/greater-than/time-since-duration": {
       "status": "unsupported",
       "reason": "timeSince() is measured from the PDP's request time, which the plan does not carry; an Elasticsearch now is the store's clock at millisecond precision, and computing timeSince over a field needs a script"
+    },
+    "timestamp/less-or-equal/sub-second-literal-at-stored-fraction": {
+      "status": "unsupported",
+      "reason": "A sub-millisecond timestamp literal needs a date_nanos field; an ordinary Elasticsearch date field keeps milliseconds, so the adapter refuses it"
+    },
+    "timestamp/less-or-equal/sub-second-literal-before-stored-fraction": {
+      "status": "unsupported",
+      "reason": "A sub-millisecond timestamp literal needs a date_nanos field; an ordinary Elasticsearch date field keeps milliseconds, so the adapter refuses it"
     },
     "timestamp/less-than/relative-window": {
       "status": "unsupported",

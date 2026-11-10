@@ -69,6 +69,10 @@
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "The post-filter compiles a matches() pattern with re2js once, at translation, so a pattern read from each row is refused."
+    },
     "type-mismatch/matches/list-literal-pattern": {
       "status": "unsupported",
       "reason": "matches() needs a constant string pattern, which the post-filter compiles at translation; a list pattern is a CEL no-overload error."

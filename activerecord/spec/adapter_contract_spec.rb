@@ -888,7 +888,7 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
+  # gap tracked by #675; delete it when its corpus action lands.
   describe "matches() against RE2's own parse" do
     def matches(pattern) = expression("matches", variable("request.resource.attr.aString"), value(pattern))
 

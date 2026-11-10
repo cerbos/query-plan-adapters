@@ -126,20 +126,19 @@ internal object PlanValues {
     /**
      * Folds `add(left, right)` where both operands are constants: strings concatenate, numbers add.
      *
-     * Reports TYPES, never values: a plan constant can carry a folded principal attribute. Malformed
-     * rather than unsupported for the non-string, non-numeric pairings — `null + x` and `true + x`
-     * are CEL no-overload errors whatever `x` is, so a planner folding constants never emits them.
+     * Reports TYPES, never values: a plan constant can carry a folded principal attribute. Any
+     * other pairing is a CEL no-overload error the planner keeps, so it is refused.
      */
     fun foldAdd(left: Any?, right: Any?): Any {
         if (left == null || right == null) {
-            throw Refusals.malformed("add requires non-null operands, got ${typeName(left)} + ${typeName(right)}")
+            throw Refusals.unsupported("add requires non-null operands, got ${typeName(left)} + ${typeName(right)}")
         }
-        if (left is String || right is String) return "$left$right"
+        if (left is String && right is String) return left + right
         if (left is Number && right is Number) {
             return if (left is Long && right is Long) left + right else left.toDouble() + right.toDouble()
         }
-        throw Refusals.malformed(
-            "add requires string or numeric operands, got ${typeName(left)} + ${typeName(right)}",
+        throw Refusals.unsupported(
+            "add requires two strings or two numbers, got ${typeName(left)} + ${typeName(right)}",
         )
     }
 

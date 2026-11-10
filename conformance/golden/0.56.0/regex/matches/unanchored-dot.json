@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a4",
+    "a5"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/unanchored-dot",
+  "intent": "matches(\"a.b\"), unanchored: a and b with exactly one character between them.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "a.b"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/unanchored-dot",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"a.b\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The . never matches a newline, so a4 \"xa_by\" and a5 \"xaXby\" match and h2 \"a\\nb\" does not; lowering it to LIKE '%a_b%' lets _ match the newline and over-grants h2."
+}

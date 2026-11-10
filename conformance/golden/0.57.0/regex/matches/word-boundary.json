@@ -1,0 +1,52 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "c1",
+    "h6",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/word-boundary",
+  "intent": "matches(\"ne\\\\b\"): ne followed by an ASCII word boundary.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "ne\\b"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/word-boundary",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"ne\\\\b\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a1 \"one\" and c1 \"One\" match and b1 \"oneXtwo\" does not; dropping \\b over-grants b1, and PostgreSQL reads \\b as a backspace and under-grants a1."
+}
