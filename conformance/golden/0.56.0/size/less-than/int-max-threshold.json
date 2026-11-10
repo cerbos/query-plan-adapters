@@ -1,0 +1,96 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "size/less-than/int-max-threshold",
+  "intent": "size(aString) < 2147483647, the largest 32-bit int.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 2147483647
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/less-than/int-max-threshold",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aString) < 2147483647"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The boundary is in range and must compare as written; a guard that folds thresholds at or above it to always-false returns nothing."
+}

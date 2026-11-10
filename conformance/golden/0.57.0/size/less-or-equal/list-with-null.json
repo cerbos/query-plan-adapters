@@ -1,0 +1,93 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a5",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "size/less-or-equal/list-with-null",
+  "intent": "size(aNumberList) <= 1, where j4 sends the list as null.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumberList"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/less-or-equal/list-with-null",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aNumberList) <= 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "size(null) has no overload and denies; a store that counts a null list as zero elements returns j4."
+}
