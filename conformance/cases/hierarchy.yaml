@@ -24,6 +24,13 @@ cases:
   condition:
     match:
       expr: 'hierarchy(R.attr.scope, "").ancestorOf(hierarchy("dept.eng", ""))'
+- id: 'hierarchy/ancestor-of/empty-path-negated'
+  tier: adversarial
+  intent: '!hierarchy(field, "").ancestorOf(hierarchy("", "")): the empty path splits into zero segments on the empty delimiter, so it has no strict ancestors.'
+  trap: 'With no prefixes to list, folding to false and negating admits rows missing scope (a7); every present scope, a8 "" included, is allowed.'
+  condition:
+    match:
+      expr: '!hierarchy(R.attr.scope, "").ancestorOf(hierarchy("", ""))'
 - id: 'hierarchy/ancestor-of/like-metacharacters-in-path'
   tier: adversarial
   intent: 'ancestorOf against a constant path containing % and _ (''50%.a_b.x'').'
@@ -31,6 +38,13 @@ cases:
   condition:
     match:
       expr: 'hierarchy(R.attr.scope).ancestorOf(hierarchy("50%.a_b.x"))'
+- id: 'hierarchy/ancestor-of/single-segment-constant-negated'
+  tier: adversarial
+  intent: '!hierarchy(field).ancestorOf(hierarchy("dept")): a one-segment path has no strict ancestors, so every present scope is allowed.'
+  trap: 'The strict-prefix list is empty: folding it to false and negating admits rows missing scope (a7), an empty IN list fails to run, and counting the equal path as an ancestor drops a1.'
+  condition:
+    match:
+      expr: '!hierarchy(R.attr.scope).ancestorOf(hierarchy("dept"))'
 - id: 'hierarchy/descendent-of/bracket-in-path'
   tier: adversarial
   intent: 'descendentOf with a '':'' delimiter against a constant path containing ''['' (''[env]:prod'').'
@@ -66,6 +80,13 @@ cases:
   condition:
     match:
       expr: 'hierarchy(R.attr.scope, ":").descendentOf(hierarchy("50%:a_b", ":"))'
+- id: 'hierarchy/descendent-of/single-segment-constant'
+  tier: extended
+  intent: 'hierarchy(field).descendentOf(hierarchy("dept")): a one-segment ancestor, so every sibling branch under it is a descendant.'
+  trap: 'Must become LIKE ''dept.%''; a prefix built from the constant''s parent is empty and matches every row, and the equal path a1 must be excluded.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope).descendentOf(hierarchy("dept"))'
 - id: 'hierarchy/overlaps/constant-path'
   tier: extended
   intent: 'hierarchy(field).overlaps(hierarchy(constant)): ancestor, equal or descendant.'
@@ -87,6 +108,13 @@ cases:
   condition:
     match:
       expr: 'hierarchy(R.attr.scope, "").overlaps(hierarchy("dept.eng", ""))'
+- id: 'hierarchy/overlaps/field-to-field'
+  tier: adversarial
+  intent: 'overlaps between two hierarchies read from columns: scope split on '':'' against scope split on ''.''.'
+  trap: 'Neither side is a constant to expand into prefixes, so an adapter must compare segment-wise at query time or refuse; only paths that are one segment under both delimiters (a1, a8, a9) overlap.'
+  condition:
+    match:
+      expr: 'hierarchy(R.attr.scope, ":").overlaps(hierarchy(R.attr.scope))'
 - id: 'hierarchy/overlaps/like-metacharacters-in-path'
   tier: adversarial
   intent: 'overlaps with a '':'' delimiter against ''50%:a_b'', emitting the IN list, the equality and the escaped LIKE at once.'

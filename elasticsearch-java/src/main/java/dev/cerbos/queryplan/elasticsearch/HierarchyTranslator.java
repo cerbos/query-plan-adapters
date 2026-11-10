@@ -293,8 +293,8 @@ final class HierarchyTranslator {
 
     /**
      * A bare {@code bool.must_not} would match documents missing the field, where CEL errors. An
-     * {@code exists} guard would fix that, but the corpus has no negated strict-ancestry action to
-     * prove it yet, so it stays refused.
+     * {@code exists} guard would fix that; until it is proven across negated strict shapes it stays
+     * refused.
      */
     private static UnsupportedPlanShapeException negatedHierarchy(String operator) {
         return unsupported("Negated " + operator + " cannot be expressed safely: "

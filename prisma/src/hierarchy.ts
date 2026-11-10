@@ -334,7 +334,13 @@ export function handleAncestorDescendantOperator(
     const delimiter = ancestor.delimiter;
     const prefixes = getStrictPrefixes(descendant.segments, delimiter);
     if (prefixes.length === 0) {
-      return buildImpossibleFilter(ancestor.fieldRef);
+      if (ancestor.fieldRef.nullable === false) return buildImpossibleFilter(ancestor.fieldRef);
+      return {
+        AND: [
+          buildFieldFilter(ancestor.fieldRef, "equals", ""),
+          buildFieldFilter(ancestor.fieldRef, "not", ""),
+        ],
+      };
     }
     if (prefixes.length === 1) {
       return buildFieldFilter(ancestor.fieldRef, "equals", prefixes[0]!);

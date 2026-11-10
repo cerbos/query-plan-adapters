@@ -1,0 +1,91 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/ancestor-of/empty-path-negated",
+  "intent": "!hierarchy(field, \"\").ancestorOf(hierarchy(\"\", \"\")): the empty path splits into zero segments on the empty delimiter, so it has no strict ancestors.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.scope"
+                      },
+                      {
+                        "value": ""
+                      }
+                    ],
+                    "operator": "hierarchy"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": ""
+                      },
+                      {
+                        "value": ""
+                      }
+                    ],
+                    "operator": "hierarchy"
+                  }
+                }
+              ],
+              "operator": "ancestorOf"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/ancestor-of/empty-path-negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!hierarchy(R.attr.scope, \"\").ancestorOf(hierarchy(\"\", \"\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "With no prefixes to list, folding to false and negating admits rows missing scope (a7); every present scope, a8 \"\" included, is allowed."
+}
