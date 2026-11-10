@@ -66,6 +66,13 @@ cases:
   condition:
     match:
       expr: '(R.attr.parent.aBool) ? (R.attr.obj.inner != "same") : (!R.attr.aString.contains(R.attr.aOptionalString))'
+- id: 'conditional/ternary/literal-true-branch'
+  tier: adversarial
+  intent: 'A ternary whose then branch is the literal true and whose else branch reads updatedAt, which is missing on most rows whose aBool takes the then branch.'
+  trap: 'A literal branch is not a predicate, so a translator that falls back to evaluating the whole ternary guards updatedAt on every row and drops those whose condition alone allows them. Found by fuzzing (fuzz/s61/0143, mongoose, PDP 0.56.0, where has(R.attr.coOwner) folds to true).'
+  condition:
+    match:
+      expr: 'R.attr.aBool ? true : (timestamp(R.attr.updatedAt) == timestamp("2020-03-15T10:30:00.000Z"))'
 - id: conditional/ternary/negated
   tier: adversarial
   intent: 'A ternary comparison under negation (!((aBool ? aNumber : 0) > 1)).'

@@ -88,6 +88,10 @@
       "reason": "int() cannot be lowered to a SQL CAST, which on PostgreSQL and MySQL rounds to nearest where CEL truncates toward zero.",
       "status": "unsupported"
     },
+    "cast/int/out-of-range-beside-relation": {
+      "reason": "Same int() refusal as cast/int/double-truncation-bounds.",
+      "status": "unsupported"
+    },
     "cast/int/string-beyond-double-precision": {
       "reason": "int() cannot be lowered to a SQL CAST, which on every ent dialect reads what CEL rejects as malformed and rounds where CEL truncates.",
       "status": "unsupported"

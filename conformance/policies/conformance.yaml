@@ -351,6 +351,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aDouble) > 0 || int(R.attr.aDouble) < -4
+    # cast/int/out-of-range-beside-relation
+    - actions:
+        - cast/int/out-of-range-beside-relation
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aDouble) == 22 || R.attr.parent.inner.aString.endsWith("dept")
     # cast/int/malformed-string
     - actions:
         - cast/int/malformed-string
@@ -1755,6 +1764,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.parent.aBool) ? (R.attr.obj.inner != "same") : (!R.attr.aString.contains(R.attr.aOptionalString))'
+    # conditional/ternary/literal-true-branch
+    - actions:
+        - conditional/ternary/literal-true-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'R.attr.aBool ? true : (timestamp(R.attr.updatedAt) == timestamp("2020-03-15T10:30:00.000Z"))'
     # conditional/ternary/negated
     - actions:
         - conditional/ternary/negated

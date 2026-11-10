@@ -1704,7 +1704,11 @@ internal sealed class Translator
                     var truncated = _provider == DatabaseProvider.Sqlite
                         ? strict.Value
                         : Expression.Convert(Expression.Call(MathTruncate, Expression.Convert(strict.Value, typeof(double))), typeof(double?));
-                    return new ScalarTerm(Expression.Convert(truncated, typeof(long?)), Ex.And(strict.Defined, inRange), ScalarKind.Int, false);
+                    // SQL Server may run the CAST before a sibling guard and abort the query.
+                    Expression value = Expression.Convert(truncated, typeof(long?));
+                    if (_provider != DatabaseProvider.Sqlite)
+                        value = Expression.Condition(inRange, value, Expression.Constant(null, typeof(long?)));
+                    return new ScalarTerm(value, Ex.And(strict.Defined, inRange), ScalarKind.Int, false);
                 }
             case ScalarTerm { Kind: ScalarKind.String }:
                 throw Refuse("int() over a string column has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string.");

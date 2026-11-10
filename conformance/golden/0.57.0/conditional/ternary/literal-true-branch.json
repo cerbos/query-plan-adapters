@@ -1,0 +1,108 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/literal-true-branch",
+  "intent": "A ternary whose then branch is the literal true and whose else branch reads updatedAt, which is missing on most rows whose aBool takes the then branch.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "value": true
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.updatedAt"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "2020-03-15T10:30:00Z"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "if"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/literal-true-branch",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aBool ? true : (timestamp(R.attr.updatedAt) == timestamp(\"2020-03-15T10:30:00.000Z\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A literal branch is not a predicate, so a translator that falls back to evaluating the whole ternary guards updatedAt on every row and drops those whose condition alone allows them. Found by fuzzing (fuzz/s61/0143, mongoose, PDP 0.56.0, where has(R.attr.coOwner) folds to true)."
+}

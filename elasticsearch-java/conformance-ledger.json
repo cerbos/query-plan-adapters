@@ -153,6 +153,10 @@
       "status": "unsupported",
       "reason": "int() over a numeric field is a computed operand; the Query DSL cannot cast a field without scripts."
     },
+    "cast/int/out-of-range-beside-relation": {
+      "status": "unsupported",
+      "reason": "Same int() refusal as cast/int/double-truncation-bounds."
+    },
     "cast/int/string-beyond-double-precision": {
       "status": "unsupported",
       "reason": "int() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."
