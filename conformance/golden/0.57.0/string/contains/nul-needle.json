@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "k3"
+  ],
+  "degenerateReason": null,
+  "id": "string/contains/nul-needle",
+  "intent": "contains() with a needle that is a single NUL.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "\u0000"
+          }
+        ],
+        "operator": "contains"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/contains/nul-needle",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.contains(\"\\u0000\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Only k3 holds a NUL. A LIKE pattern read as C text truncates %NUL% to %, which matches every non-null row."
+}

@@ -1134,6 +1134,8 @@ internal sealed class Translator
     /// </summary>
     private Expression Match(string op, Expression value, Expression needle, string? literal)
     {
+        if (literal is not null && literal.Contains('\0'))
+            throw Refuse($"{op}() with a needle holding a NUL character: PostgreSQL text cannot hold one.");
         switch (_provider)
         {
             case DatabaseProvider.SqlServer:

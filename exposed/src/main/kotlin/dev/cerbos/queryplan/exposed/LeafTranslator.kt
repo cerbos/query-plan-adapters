@@ -1,9 +1,10 @@
 package dev.cerbos.queryplan.exposed
 
-import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.queryplan.exposed.sql.CodePointOrdering
+import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
+import dev.cerbos.queryplan.exposed.sql.NulSafeMatch
 import dev.cerbos.queryplan.exposed.sql.Params
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
@@ -18,6 +19,7 @@ import org.jetbrains.exposed.v1.core.LessOp
 import org.jetbrains.exposed.v1.core.LikeEscapeOp
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
+import org.jetbrains.exposed.v1.core.stringParam
 
 /**
  * The scalar leaf: one resolved value against one plan constant, under the normalised operator.
@@ -172,6 +174,9 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
     fun defaultLeaf(operator: String, target: Resolution.Scalar, value: Any): Op<Boolean> {
         val constant = Params.of(value)
         val expression = ExactString.of(comparable(target, value), operator)
+        if (operator in setOf("contains", "startsWith", "endsWith") && value is String && '\u0000' in value) {
+            throw ScalarRefusals.nulNeedle(operator)
+        }
         return when (operator) {
             "eq" -> EqOp(expression, constant)
             "ne" -> NeqOp(expression, constant)
@@ -199,7 +204,13 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
             append(escaped)
             if (trailingWildcard) append('%')
         }
-        return LikeEscapeOp(haystack, ExactString.param(pattern), true, LikeEscaping.ESCAPE_CHAR)
+        return NulSafeMatch(
+            LikeEscapeOp(haystack, ExactString.param(pattern), true, LikeEscaping.ESCAPE_CHAR),
+            haystack,
+            stringParam(needle.toString()),
+            leadingWildcard,
+            trailingWildcard,
+        )
     }
 
     /** The target cast to IEEE double when the constant is fractional or too large for a `Long`, as CEL compares. */

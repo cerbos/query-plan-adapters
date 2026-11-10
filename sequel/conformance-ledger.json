@@ -293,6 +293,10 @@
       "status": "unsupported",
       "reason": "size() of a map() projection reaches the count as a projected association, which has no count: each element is read through the lambda body, and a body that errors on one element (b6's unnamed tag) makes the whole count an error. Only a named collection or a filter() is counted, so the projection is refused."
     },
+    "string/contains/nul-needle": {
+      "status": "unsupported",
+      "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors, and MySQL's LIKE stops reading the pattern at it."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "SQL temporal columns preserve instants but discard the RFC-3339 spelling compared by bare CEL attributes; timestamp wrappers are required."

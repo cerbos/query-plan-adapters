@@ -129,6 +129,11 @@ final class LeafTranslator {
             if (!String.class.equals(path.getJavaType()) || !(value instanceof String needle)) {
                 return tri.unknown();
             }
+            if (needle.indexOf('\0') >= 0) {
+                throw Refusals.unsupported(op + "() with a needle holding a NUL character: "
+                        + "PostgreSQL text cannot hold one, and MySQL's LIKE stops reading the "
+                        + "pattern at it.");
+            }
             return cb.like(ExactStrings.exact(cb, path.as(String.class)),
                     match.pattern(PlanValues.escapeLike(needle)), '\\');
         }

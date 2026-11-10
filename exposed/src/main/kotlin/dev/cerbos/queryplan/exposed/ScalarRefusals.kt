@@ -137,6 +137,12 @@ internal object ScalarRefusals {
             "surrogate pair before U+E000–U+FFFF.",
     )
 
+    /** A string match whose constant needle holds a NUL character. */
+    fun nulNeedle(operator: String): UnsupportedPlanShapeException = Refusals.unsupported(
+        "Cannot translate $operator() with a needle holding a NUL character: PostgreSQL text " +
+            "cannot hold one, and MySQL's LIKE stops reading the pattern at it.",
+    )
+
     /**
      * A division whose denominator is a floating-point column or computed arithmetic: its zero may
      * be `-0.0`, which CEL divides into the opposite infinity and SQL cannot tell from `0.0`.

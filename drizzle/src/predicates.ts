@@ -147,6 +147,9 @@ const bindAgainstColumn = (value: Value, column: AnyColumn): SQL | Param =>
 
 export type StringMatchOperator = "contains" | "startsWith" | "endsWith";
 
+const sqliteCharacterLength = (expr: SQL): SQL =>
+  sql`length(json_extract(replace(replace(replace(json_quote(${expr}), '\\\\', char(1)), '\\u0000', ' '), char(1), '\\\\'), '$'))`;
+
 /**
  * A string's length in CHARACTERS, the unit CEL's `size()` and every dialect's `substr()` count
  * in. SQLite's and PostgreSQL's `length()` already count characters; MySQL's counts BYTES, so a
@@ -166,8 +169,7 @@ export const characterLength = (
   }
 
   if (columns.some((column) => column !== undefined && is(column, SQLiteColumn))) {
-    return (expr) =>
-      sql`length(json_extract(replace(replace(replace(json_quote(${expr}), '\\\\', char(1)), '\\u0000', ' '), char(1), '\\\\'), '$'))`;
+    return sqliteCharacterLength;
   }
 
   return (expr) => sql`length(${expr})`;
@@ -196,7 +198,12 @@ export const buildStringMatchCondition = (
       // from a column-valued needle as pattern syntax. The explicit NULL arm
       // preserves CEL missing-attribute errors under negation, and contains("")
       // remains true for every present receiver.
-      const body = sql`when ${needleExpr} = '' then true else length(replace(${receiverExpr}, ${needleExpr}, '')) < length(${receiverExpr}) end`;
+      // SQLite's replace() cannot match past a NUL; its instr() compares every byte.
+      const body =
+        length === sqliteCharacterLength
+          ? sql`when ${needleExpr} = '' then true else instr(${receiverExpr}, ${needleExpr}) > 0 end`
+          : sql`when ${needleExpr} = '' then true else length(replace(${receiverExpr}, ${needleExpr}, '')) < length(${receiverExpr}) end`;
+
       const nullGuard = buildNullGuard(receiver, needle);
 
       return nullGuard
@@ -204,9 +211,18 @@ export const buildStringMatchCondition = (
         : sql`(case ${body})`;
     }
 
+    // SQLite's substr() reads a string only up to its first NUL. instr() compares every byte,
+    // and hex() keeps a suffix aligned to whole bytes.
     case "startsWith":
+      if (length === sqliteCharacterLength) return sql`(instr(${receiverExpr}, ${needleExpr}) = 1)`;
+
       return sql`substr(${receiverExpr}, 1, ${length(needleExpr)}) = ${needleExpr}`;
     case "endsWith":
+      if (length === sqliteCharacterLength) {
+        // hex() reads NULL as '', so NULL is propagated by hand.
+        return sql`(case when ${receiverExpr} is not null and ${needleExpr} is not null then hex(${receiverExpr}) like '%' || hex(${needleExpr}) end)`;
+      }
+
       return sql`substr(${receiverExpr}, ${length(receiverExpr)} - ${length(needleExpr)} + 1) = ${needleExpr}`;
   }
 };

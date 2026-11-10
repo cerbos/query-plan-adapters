@@ -201,6 +201,9 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 		return writeTruthTest(b, t)
 
 	case queryplan.Like:
+		if b.Dialect() == dialect.SQLite {
+			return writeSQLiteLike(b, t)
+		}
 		return wrap(b, func(b *sql.Builder) error {
 			if err := write(b, t.Receiver); err != nil {
 				return err
@@ -416,6 +419,40 @@ func writeCall(b *sql.Builder, c queryplan.Call) error {
 	b.WriteString(name)
 	return wrap(b, func(b *sql.Builder) error {
 		return writeSeparated(b, c.Args, ", ")
+	})
+}
+
+// writeSQLiteLike matches a Like's needle without LIKE, which SQLite reads only up to a string's
+// first NUL: instr() and = compare every byte, and hex() keeps a suffix aligned to whole bytes.
+// Each is case-sensitive, as CEL is, whatever case_sensitive_like says, and propagates NULL.
+func writeSQLiteLike(b *sql.Builder, t queryplan.Like) error {
+	return wrap(b, func(b *sql.Builder) error {
+		operands := func(open, sep, close string) error {
+			b.WriteString(open)
+			if err := write(b, t.Receiver); err != nil {
+				return err
+			}
+			b.WriteString(sep)
+			if err := write(b, t.Needle); err != nil {
+				return err
+			}
+			b.WriteString(close)
+			return nil
+		}
+		switch t.Anchor {
+		case queryplan.LikeContains:
+			return operands("instr(", ", ", ") > 0")
+		case queryplan.LikeStartsWith:
+			return operands("instr(", ", ", ") = 1")
+		case queryplan.LikeEndsWith:
+			// hex() reads NULL as '', so NULL is propagated by hand.
+			if err := operands("CASE WHEN ", " IS NOT NULL AND ", " IS NOT NULL THEN "); err != nil {
+				return err
+			}
+			return operands("hex(", ") LIKE '%' || hex(", ") END")
+		default:
+			return operands("", " = ", "")
+		}
 	})
 }
 

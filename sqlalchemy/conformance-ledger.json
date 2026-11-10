@@ -467,6 +467,10 @@
       "status": "unsupported",
       "reason": "add over a null constant has no CEL overload, and SQL would carry it as NULL rather than an error, so it is refused."
     },
+    "string/contains/nul-needle": {
+      "status": "unsupported",
+      "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors, and MySQL's LIKE stops reading the pattern at it."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal attributes compare RFC 3339 strings in CEL; a stored timestamp loses the original spelling, so both operands need timestamp()."

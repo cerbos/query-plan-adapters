@@ -39,9 +39,10 @@ module Cerbos
 
       module_function
 
-      # Escapes every regex metacharacter so the value matches itself literally.
+      # Escapes every regex metacharacter so the value matches itself literally. A NUL is
+      # spelled \x00, since MongoDB refuses a pattern that embeds one.
       def escape(value)
-        value.gsub(METACHARACTERS) { |character| "\\#{character}" }
+        value.gsub(METACHARACTERS) { |character| "\\#{character}" }.gsub("\0", "\\x00")
       end
 
       # @return [String] the PCRE2 pattern

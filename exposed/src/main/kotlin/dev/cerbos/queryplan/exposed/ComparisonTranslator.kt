@@ -1,10 +1,11 @@
 package dev.cerbos.queryplan.exposed
 
-import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.AsciiReplace
+import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
+import dev.cerbos.queryplan.exposed.sql.NulSafeMatch
 import dev.cerbos.queryplan.exposed.sql.NullLiteral
 import dev.cerbos.queryplan.exposed.sql.Params
 import dev.cerbos.queryplan.exposed.sql.ScalarCase
@@ -1016,11 +1017,17 @@ internal class ComparisonTranslator(private val translation: Translation) {
         needle: Expression<*>,
         leadingWildcard: Boolean,
         trailingWildcard: Boolean,
-    ): Op<Boolean> = LikeEscapeOp(
-        ExactString.of(haystack, "eq"),
-        LikeEscaping.columnPattern(needle, leadingWildcard, trailingWildcard),
-        true,
-        LikeEscaping.ESCAPE_CHAR,
+    ): Op<Boolean> = NulSafeMatch(
+        LikeEscapeOp(
+            ExactString.of(haystack, "eq"),
+            LikeEscaping.columnPattern(needle, leadingWildcard, trailingWildcard),
+            true,
+            LikeEscaping.ESCAPE_CHAR,
+        ),
+        haystack,
+        needle,
+        leadingWildcard,
+        trailingWildcard,
     )
 
     companion object {

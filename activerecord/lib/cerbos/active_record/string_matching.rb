@@ -27,6 +27,13 @@ module Cerbos
       # @param prefix [Boolean] permit any characters before the needle
       # @param suffix [Boolean] permit any characters after the needle
       def match(receiver, needle, prefix:, suffix:)
+        if needle.is_a?(::String) && needle.include?("\0")
+          raise UnsupportedOperatorError,
+            "Cannot translate a string match whose needle holds a NUL character: PostgreSQL " \
+            "text cannot hold one, and MySQL's LIKE stops reading the pattern at it"
+        end
+        return sqlite_match(receiver, needle, prefix: prefix, suffix: suffix) if dialect.sqlite?
+
         pattern =
           if needle.is_a?(::String)
             literal = escape_literal(needle)
@@ -57,6 +64,28 @@ module Cerbos
       end
 
       private
+
+      # SQLite's LIKE reads a string only up to its first NUL. instr() and = compare every byte,
+      # and hex() keeps a suffix aligned to whole bytes; each is case-sensitive, as CEL is.
+      def sqlite_match(receiver, needle, prefix:, suffix:)
+        haystack = ArelSupport.quote(receiver)
+        needle = ArelSupport.quote(needle)
+        position = ArelSupport.function("instr", [haystack, needle])
+
+        if prefix && suffix
+          Arel::Nodes::GreaterThan.new(position, ArelSupport.quote(0))
+        elsif suffix
+          Arel::Nodes::Equality.new(position, ArelSupport.quote(1))
+        elsif prefix
+          # hex() reads NULL as '', so NULL is propagated by hand.
+          hex = ->(node) { ArelSupport.function("hex", [node]) }
+          suffix_match = Arel::Nodes::Matches.new(hex.call(haystack), dialect.concat(ArelSupport.quote("%"), hex.call(needle)), nil, true)
+          both_present = Arel::Nodes::And.new([Arel::Nodes::NotEqual.new(haystack, nil), Arel::Nodes::NotEqual.new(needle, nil)])
+          ArelSupport.case_node([[both_present, suffix_match]])
+        else
+          Arel::Nodes::Equality.new(haystack, needle)
+        end
+      end
 
       # Escapes LIKE metacharacters in a column needle, in SQL at query time.
       #

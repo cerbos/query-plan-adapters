@@ -173,6 +173,10 @@
       "status": "unsupported",
       "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; the escape \\b is not read, so the pattern is refused."
     },
+    "string/contains/nul-needle": {
+      "status": "unsupported",
+      "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "A timestamp column reaches CEL as an RFC 3339 string whose exact spelling the store does not keep, so comparing it as a string has no translation. Wrap it in timestamp()."

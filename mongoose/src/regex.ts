@@ -4,8 +4,9 @@ import { UnsupportedQueryPlanError } from "./errors";
 import { lookup } from "./narrowing";
 
 /** Escapes every regex metacharacter so the value matches itself literally. */
+/** Every regex metacharacter escaped, and a NUL spelled \x00, since MongoDB refuses a pattern that embeds one. */
 export const escapeRegexValue = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replaceAll("\u0000", "\\x00");
 
 /**
  * How a CEL `matches()` pattern reaches MongoDB. CEL compiles the pattern with Go's `regexp`

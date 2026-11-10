@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
-from typing import Any, NoReturn
+from typing import Any, ClassVar, NoReturn
 
 from sqlalchemy import (
     ARRAY,
@@ -42,8 +42,9 @@ from sqlalchemy import (
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql import operators
-from sqlalchemy.sql.expression import ColumnElement
+from sqlalchemy.sql.expression import ColumnElement, Grouping
 from sqlalchemy.sql.functions import FunctionElement
+from sqlalchemy.sql.visitors import InternalTraversal
 
 from cerbos_sqlalchemy._regex import (
     AllCharactersIn,
@@ -477,8 +478,20 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
         return null()
     if any(isinstance(value, (list, dict)) for value in (receiver, needle)):
         return null()
+    if isinstance(needle, str) and "\0" in needle:
+        raise UnsupportedPlanError(
+            "a string match whose needle holds a NUL character: PostgreSQL text cannot hold "
+            "one, and MySQL's LIKE stops reading the pattern at it"
+        )
     if isinstance(receiver, str):
         receiver = literal(receiver, String)
+    unescaped = literal(needle, String) if isinstance(needle, str) else needle
+    anchor = {
+        (True, True): "contains",
+        (True, False): "ends",
+        (False, True): "starts",
+        (False, False): "whole",
+    }[(prefix, suffix)]
     if isinstance(needle, str):
         pattern: Any = (
             ("%" if prefix else "")
@@ -491,8 +504,70 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
             pattern = literal("%", String) + pattern
         if suffix:
             pattern = pattern + literal("%", String)
-    receiver, pattern = exact_pair(receiver, pattern)
-    return receiver.like(pattern, escape=_LIKE_ESCAPE_CHAR)
+    exact_receiver, pattern = exact_pair(receiver, pattern)
+    return _StringMatch(
+        exact_receiver.like(pattern, escape=_LIKE_ESCAPE_CHAR),
+        receiver,
+        unescaped,
+        anchor,
+    )
+
+
+class _StringMatch(ColumnElement):
+    """A string match: an escaped LIKE, except on SQLite, whose LIKE reads a string only up to
+    its first NUL. There ``instr()`` and ``=`` compare every byte, and ``hex()`` keeps a suffix
+    aligned to whole bytes; each is case-sensitive, as CEL is."""
+
+    type = Boolean()
+    inherit_cache = True
+    _traverse_internals: ClassVar = [
+        ("like", InternalTraversal.dp_clauseelement),
+        ("receiver", InternalTraversal.dp_clauseelement),
+        ("needle", InternalTraversal.dp_clauseelement),
+        ("anchor", InternalTraversal.dp_string),
+        ("negated", InternalTraversal.dp_boolean),
+    ]
+
+    def __init__(
+        self, like: Any, receiver: Any, needle: Any, anchor: str, negated: bool = False
+    ) -> None:
+        self.like = like
+        self.receiver = receiver
+        self.needle = needle
+        self.anchor = anchor
+        self.negated = negated
+
+    def self_group(self, against: Any = None) -> Any:
+        return Grouping(self)
+
+    def _negate(self) -> "_StringMatch":
+        return _StringMatch(
+            not_(self.like), self.receiver, self.needle, self.anchor, not self.negated
+        )
+
+
+@compiles(_StringMatch)
+def _string_match_like(element, compiler, **kw):
+    return compiler.process(element.like, **kw)
+
+
+@compiles(_StringMatch, "sqlite")
+def _sqlite_string_match(element, compiler, **kw):
+    receiver, needle = element.receiver, element.needle
+    position = func.instr(receiver, needle)
+    predicate = {
+        "contains": position > 0,
+        "starts": position == 1,
+        # hex() reads NULL as '', so NULL is propagated by hand.
+        "ends": case(
+            (
+                and_(receiver.is_not(None), needle.is_not(None)),
+                func.hex(receiver).like(literal("%", String) + func.hex(needle)),
+            )
+        ),
+        "whole": receiver == needle,
+    }[element.anchor]
+    return compiler.process(not_(predicate) if element.negated else predicate, **kw)
 
 
 def _matches(receiver: Any, pattern: Any) -> Any:

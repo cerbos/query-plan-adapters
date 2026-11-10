@@ -37,6 +37,13 @@ module Cerbos
       # @param prefix [Boolean] permit any characters before the needle
       # @param suffix [Boolean] permit any characters after the needle
       def match(receiver, needle, prefix:, suffix:)
+        if needle.is_a?(::String) && needle.include?("\0")
+          raise UnsupportedOperatorError,
+            "Cannot translate a string match whose needle holds a NUL character: PostgreSQL " \
+            "text cannot hold one, and MySQL's LIKE stops reading the pattern at it"
+        end
+        return sqlite_match(receiver, needle, prefix: prefix, suffix: suffix) if dialect.sqlite?
+
         pattern =
           if needle.is_a?(::String)
             literal = escape_literal(needle)
@@ -65,6 +72,26 @@ module Cerbos
       end
 
       private
+
+      # SQLite's LIKE reads a string only up to its first NUL. instr() and = compare every byte,
+      # and hex() keeps a suffix aligned to whole bytes; each is case-sensitive, as CEL is.
+      def sqlite_match(receiver, needle, prefix:, suffix:)
+        position = SqlSupport.function(:instr, [receiver, needle])
+
+        if prefix && suffix
+          SqlSupport::BooleanExpression.new(:>, position, 0)
+        elsif suffix
+          SqlSupport::BooleanExpression.new(:"=", position, 1)
+        elsif prefix
+          # hex() reads NULL as '', so NULL is propagated by hand.
+          hex = ->(node) { SqlSupport.function(:hex, [node]) }
+          suffix_match = SqlSupport::BooleanExpression.new(:LIKE, hex.call(receiver), dialect.concat("%", hex.call(needle)))
+          both_present = SqlSupport.and_node([SqlSupport::BooleanExpression.new(:"IS NOT", receiver, nil), SqlSupport::BooleanExpression.new(:"IS NOT", needle, nil)])
+          SqlSupport.case_node([[both_present, suffix_match]])
+        else
+          SqlSupport::BooleanExpression.new(:"=", receiver, needle)
+        end
+      end
 
       # Puts an escape character before each LIKE metacharacter in a needle that is a column.
       # The database does this when it runs the query.

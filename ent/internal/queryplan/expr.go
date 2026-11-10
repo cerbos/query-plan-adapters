@@ -168,10 +168,25 @@ type TruthTest struct {
 // Like is a pattern match with an explicit escape character. Metacharacters in the needle are
 // always escaped before they reach here (see escapeLikeLiteral / escapeLikeColumn), so a `%` in
 // policy data can never act as a wildcard.
+//
+// Needle is the unescaped text the pattern matches, and Anchor where, for a store whose LIKE reads
+// a string only up to its first NUL: SQLite's does, so its renderer matches Needle by other means.
 type Like struct {
 	Receiver Expr
 	Pattern  Expr
+	Needle   Expr
+	Anchor   LikeAnchor
 }
+
+// LikeAnchor is where a Like's needle must sit in its receiver.
+type LikeAnchor int
+
+const (
+	LikeContains LikeAnchor = iota
+	LikeStartsWith
+	LikeEndsWith
+	LikeWhole
+)
 
 // NotDistinct is null-safe equality (`IS NOT DISTINCT FROM`).
 //
