@@ -1,0 +1,78 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a5",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d2",
+    "e1",
+    "g1",
+    "h6",
+    "j2",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/string-match-receiver",
+  "intent": "A ternary choosing aString or a constant as the receiver of contains().",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "none"
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "value": "n"
+          }
+        ],
+        "operator": "contains"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/string-match-receiver",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aBool ? R.attr.aString : \"none\").contains(\"n\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The ternary sits under a string function, not a comparison; a translator that pushes only comparisons into the branches must refuse, and the constant else arm holds \"n\" for every aBool=false row."
+}

@@ -465,6 +465,22 @@
       "status": "unsupported",
       "reason": "eq against a list literal cannot be expressed: a term or range query compares a field against a scalar, and the Query DSL has no whole-list comparison (ordered, counting duplicates)"
     },
+    "comparison/greater-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/infinity-from-ternary: a division by zero is an int error or a double infinity, and the plan cannot tell which"
+    },
+    "comparison/greater-or-equal/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary: 0/0 is an int division error or a double NaN, and the plan cannot tell which"
+    },
+    "comparison/greater-or-equal/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary: 0/0 is an int division error or a double NaN, and the plan cannot tell which"
+    },
+    "comparison/greater-or-equal/negative-zero-from-ternary": {
+      "status": "unsupported",
+      "reason": "The ternary hoists into one comparison per branch, but the then branch multiplies two literals the plan spells as integers (-1 * 0), and literal arithmetic the planner left unfolded is refused"
+    },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "The ternary hoists into one comparison per branch, but each branch divides two literals the plan spells as integers: an int division by zero is a CEL error while a double division gives infinity, and the plan cannot tell which, so the literal division is refused"
@@ -472,6 +488,18 @@
     "comparison/greater-than/nan-from-ternary": {
       "status": "unsupported",
       "reason": "The ternary hoists into one comparison per branch, but the else branch divides two literals the plan spells as integers: an int 0/0 is a CEL error while a double 0.0/0.0 is NaN, and the plan cannot tell which, so the literal division is refused"
+    },
+    "comparison/greater-than/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary: 0/0 is an int division error or a double NaN, and the plan cannot tell which"
+    },
+    "comparison/less-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/infinity-from-ternary: a division by zero is an int error or a double infinity, and the plan cannot tell which"
+    },
+    "comparison/less-or-equal/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary: 0/0 is an int division error or a double NaN, and the plan cannot tell which"
     },
     "comparison/less-or-equal/nan-from-ternary-on-both-sides": {
       "status": "unsupported",
@@ -481,9 +509,25 @@
       "status": "unsupported",
       "reason": "Same unfolded literal division as comparison/less-or-equal/nan-from-ternary-on-both-sides, under negation, where NaN and a division error decide differently"
     },
+    "comparison/less-than/infinity-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/infinity-from-ternary: a division by zero is an int error or a double infinity, and the plan cannot tell which"
+    },
+    "comparison/less-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary: 0/0 is an int division error or a double NaN, and the plan cannot tell which"
+    },
+    "comparison/less-than/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary: 0/0 is an int division error or a double NaN, and the plan cannot tell which"
+    },
     "comparison/less-than/nan-from-ternary-value-first": {
       "status": "unsupported",
       "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary, value-first"
+    },
+    "comparison/less-than/negative-zero-from-ternary": {
+      "status": "unsupported",
+      "reason": "The ternary hoists into one comparison per branch, but the then branch multiplies two literals the plan spells as integers (-1 * 0), and literal arithmetic the planner left unfolded is refused"
     },
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",
@@ -512,6 +556,10 @@
     "conditional/ternary/negated-collection-condition": {
       "status": "unsupported",
       "reason": "The ternary's condition is a positive all() over tags, refused as collection/all/empty-collection is: Elasticsearch does not index an empty nested array, so all cannot distinguish an empty collection (true) from a missing collection (CEL error)"
+    },
+    "conditional/ternary/string-match-receiver": {
+      "status": "unsupported",
+      "reason": "A ternary is hoisted into its branches only as an operand of a comparison; as the receiver of contains() it is refused"
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",

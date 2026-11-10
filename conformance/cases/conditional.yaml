@@ -17,6 +17,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0'
+- id: 'conditional/ternary/boolean-missing-attribute-condition'
+  tier: adversarial
+  intent: 'A boolean-valued ternary whose condition compares aOptionalString, which is missing on some rows.'
+  trap: 'A missing condition attribute is an error that denies the row; writing the else arm as NOT(cond) AND b lets SQL NULL fall through to aBool.'
+  condition:
+    match:
+      expr: 'R.attr.aOptionalString != "x" ? R.attr.aNumber > 1 : R.attr.aBool'
 - id: 'conditional/ternary/compared-to-literal'
   tier: extended
   intent: 'A ternary selecting a numeric attribute or a constant, compared with a literal ((aBool ? aNumber : 0) > 1).'
@@ -24,6 +31,48 @@ cases:
   condition:
     match:
       expr: '(R.attr.aBool ? R.attr.aNumber : 0) > 1'
+- id: 'conditional/ternary/comparison-under-and'
+  tier: adversarial
+  intent: 'A ternary comparison joined by && to a string equality.'
+  trap: 'The guarded-branch rewrite must stay grouped under AND; splicing its OR in unparenthesised lets the else arm bypass the other conjunct.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? R.attr.aNumber : 0) > 1) && R.attr.aString != "one"'
+- id: 'conditional/ternary/comparison-under-or'
+  tier: adversarial
+  intent: 'A ternary comparison joined by || to a string equality that admits an aBool=false row.'
+  trap: 'b4 matches only through the other disjunct; the guarded rewrite must not absorb it, and j3 (aBool missing) must not match through the ternary.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? R.attr.aNumber : 0) > 1) || R.attr.aString == "mirror"'
+- id: 'conditional/ternary/constant-branches'
+  tier: adversarial
+  intent: 'A ternary whose branches are both constants, compared with a constant ((aBool ? 1 : 0) > 0).'
+  trap: 'Each branch comparison folds to a constant, leaving only the condition; a translator that expects a column on one side rejects it or loses the guard.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? 1 : 0) > 0'
+- id: 'conditional/ternary/constant-branches-beyond-long-range'
+  tier: adversarial
+  intent: 'Constant ternary branches beyond the int64 range compared with 9.3e18.'
+  trap: 'Folding the branch comparison through a long cast saturates both 1e19 and 9.3e18 to Long.MAX_VALUE, so the then arm folds to false.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? 1.0e19 : -1.0e19) > 9.3e18'
+- id: 'conditional/ternary/constant-false-branch'
+  tier: adversarial
+  intent: 'A boolean ternary with a constant false then-branch (aBool ? false : aNumber > 5).'
+  trap: 'The constant branch is a value, not a predicate; dropping it, or reading it as the guard, admits aBool=true rows.'
+  condition:
+    match:
+      expr: 'R.attr.aBool ? false : R.attr.aNumber > 5'
+- id: 'conditional/ternary/constant-true-branch'
+  tier: adversarial
+  intent: 'A boolean ternary with a constant true then-branch (aBool ? true : aNumber > 5).'
+  trap: 'Folding it to aBool || aNumber > 5 admits j3, whose missing aBool is an error that denies both arms.'
+  condition:
+    match:
+      expr: 'R.attr.aBool ? true : R.attr.aNumber > 5'
 - id: 'conditional/ternary/expression-condition'
   tier: extended
   intent: A ternary whose condition is a startsWith expression rather than a bare boolean column.
@@ -31,6 +80,13 @@ cases:
   condition:
     match:
       expr: '(R.attr.aString.startsWith("100") ? R.attr.aNumber : -1) >= 0'
+- id: 'conditional/ternary/index-in-untaken-branch'
+  tier: adversarial
+  intent: 'A ternary whose then branch indexes a list and whose else branch reads a nullable scalar.'
+  trap: 'CEL evaluates only the selected branch. Requiring a non-empty aBoolList and a present aNumber on every row drops rows that the other branch allows. Found by fuzzing (fuzz/s41/0439, mongoose).'
+  condition:
+    match:
+      expr: '(size(R.attr.tags) >= 1) ? (R.attr.aBoolList[0] != true) : (R.attr.aNumber < 21)'
 - id: 'conditional/ternary/inside-all'
   tier: extended
   intent: A ternary over an outer attribute inside an all() body.
@@ -45,13 +101,6 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.exists(t, (R.attr.aBool ? t.name : "zz") == "public")'
-- id: 'conditional/ternary/index-in-untaken-branch'
-  tier: adversarial
-  intent: 'A ternary whose then branch indexes a list and whose else branch reads a nullable scalar.'
-  trap: 'CEL evaluates only the selected branch. Requiring a non-empty aBoolList and a present aNumber on every row drops rows that the other branch allows. Found by fuzzing (fuzz/s41/0439, mongoose).'
-  condition:
-    match:
-      expr: '(size(R.attr.tags) >= 1) ? (R.attr.aBoolList[0] != true) : (R.attr.aNumber < 21)'
 - id: 'conditional/ternary/missing-attribute-condition'
   tier: adversarial
   intent: A ternary whose condition compares an attribute that is missing on some rows.
@@ -80,6 +129,13 @@ cases:
   condition:
     match:
       expr: '!((R.attr.aBool ? R.attr.aNumber : 0) > 1)'
+- id: 'conditional/ternary/negated-boolean-missing-attribute-condition'
+  tier: adversarial
+  intent: 'A negated boolean ternary whose condition compares aOptionalString, which is missing on some rows.'
+  trap: 'The missing condition is an error under both polarities; NOT over a guarded disjunction that reads FALSE for it admits a2, a4, a8, c2 and e1.'
+  condition:
+    match:
+      expr: '!(R.attr.aOptionalString != "x" ? R.attr.aNumber > 1 : R.attr.aBool)'
 - id: 'conditional/ternary/negated-branch-on-relation'
   tier: adversarial
   intent: 'Negated equality over a ternary whose else-branch reads an optional attribute through the parent relation.'
@@ -101,13 +157,6 @@ cases:
   condition:
     match:
       expr: '!((R.attr.aOptionalString != "x" ? R.attr.aNumber : 0.0) > 1.0)'
-- id: 'conditional/ternary/nested-in-condition'
-  tier: adversarial
-  intent: 'A ternary whose condition is a boolean ternary over aBool, which is missing on j3.'
-  trap: 'Writing a boolean ternary as (c AND a) OR (NOT c AND b) yields FALSE, not UNKNOWN, when c is UNKNOWN, so the outer else guard takes j3. Found by fuzzing (fuzz/s53/0111, drizzle).'
-  condition:
-    match:
-      expr: '(R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0) ? R.attr.aNumber > 100 : R.attr.aNumber > 0'
 - id: 'conditional/ternary/nested-in-both-branches'
   tier: extended
   intent: 'A ternary whose both branches are ternaries, compared with a threshold.'
@@ -115,6 +164,13 @@ cases:
   condition:
     match:
       expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0.0 : R.attr.aNumber) : (R.attr.aNumber < 0.0 ? -1.0 : 5.0)) > 1.0'
+- id: 'conditional/ternary/nested-in-condition'
+  tier: adversarial
+  intent: 'A ternary whose condition is a boolean ternary over aBool, which is missing on j3.'
+  trap: 'Writing a boolean ternary as (c AND a) OR (NOT c AND b) yields FALSE, not UNKNOWN, when c is UNKNOWN, so the outer else guard takes j3. Found by fuzzing (fuzz/s53/0111, drizzle).'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0) ? R.attr.aNumber > 100 : R.attr.aNumber > 0'
 - id: 'conditional/ternary/nested-in-then-branch'
   tier: extended
   intent: 'A ternary whose then-branch is another ternary, compared with a literal.'
@@ -129,6 +185,27 @@ cases:
   condition:
     match:
       expr: '(R.attr.aBool ? R.attr.aNumber : 0.0) > (R.attr.aString == "" ? 1.0 : 2.0)'
+- id: 'conditional/ternary/string-branch-equals'
+  tier: adversarial
+  intent: 'A ternary choosing aString or a constant string, compared == "same".'
+  trap: 'The else arm compares two constants and is true for every aBool=false row; dropping the guard admits every row, and j1 and j3 must stay denied.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? R.attr.aString : "same") == "same"'
+- id: 'conditional/ternary/string-branch-not-equals'
+  tier: adversarial
+  intent: 'A ternary choosing aString or a constant string, compared != "one".'
+  trap: 'Only a1 and the rows missing aString (j1) or aBool (j3) are denied; NOT over an equality rewrite admits j1 and j3.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? R.attr.aString : "none") != "one"'
+- id: 'conditional/ternary/string-match-receiver'
+  tier: adversarial
+  intent: 'A ternary choosing aString or a constant as the receiver of contains().'
+  trap: 'The ternary sits under a string function, not a comparison; a translator that pushes only comparisons into the branches must refuse, and the constant else arm holds "n" for every aBool=false row.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? R.attr.aString : "none").contains("n")'
 - id: 'conditional/ternary/value-first'
   tier: adversarial
   intent: 'A constant on the left of a comparison wrapping a ternary (0 < (aBool ? aNumber : -1)).'

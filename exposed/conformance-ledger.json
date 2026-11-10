@@ -224,6 +224,10 @@
       "status": "unsupported",
       "reason": "The then branch reads aBoolList[0], the same index() refusal as collection/index/first-element-of-boolean-list: the rows a relation subquery returns carry no CEL list order. The translator walks both branches, so the refusal comes even where the condition never takes that branch."
     },
+    "conditional/ternary/string-match-receiver": {
+      "status": "unsupported",
+      "reason": "A ternary is distributed into its branches only as an operand of ==, !=, <, <=, > or >=; as the receiver of contains() it is refused."
+    },
     "logic/and/non-boolean-operand-in-value-negated": {
       "status": "unsupported",
       "reason": "An and() whose result is compared with `==` as a value has no translation: the walker lowers and() only in condition position, and refuses it as an operand of eq."

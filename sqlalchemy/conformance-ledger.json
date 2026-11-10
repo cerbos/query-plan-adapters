@@ -241,9 +241,21 @@
       "status": "unsupported",
       "reason": "Whole-list equality needs the relation-mapped tagNames as a scalar, and the relation mapping exposes member rows only."
     },
+    "comparison/greater-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `comparison/greater-than/infinity-from-ternary`: the 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator recorded as the integer `0`, which the adapter cannot tell from a -0.0 whose sign was dropped, so it refuses rather than guess which infinity CEL produced."
+    },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "The 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator recorded as the integer `0`. The adapter cannot tell that from a -0.0 whose sign was dropped (Cerbos's HTTP API renders -0.0 as `-0`, which json.loads decodes to the integer 0), so it refuses an integer zero denominator rather than guess which infinity CEL produced. A double zero, as a gRPC plan carries, translates."
+    },
+    "comparison/less-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same refusal as `comparison/greater-than/infinity-from-ternary`: the 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator recorded as the integer `0`, which the adapter cannot tell from a -0.0 whose sign was dropped, so it refuses rather than guess which infinity CEL produced."
+    },
+    "comparison/less-than/infinity-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Same refusal as `comparison/greater-than/infinity-from-ternary`: the 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator recorded as the integer `0`, which the adapter cannot tell from a -0.0 whose sign was dropped, so it refuses rather than guess which infinity CEL produced."
     },
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",

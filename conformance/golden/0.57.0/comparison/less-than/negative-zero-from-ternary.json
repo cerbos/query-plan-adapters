@@ -1,0 +1,77 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "b2",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-than/negative-zero-from-ternary",
+  "intent": "A ternary yielding -0.0 or -1.0 compared < 0.0.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": -1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "mult"
+                  }
+                },
+                {
+                  "value": -1
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/negative-zero-from-ternary",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "((R.attr.aBool ? -1.0 * 0.0 : -1.0) < 0.0) && now() == now()"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "IEEE holds -0.0 equal to 0.0, so only the -1.0 arm passes; Double.compare ranks -0.0 below 0.0 and over-grants the aBool=true rows."
+}
