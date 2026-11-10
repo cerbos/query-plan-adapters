@@ -70,9 +70,12 @@ die() { echo "run-harness: $*" >&2; exit 2; }
 
 # A container this script started, removed on exit whatever happens.
 CONTAINERS=()
+COMPOSE_DIRS=()
 cleanup() {
   for name in "${CONTAINERS[@]}"; do docker rm -f "${name}" >/dev/null 2>&1 || true; done
+  for dir in "${COMPOSE_DIRS[@]}"; do docker compose --project-directory "${dir}" down -v >/dev/null 2>&1 || true; done
   CONTAINERS=()
+  COMPOSE_DIRS=()
 }
 trap cleanup EXIT INT TERM
 
@@ -140,6 +143,7 @@ run_leg() { # <adapter> <store>
 
     convex:convex)
       npm_ready || return 1
+      COMPOSE_DIRS+=("${PWD}")
       docker compose up -d || return 1
       local status=0
       if wait_for "the Convex backend" curl -sf http://127.0.0.1:3210/version; then
