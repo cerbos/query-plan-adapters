@@ -200,14 +200,6 @@
       "status": "unsupported",
       "reason": "String concatenation under eq requires every operand to be a string constant or a String column: 'request.resource.attr.aNumber' is Integer (operands EXPRESSION add() and VALUE (STRING_VALUE))."
     },
-    "type-mismatch/has-intersection/negated-resource-list-against-map": {
-      "status": "unsupported",
-      "reason": "hasIntersection over a map is a CEL no-overload error: it takes two lists."
-    },
-    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
-      "status": "unsupported",
-      "reason": "hasIntersection over a String is a CEL no-overload error: it takes two lists."
-    },
     "type-mismatch/in/string-field-in-string-field": {
       "status": "unsupported",
       "reason": "`in` with an attribute haystack needs a Relation mapping; aOptionalString is a scalar column, over which CEL raises a no-overload error."

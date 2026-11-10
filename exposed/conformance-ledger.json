@@ -400,14 +400,6 @@
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
     },
-    "type-mismatch/has-intersection/negated-resource-list-against-map": {
-      "status": "unsupported",
-      "reason": "Request.resource.attr.tags denotes the elements of adversarial_tags themselves, but the relation declares no element column; map it with element = <column>."
-    },
-    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
-      "status": "unsupported",
-      "reason": "Request.resource.attr.tags denotes the elements of adversarial_tags themselves, but the relation declares no element column; map it with element = <column>."
-    },
     "type-mismatch/in/string-field-in-string-field": {
       "status": "unsupported",
       "reason": "`in` with an attribute haystack needs a relation mapping; aOptionalString is a scalar column, over which CEL raises a no-overload error."
