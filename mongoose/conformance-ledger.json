@@ -77,6 +77,14 @@
       "status": "unsupported",
       "reason": "$regex takes a constant pattern that the translator checks as RE2 first; a pattern read from a row would run as PCRE2, so it is refused."
     },
+    "regex/matches/negated-repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "RE2 reads ^* as a repetition of the start anchor, and PCRE2 rejects a quantified assertion, so the pattern has no PCRE2 spelling the adapter writes."
+    },
+    "regex/matches/repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "RE2 reads ^* as a repetition of the start anchor, and PCRE2 rejects a quantified assertion, so the pattern has no PCRE2 spelling the adapter writes."
+    },
     "regex/matches/word-boundary": {
       "status": "unsupported",
       "reason": "The RE2-to-PCRE2 translator reads only literal escapes and \\d \\D \\w \\W of the escapes both dialects share; \\b is outside that subset, so the pattern is refused."

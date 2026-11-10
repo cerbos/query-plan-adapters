@@ -163,7 +163,11 @@ module Cerbos
 
           @index += 2
           case escaped
-          when "d", "D", "w", "W" then ["\\#{escaped}", true]
+          # RE2 folds \w under (?i) to hold KELVIN SIGN and LONG S, and \W is its complement;
+          # PCRE2's \w and \W stay ASCII without UCP.
+          when "w" then [@caseless ? "[\\w\\x{17F}\\x{212A}]" : "\\w", true]
+          when "W" then [@caseless ? "[^\\w\\x{17F}\\x{212A}]" : "\\W", true]
+          when "d", "D" then ["\\#{escaped}", true]
           when "s" then ["[\\t\\n\\f\\r ]", true]
           when "S" then ["[^\\t\\n\\f\\r ]", true]
           when "b", "B" then ["\\#{escaped}", false]
@@ -329,7 +333,10 @@ module Cerbos
 
           @index += 1
           case escaped
-          when "d", "w", "D", "W" then "\\#{escaped}"
+          when "w", "W"
+            unsupported("\\#{escaped} inside a case-insensitive class") if @caseless
+            "\\#{escaped}"
+          when "d", "D" then "\\#{escaped}"
           when "s" then "\\t\\n\\f\\r "
           when "t" then 0x09
           when "n" then 0x0A

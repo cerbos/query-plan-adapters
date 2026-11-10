@@ -47,6 +47,10 @@
     "j4": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 38.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "k1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 36.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "k2": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 37.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
-    "k3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 39.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
+    "k3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 39.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "l1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 41.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "l2": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 42.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "l3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 43.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "l4": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 44.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
   }
 }

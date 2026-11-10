@@ -136,3 +136,10 @@ cases:
         - expr: 'R.attr.aNumber > 30'
         - expr: 'R.attr.aString == "one"'
         - expr: R.attr.aBool == false
+- id: 'logic/bare/string-attribute'
+  tier: adversarial
+  intent: 'A bare string attribute in condition position, OR''d with aNumber == 5 (aString || aNumber == 5).'
+  trap: 'A string in condition position is a CEL error, so only a1 is allowed. A translation that compares the attribute to true grants l2 once a store coerces true to "true".'
+  condition:
+    match:
+      expr: 'R.attr.aString || R.attr.aNumber == 5'

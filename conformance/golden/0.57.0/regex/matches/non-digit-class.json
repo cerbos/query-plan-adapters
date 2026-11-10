@@ -29,7 +29,11 @@
     "j3",
     "j4",
     "k1",
-    "k3"
+    "k3",
+    "l1",
+    "l2",
+    "l3",
+    "l4"
   ],
   "degenerateReason": null,
   "id": "regex/matches/non-digit-class",

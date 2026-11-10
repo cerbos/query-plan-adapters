@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "a2",
+    "a6",
+    "a7",
+    "a8",
+    "b2",
+    "b3",
+    "d1",
+    "h1",
+    "h2",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i5",
+    "i8",
+    "i9",
+    "k1",
+    "k2",
+    "k3",
+    "l3"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/negated-case-fold-perl-word-class",
+  "intent": "!matches(\"(?i)^\\\\w+$\") over i7, whose aString is KELVIN SIGN + LONG S.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "(?i)^\\w+$"
+                }
+              ],
+              "operator": "matches"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/negated-case-fold-perl-word-class",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aString.matches(\"(?i)^\\\\w+$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2 folds \\w under (?i) to include KELVIN SIGN and LONG S, so i7 matches and is denied. A lowering that keeps \\w ASCII grants i7."
+}

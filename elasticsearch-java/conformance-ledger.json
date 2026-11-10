@@ -914,6 +914,10 @@
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^ks — Lucene regexp has no inline flags, and its case_insensitive option does not follow RE2's Unicode simple-folding orbits"
     },
+    "regex/matches/case-fold-perl-non-word-class": {
+      "status": "unsupported",
+      "reason": "Lucene's regexp syntax has no (?i) flag and no \\W class."
+    },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^one"
@@ -942,6 +946,10 @@
       "status": "unsupported",
       "reason": "matches regex has a top-level alternation: RE2 searches for either branch anywhere, while Lucene matches the whole field, and the empty branch has no anchored spelling, so the pattern is refused."
     },
+    "regex/matches/empty-alternative-in-group": {
+      "status": "unsupported",
+      "reason": "RE2 matches the empty string at an empty alternative inside a group, which Lucene's regexp reads differently."
+    },
     "regex/matches/end-anchor-mid-pattern": {
       "status": "unsupported",
       "reason": "The RE2-to-Lucene translator reads ^ and $ only at the ends of the pattern; Lucene has no anchors to place one mid-pattern, so it is refused."
@@ -966,6 +974,22 @@
       "status": "unsupported",
       "reason": "Lookahead is outside the RE2/Lucene common regular expression syntax; translating it as a Lucene regexp would change CEL error semantics."
     },
+    "regex/matches/negated-anchored-invalid-patterns-from-principal": {
+      "status": "unsupported",
+      "reason": "RE2 rejects a repetition of a repetition and a repetition with nothing to repeat, so CEL's matches() errors and denies; Lucene accepts the pattern, so it is refused rather than sent."
+    },
+    "regex/matches/negated-case-fold-perl-word-class": {
+      "status": "unsupported",
+      "reason": "Lucene's regexp syntax has no (?i) flag and no \\w class."
+    },
+    "regex/matches/negated-double-star-from-principal": {
+      "status": "unsupported",
+      "reason": "RE2 rejects a repetition of a repetition and a repetition with nothing to repeat, so CEL's matches() errors and denies; Lucene accepts the pattern, so it is refused rather than sent."
+    },
+    "regex/matches/negated-empty-alternative-in-group": {
+      "status": "unsupported",
+      "reason": "RE2 matches the empty string at an empty alternative inside a group, which Lucene's regexp reads differently."
+    },
     "regex/matches/negated-invalid-patterns-from-principal": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 3: (a)\\1 — the invalid patterns are refused rather than handed to Lucene, and the disjunction with them"
@@ -977,6 +1001,18 @@
     "regex/matches/negated-nested-repetition-over-budget-from-principal": {
       "status": "unsupported",
       "reason": "matches regex has a repetition at index 6 whose nested copies exceed RE2's bound of 1000, so RE2 rejects the pattern and CEL's matches() errors; Lucene would accept it: (a{2}){600}"
+    },
+    "regex/matches/negated-repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "Lucene's regexp has no anchors, so RE2's repeated start anchor ^* has no Lucene spelling, and Lucene would read the * as a repetition of nothing."
+    },
+    "regex/matches/negated-star-after-group-open-from-principal": {
+      "status": "unsupported",
+      "reason": "RE2 rejects a repetition of a repetition and a repetition with nothing to repeat, so CEL's matches() errors and denies; Lucene accepts the pattern, so it is refused rather than sent."
+    },
+    "regex/matches/negated-unanchored-case-fold-perl-word-class": {
+      "status": "unsupported",
+      "reason": "Lucene's regexp syntax has no (?i) flag and no \\w class."
     },
     "regex/matches/non-capturing-group-optional-suffix": {
       "status": "unsupported",
@@ -993,6 +1029,10 @@
     "regex/matches/posix-class-and-range-bounded": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 1: [[:digit:]a-c]{1,2}"
+    },
+    "regex/matches/repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "Lucene's regexp has no anchors, so RE2's repeated start anchor ^* has no Lucene spelling, and Lucene would read the * as a repetition of nothing."
     },
     "regex/matches/top-level-alternation-prefix-or-suffix": {
       "status": "unsupported",

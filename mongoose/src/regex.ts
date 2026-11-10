@@ -326,6 +326,18 @@ class Parser {
       throw new InvalidRe2Pattern("invalid escape sequence: backreference");
     }
 
+    // RE2 folds \w under (?i) to hold LONG S and KELVIN SIGN, and \W is its complement;
+    // PCRE2's \w and \W stay ASCII without UCP.
+    if (this.caseInsensitive && (c === "w" || c === "W")) {
+      if (inClass) {
+        throw new UnsupportedQueryPlanError(
+          `matches pattern has \\${c} inside a case-insensitive class, outside the common RE2/PCRE2 subset`,
+        );
+      }
+
+      return { kind: "atom", out: c === "w" ? "[\\w\u017F\u212A]" : "[^\\w\u017F\u212A]", caseless: false };
+    }
+
     if (PERL_CLASSES.has(c)) {
       return { kind: "atom", out: `\\${c}`, caseless: false };
     }

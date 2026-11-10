@@ -7,6 +7,7 @@ package dev.cerbos.queryplan.elasticsearch;
 
 import static dev.cerbos.queryplan.elasticsearch.Refusals.exceptUnsupported;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.malformed;
+import static dev.cerbos.queryplan.elasticsearch.Refusals.unmapped;
 import static dev.cerbos.queryplan.elasticsearch.Refusals.unsupported;
 
 import com.google.protobuf.Value;
@@ -67,7 +68,7 @@ final class PlanWalker {
             case EXPRESSION -> expression(operand.getExpression(), scope, polarity);
             case VARIABLE -> {
                 String field = scope.field(operand.getVariable());
-                yield leaf.operatorOrDefault("eq").apply(field, polarity.holds());
+                yield bareVariable(field, polarity);
             }
             // The planner folds a lambda body it can decide to a bare value: `t.name in []` arrives
             // as `false`. A boolean holds or fails for every document alike; any other value where
@@ -78,6 +79,25 @@ final class PlanWalker {
                     : Queries.matchNone();
             default -> throw malformed("Unexpected operand type: " + operand.getNodeCase());
         };
+    }
+
+    /**
+     * A field read as a condition. Only a stored boolean makes it defined: CEL has no overload of
+     * a condition or {@code !} for another type, so it denies under both polarities, while a term
+     * query for {@code true} matches a keyword field holding {@code "true"}.
+     */
+    private Map<String, Object> bareVariable(String field, Polarity polarity) {
+        ElasticsearchQueryPlanAdapter.ScalarType type = options.scalarTypes().get(field);
+        if (type == null) {
+            throw unmapped("Field '" + field + "' is read as a condition but has no declared scalar "
+                    + "type: a term query for true or false matches a keyword field holding the "
+                    + "text \"true\" or \"false\", where CEL has no overload for a non-boolean "
+                    + "condition. Declare it in Options.withScalarTypes");
+        }
+        if (type != ElasticsearchQueryPlanAdapter.ScalarType.BOOLEAN) {
+            return Queries.matchNone();
+        }
+        return leaf.operatorOrDefault("eq").apply(field, polarity.holds());
     }
 
     Map<String, Object> expression(Expression expression, Scope scope, Polarity polarity) {

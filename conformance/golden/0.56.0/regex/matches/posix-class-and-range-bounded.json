@@ -1,7 +1,8 @@
 {
   "allowed": [
     "h3",
-    "h4"
+    "h4",
+    "l4"
   ],
   "degenerateReason": null,
   "id": "regex/matches/posix-class-and-range-bounded",

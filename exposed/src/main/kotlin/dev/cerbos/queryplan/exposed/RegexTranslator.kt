@@ -240,8 +240,10 @@ internal class RegexTranslator(private val translation: Translation) {
                     }
                     else -> return atom
                 }
-                // A repeated anchor or a stacked quantifier: RE2 rejects both (a**, ^*).
-                if (atom is Node.Begin || atom is Node.End || atom is Node.Rep) throw InvalidRe2()
+                // RE2 reads ^* as an optional anchor, which LIKE cannot spell.
+                if (atom is Node.Begin || atom is Node.End) throw unsupported(src, "a repeated anchor")
+                // A stacked quantifier: RE2 rejects a**.
+                if (atom is Node.Rep) throw InvalidRe2()
                 // A lazy suffix accepts the same language.
                 if (pos < src.length && peek() == '?') pos++
                 atom = Node.Rep(atom, min, max)

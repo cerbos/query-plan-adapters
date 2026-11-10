@@ -29,7 +29,8 @@
     "j2",
     "j3",
     "j4",
-    "k2"
+    "k2",
+    "l2"
   ],
   "degenerateReason": null,
   "id": "regex/matches/negated-class",

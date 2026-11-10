@@ -74,6 +74,10 @@ final class RegexTranslator {
         // The current group's copies before its last atom when that atom is a group, else -1: a
         // {0} after the group copies nothing, and Go's repeatIsValid stops there.
         int copiesBeforeLastGroup = -1;
+        // What the last token was, so a repetition with nothing to repeat, a repetition of a
+        // repetition and an empty alternative are refused: RE2 rejects the first two and Lucene
+        // reads all three differently from RE2.
+        Token last = Token.NONE;
         for (int index = 0; index < pattern.length(); index++) {
             char current = pattern.charAt(index);
             if (escaped) {
@@ -82,6 +86,7 @@ final class RegexTranslator {
                 }
                 translated.append('\\').append(current);
                 escaped = false;
+                last = Token.ATOM;
                 atomCopies = 1;
                 copiesBeforeLastGroup = -1;
                 continue;
@@ -104,6 +109,7 @@ final class RegexTranslator {
                 }
                 inCharacterClass = false;
                 translated.append(current);
+                last = Token.ATOM;
                 atomCopies = 1;
                 copiesBeforeLastGroup = -1;
                 continue;
@@ -122,11 +128,13 @@ final class RegexTranslator {
                 depth++;
                 enclosingCopies.push(groupCopies);
                 groupCopies = 1;
+                last = Token.NONE;
             } else if (current == ')') {
-                if (depth == 0) {
+                if (depth == 0 || last == Token.NONE) {
                     throw unsupportedRegexSyntax(pattern, index);
                 }
                 depth--;
+                last = Token.ATOM;
                 atomCopies = groupCopies;
                 copiesBeforeLastGroup = enclosingCopies.pop();
                 groupCopies = Math.max(copiesBeforeLastGroup, groupCopies);
@@ -137,6 +145,11 @@ final class RegexTranslator {
                         + ": RE2 reads ^a|b$ as two separately anchored alternatives, while "
                         + "Lucene matches the whole field against a|b, so the alternation must "
                         + "be parenthesised as ^(a|b)$: " + pattern);
+            } else if (current == '|') {
+                if (last == Token.NONE) {
+                    throw emptyAlternative(pattern, index);
+                }
+                last = Token.NONE;
             } else if (current == '{') {
                 int close = intervalEnd(pattern, index);
                 if (close < 0) {
@@ -144,6 +157,7 @@ final class RegexTranslator {
                             + " that does not begin a {n}, {n,} or {n,m} repetition, which "
                             + "Lucene rejects at query time: " + pattern);
                 }
+                last = repetition(last, pattern, index);
                 String interval = pattern.substring(index + 1, close);
                 // RE2 reads a count as Go's regexp/syntax parseInt does, without a leading zero.
                 if (!interval.matches("(0|[1-9][0-9]*)(,(0|[1-9][0-9]*)?)?")) {
@@ -171,6 +185,13 @@ final class RegexTranslator {
                 translated.append(pattern, index, close + 1);
                 index = close;
                 continue;
+            }
+            if (current == '*' || current == '+') {
+                last = repetition(last, pattern, index);
+            } else if (current == '?') {
+                last = last == Token.REPETITION ? Token.LAZY : repetition(last, pattern, index);
+            } else if (current != '(' && current != '|') {
+                last = Token.ATOM;
             }
             if (current == '"') {
                 translated.append("\\\"");
@@ -234,6 +255,28 @@ final class RegexTranslator {
             backslashes++;
         }
         return backslashes % 2 != 0;
+    }
+
+    private enum Token { NONE, ATOM, REPETITION, LAZY }
+
+    private static Token repetition(Token last, String pattern, int index) {
+        if (last == Token.NONE) {
+            throw unsupported("matches regex has a repetition at index " + index + " with "
+                    + "nothing to repeat: RE2 rejects it, or repeats the anchor before it, and "
+                    + "Lucene reads it as neither: " + pattern);
+        }
+        if (last != Token.ATOM) {
+            throw unsupported("matches regex has a repetition at index " + index + " with a "
+                    + "repetition before it, which RE2 rejects, so CEL's matches() errors, while "
+                    + "Lucene reads it as a pattern: " + pattern);
+        }
+        return Token.REPETITION;
+    }
+
+    private static UnsupportedPlanShapeException emptyAlternative(String pattern, int index) {
+        return unsupported("matches regex has an empty alternative at index " + index
+                + ": RE2 matches the empty string there, while Lucene reads the | differently: "
+                + pattern);
     }
 
     private static UnsupportedPlanShapeException unsupportedRegexSyntax(String pattern, int index) {

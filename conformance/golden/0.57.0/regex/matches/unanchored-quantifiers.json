@@ -1,7 +1,8 @@
 {
   "allowed": [
     "h3",
-    "h5"
+    "h5",
+    "l3"
   ],
   "degenerateReason": null,
   "id": "regex/matches/unanchored-quantifiers",

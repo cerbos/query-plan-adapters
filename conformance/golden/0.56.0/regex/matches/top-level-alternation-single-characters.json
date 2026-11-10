@@ -5,7 +5,8 @@
     "h3",
     "h5",
     "i9",
-    "k3"
+    "k3",
+    "l3"
   ],
   "degenerateReason": null,
   "id": "regex/matches/top-level-alternation-single-characters",

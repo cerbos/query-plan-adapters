@@ -1,0 +1,55 @@
+{
+  "allowed": [
+    "a8",
+    "i8"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/negated-unanchored-case-fold-perl-word-class",
+  "intent": "!matches(\"(?i)\\\\w\") over i7.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "(?i)\\w"
+                }
+              ],
+              "operator": "matches"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/negated-unanchored-case-fold-perl-word-class",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aString.matches(\"(?i)\\\\w\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2's folded \\w matches i7, so it is denied. An ASCII \\w finds no word character in i7 and the negation grants it."
+}

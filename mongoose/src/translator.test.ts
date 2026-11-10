@@ -523,7 +523,7 @@ describe("the mapper contract", () => {
       }),
     ).toStrictEqual({
       kind: PlanKind.CONDITIONAL,
-      filters: { "parent.aBool": { $eq: true } },
+      filters: { "parent.aBool": { $type: "bool", $eq: true } },
     });
   });
 

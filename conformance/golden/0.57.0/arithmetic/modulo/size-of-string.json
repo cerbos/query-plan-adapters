@@ -12,7 +12,8 @@
     "i4",
     "i6",
     "j2",
-    "k2"
+    "k2",
+    "l2"
   ],
   "degenerateReason": null,
   "id": "arithmetic/modulo/size-of-string",
