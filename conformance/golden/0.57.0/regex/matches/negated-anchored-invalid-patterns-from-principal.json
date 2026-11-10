@@ -1,0 +1,128 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/negated-anchored-invalid-patterns-from-principal",
+  "intent": "Anchored RE2-invalid patterns, each chosen by a principal-attribute ternary and negated, OR'd with aNumber == 5.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "value": "^a**$"
+                            }
+                          ],
+                          "operator": "matches"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "value": "^a{2,1}$"
+                            }
+                          ],
+                          "operator": "matches"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "value": "^(*a)$"
+                            }
+                          ],
+                          "operator": "matches"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 5
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/negated-anchored-invalid-patterns-from-principal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"^a**$\" : \"^h$\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"^a{2,1}$\" : \"^h$\") || !R.attr.aString.matches(P.attr.context == \"projects:f1\" ? \"^(*a)$\" : \"^h$\") || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Go's regexp rejects ^a**$, ^a{2,1}$ and ^(*a)$, so only a1 is allowed. An engine that reads them leniently makes a negated disjunct true and over-grants."
+}

@@ -484,9 +484,10 @@ const translateBareVariable = (
     throw new UnsupportedQueryPlanError("Bare collection variables are unsupported");
   }
 
+  // Mongoose casts true onto a String path as "true", which CEL would not accept as a condition.
   return buildGuardedFieldFilter(
     path,
-    { $eq: true },
+    { $type: "bool", $eq: true },
     isNullableReference(name, ctx.mapper),
   );
 };

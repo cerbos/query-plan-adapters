@@ -145,6 +145,10 @@
       "status": "unsupported",
       "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (size()) has no SQL value to test against the list."
     },
+    "regex/matches/case-fold-perl-non-word-class": {
+      "status": "unsupported",
+      "reason": "matches() is lowered only where LIKE can spell the pattern exactly. Under (?i), \\W is every character but the word characters and their case folds U+017F and U+212A, and LIKE has no character class."
+    },
     "regex/matches/case-insensitive-non-ascii": {
       "status": "unsupported",
       "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; (?i) is spelled as ASCII case alternatives, so a non-ASCII letter under it is refused (register an OperatorFunction for matches to use a database regex)."
@@ -165,9 +169,17 @@
       "status": "unsupported",
       "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; a negated character class has no LIKE spelling and is refused (register an OperatorFunction for matches to use a database regex)."
     },
+    "regex/matches/negated-repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "matches() is lowered only where LIKE can spell the pattern exactly. RE2 reads the * after ^ as a repetition of the start anchor, which the regex lowering does not read, so ^*a$ is refused rather than lowered with a guess at what the * means."
+    },
     "regex/matches/non-digit-class": {
       "status": "unsupported",
       "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; \\D has no LIKE spelling and is refused (register an OperatorFunction for matches to use a database regex)."
+    },
+    "regex/matches/repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "matches() is lowered only where LIKE can spell the pattern exactly. RE2 reads the * after ^ as a repetition of the start anchor, which the regex lowering does not read, so ^*a$ is refused rather than lowered with a guess at what the * means."
     },
     "regex/matches/unanchored-dot": {
       "status": "unsupported",

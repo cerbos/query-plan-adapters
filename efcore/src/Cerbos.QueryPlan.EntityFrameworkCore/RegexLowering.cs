@@ -302,7 +302,7 @@ internal static class RegexLowering
             _position++;
             if (character == "A") return new BeginNode();
             if (character == "z") return new EndNode();
-            if (PerlClasses.TryGetValue(character, out var perl)) return new SetNode(perl);
+            if (PerlClasses.TryGetValue(character, out var perl)) return new SetNode(ClassMembers(perl));
             if (LiteralEscapes.TryGetValue(character, out var control)) return Literal(control);
             if (Punctuation.IsMatch(character)) return Literal(character);
             // A lone \1-\7 would be a backreference and \8, \9 are nothing: RE2 rejects both, and reads
@@ -361,8 +361,13 @@ internal static class RegexLowering
                     members.Add(start.Character!);
                 }
             }
-            return Unique(_caseInsensitive ? members.SelectMany(m => FoldCase(m, _pattern)) : members);
+            return ClassMembers(members);
         }
+
+        // Under (?i) RE2 folds every member of a class, a Perl class outside brackets included:
+        // (?i)\w also matches KELVIN SIGN and LONG S.
+        private List<string> ClassMembers(IEnumerable<string> members) =>
+            Unique(_caseInsensitive ? members.SelectMany(m => FoldCase(m, _pattern)) : members);
 
         /// <summary>One class member: a character, or a Perl class's characters.</summary>
         private (string? Character, List<string>? Set) ClassCharacter()

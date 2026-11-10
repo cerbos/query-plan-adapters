@@ -1,6 +1,7 @@
 {
   "allowed": [
-    "h3"
+    "h3",
+    "l4"
   ],
   "degenerateReason": null,
   "id": "regex/matches/lucene-reserved-characters-in-class",

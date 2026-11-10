@@ -81,6 +81,14 @@
       "status": "unsupported",
       "reason": "RE2 rejects a pattern whose nested counted repetitions exceed its budget of 1000 copies, and PCRE2, which $regex runs, accepts it; the adapter does not compute RE2's budget, so it refuses a counted repetition nested in a counted repetition rather than send $regex a pattern RE2 would reject."
     },
+    "regex/matches/negated-repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "RE2 reads ^* as a repetition of the start anchor, and PCRE2 rejects a quantified assertion, so the pattern has no PCRE2 spelling the adapter writes."
+    },
+    "regex/matches/repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "RE2 reads ^* as a repetition of the start anchor, and PCRE2 rejects a quantified assertion, so the pattern has no PCRE2 spelling the adapter writes."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "A bare comparison of two date_time fields: CEL compares the strings the application sent, and a stored BSON date has discarded the lexical spelling (two spellings of one instant are equal dates and unequal strings). Refused in the filter and in the three-valued evaluation alike; compare timestamp(...) values instead."

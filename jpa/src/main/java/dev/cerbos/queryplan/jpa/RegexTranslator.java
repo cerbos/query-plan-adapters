@@ -376,9 +376,12 @@ final class RegexTranslator {
                 } else {
                     return atom;
                 }
-                if (atom instanceof Node.Begin || atom instanceof Node.End
-                        || atom instanceof Node.Rep) {
-                    // A repeated anchor or a stacked quantifier: RE2 rejects both (a**, ^*).
+                if (atom instanceof Node.Begin || atom instanceof Node.End) {
+                    // RE2 reads ^* as an optional anchor, which LIKE cannot spell.
+                    throw unsupported(src, "a repeated anchor");
+                }
+                if (atom instanceof Node.Rep) {
+                    // A stacked quantifier: RE2 rejects a**.
                     throw new InvalidRe2();
                 }
                 // A lazy suffix accepts the same language.

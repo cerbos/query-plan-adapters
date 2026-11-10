@@ -27,7 +27,11 @@
     "j3",
     "j4",
     "k2",
-    "k3"
+    "k3",
+    "l1",
+    "l2",
+    "l3",
+    "l4"
   ],
   "degenerateReason": null,
   "id": "comparison/greater-than/string-code-point-order",

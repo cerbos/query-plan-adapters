@@ -329,6 +329,10 @@
       "status": "unsupported",
       "reason": "`aString && aBool` reads a string field as a boolean, a CEL no-overload error under both polarities that no Prisma filter keeps out (a NOT over any filter selects it), so it is refused."
     },
+    "logic/bare/string-attribute": {
+      "status": "unsupported",
+      "reason": "A string attribute in boolean position is a CEL type error, which denies under negation as well, and Prisma has no filter that answers UNKNOWN for it."
+    },
     "logic/not/bare-string-attribute": {
       "status": "unsupported",
       "reason": "`!R.attr.aString` reads a string field as a boolean, a CEL no-overload error under both polarities that no Prisma filter keeps out (a NOT over any filter selects it), so it is refused."
@@ -405,6 +409,10 @@
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and matches() is lowered only to LIKE filters that decide it exactly; a .* in a pattern not anchored at both ends is refused."
     },
+    "regex/matches/case-fold-perl-non-word-class": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and its string filters cannot spell (?i)\\W, every character but the word characters and their case folds U+017F and U+212A."
+    },
     "regex/matches/case-insensitive-non-ascii": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter; (?i) is lowered to LIKE alternatives over ASCII letters only, so a non-ASCII letter under (?i) is refused."
@@ -425,9 +433,21 @@
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and the translator lowers only patterns a combination of LIKE filters decides exactly: `[ab@#&~<>]+` is a repeated class, an unbounded repetition with no LIKE spelling."
     },
+    "regex/matches/negated-case-fold-perl-word-class": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and its string filters cannot spell (?i)\\w, the word characters with their case folds U+017F and U+212A."
+    },
     "regex/matches/negated-class": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and a negated character class has no exact LIKE lowering, so the pattern is refused."
+    },
+    "regex/matches/negated-repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and its string filters cannot say what RE2's repeated start anchor ^* means."
+    },
+    "regex/matches/negated-unanchored-case-fold-perl-word-class": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and its string filters cannot spell (?i)\\w, the word characters with their case folds U+017F and U+212A."
     },
     "regex/matches/non-digit-class": {
       "status": "unsupported",
@@ -436,6 +456,10 @@
     "regex/matches/nul-in-character-class": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and the translator lowers only patterns a combination of LIKE filters decides exactly: `[abx]+` is a repeated class, an unbounded repetition with no LIKE spelling."
+    },
+    "regex/matches/repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and its string filters cannot say what RE2's repeated start anchor ^* means."
     },
     "regex/matches/two-dot-star-gaps": {
       "status": "unsupported",

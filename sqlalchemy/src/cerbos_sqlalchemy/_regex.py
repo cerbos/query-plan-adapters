@@ -328,7 +328,7 @@ class _Parser:
             return _End()
         perl = _PERL_CLASSES.get(character)
         if perl is not None:
-            return _Set(perl)
+            return _Set(self._class_members(list(perl)))
         control = _LITERAL_ESCAPES.get(character)
         if control is not None:
             return self._literal(control)
@@ -387,6 +387,11 @@ class _Parser:
                 members.extend(span)
             else:
                 members.append(start)
+        return self._class_members(members)
+
+    def _class_members(self, members: list[str]) -> tuple[str, ...]:
+        # Under (?i) RE2 folds every member of a class, a Perl class outside brackets
+        # included: (?i)\w also matches KELVIN SIGN and LONG S.
         if self.case_insensitive:
             folded = [c for member in members for c in _fold_case(member, self.pattern)]
             return _unique(folded)

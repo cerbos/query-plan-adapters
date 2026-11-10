@@ -24,7 +24,9 @@
     "i8",
     "i9",
     "k1",
-    "k3"
+    "k3",
+    "l1",
+    "l4"
   ],
   "degenerateReason": null,
   "id": "comparison/less-than/astral-string-against-high-bmp",

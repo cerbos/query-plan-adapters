@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a2",
+    "a6",
+    "a7",
+    "b2",
+    "b3",
+    "d1",
+    "h1",
+    "h2",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i5",
+    "i8",
+    "i9",
+    "k1",
+    "k2",
+    "k3",
+    "l3"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/case-fold-perl-non-word-class",
+  "intent": "matches(\"(?i)\\\\W\") over i7.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "(?i)\\W"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/case-fold-perl-non-word-class",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"(?i)\\\\W\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Under RE2's folding neither KELVIN SIGN nor LONG S is a non-word character, so i7 is denied. An ASCII \\W matches both and grants i7."
+}

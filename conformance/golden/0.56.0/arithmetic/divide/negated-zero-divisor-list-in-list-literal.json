@@ -43,7 +43,11 @@
     "j4",
     "k1",
     "k2",
-    "k3"
+    "k3",
+    "l1",
+    "l2",
+    "l3",
+    "l4"
   ],
   "degenerateReason": null,
   "id": "arithmetic/divide/negated-zero-divisor-list-in-list-literal",

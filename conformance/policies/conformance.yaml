@@ -2685,6 +2685,15 @@ resourcePolicy:
               - expr: R.attr.aNumber > 30
               - expr: R.attr.aString == "one"
               - expr: R.attr.aBool == false
+    # logic/bare/string-attribute
+    - actions:
+        - logic/bare/string-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString || R.attr.aNumber == 5
     # membership/in/empty-list
     - actions:
         - membership/in/empty-list
@@ -3923,6 +3932,96 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches(R.attr.aOptionalString)
+    # regex/matches/negated-case-fold-perl-word-class
+    - actions:
+        - regex/matches/negated-case-fold-perl-word-class
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches("(?i)^\\w+$")'
+    # regex/matches/negated-unanchored-case-fold-perl-word-class
+    - actions:
+        - regex/matches/negated-unanchored-case-fold-perl-word-class
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches("(?i)\\w")'
+    # regex/matches/case-fold-perl-non-word-class
+    - actions:
+        - regex/matches/case-fold-perl-non-word-class
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("(?i)\\W")
+    # regex/matches/negated-anchored-invalid-patterns-from-principal
+    - actions:
+        - regex/matches/negated-anchored-invalid-patterns-from-principal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a**$" : "^h$") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a{2,1}$" : "^h$") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(*a)$" : "^h$") || R.attr.aNumber == 5'
+    # regex/matches/repeated-start-anchor
+    - actions:
+        - regex/matches/repeated-start-anchor
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^*a$")
+    # regex/matches/empty-alternative-in-group
+    - actions:
+        - regex/matches/empty-alternative-in-group
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^(|ab)$")
+    # regex/matches/negated-double-star-from-principal
+    - actions:
+        - regex/matches/negated-double-star-from-principal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a**$" : "^h$") || R.attr.aNumber == 5'
+    # regex/matches/negated-star-after-group-open-from-principal
+    - actions:
+        - regex/matches/negated-star-after-group-open-from-principal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(*a)$" : "^h$") || R.attr.aNumber == 5'
+    # regex/matches/negated-repeated-start-anchor
+    - actions:
+        - regex/matches/negated-repeated-start-anchor
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches("^*a$")'
+    # regex/matches/negated-empty-alternative-in-group
+    - actions:
+        - regex/matches/negated-empty-alternative-in-group
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches("^(|ab)$")'
     # relation/all/negated-to-one-chain
     - actions:
         - relation/all/negated-to-one-chain

@@ -305,7 +305,7 @@ class Parser {
     if (character === "z") return { kind: "end" };
     const perl = lookup(PERL_CLASSES, character);
 
-    if (perl) return { kind: "set", characters: perl };
+    if (perl) return { kind: "set", characters: this.classMembers(perl) };
     const control = lookup(LITERAL_ESCAPES, character);
 
     if (control) return this.literal(control);
@@ -380,9 +380,14 @@ class Parser {
       }
     }
 
+    return this.classMembers(members);
+  }
+
+  /** Under (?i) RE2 folds every class member, a Perl class outside brackets included. */
+  private classMembers(members: readonly string[]): string[] {
     const folded = this.caseInsensitive
       ? members.flatMap((member) => foldCase(member, this.pattern))
-      : members;
+      : [...members];
 
     return unique(folded);
   }

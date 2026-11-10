@@ -225,6 +225,10 @@
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
+    "regex/matches/case-fold-perl-non-word-class": {
+      "status": "unsupported",
+      "reason": "Under (?i), \\W is every character but the word characters and their case folds U+017F and U+212A: a set no finite list of literals, character set or LIKE pattern the lowering writes can spell."
+    },
     "regex/matches/dot-all-flag": {
       "status": "unsupported",
       "reason": "The RE2 lowering does not read (?s), under which . also matches a newline; the store's regex dialect is not RE2, so the pattern is refused rather than passed through."
@@ -237,13 +241,25 @@
       "status": "unsupported",
       "reason": "matches() is lowered only for a constant pattern, which is parsed as RE2 before translation; a pattern read from a row would reach the store's own regex dialect, which is not RE2."
     },
+    "regex/matches/negated-case-fold-perl-word-class": {
+      "status": "unsupported",
+      "reason": "Under (?i), \\w also matches U+017F and U+212A, so ^\\w+$ matches every string over 65 characters, more than the small character sets the lowering spells exactly."
+    },
     "regex/matches/negated-class": {
       "status": "unsupported",
       "reason": "A negated character class is too wide to enumerate as literals, and the store's regex dialect is not RE2, so the pattern is refused."
     },
+    "regex/matches/negated-repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "RE2 reads the * after ^ as a repetition of the start anchor, which the regex lowering does not read, so ^*a$ is refused rather than lowered with a guess at what the * means."
+    },
     "regex/matches/non-digit-class": {
       "status": "unsupported",
       "reason": "\\D is too wide a class to enumerate as literals, and the store's regex dialect is not RE2, so the pattern is refused."
+    },
+    "regex/matches/repeated-start-anchor": {
+      "status": "unsupported",
+      "reason": "RE2 reads the * after ^ as a repetition of the start anchor, which the regex lowering does not read, so ^*a$ is refused rather than lowered with a guess at what the * means."
     },
     "regex/matches/two-dot-star-gaps": {
       "status": "unsupported",

@@ -260,7 +260,7 @@ module Cerbos
           @position += 1
           return Begin.new if character == "A"
           return End.new if character == "z"
-          return CharSet.new(PERL_CLASSES[character]) if PERL_CLASSES.key?(character)
+          return CharSet.new(class_members(PERL_CLASSES[character])) if PERL_CLASSES.key?(character)
           return literal(LITERAL_ESCAPES[character]) if LITERAL_ESCAPES.key?(character)
           return literal(character) if character.match?(PUNCTUATION)
           # A lone \1-\7 would be a backreference and \8, \9 are nothing: RE2 rejects both, and
@@ -316,6 +316,12 @@ module Cerbos
               members << start
             end
           end
+          class_members(members)
+        end
+
+        # Under (?i) RE2 folds every member of a class, a Perl class outside brackets included:
+        # (?i)\w also matches KELVIN SIGN and LONG S.
+        def class_members(members)
           folded = @case_insensitive ? members.flat_map { |member| Regex.fold_case(member, @pattern) } : members
           folded.uniq
         end

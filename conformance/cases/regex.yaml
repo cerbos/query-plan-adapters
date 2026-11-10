@@ -283,3 +283,73 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches(R.attr.aOptionalString)'
+- id: 'regex/matches/negated-case-fold-perl-word-class'
+  tier: adversarial
+  intent: '!matches("(?i)^\\w+$") over i7, whose aString is KELVIN SIGN + LONG S.'
+  trap: 'RE2 folds \w under (?i) to include KELVIN SIGN and LONG S, so i7 matches and is denied. A lowering that keeps \w ASCII grants i7.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches("(?i)^\\w+$")'
+- id: 'regex/matches/negated-unanchored-case-fold-perl-word-class'
+  tier: adversarial
+  intent: '!matches("(?i)\\w") over i7.'
+  trap: 'RE2''s folded \w matches i7, so it is denied. An ASCII \w finds no word character in i7 and the negation grants it.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches("(?i)\\w")'
+- id: 'regex/matches/case-fold-perl-non-word-class'
+  tier: adversarial
+  intent: 'matches("(?i)\\W") over i7.'
+  trap: 'Under RE2''s folding neither KELVIN SIGN nor LONG S is a non-word character, so i7 is denied. An ASCII \W matches both and grants i7.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("(?i)\\W")'
+- id: 'regex/matches/negated-anchored-invalid-patterns-from-principal'
+  tier: adversarial
+  intent: 'Anchored RE2-invalid patterns, each chosen by a principal-attribute ternary and negated, OR''d with aNumber == 5.'
+  trap: 'Go''s regexp rejects ^a**$, ^a{2,1}$ and ^(*a)$, so only a1 is allowed. An engine that reads them leniently makes a negated disjunct true and over-grants.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a**$" : "^h$") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a{2,1}$" : "^h$") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(*a)$" : "^h$") || R.attr.aNumber == 5'
+- id: 'regex/matches/repeated-start-anchor'
+  tier: adversarial
+  intent: 'matches("^*a$"), where the star repeats the start anchor.'
+  trap: 'RE2 makes the anchor optional, so any string ending in a matches. Stripping ^ and sending *a to an engine that reads a leading * literally changes the language.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^*a$")'
+- id: 'regex/matches/empty-alternative-in-group'
+  tier: adversarial
+  intent: 'matches("^(|ab)$"), a group whose first branch is empty.'
+  trap: 'RE2 matches "" or "ab", not "|ab". An engine that reads a branch-leading | literally grants l3.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^(|ab)$")'
+- id: 'regex/matches/negated-double-star-from-principal'
+  tier: adversarial
+  intent: 'A negated matches over ^a**$, chosen by a principal-attribute ternary, OR''d with aNumber == 5.'
+  trap: 'Go''s regexp rejects a**, so the PDP allows only a1. An engine that reads it leniently grants every other row.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^a**$" : "^h$") || R.attr.aNumber == 5'
+- id: 'regex/matches/negated-star-after-group-open-from-principal'
+  tier: adversarial
+  intent: 'A negated matches over ^(*a)$, chosen by a principal-attribute ternary, OR''d with aNumber == 5.'
+  trap: 'Go''s regexp rejects a star with nothing to repeat, so the PDP allows only a1. An engine that reads it leniently grants every other row.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "^(*a)$" : "^h$") || R.attr.aNumber == 5'
+- id: 'regex/matches/negated-repeated-start-anchor'
+  tier: adversarial
+  intent: 'The negation of matches("^*a$").'
+  trap: 'RE2 makes the anchor optional, so every string ending in a matches and is denied here. An engine that reads the leading * literally matches nothing and grants them.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches("^*a$")'
+- id: 'regex/matches/negated-empty-alternative-in-group'
+  tier: adversarial
+  intent: 'The negation of matches("^(|ab)$").'
+  trap: 'RE2 matches "" or "ab". An engine that reads a branch-leading | literally grants the empty and ab rows here.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches("^(|ab)$")'
