@@ -11,3 +11,5 @@ coverage/
 
 *.pyc
 .pdm.toml
+
+.claude/settings.local.json
