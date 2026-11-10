@@ -121,7 +121,8 @@ Each adapter implements this once, in its own language. It needs no PDP.
 1. **Load the dataset.** Store every row of `seeds.json` and `derived-fields.json` in the adapter's
    real store. `parentSeedId` is a real to-one relation (below). Map the attributes so that each row,
    read back through the mapping, is the resource in `resources.json`. One mapping serves every case;
-   there are no per-case options. A seed that `requires` a store capability the adapter's ledger
+   there are no per-case options. Drizzle also replays list-reading cases under `indexMappers`, on top
+   of the single-mapper pass. A seed that `requires` a store capability the adapter's ledger
    `lacks` is a resource that store cannot hold: do not load it, and strike its id from every
    golden's `allowed` before comparing.
 2. **For each PDP in `pdp-versions.json`** (current and previous), **for each golden file**:

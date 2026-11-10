@@ -46,19 +46,22 @@ Three kinds of material live only there, and they are not equal:
    of the others, which is the condition every bug this repository exists to stop was living in.
    Each instance says at the test that it is a corpus gap, names the issue tracking the port
    ([#509](https://github.com/cerbos/query-plan-adapters/issues/509)), and is deleted when the case
-   lands. `ElasticsearchQueryPlanAdapterTest` and `SpringDataQueryPlanAdapterTest` are the worked
+   lands. `ElasticsearchQueryPlanAdapterTest` and `JpaQueryPlanAdapterTest` are the worked
    examples: a `KIND 3` banner over the block and a `Corpus gap.` lead on every test under it.
 
 ## The conformance corpus and its harnesses
 
 - A harness passes corpus data through verbatim: one mapping and one set of options for every case,
-  over the whole dataset.
+  over the whole dataset. Drizzle also replays list-reading cases under `indexMappers`, on top of the
+  single-mapper pass.
 - **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/src/corpus.ts`,
   `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`,
   `sequel/spec/support/conformance_corpus.rb`, `mongodb-ruby/spec/support/conformance_corpus.rb`,
   the Java `Corpus.java` files, `exposed/src/test/kotlin/dev/cerbos/queryplan/exposed/Corpus.kt`,
+  `efcore/test/Cerbos.QueryPlan.EntityFrameworkCore.Tests/Corpus.cs`,
   `ent/corpus_test.go`, `pgx/corpus_test.go`) is duplicated **deliberately**,
-  so every adapter stays standalone: a loader fix lands in each copy that needs it. Flag a diff that
+  so every adapter stays standalone (spring-data alone wraps jpa,
+  [ADR 0013](docs/adr/0013-spring-data-wraps-the-jpa-core.md)): a loader fix lands in each copy that needs it. Flag a diff that
   extracts a shared loader or adds a drift check between the copies. The vendored Go *translator*
   trees follow the opposite rule: byte-identical. See
   [ADR 0007](docs/adr/0007-adapters-share-data-not-code.md).
