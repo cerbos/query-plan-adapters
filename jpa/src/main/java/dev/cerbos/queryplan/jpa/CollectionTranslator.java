@@ -41,23 +41,9 @@ final class CollectionTranslator {
     }
 
     /**
-     * Translates a macro over a relation as a tri-state predicate. A NULL element column is a
-     * missing attribute, so a body that reads it is a CEL error, mapped to SQL UNKNOWN:
-     * <ul>
-     *   <li>{@code exists}: true if any element matches, else UNKNOWN if any errors, else
-     *       false;</li>
-     *   <li>{@code all}: false if any element fails, else UNKNOWN if any errors, else
-     *       true;</li>
-     *   <li>{@code exists_one}: UNKNOWN if any element errors, else true if exactly one
-     *       matches.</li>
-     * </ul>
-     * A plain EXISTS would turn an error into FALSE, and its negation would return rows the
-     * PDP denies.
-     *
-     * <p>The body is translated twice per macro (three times for {@code exists_one}), so
-     * nesting multiplies subqueries. {@link PlanWalker#enterMacro} bounds the depth
-     * ({@link JpaQueryPlanAdapter.Options#withMaxMacroDepth}, default
-     * {@value JpaQueryPlanAdapter#DEFAULT_MAX_MACRO_DEPTH}).
+     * Translates a macro over a relation as a tri-state predicate scoring each element, because a plain
+     * EXISTS turns an erroring body into FALSE. Nesting multiplies subqueries, bounded by
+     * {@link JpaQueryPlanAdapter.Options#withMaxMacroDepth}.
      */
     Predicate handleCollectionOperator(String op, List<Operand> operands, Scope scope) {
         if (operands.size() != 2) {
@@ -130,13 +116,7 @@ final class CollectionTranslator {
         });
     }
 
-    /**
-     * Folds a macro over a literal list: substitutes each element into the body and joins the
-     * results with {@code or} ({@code exists}) or {@code and} ({@code all}), as the planner
-     * does for short lists. An empty list gives false for {@code exists} and true for
-     * {@code all}. {@code exists_one} is the strict count ({@link #literalStrictCount}) equal
-     * to 1.
-     */
+    /** Folds a macro over a literal list into {@code or}/{@code and}; {@code exists_one} is the strict count equal to 1. */
     private Predicate handleKnownValueCollection(String op, Value collectionValue,
                                                  Operand lambdaOperand, Scope scope) {
         if (!"exists".equals(op) && !"all".equals(op) && !"exists_one".equals(op)) {
@@ -172,13 +152,7 @@ final class CollectionTranslator {
         return walker.traverse(Operand.newBuilder().setExpression(combined).build(), scope);
     }
 
-    /**
-     * {@code exists} or {@code all} over a list built from expressions
-     * ({@code [R.attr.a, R.attr.b].exists(s, s == "x")}): each element is substituted into the
-     * body and the results are folded by {@link PlanWalker#overComputedList}, which keeps the
-     * row UNKNOWN when any element errors. A body reading a field of the element
-     * ({@code s.f}) is refused: the element is an expression, not a row with members.
-     */
+    /** {@code exists} or {@code all} over a list built from expressions, folded by {@link PlanWalker#overComputedList}. */
     private Predicate handleComputedList(String op, Operand listOperand, Operand lambdaOperand,
                                          Scope scope) {
         if (!"exists".equals(op) && !"all".equals(op)) {
@@ -207,12 +181,9 @@ final class CollectionTranslator {
     }
 
     /**
-     * {@code list.exists(i, v, body)} and {@code list.all(i, v, body)}, where {@code i} is the
-     * element's index and {@code v} the element. Over a direct relation that declares its
-     * {@linkplain AttributeMapping.Relation#withPositionField position field}, {@code i} reads
-     * that field, so the macro becomes the one-variable macro over {@code v} with
-     * {@code v.position} for {@code i}. Over a map, {@code i} is a key, and no mapping names a
-     * key set to range over; any other collection, a literal list included, is refused too.
+     * {@code list.exists(i, v, body)} and {@code list.all(i, v, body)} over a direct relation with a
+     * {@linkplain AttributeMapping.Relation#withPositionField position field}, which {@code i} reads.
+     * Anything else is refused.
      */
     private Predicate handleTwoVariableMacro(String op, Operand listOperand,
                                              Operand lambdaOperand, Scope scope) {
@@ -305,16 +276,8 @@ final class CollectionTranslator {
     private static final String POSITIONAL_ELEMENT = "__cerbos_positional_element";
 
     /**
-     * A leaf that reads one list element by position, {@code R.attr.list[i] op v} or
-     * {@code R.attr.list[i].field op v}, over a relation that declares its
-     * {@linkplain AttributeMapping.Relation#withPositionField position field}. Returns
-     * {@code null} when no operand is such a read, so the leaf is translated as usual.
-     *
-     * <p>It is translated as {@code list.exists(e, position(e) == i && e op v)}, whose score
-     * subquery is TRUE when the element at {@code i} satisfies the leaf, FALSE when it fails
-     * it, and UNKNOWN when its comparison is (every other element is FALSE). CEL errors when
-     * {@code i} is not a non-negative integer or no element sits at {@code i}, so those are
-     * UNKNOWN too, under both polarities.
+     * {@code R.attr.list[i] op v} over a relation with a position field, as
+     * {@code list.exists(e, position(e) == i && e op v)}; {@code null} when no operand is such a read.
      */
     Predicate tryPositionalRead(String op, List<Operand> operands, Scope scope) {
         int readAt = -1;
@@ -385,12 +348,7 @@ final class CollectionTranslator {
                 && e.getOperands(1).getNodeCase() == Operand.NodeCase.VALUE ? e : null;
     }
 
-    /**
-     * The number of elements of a literal list whose body holds, or NULL when any body is
-     * UNKNOWN: {@code exists_one} and {@code filter} evaluate every element and error if any
-     * does. Each element contributes {@code CASE WHEN p THEN 1 WHEN NOT p THEN 0 END}, which is
-     * NULL for an UNKNOWN body, and SQL {@code +} carries that NULL into the sum.
-     */
+    /** The count of literal-list elements whose body holds, or NULL when any body is UNKNOWN. */
     static Expression<Long> literalStrictCount(CriteriaBuilder cb, PlanWalker walker,
                                                Value list, ParsedLambda lambda, Scope scope) {
         if (list.getKindCase() != Value.KindCase.LIST_VALUE) {

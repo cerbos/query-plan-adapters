@@ -27,13 +27,8 @@ import java.util.Map;
 sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
 
     /**
-     * Resolves {@code cerbosVar} against this scope. Never returns null: throws
-     * {@link UnmappedAttributeException} for a name the mapping does not cover and
-     * {@link MalformedPlanException} for an unbound lambda reference.
-     *
-     * <p>A dotted variable matches the longest registered Relation prefix, and the rest is
-     * walked through nested {@code fields()} maps. A {@link LambdaScope} resolves its own
-     * variable against the joined element and delegates everything else outward.
+     * Resolves {@code cerbosVar}; never null. Throws {@link UnmappedAttributeException} for an unmapped
+     * name and {@link MalformedPlanException} for an unbound lambda reference.
      */
     Resolution resolve(String cerbosVar);
 
@@ -65,23 +60,12 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
     sealed interface Resolution permits ResolvedScalar, ResolvedRelation {}
 
     /**
-     * A variable denoting a single value, and the mapping it was resolved through.
-     *
-     * <p>For the bare lambda variable ({@code t} in {@code tags.exists(t, ...)}) the mapping
-     * is the {@link AttributeMapping.Relation} it ranges over. {@code path} is null when the
-     * Field is reachable only through a relation chain, so it has no column on this scope's
-     * entity; {@link #path} reports that as an unknown attribute.
+     * A single-valued variable and its mapping. {@code path} is null when the Field is reachable only
+     * through a relation chain.
      */
     record ResolvedScalar(Path<?> path, AttributeMapping mapping) implements Resolution {}
 
-    /**
-     * A relation-valued variable: the Relations to join through, in hop order. A multi-hop
-     * chain denotes the flattened union of the last hop's elements.
-     *
-     * <p>{@code owner} is the scope whose {@code from()} holds the first hop. A subquery over
-     * the relation must correlate that {@code From}; any other could silently query a
-     * same-named collection on the wrong entity.
-     */
+    /** A relation-valued variable: its hops, and the {@code owner} scope a subquery over it must correlate. */
     record ResolvedRelation(Scope owner, List<AttributeMapping.Relation> chain)
             implements Resolution {
         public ResolvedRelation {
@@ -106,13 +90,7 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         return new LambdaScope(from, parentQuery, relation, lambdaVar, outer);
     }
 
-    /**
-     * Re-roots the scope chain for use inside subquery {@code sub}, which correlated
-     * {@code target}'s {@code from()}. The {@code target} level is re-rooted at
-     * {@code correlated}; levels between {@code scope} and {@code target} keep their Froms but
-     * build deeper subqueries against {@code sub}. {@code target} is matched by identity, since
-     * it is the {@link ResolvedRelation#owner()} returned on this chain.
-     */
+    /** Re-roots the scope chain inside subquery {@code sub}, which correlated {@code target}'s {@code from()}. */
     static Scope rebaseAt(Scope scope, Scope target, From<?, ?> correlated, AbstractQuery<?> sub) {
         if (scope == target) {
             if (scope instanceof RootScope rs) {
@@ -280,14 +258,7 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         return traversePath(from, memberField);
     }
 
-    /**
-     * Walks a dotted JPA path, LEFT-joining each association before the last segment.
-     *
-     * <p>{@code Path.get()} would inner-join, dropping the row from the whole query when the
-     * association is absent, even when another {@code OR} branch allows it. A LEFT join makes
-     * the missing hop NULL, which only makes its own comparison UNKNOWN. Embeddables stay on
-     * {@code get()}.
-     */
+    /** Walks a dotted JPA path, LEFT-joining each association, so an absent hop is NULL rather than dropping the row. */
     static Path<?> traversePath(From<?, ?> from, String dottedJpaPath) {
         String[] parts = dottedJpaPath.split("\\.");
         Path<?> p = from;

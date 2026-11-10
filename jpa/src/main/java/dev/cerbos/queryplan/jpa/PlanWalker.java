@@ -241,19 +241,9 @@ final class PlanWalker {
     private static final String LIST_ELEMENT = "__cerbos_list_element";
 
     /**
-     * {@code coll == [v1, ..., vn]} with {@code coll} a relation, a {@code map()} projection of
-     * one ({@code t} or {@code t.f}), or an {@code except()} of one, rewritten into operators
-     * that translate, and {@code !=} as its negation. CEL list equality is ordered:
-     * <ul>
-     *   <li>at most one element has no order to compare, so it is
-     *       {@code size(coll) == n && coll.exists(e, e == v)};</li>
-     *   <li>more need the relation's declared position field, and are
-     *       {@code size(coll) == n && coll[0] == v1 && ...}, each read in range once the size
-     *       matches;</li>
-     *   <li>an {@code except()} difference is compared only with at most one element, as
-     *       {@code size(diff) == n} and, for one, a kept element equal to it.</li>
-     * </ul>
-     * Returns {@code null} for any other shape, which the comparison then refuses.
+     * {@code coll == [v1, ..., vn]} over a relation, a {@code map()} of one or an {@code except()} of one,
+     * rewritten with {@code size()} and positional reads (more than one element needs a position field),
+     * and {@code !=} as its negation. {@code null} for any other shape.
      */
     private static Operand wholeListEquality(String op, List<Operand> operands, Scope scope) {
         if (operands.size() != 2) {
@@ -387,19 +377,9 @@ final class PlanWalker {
     }
 
     /**
-     * {@code x in coll.map(t, body)}, over a literal list or a relation, rewritten as
-     * {@code size(coll.filter(t, x == body)) > 0}, whose strict count is UNKNOWN when any
-     * element's comparison is. That is exact because CEL's {@code map} errors when any element's
-     * body does, and {@code x == body} is UNKNOWN only where the body errors or {@code x} is a
-     * missing attribute.
-     *
-     * <p>{@code x in coll.filter(t, p)} likewise becomes
-     * {@code size(coll.filter(t, p ? x == t : false)) > 0}: CEL's {@code filter} errors when
-     * any element's {@code p} does, and the ternary keeps an UNKNOWN {@code p} UNKNOWN where
-     * {@code p && x == t} would let a FALSE comparison absorb it.
-     *
-     * <p>Returns {@code null} for any other shape, and when {@code x} reads the lambda
-     * variable's name, which the rewrite would capture.
+     * {@code x in coll.map(t, body)} as {@code size(coll.filter(t, x == body)) > 0}, and
+     * {@code x in coll.filter(t, p)} as {@code size(coll.filter(t, p ? x == t : false)) > 0}; both keep
+     * CEL's errors UNKNOWN. {@code null} for other shapes or when {@code x} reads the lambda variable.
      */
     private static Operand membershipInProjection(List<Operand> operands) {
         if (operands.size() != 2
@@ -432,13 +412,7 @@ final class PlanWalker {
         return expression("gt", expression("size", filter), number(0));
     }
 
-    /**
-     * {@code x in a + b}, rewritten as {@code x in a || x in b}, when every part of the
-     * concatenation is a literal list or a direct relation. Neither can error, so the
-     * disjunction errors exactly where {@code x in (a + b)} does: when {@code x} is a missing
-     * attribute. A part that can error (a relation reached through a to-one parent, a computed
-     * list) is left to the refusal, since a TRUE disjunct would hide its error.
-     */
+    /** {@code x in a + b} as {@code x in a || x in b}, when every part is a literal list or a direct relation. */
     private static Operand membershipInConcatenation(List<Operand> operands, Scope scope) {
         if (operands.size() != 2) {
             return null;
@@ -491,14 +465,8 @@ final class PlanWalker {
     }
 
     /**
-     * A macro or membership over a list built from expressions ({@code [R.attr.a, "x"]}),
-     * folded per element: {@code any} joins {@code perElement} with {@code or}
-     * ({@code exists}, {@code in}), otherwise with {@code and} ({@code all}). CEL builds the
-     * list first, so one erroring element errors the whole result, even where another element
-     * decides it; a plain disjunction would let a TRUE element hide that error. Each computed
-     * element's {@code e == e || !(e == e)} is TRUE where the element evaluates and UNKNOWN
-     * where it errors, and the fold is taken under that guard as a ternary, which is UNKNOWN
-     * under both polarities whenever the guard is.
+     * A macro or membership over a list built from expressions, folded per element under an
+     * {@code e == e || !(e == e)} guard, because one erroring element errors the whole result.
      */
     Predicate overComputedList(List<Operand> elements, List<Operand> perElement, boolean any,
                                Scope scope) {
@@ -545,12 +513,7 @@ final class PlanWalker {
         return null;
     }
 
-    /**
-     * {@code intersect(a, b) == []} as {@code !hasIntersection(a, b)}, and {@code != []} as
-     * {@code hasIntersection(a, b)}: Cerbos's {@code intersect} keeps the elements the two
-     * lists share, so it is empty exactly when they share none. Its size is not translated, as
-     * it counts duplicates from whichever list is shorter. {@code null} for any other shape.
-     */
+    /** {@code intersect(a, b) == []} as {@code !hasIntersection(a, b)}, and {@code != []} as its negation. */
     private static Operand intersectionEmptiness(String op, List<Operand> operands) {
         if (operands.size() != 2) {
             return null;
@@ -573,13 +536,7 @@ final class PlanWalker {
         return null;
     }
 
-    /**
-     * {@code {"k1": v1, ...}[key] == c} (or {@code !=}), a lookup in a map literal by a
-     * computed key: the keys whose value equals {@code c} (or differs from it) when
-     * {@code key} is one of the map's keys, and UNKNOWN under both polarities when it is not,
-     * as CEL errors on a missing key. Values are compared with CEL equality (numbers by
-     * value, other types by kind and value). {@code null} for any other shape.
-     */
+    /** {@code {"k1": v1, ...}[key] ==/!= c}, UNKNOWN when {@code key} is missing. {@code null} for any other shape. */
     private Predicate mapLiteralLookup(String op, List<Operand> operands, Scope scope) {
         if (operands.size() != 2) {
             return null;

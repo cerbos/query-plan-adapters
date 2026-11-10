@@ -30,17 +30,9 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
- * Translates every leaf comparison: field against value, field against field, constant against
- * constant, constant-receiver string matches, arithmetic, ternary and {@code size()}
- * comparisons.
- *
- * <p>{@link #resolve} classifies each operand into a {@link Resolved} shape without converting
- * it, and {@link #dispatch} translates the pair. Conversion is lazy because the error a
- * malformed operand raises depends on the whole comparison, and those messages are pinned.
- *
- * <p>To add an operand type, add a {@code Resolved} case, classify it in {@link #resolve} and
- * handle its pairings in {@link #dispatch}, as the {@code timestamp()} cases do. Unhandled
- * pairings fall through to {@link #leafOperandError}.
+ * Translates every leaf comparison. {@link #resolve} classifies each operand into a {@link Resolved}
+ * shape without converting it, and {@link #dispatch} translates the pair; conversion is lazy because
+ * which error a malformed operand raises depends on the whole comparison.
  */
 final class ComparisonTranslator {
 
@@ -78,12 +70,7 @@ final class ComparisonTranslator {
         this.arithmetic = new ArithmeticTranslator(cb, tri, leaf, this);
     }
 
-    /**
-     * Translates an operator that {@link PlanWalker#traverseExpression} does not handle by
-     * name. The ternary rewrite runs first, on the raw operands, because it needs source order.
-     * Then the operands are normalized field-first ({@link NormalizedBinary}), {@code size()}
-     * comparisons are tried, and everything else is resolved and dispatched.
-     */
+    /** Translates an operator {@link PlanWalker#traverseExpression} does not handle by name: ternary first, then field-first. */
     Predicate translate(String op, List<Operand> operands, Scope scope) {
         Predicate ternaryPred = ternary.tryTernaryComparison(op, operands, scope);
         if (ternaryPred != null) {
@@ -707,13 +694,8 @@ final class ComparisonTranslator {
     }
 
     /**
-     * {@code timestamp(field) op timestamp(constant)}, with {@code op} already field-first.
-     *
-     * <p>Only {@link Instant} and {@link OffsetDateTime} columns are translated, because both
-     * denote an absolute instant. {@code LocalDateTime}, {@code java.util.Date} and
-     * {@code String} do not, and guessing a zone could return rows the PDP denies, so they
-     * throw. A registered {@link OperatorFunction} override is tried first, with the parsed
-     * {@link Instant}. A NULL column makes the comparison UNKNOWN, matching CEL's deny.
+     * {@code timestamp(field) op timestamp(constant)}. Only {@link Instant} and {@link OffsetDateTime}
+     * columns translate; a zoneless type would need a guessed zone. A NULL column is UNKNOWN.
      */
     private Predicate timestampLeaf(String op, Resolved.TimestampField field,
                                     Resolved.TimestampConstant constant, Scope scope) {
@@ -753,12 +735,8 @@ final class ComparisonTranslator {
     private static final Instant MAX_TIMESTAMP = Instant.parse("9999-12-31T23:59:59.999999999Z");
 
     /**
-     * {@code timestamp(field) + shift op c}, solved for the column as
-     * {@code timestamp(field) op c - shift}: adding a duration is exact on instants, so the two
-     * agree wherever the sum is a timestamp. Where it is not, the sum leaves CEL's year-1 to
-     * year-9999 range and CEL errors, so a column within {@code shift} of the bound is UNKNOWN
-     * under both polarities. A solved constant outside that range is refused: it has no
-     * column value on the other side to bind.
+     * {@code timestamp(field) + shift op c}, solved as {@code timestamp(field) op c - shift}. A column
+     * within {@code shift} of CEL's year range is UNKNOWN; a solved constant outside it is refused.
      */
     private Predicate shiftedTimestampLeaf(String op, Resolved.ShiftedTimestampField shifted,
                                            Instant c, Scope scope) {
@@ -780,12 +758,7 @@ final class ComparisonTranslator {
                 temporalBound(shifted.variable(), path, overflowOp, edge)));
     }
 
-    /**
-     * {@code timestamp(field).timeSince() op d}: {@code now - field op d}, solved for the column
-     * as {@code field op' now - d} with {@code op} mirrored. {@code now} is read when the
-     * filter builds its predicate, which is when the query asks the question; the
-     * difference of two CEL timestamps always fits a CEL duration.
-     */
+    /** {@code timestamp(field).timeSince() op d}, solved as {@code field op' now - d}; {@code now} is read at build time. */
     private Predicate timeSinceLeaf(String op, Resolved.TimeSinceField since, Duration d,
                                     Scope scope) {
         Instant bound = Instant.now().minus(d);
@@ -804,13 +777,8 @@ final class ComparisonTranslator {
     private static final double INT64_LIMIT = 0x1p63;
 
     /**
-     * {@code int(column) op c}, over a Double or Integer column. CEL's {@code int()} truncates a
-     * double toward zero, which PostgreSQL and MySQL {@code CAST} do not (they round), so the
-     * comparison is solved for the column instead: {@code int(d) >= m} is {@code d >= m} for a
-     * positive {@code m} and {@code d > m - 1} otherwise, and {@code int(d) <= m} is
-     * {@code d <= m} for a negative {@code m} and {@code d < m + 1} otherwise. A NULL column, or
-     * one outside the int64 range (where CEL errors, NaN included), is UNKNOWN under both
-     * polarities.
+     * {@code int(column) op c} over a Double or Integer column, solved for the column because CEL's
+     * {@code int()} truncates where SQL {@code CAST} rounds. NULL or out-of-int64 is UNKNOWN.
      */
     private Predicate intOfFieldComparison(String op, Resolved.IntOfField field, double c,
                                            List<Operand> operands, Scope scope) {
@@ -854,12 +822,8 @@ final class ComparisonTranslator {
     }
 
     /**
-     * {@code int(s)} over a String column, which CEL parses with Go's
-     * {@code strconv.ParseInt(s, 10, 64)}: an optional {@code +} or {@code -}, then one or more
-     * ASCII digits, within int64. SQL {@code CAST} accepts other spellings or fails the query,
-     * so the value is compared without one: its sign, then its digits with leading zeros
-     * trimmed, which order by length and then lexicographically. Every expression is built
-     * fresh, so none is shared between polarities.
+     * {@code int(s)} over a String column, parsed as Go's {@code strconv.ParseInt}: compared by sign and
+     * then by trimmed digits, since SQL {@code CAST} accepts other spellings.
      */
     private final class IntText {
         private static final String INT64_MAX = "9223372036854775807";
@@ -953,23 +917,9 @@ final class ComparisonTranslator {
             Set.of(Double.class, Integer.class, Long.class);
 
     /**
-     * {@code string(column) eq/ne "text"}, decided per column type. SQL has no portable spelling
-     * of CEL's conversion ({@code CAST} gives {@code '1'} for a MySQL boolean and its own number
-     * format everywhere), so the constant is inverted in Java and only the column reaches SQL:
-     *
-     * <ul>
-     *   <li>{@link String}: {@code string()} is the identity, so the column is compared as it
-     *       stands, through any override for {@code op}.</li>
-     *   <li>{@link Boolean}: CEL renders exactly {@code "true"} or {@code "false"}. A
-     *       text-producing {@code CASE} would compare in the connection collation, which is
-     *       case-insensitive under MySQL Connector/J.</li>
-     *   <li>{@link Double}, {@link Integer}, {@link Long}: the one double CEL renders as the
-     *       constant ({@link CelDoubleText}), compared as a double.</li>
-     * </ul>
-     *
-     * <p>A constant no value renders as matches nothing. A NULL column stays UNKNOWN under both
-     * polarities, even one declared EXPLICIT, because CEL's {@code string()} errors on null and
-     * the PDP denies. Other column types, primitive ones included, are refused.
+     * {@code string(column) eq/ne "text"}, solved per column type: a String compares as is, a Boolean
+     * against {@code true}/{@code false}, a number against the one double CEL renders as the text. A
+     * NULL column is UNKNOWN; other column types are refused.
      */
     private Predicate stringOfFieldComparison(String op, Resolved.StringOfField field,
                                               String value, List<Operand> operands, Scope scope) {
@@ -1008,13 +958,7 @@ final class ComparisonTranslator {
         }
     }
 
-    /**
-     * {@code string(int(column)) eq/ne "text"}. {@code int()} parses a String column exactly
-     * and truncates a Double one toward zero, and {@code string()} renders the int in plain
-     * decimal, so the comparison holds exactly where the column converts to the int that renders
-     * as {@code text}; a {@code text} no int renders as matches nothing. Where {@code int()}
-     * errors (NULL, unparsable, outside int64) the row is UNKNOWN under both polarities.
-     */
+    /** {@code string(int(column)) eq/ne "text"}: holds where the column converts to that int; UNKNOWN where {@code int()} errors. */
     @SuppressWarnings("unchecked")
     private Predicate stringOfIntOfFieldComparison(String op, Resolved.StringOfIntOfField field,
                                                    String text, List<Operand> operands,
@@ -1077,16 +1021,8 @@ final class ComparisonTranslator {
     private static final String ASCII_LOWER = "abcdefghijklmnopqrstuvwxyz";
 
     /**
-     * {@code column.upperAscii() op "text"}. CEL's {@code upperAscii()} folds only the 26 ASCII
-     * letters, while SQL {@code UPPER} is Unicode-aware ({@code é} becomes {@code É}, and the
-     * dotless {@code ı} becomes {@code I}), so the fold is spelled as 26 nested
-     * case-sensitive {@code REPLACE}s, each mapping one lowercase ASCII letter to its capital.
-     * The result is compared under the column's own collation, which the harnesses pin
-     * byte-exact. A NULL column is UNKNOWN: {@code upperAscii()} on a missing attribute or on
-     * null is a CEL error.
-     *
-     * <p>A non-string constant is CEL's {@code false} under {@code ==} (and {@code true} under
-     * {@code !=}), and a CEL error under an ordering.
+     * {@code column.upperAscii() op "text"}, as 26 nested case-sensitive {@code REPLACE}s because SQL
+     * {@code UPPER} folds beyond ASCII. A NULL column is UNKNOWN.
      */
     @SuppressWarnings("unchecked")
     private Predicate upperAsciiComparison(String op, Resolved.UpperAsciiField field,
@@ -1131,15 +1067,8 @@ final class ComparisonTranslator {
     }
 
     /**
-     * A comparison whose {@code add} is CEL string concatenation, or {@code null} when no string
-     * is involved and the comparison is numeric. The plan does not say which {@code +} it is, so
-     * the operand types decide: a string constant or a {@link String} column anywhere under the
-     * {@code add} makes it concatenation, and every other leaf must then be a string too.
-     *
-     * <p>{@code "a" + null} is a CEL error, so a NULL column under the concatenation keeps the
-     * comparison UNKNOWN under both polarities; {@code CONCAT} alone would not, since some
-     * dialects skip NULL arguments. A column compared with the concatenation keeps its own null
-     * convention: declared EXPLICIT, {@code ==} and {@code !=} are definite on a NULL.
+     * A comparison whose {@code add} is string concatenation, or {@code null} when it is numeric: any
+     * string leaf makes it concatenation. A NULL column keeps it UNKNOWN.
      */
     private Predicate tryConcatComparison(String op, List<Operand> operands, Scope scope) {
         if (!isStringTyped(operands.get(0), scope) && !isStringTyped(operands.get(1), scope)) {
@@ -1171,13 +1100,7 @@ final class ComparisonTranslator {
                 () -> cb.or(nullable.stream().map(cb::isNull).toArray(Predicate[]::new)));
     }
 
-    /**
-     * Whether one side is a string and the other a numeric {@code add}: one with no string
-     * under it and a number that makes it CEL's numeric {@code +}. CEL has no ordering between
-     * a string and a number, so {@code aString < aNumber + 1.0} is an error that denies under
-     * both polarities (cerbos/query-plan-adapters#575). Read as concatenation instead, the
-     * numeric column would be refused as a non-string operand.
-     */
+    /** Whether a string is ordered against a numeric {@code add}, which CEL errors on (#575). */
     private boolean ordersStringAgainstNumericAdd(List<Operand> operands, Scope scope) {
         for (int side = 0; side < 2; side++) {
             Operand add = operands.get(side);
@@ -1372,12 +1295,8 @@ final class ComparisonTranslator {
     }
 
     /**
-     * Evaluates a comparison of two constants to always-true ({@code 1=1}) or always-false
-     * ({@code 1=0}). Numbers compare as doubles and strings lexicographically; other types
-     * support only eq/ne, and ordering them throws.
-     *
-     * <p>Uses the primitive operators, not {@link Double#compare}, which ranks NaN above every
-     * number. A NaN constant (e.g. an unfolded {@code 0.0/0.0}) must compare false, as in CEL.
+     * Evaluates a comparison of two constants to {@code 1=1} or {@code 1=0}, with primitive operators so a
+     * NaN compares false as in CEL.
      */
     Predicate constantComparison(String op, Object left, Object right) {
         if ("eq".equals(op) || "ne".equals(op)) {
@@ -1497,14 +1416,8 @@ final class ComparisonTranslator {
     private static final List<String> LIKE_METACHARACTERS = List.of("\\", "%", "_", "[");
 
     /**
-     * {@code haystack LIKE pattern(needle)} for a column needle. The needle's LIKE
-     * metacharacters are escaped with nested {@code REPLACE}, as {@link PlanValues#escapeLike}
-     * does for constants. {@code [} is escaped because SQL Server treats it as a character
-     * class.
-     *
-     * <p>A NULL needle gives a NULL pattern, so the LIKE is UNKNOWN under both polarities, as
-     * CEL's missing-attribute error denies under both. It also stops a dialect whose
-     * {@code CONCAT} treats NULL as {@code ''} from building a match-all {@code '%%'}.
+     * {@code haystack LIKE pattern(needle)} for a column needle, escaped with nested {@code REPLACE}. A
+     * NULL needle gives a NULL pattern, keeping the LIKE UNKNOWN.
      */
     private Predicate fieldToFieldLike(Expression<?> haystack, Expression<?> needle,
                                        StringMatch match) {

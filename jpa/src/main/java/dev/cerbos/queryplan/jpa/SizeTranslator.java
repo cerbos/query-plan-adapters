@@ -40,17 +40,7 @@ final class SizeTranslator {
         this.subqueries = subqueries;
     }
 
-    /**
-     * The constant, adjusted for an integral count. Truncating a fraction ({@code >= 1.5} as
-     * {@code >= 1}) would return rows the PDP denies, so:
-     * <ul>
-     *   <li>{@code eq f} is always false and {@code ne f} always true, held in
-     *       {@code decided};</li>
-     *   <li>{@code gt f} and {@code ge f} become {@code ge ceil(f)};</li>
-     *   <li>{@code lt f} and {@code le f} become {@code le floor(f)}.</li>
-     * </ul>
-     * An integral constant keeps its operator and {@code decided} is {@code null}.
-     */
+    /** The constant adjusted for an integral count: {@code ge 1.5} is {@code ge 2}, and {@code eq 1.5} is {@code decided}. */
     private record Threshold(String op, long value, Boolean decided) {
 
         static Threshold of(String op, double raw) {
