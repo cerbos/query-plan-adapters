@@ -7,7 +7,6 @@ import org.jetbrains.exposed.v1.core.QueryBuilder
 import org.jetbrains.exposed.v1.core.booleanParam
 import org.jetbrains.exposed.v1.core.doubleParam
 import org.jetbrains.exposed.v1.core.longParam
-import org.jetbrains.exposed.v1.core.stringParam
 
 /**
  * Binds a plan constant BY THE VALUE'S TYPE, never by the column's.
@@ -20,7 +19,7 @@ import org.jetbrains.exposed.v1.core.stringParam
  */
 internal object Params {
     fun of(value: Any): Expression<*> = when (value) {
-        is String -> stringParam(value)
+        is String -> ExactString.param(value)
         is Long -> longParam(value)
         is Int -> longParam(value.toLong())
         // A NaN or an infinity is refused here rather than bound, so "no statement this adapter

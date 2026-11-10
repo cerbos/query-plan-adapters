@@ -1,5 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import org.jetbrains.exposed.v1.core.EqOp
@@ -8,7 +9,6 @@ import org.jetbrains.exposed.v1.core.IsNullOp
 import org.jetbrains.exposed.v1.core.LikeEscapeOp
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
-import org.jetbrains.exposed.v1.core.stringParam
 
 /**
  * `overlaps`, `ancestorOf` and `descendentOf` over Cerbos hierarchies.
@@ -151,9 +151,9 @@ internal class HierarchyTranslator(private val translation: Translation) {
         return TriLogic.or(
             buildList {
                 // The column is an ancestor of the constant...
-                strictPrefixes(other.segments, delimiter).forEach { add(EqOp(field.expression, stringParam(it))) }
+                strictPrefixes(other.segments, delimiter).forEach { add(EqOp(field.expression, ExactString.param(it))) }
                 // ...or equal to it...
-                add(EqOp(field.expression, stringParam(whole)))
+                add(EqOp(field.expression, ExactString.param(whole)))
                 // ...or a descendant of it.
                 add(startsWith(field.expression, whole + delimiter))
             },
@@ -180,7 +180,7 @@ internal class HierarchyTranslator(private val translation: Translation) {
             if (prefixes.isEmpty()) {
                 return TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(ancestor.expression))
             }
-            return TriLogic.or(prefixes.map { EqOp(ancestor.expression, stringParam(it)) })
+            return TriLogic.or(prefixes.map { EqOp(ancestor.expression, ExactString.param(it)) })
         }
         if (ancestor is Hierarchy.Constant && descendant is Hierarchy.Constant) {
             if (descendant.segments.size > ancestor.segments.size && isPrefix(ancestor.segments, descendant.segments)) {
@@ -305,9 +305,9 @@ internal class HierarchyTranslator(private val translation: Translation) {
                 segment is Segment.Literal && other is Segment.Literal ->
                     if (segment.value != other.value) return null
                 segment is Segment.FieldSegment && other is Segment.Literal ->
-                    conditions.add(EqOp(segment.expression, stringParam(other.value)))
+                    conditions.add(EqOp(segment.expression, ExactString.param(other.value)))
                 segment is Segment.Literal && other is Segment.FieldSegment ->
-                    conditions.add(EqOp(other.expression, stringParam(segment.value)))
+                    conditions.add(EqOp(other.expression, ExactString.param(segment.value)))
                 else -> throw Refusals.unsupported(
                     "Cannot compare two column segments in a hierarchy overlap: neither side's " +
                         "value is known at translation time",
@@ -319,7 +319,7 @@ internal class HierarchyTranslator(private val translation: Translation) {
 
     private fun startsWith(expression: Expression<*>, prefix: String): Op<Boolean> = LikeEscapeOp(
         expression,
-        stringParam(PlanValues.escapeLike(prefix) + "%"),
+        ExactString.param(PlanValues.escapeLike(prefix) + "%"),
         true,
         LikeEscaping.ESCAPE_CHAR,
     )
@@ -393,9 +393,9 @@ internal class HierarchyTranslator(private val translation: Translation) {
         fun isOneOf(values: List<String>): Op<Boolean> = if (values.isEmpty()) {
             TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(column))
         } else {
-            TriLogic.or(values.map { EqOp(column, stringParam(it)) })
+            TriLogic.or(values.map { EqOp(column, ExactString.param(it)) })
         }
-        val descendant = TriLogic.and(startsWith(column, whole), NeqOp(column, stringParam(whole)))
+        val descendant = TriLogic.and(startsWith(column, whole), NeqOp(column, ExactString.param(whole)))
         return when (operator) {
             "overlaps" -> TriLogic.or(isOneOf(prefixes), startsWith(column, whole))
             // ancestorOf(first, second): first is the strict ancestor.

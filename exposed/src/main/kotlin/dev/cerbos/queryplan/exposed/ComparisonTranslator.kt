@@ -1,5 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.AsciiReplace
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
@@ -22,7 +23,6 @@ import org.jetbrains.exposed.v1.core.LikeEscapeOp
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.booleanParam
-import org.jetbrains.exposed.v1.core.stringParam
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -295,9 +295,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 translation.leaf.requireText(operator, target)
                 val needle = target.expression
                 return when (operator) {
-                    "contains" -> columnNeedleMatch(stringParam(receiver), needle, true, true)
-                    "startsWith" -> columnNeedleMatch(stringParam(receiver), needle, false, true)
-                    "endsWith" -> columnNeedleMatch(stringParam(receiver), needle, true, false)
+                    "contains" -> columnNeedleMatch(ExactString.param(receiver), needle, true, true)
+                    "startsWith" -> columnNeedleMatch(ExactString.param(receiver), needle, false, true)
+                    "endsWith" -> columnNeedleMatch(ExactString.param(receiver), needle, true, false)
                     else -> throw Refusals.internal("Unsupported string-match operator: $operator")
                 }
             }
@@ -560,7 +560,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
         for (lower in 'a'..'z') {
             folded = AsciiReplace(folded, lower.toString(), lower.uppercaseChar().toString())
         }
-        return compare(operator, folded, stringParam(constant))
+        return compare(operator, folded, ExactString.param(constant))
     }
 
     /**
@@ -741,9 +741,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 ScalarColumnKind.BOOLEAN -> ScalarCase(
                     listOf(
                         IsNullOp(target.expression) to NullLiteral,
-                        EqOp(target.expression, booleanParam(true)) to stringParam("true"),
+                        EqOp(target.expression, booleanParam(true)) to ExactString.param("true"),
                     ),
-                    stringParam("false"),
+                    ExactString.param("false"),
                 )
                 // string() of a string is the identity, so a text column is compared as itself.
                 // A CAST would be worse than redundant: MySQL gives `CAST(x AS CHAR)` the
@@ -1014,7 +1014,10 @@ internal class ComparisonTranslator(private val translation: Translation) {
      * arithmetic, timestamps and concatenations. A constant-RHS scalar leaf does NOT route here —
      * it goes through [LeafTranslator], which owns the null convention and the double cast.
      */
-    fun compare(operator: String, left: Expression<*>, right: Expression<*>): Op<Boolean> = when (operator) {
+    fun compare(operator: String, left: Expression<*>, right: Expression<*>): Op<Boolean> =
+        compareRaw(operator, ExactString.of(left, operator), ExactString.of(right, operator))
+
+    private fun compareRaw(operator: String, left: Expression<*>, right: Expression<*>): Op<Boolean> = when (operator) {
         "eq" -> EqOp(left, right)
         "ne" -> NeqOp(left, right)
         "lt" -> LessOp(left, right)
@@ -1102,7 +1105,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
         leadingWildcard: Boolean,
         trailingWildcard: Boolean,
     ): Op<Boolean> = LikeEscapeOp(
-        haystack,
+        ExactString.of(haystack, "eq"),
         LikeEscaping.columnPattern(needle, leadingWildcard, trailingWildcard),
         true,
         LikeEscaping.ESCAPE_CHAR,

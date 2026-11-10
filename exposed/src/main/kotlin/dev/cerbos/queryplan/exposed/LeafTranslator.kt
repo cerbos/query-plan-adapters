@@ -1,5 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.queryplan.exposed.sql.CodePointOrdering
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
@@ -17,7 +18,6 @@ import org.jetbrains.exposed.v1.core.LessOp
 import org.jetbrains.exposed.v1.core.LikeEscapeOp
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
-import org.jetbrains.exposed.v1.core.stringParam
 
 /**
  * The scalar leaf: one resolved value against one plan constant.
@@ -80,7 +80,11 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
         if (operator in ORDERING_OPERATORS && value is String && CodePointOrdering.needed(value) &&
             ScalarColumnTypes.isText(target.column)
         ) {
-            return CodePointOrdering(target.expression, Params.of(value), CodePointOrdering.sign(operator))
+            return CodePointOrdering(
+                ExactString.of(target.expression, operator),
+                Params.of(value),
+                CodePointOrdering.sign(operator),
+            )
         }
 
         // An attribute the caller sends as an explicit null holds a null VALUE in CEL, so equality
@@ -227,7 +231,7 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
     /** The default lowering of one leaf operator against one non-null constant. */
     fun defaultLeaf(operator: String, target: Resolution.Scalar, value: Any): Op<Boolean> {
         val constant = Params.of(value)
-        val expression = comparable(target, value)
+        val expression = ExactString.of(comparable(target, value), operator)
         return when (operator) {
             "eq" -> EqOp(expression, constant)
             "ne" -> NeqOp(expression, constant)
@@ -261,7 +265,7 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
             append(escaped)
             if (trailingWildcard) append('%')
         }
-        return LikeEscapeOp(haystack, stringParam(pattern), true, LikeEscaping.ESCAPE_CHAR)
+        return LikeEscapeOp(haystack, ExactString.param(pattern), true, LikeEscaping.ESCAPE_CHAR)
     }
 
     /**
