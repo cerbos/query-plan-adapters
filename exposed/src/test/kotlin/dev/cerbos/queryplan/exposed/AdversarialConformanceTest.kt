@@ -403,7 +403,7 @@ class AdversarialConformanceTest {
     // -- KIND 3: a policy can reach these, and the corpus does not carry them yet -----------------
 
     /**
-     * **Corpus gap.** #509: the corpus counts the `mainCategory` chain with two spellings. These are
+     * **Corpus gap.** #668: the corpus counts the `mainCategory` chain with two spellings. These are
      * the other thresholds and polarities, and rows without a `mainCategory` must stay out of every
      * one (#316). Seeds with one have at least one subCategory (i9 has two), and the rest are CEL
      * missing-path errors, so each of these is empty.

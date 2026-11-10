@@ -9,7 +9,7 @@
 # * Plans the planner never emits: empty `and`, wrong operand count, unknown kind. The adapter
 #   accepts plans from any source, so these must fail closed.
 # * Corpus gaps (kind 3, temporary): policy-reachable shapes the corpus does not carry yet,
-#   tracked by #509. Each is deleted when its case lands.
+#   tracked by #668. Each is deleted when its case lands.
 #
 # Anything a conformance golden already decides does not belong here. New shapes go in the
 # corpus.
@@ -547,7 +547,7 @@ RSpec.describe Cerbos::ActiveRecord do
   # The NaN of `x / x`, the `-0.0` divisor and the refused column divisor are the corpus's
   # `arithmetic/divide/*` cases.
   describe "division by a row-dependent denominator" do
-    # Corpus gap (#509). The corpus divides by `-0.0` (`arithmetic/divide/negative-zero-divisor`)
+    # Corpus gap (#668). The corpus divides by `-0.0` (`arithmetic/divide/negative-zero-divisor`)
     # but not by `+0.0`.
     it "resolves an Infinity from a constant zero denominator" do
       # 2/0 is +Infinity, and -3/0 is -Infinity.
@@ -817,7 +817,7 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #509; delete it when its corpus action lands.
+  # gap tracked by #668; delete it when its corpus action lands.
   describe "a CEL error compared with null" do
     let(:size_of_number) { expression("size", variable("request.resource.attr.aNumber")) }
 
@@ -866,7 +866,7 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #509; delete it when its corpus action lands.
+  # gap tracked by #668; delete it when its corpus action lands.
   describe "arithmetic over a string or a boolean" do
     # Corpus gap. Attributes are dyn, so each of these type-checks, and CEL has no overload for
     # any of them: every row is an error. SQL concatenates the string and the number, or reads the
@@ -888,7 +888,7 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #509; delete it when its corpus action lands.
+  # gap tracked by #668; delete it when its corpus action lands.
   describe "matches() against RE2's own parse" do
     def matches(pattern) = expression("matches", variable("request.resource.attr.aString"), value(pattern))
 
@@ -904,7 +904,7 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #509; delete it when its corpus action lands.
+  # gap tracked by #668; delete it when its corpus action lands.
   describe "an operand of no type the operator takes" do
     let(:tags) { variable("request.resource.attr.tags") }
     let(:may_divide_by_zero) { expression("div", variable("request.resource.attr.aNumber"), value(0.0)) }
@@ -949,7 +949,7 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #509; delete it when its corpus action lands.
+  # gap tracked by #668; delete it when its corpus action lands.
   describe "a list or map literal" do
     # Corpus gap. `x in map` tests the keys. The planner folds a literal map to `==`, but a map
     # can still arrive as a value, and answering FALSE would grant its negation.

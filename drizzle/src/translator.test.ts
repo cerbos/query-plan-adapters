@@ -534,7 +534,7 @@ describe("what the stores cannot show", () => {
   });
 });
 
-// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). Every pattern here is policy-reachable, and
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#668). Every pattern here is policy-reachable, and
 // the corpus's regex cases witness only one pattern per rule. These pin the RE2 rules the
 // lowering relies on that no case exercises yet. Delete each when a case carrying it lands.
 describe("RE2 patterns lowered without a regex engine", () => {
@@ -564,7 +564,7 @@ describe("RE2 patterns lowered without a regex engine", () => {
   );
 });
 
-// KIND 3 — corpus gap (cerbos/query-plan-adapters#509). int() over a string or double column is
+// KIND 3 — corpus gap (cerbos/query-plan-adapters#668). int() over a string or double column is
 // carried by cases only against small constants. Delete each test when a case carrying it lands.
 describe("int() over a string or double column", () => {
   const intPlan = (condition: unknown): PlanResourcesResponse =>

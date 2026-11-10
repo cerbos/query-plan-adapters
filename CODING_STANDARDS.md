@@ -45,7 +45,7 @@ Three kinds of material live only there, and they are not equal:
    yet. This one is a **bridge, not a home**: a shape parked here is asked of one adapter and none
    of the others, which is the condition every bug this repository exists to stop was living in.
    Each instance says at the test that it is a corpus gap, names the issue tracking the port
-   ([#509](https://github.com/cerbos/query-plan-adapters/issues/509)), and is deleted when the case
+   ([#668](https://github.com/cerbos/query-plan-adapters/issues/668)), and is deleted when the case
    lands. `ElasticsearchQueryPlanAdapterTest` and `JpaQueryPlanAdapterTest` are the worked
    examples: a `KIND 3` banner over the block and a `Corpus gap.` lead on every test under it.
 
