@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "a1",
+    "a5"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/less-or-equal/sub-second-literal-at-stored-fraction",
+  "intent": "timestamp(createdAt) <= a literal at a5's exact microsecond (2020-03-15T10:30:00.123456Z).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2020-03-15T10:30:00.123456Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/less-or-equal/sub-second-literal-at-stored-fraction",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdAt) <= timestamp(\"2020-03-15T10:30:00.123456Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a1 and a5 are allowed. A literal truncated to the second or the millisecond falls before a5 and drops it."
+}

@@ -4895,6 +4895,96 @@ resourcePolicy:
       condition:
         match:
           expr: timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00Z")
+    # timestamp/greater-than/literal-instant
+    - actions:
+        - timestamp/greater-than/literal-instant
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) > timestamp("2024-06-01T00:00:00Z")
+    # timestamp/less-than/literal-instant-value-first
+    - actions:
+        - timestamp/less-than/literal-instant-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp("2024-06-01T00:00:00Z") < timestamp(R.attr.createdAt)
+    # timestamp/less-or-equal/literal-instant-value-first
+    - actions:
+        - timestamp/less-or-equal/literal-instant-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp("2024-06-01T00:00:00Z") <= timestamp(R.attr.createdAt)
+    # timestamp/greater-or-equal/literal-instant-value-first
+    - actions:
+        - timestamp/greater-or-equal/literal-instant-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp("2024-06-01T00:00:00Z") >= timestamp(R.attr.createdAt)
+    # timestamp/equals/literal-instant-value-first
+    - actions:
+        - timestamp/equals/literal-instant-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp("2024-06-01T00:00:00Z") == timestamp(R.attr.createdAt)
+    # timestamp/not-equals/literal-instant-value-first
+    - actions:
+        - timestamp/not-equals/literal-instant-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp("2024-06-01T00:00:00Z") != timestamp(R.attr.createdAt)
+    # timestamp/less-or-equal/sub-second-literal-before-stored-fraction
+    - actions:
+        - timestamp/less-or-equal/sub-second-literal-before-stored-fraction
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.000001Z")
+    # timestamp/less-or-equal/sub-second-literal-at-stored-fraction
+    - actions:
+        - timestamp/less-or-equal/sub-second-literal-at-stored-fraction
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.123456Z")
+    # timestamp/equals/ternary-over-literal-instants
+    - actions:
+        - timestamp/equals/ternary-over-literal-instants
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? timestamp("2024-01-01T02:00:00+02:00") : timestamp("2030-01-01T00:00:00Z")) == timestamp("2024-01-01T00:00:00Z")'
+    # timestamp/greater-than/ternary-over-literal-instants
+    - actions:
+        - timestamp/greater-than/ternary-over-literal-instants
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? timestamp("2024-01-01T00:00:00Z") : timestamp("2030-01-01T00:00:00Z")) > timestamp("2025-01-01T00:00:00Z")'
     # type-mismatch/contains/number-field-needle
     - actions:
         - type-mismatch/contains/number-field-needle
