@@ -80,6 +80,42 @@
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as membership/in/map-attribute-keys, under negation."
     },
+    "regex/matches/case-insensitive-non-ascii": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering expands (?i) through a table of ASCII and known Unicode folding orbits; É is not tabulated, so the pattern is refused rather than folded by a store collation that is not RE2's."
+    },
+    "regex/matches/dot-all-flag": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering reads only a leading (?i) and (?:...) groups; (?s), under which . also matches a newline, is refused."
+    },
+    "regex/matches/end-anchor-mid-pattern": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering reads ^ and $ only at the ends of the pattern or of a top-level branch; an anchor followed by more pattern is refused."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "matches() is lowered only for a constant pattern, which is parsed as RE2 before translation; a pattern read from a row would reach the database's own regex dialect, which is not RE2."
+    },
+    "regex/matches/negated-class": {
+      "status": "unsupported",
+      "reason": "A negated character class matches an unbounded set of characters, which the lowering to literals and LIKE cannot enumerate, so the pattern is refused."
+    },
+    "regex/matches/non-digit-class": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering does not read \\D, an unbounded class it cannot enumerate, so the pattern is refused."
+    },
+    "regex/matches/two-dot-star-gaps": {
+      "status": "unsupported",
+      "reason": "Two .* gaps are not a finite set of literals or a single prefix-and-suffix LIKE, and LIKE's % would cross a newline RE2's . does not, so the pattern is refused."
+    },
+    "regex/matches/unanchored-dot": {
+      "status": "unsupported",
+      "reason": "A . between two literals is not a finite set of literals, and LIKE's _ would match a newline RE2's . does not, so the pattern is refused."
+    },
+    "regex/matches/word-boundary": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering does not read \\b, which has no LIKE equivalent, so the pattern is refused."
+    },
     "size/greater-than/map-projection": {
       "status": "unsupported",
       "reason": "size() of a map() projection: each element is read through the lambda body, and a body that errors on one element (b6's unnamed tag) makes the whole count an error. The adapter counts only a named collection or a filter(), so the projection is refused."

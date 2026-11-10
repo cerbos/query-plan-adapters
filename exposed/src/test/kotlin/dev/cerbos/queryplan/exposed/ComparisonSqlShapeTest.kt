@@ -64,7 +64,8 @@ class ComparisonSqlShapeTest {
         //    `LikeEscaping.columnPattern` guards because a NULL needle must not match everything;
         //  - an operator whose own lowering is two-valued and therefore carries its own witness:
         //    `string()`'s portable CASE, `size()`'s out-of-int-range fold, the `map()`
-        //    projection's NULL-element subquery, and a `list()`-built hierarchy's prefix fold;
+        //    projection's NULL-element subquery, a `list()`-built hierarchy's prefix fold, and a
+        //    `matches()` branch that matches every string (`regex/matches/empty-alternative`);
         //  - `in` between two attributes, whose EXISTS is two-valued in the member, so an
         //    undeclared member carries its own missing-attribute witness (`in-var-var-omitted`);
         //  - a string concatenation the comparison cannot solve, folded to a constant that still
@@ -422,7 +423,7 @@ class ComparisonSqlShapeTest {
         // `list` is a hierarchy assembled from a list holding a column: when the constant prefix
         // alone decides the relation, the lowering is TRUE unless that column is missing, and the
         // IS NULL is the witness for the column it never compares (`hier-overlaps-list-prefix`).
-        val SELF_GUARDING_OPERATORS = setOf("string", "size", "map", "list")
+        val SELF_GUARDING_OPERATORS = setOf("string", "size", "map", "list", "matches")
 
         val LAMBDA_MACROS = setOf("exists", "all", "exists_one", "filter", "map", "isSubset", "except")
 

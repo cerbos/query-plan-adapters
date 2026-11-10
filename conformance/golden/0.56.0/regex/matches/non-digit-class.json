@@ -1,0 +1,75 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a9",
+    "b1",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7",
+    "i7",
+    "i8",
+    "j2",
+    "j3",
+    "j4",
+    "k1"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/non-digit-class",
+  "intent": "matches(\"^\\\\D+$\"): one or more characters, none of them a digit.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^\\D+$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/non-digit-class",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^\\\\D+$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a1 \"one\" matches and a2 \"100%_done\" and a8 \"\" do not; a dialect without \\D reads it as a literal D, and lowering it to \"contains no digit\" over-grants a8."
+}

@@ -113,11 +113,39 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `aDouble / 0.0` divides a stored number by an integral literal the plan ships without saying whether it was an int or a double."
     },
+    "comparison/greater-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/greater-or-equal/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/greater-or-equal/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/greater-or-equal/negative-zero-from-ternary": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary multiplies two integral literals (-1 * 0), and the plan does not carry whether each was written as an int or a double."
+    },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
     },
     "comparison/greater-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/greater-than/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/less-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/less-or-equal/nan-from-ternary": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
     },
@@ -129,9 +157,25 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
     },
+    "comparison/less-than/infinity-on-both-sides": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/less-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/less-than/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
     "comparison/less-than/nan-from-ternary-value-first": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary divides two integral literals, and the plan does not carry whether each was written as an int or a double: `0 / 0` is an error where `0.0 / 0.0` is NaN, and the two select different rows."
+    },
+    "comparison/less-than/negative-zero-from-ternary": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the ternary multiplies two integral literals (-1 * 0), and the plan does not carry whether each was written as an int or a double."
     },
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",

@@ -131,9 +131,10 @@ export function foldArithmetic(
   }
   if (
     operator === "add" &&
-    (typeof left === "string" || typeof right === "string")
+    typeof left === "string" &&
+    typeof right === "string"
   ) {
-    return String(left) + String(right);
+    return left + right;
   }
   if (typeof left !== "number" || typeof right !== "number") {
     throw new UnsupportedQueryPlanError(`${operator} operator requires string or number operands`);

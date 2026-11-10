@@ -76,6 +76,10 @@
       "status": "unsupported",
       "reason": "Same refusal as comparison/less-than/astral-string-against-high-bmp, under negation: a UTF-16 code unit ordering puts the surrogate pair before U+FFFD, so the literal is refused."
     },
+    "conditional/ternary/string-match-receiver": {
+      "status": "unsupported",
+      "reason": "A ternary is distributed into its branches only as an operand of ==, !=, <, <=, > or >=; as the receiver of contains() it is refused."
+    },
     "hierarchy/overlaps/field-to-field": {
       "status": "unsupported",
       "reason": "Both hierarchies are read from columns, so there is no constant path to expand into prefixes, and JPA Criteria cannot split a column on a delimiter to compare it segment by segment."
@@ -84,13 +88,49 @@
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."
     },
+    "regex/matches/case-insensitive-non-ascii": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; (?i) is spelled as ASCII case alternatives, so a non-ASCII letter under it is refused (register an OperatorFunction for matches to use a database regex)."
+    },
+    "regex/matches/dot-all-flag": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; an inline flag other than a leading (?i) is refused (register an OperatorFunction for matches to use a database regex)."
+    },
+    "regex/matches/end-anchor-mid-pattern": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; an anchor followed by more pattern is refused (register an OperatorFunction for matches to use a database regex)."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, and the LIKE lowering reads only a constant pattern; matches() between two columns is refused."
+    },
+    "regex/matches/negated-class": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; a negated character class has no LIKE spelling and is refused (register an OperatorFunction for matches to use a database regex)."
+    },
+    "regex/matches/non-digit-class": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; \\D has no LIKE spelling and is refused (register an OperatorFunction for matches to use a database regex)."
+    },
+    "regex/matches/unanchored-dot": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; a lone . would become _, which matches a newline RE2's . does not, so it is refused (register an OperatorFunction for matches to use a database regex)."
+    },
     "regex/matches/unbounded-count": {
       "status": "unsupported",
       "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; the unbounded run `.{8,}` is lowered only as `.*` or `.+` between finite parts, so it is refused (register an OperatorFunction for matches to use a database regex)."
     },
+    "regex/matches/word-boundary": {
+      "status": "unsupported",
+      "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; \\b has no LIKE spelling and is refused (register an OperatorFunction for matches to use a database regex)."
+    },
     "size/greater-than/map-projection": {
       "status": "unsupported",
       "reason": "size() takes a collection attribute or a filter(); a map() projection is refused, since its body is evaluated per element and one erroring element (b6's unnamed tag) makes the count an error."
+    },
+    "string/concatenate/negated-null-principal-attribute": {
+      "status": "unsupported",
+      "reason": "A null principal attribute reaches the plan as a null constant beside add; CEL has no overload for it and the adapter does not model the error, so it refuses rather than fold the concatenation."
     },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",

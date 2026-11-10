@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "string/concatenate/suffix-value-first",
+  "intent": "A literal compared == a concatenation that appends a literal suffix to the attribute (\"one-end\" == aString + \"-end\").",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": "one-end"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "-end"
+                }
+              ],
+              "operator": "add"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "string/concatenate/suffix-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "\"one-end\" == R.attr.aString + \"-end\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Solving it back to an equality must strip the suffix, so only a1 \"one\" is allowed; stripping a prefix, or comparing the whole literal to the column, denies a1."
+}

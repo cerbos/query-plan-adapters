@@ -248,6 +248,10 @@
       "status": "unsupported",
       "reason": "Same refusal as string/contains/field-to-field: the else branch is contains() with a column-valued needle, which would need per-row LIKE escaping Prisma filters cannot express."
     },
+    "conditional/ternary/string-match-receiver": {
+      "status": "unsupported",
+      "reason": "A ternary is distributed into its branches only as an operand of a comparison; as the receiver of contains() it is refused."
+    },
     "hierarchy/overlaps/field-to-field": {
       "status": "unsupported",
       "reason": "Both hierarchies are read from columns, and a Prisma filter compares a column only against constants: it cannot split a column on a delimiter."
@@ -300,9 +304,45 @@
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: in requires a field member and literal list, or a literal member and field collection."
     },
+    "regex/matches/anchored-prefix-dot-star": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and matches() is lowered only to LIKE filters that decide it exactly; a .* in a pattern not anchored at both ends is refused."
+    },
+    "regex/matches/case-insensitive-non-ascii": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter; (?i) is lowered to LIKE alternatives over ASCII letters only, so a non-ASCII letter under (?i) is refused."
+    },
+    "regex/matches/dot-all-flag": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and the LIKE lowering reads no inline flag but a leading (?i); (?s) is refused."
+    },
+    "regex/matches/end-anchor-mid-pattern": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and the LIKE lowering reads ^ and $ only at a branch's ends; an anchor followed by more pattern is refused."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter; matches() is lowered to LIKE only for a column receiver and a literal pattern, so a pattern read from a row is refused."
+    },
     "regex/matches/lucene-reserved-characters-in-class": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and the translator lowers only patterns a combination of LIKE filters decides exactly: `[ab@#&~<>]+` is a repeated class, an unbounded repetition with no LIKE spelling."
+    },
+    "regex/matches/negated-class": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and a negated character class has no exact LIKE lowering, so the pattern is refused."
+    },
+    "regex/matches/non-digit-class": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and \\D has no exact LIKE lowering, so the pattern is refused."
+    },
+    "regex/matches/two-dot-star-gaps": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and the LIKE lowering takes at most one .* per alternative; two are refused."
+    },
+    "regex/matches/unanchored-dot": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and a . in a pattern not anchored at both ends has no exact LIKE lowering (_ matches a newline that RE2's . does not), so the pattern is refused."
     },
     "regex/matches/unanchored-quantifiers": {
       "status": "unsupported",
@@ -311,6 +351,10 @@
     "regex/matches/whitespace-class": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and \\s* anchored at both ends (a string made only of RE2 whitespace) has no LIKE spelling: LIKE has no character classes, so the translator refuses the \\s escape"
+    },
+    "regex/matches/word-boundary": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and \\b has no LIKE lowering, so the pattern is refused."
     },
     "relation/equals/negated-one-hop-against-explicit-null-field": {
       "status": "unsupported",
@@ -411,6 +455,10 @@
     "size/not-equals/fractional-threshold": {
       "status": "unsupported",
       "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
+    },
+    "string/concatenate/negated-null-principal-attribute": {
+      "status": "unsupported",
+      "reason": "add(null, \"canary\") is folded only when both constants are strings or both numbers; CEL has no overload for a null operand, and Prisma has no expression to carry the error, so it is refused."
     },
     "string/concatenate/ordering": {
       "status": "unsupported",

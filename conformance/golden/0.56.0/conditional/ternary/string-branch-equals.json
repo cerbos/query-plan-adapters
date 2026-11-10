@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a2",
+    "a5",
+    "a9",
+    "b2",
+    "b4",
+    "b6",
+    "c2",
+    "d2",
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/string-branch-equals",
+  "intent": "A ternary choosing aString or a constant string, compared == \"same\".",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "same"
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "value": "same"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/string-branch-equals",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aBool ? R.attr.aString : \"same\") == \"same\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The else arm compares two constants and is true for every aBool=false row; dropping the guard admits every row, and j1 and j3 must stay denied."
+}

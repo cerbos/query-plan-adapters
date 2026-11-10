@@ -33,6 +33,18 @@
       "status": "unsupported",
       "reason": "Same key membership over a to-one relation as `membership/in/map-attribute-keys`, under negation"
     },
+    "regex/matches/case-insensitive-non-ascii": {
+      "status": "unsupported",
+      "reason": "(?i) is passed to $regex only over ASCII letters: PCRE2 and RE2 fold other letters differently, so a (?i) pattern holding a non-ASCII letter is refused."
+    },
+    "regex/matches/dot-all-flag": {
+      "status": "unsupported",
+      "reason": "The RE2-to-PCRE2 translator reads no inline flag but (?i); (?s) is refused."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "$regex takes a constant pattern that the translator checks as RE2 first; a pattern read from a row would run as PCRE2, so it is refused."
+    },
     "regex/matches/negated-nested-repetition-over-budget-from-principal": {
       "status": "unsupported",
       "reason": "RE2 rejects a pattern whose nested counted repetitions exceed its budget of 1000 copies, and PCRE2, which $regex runs, accepts it; the adapter does not compute RE2's budget, so it refuses a counted repetition nested in a counted repetition rather than send $regex a pattern RE2 would reject."
