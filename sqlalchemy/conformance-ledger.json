@@ -85,6 +85,10 @@
       "status": "unsupported",
       "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so int() is refused rather than lowered to CAST."
     },
+    "cast/int/out-of-range-beside-relation": {
+      "status": "unsupported",
+      "reason": "Same int() refusal as cast/int/double-truncation-bounds."
+    },
     "cast/int/string-beyond-double-precision": {
       "status": "unsupported",
       "reason": "SQL CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so int() is refused rather than lowered to CAST."

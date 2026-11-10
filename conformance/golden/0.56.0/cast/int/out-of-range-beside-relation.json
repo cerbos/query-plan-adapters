@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "h6"
+  ],
+  "degenerateReason": null,
+  "id": "cast/int/out-of-range-beside-relation",
+  "intent": "int(aDouble) == 22 OR'd with a predicate over the to-one parent chain.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aDouble"
+                      }
+                    ],
+                    "operator": "int"
+                  }
+                },
+                {
+                  "value": 22
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.inner.aString"
+                },
+                {
+                  "value": "dept"
+                }
+              ],
+              "operator": "endsWith"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "cast/int/out-of-range-beside-relation",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aDouble) == 22 || R.attr.parent.inner.aString.endsWith(\"dept\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "g1's -9.5e18 is out of int64 range, an error CEL denies for that row alone. A CAST guarded only by a sibling range check can run first and abort the whole query: SQL Server does so once the OR joins the parent chain. Found by fuzzing (fuzz/s61/0248, efcore / sqlserver)."
+}
