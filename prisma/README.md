@@ -96,7 +96,9 @@ mapper: {
 mapper: (path) => ({ field: path.replace("request.resource.attr.", "") })
 ```
 
-An unmapped path is used verbatim as the Prisma field name, which makes the query fail.
+An unmapped path is used verbatim as the Prisma field name, which makes the query fail. Without a
+mapping of its own, a path resolves through its longest mapped prefix only when that prefix names a
+relation; a key read beneath a prefix mapped to a scalar field throws `UnsupportedQueryPlanError`.
 
 ### `MapperConfig`
 

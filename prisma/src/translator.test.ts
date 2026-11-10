@@ -440,6 +440,15 @@ describe("the mapper contract", () => {
     });
   });
 
+  test("a key under a scalar-mapped prefix is refused, not resolved to the prefix's column", async () => {
+    // cerbos/query-plan-adapters#689: the plan reads aString beneath a prefix mapped to one column.
+    await expect(
+      translate("string/equals/case-sensitive", {
+        mapper: { "request.resource.attr": { field: "owner" } },
+      }),
+    ).rejects.toThrow(UnsupportedQueryPlanError);
+  });
+
   test.each(["collection/exists/scalar-list-equals"])(
     "%s resolves a projection supplied through a prefix mapper",
     async (action) => {

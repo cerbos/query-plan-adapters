@@ -202,6 +202,13 @@ export function resolveFieldReference(
 
   const activeConfig = config ?? matchedConfig;
 
+  // A scalar column has no keys: reading one beneath it would compare the column itself.
+  if (!config && matchedConfig && !matchedConfig.relation) {
+    throw new UnsupportedQueryPlanError(
+      `"${reference}" reads "${reference.slice(matchedPrefix.length + 1)}" beneath "${matchedPrefix}", which is mapped to a scalar field; map the full reference`,
+    );
+  }
+
   if (!activeConfig?.relation) {
     return {
       path: [activeConfig?.field || reference],
