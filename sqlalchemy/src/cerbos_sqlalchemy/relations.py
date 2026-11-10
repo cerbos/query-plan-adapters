@@ -23,7 +23,7 @@ from sqlalchemy import (
     true,
 )
 
-from cerbos_sqlalchemy._operators import OPERATOR_FNS, require_lowerable
+from cerbos_sqlalchemy._operators import OPERATOR_FNS, exact_pair, require_lowerable
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
 __all__ = ["Relation", "relation_overrides", "require_hops"]
@@ -243,9 +243,11 @@ def _relation_membership(relation: Relation, value: Any) -> Any:
     if value is None:
         predicate = member.is_(None)
     elif hasattr(value, "is_"):
-        predicate = or_(member == value, and_(member.is_(None), value.is_(None)))
+        left, right = exact_pair(member, value)
+        predicate = or_(left == right, and_(member.is_(None), value.is_(None)))
     else:
-        predicate = member == value
+        left, right = exact_pair(member, value)
+        predicate = left == right
     return relation._guarded(relation._exists(predicate))
 
 

@@ -401,40 +401,22 @@ Plan with the SDK's async client, or run the sync one off the event loop.
 
 ### Database collation requirements
 
-CEL string and hierarchy comparisons are case-sensitive and byte-exact. Columns in `attr_map` must
-use a byte-exact collation for equality, membership, and the `LIKE` emitted by
-`contains`/`startsWith`/`endsWith` and hierarchy-prefix predicates — otherwise the filter can
-**over-grant** (`One` matching `one`, `Dept.Eng` overlapping `dept.eng`). The adapter cannot enforce
-this portably.
+CEL string and hierarchy comparisons are byte-exact, and CEL orders strings by code point. The
+adapter does not trust the column's collation for that:
 
-On MySQL the default `_ci` collations are case-insensitive. Use `utf8mb4_0900_bin` (MySQL 8.0.17+).
-Case-sensitive is not enough: `utf8mb4_0900_as_cs` ignores a soft hyphen (`'o­ne' = 'one'` is
-TRUE), and `utf8mb4_bin` is PAD SPACE (`'a' = 'a '` is TRUE)
-([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+- **MySQL:** every comparison, membership test and `LIKE` over a `String` column or a string
+  literal runs under `COLLATE utf8mb4_0900_bin`, which is byte-exact and NO PAD, so the default
+  `utf8mb4_0900_ai_ci` (on the column or on the connection) cannot make `One` match `one`. String
+  columns must use the `utf8mb4` character set, and a comparison over a column whose own collation
+  differs cannot use that column's index.
+- **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
+  ordering (`<`, `<=`, `>`, `>=`) over a string runs under `COLLATE "C"`, since a linguistic
+  collation such as `en_US.UTF-8` sorts `"One"` after `"a"`
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Avoid nondeterministic ICU
+  collations and `citext`.
 
-String ordering (`<`, `<=`, `>`, `>=`) follows the collation too, and CEL orders strings by code
-point. SQLite's default `BINARY` and MySQL's `utf8mb4_0900_bin` do. On PostgreSQL every collation
-is deterministic, so equality is exact, but a linguistic one such as glibc's `en_US.UTF-8` (the
-usual default on Debian images and managed services) or ICU's `en-US` sorts `"One"` after `"a"`,
-so `R.attr.name > "a"` over-grants it
-([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Use `"C"` on every column a
-policy orders: create the database with `LC_COLLATE 'C'`, or declare `COLLATE "C"` on the column.
-The conformance harness's PostgreSQL container initialises with `--lc-collate=C`, overridable
-through `ADAPTER_TEST_POSTGRES_INITDB_ARGS`.
-
-On MySQL a string literal, and `string()` of a column (`CAST(... AS CHAR)`, or the `'true'`/`'false'`
-of a boolean), take the **connection's** collation, not the column's, and a utf8mb4 session starts
-at `utf8mb4_0900_ai_ci` whatever the server default is. Set `utf8mb4_0900_bin` on every connection,
-or `!(string(R.attr.owner) == "set")` drops the `Set` row CEL keeps. The conformance harness does it
-from a `connect` listener, which runs after the driver's own character-set setup:
-
-```python
-@event.listens_for(engine, "connect")
-def _byte_exact_collation(dbapi_connection, _connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("SET NAMES utf8mb4 COLLATE utf8mb4_0900_bin")
-    cursor.close()
-```
+The conformance MySQL leg runs under the server default, and the PostgreSQL leg under ICU's
+`en-US`, so the corpus proves both on every run.
 
 On SQLite a column collation does not help: SQLite's `LIKE` ignores it and folds ASCII case unless
 the connection sets `PRAGMA case_sensitive_like = ON`. Without the pragma, `contains`, `startsWith`,

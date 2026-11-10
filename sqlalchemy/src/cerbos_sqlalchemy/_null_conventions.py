@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from sqlalchemy import and_, case, literal, not_, or_
 
-from cerbos_sqlalchemy._operators import scalar_kind
+from cerbos_sqlalchemy._operators import exact_pair, scalar_kind
 from cerbos_sqlalchemy._plan import Expr, Operand, Value, Variable
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
@@ -175,7 +175,8 @@ def definite_equality(
         present.append(left_column.isnot(None))
     if right_explicit:
         present.append(right.isnot(None))
-    equality = and_(*present, left_column == right)
+    left_exact, right_exact = exact_pair(left_column, right)
+    equality = and_(*present, left_exact == right_exact)
     if left_explicit and right_explicit:
         equality = or_(and_(left_column.is_(None), right.is_(None)), equality)
     return not_(equality) if operator == "ne" else equality
