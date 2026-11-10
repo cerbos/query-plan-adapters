@@ -1233,6 +1233,10 @@
       "status": "unsupported",
       "reason": "The comparison holds for an empty collection, and an Elasticsearch document holds an empty array and a missing field the same way (no indexed value), so the NOT(exists) it needs would admit a missing collection, which CEL denies; the shape is refused."
     },
+    "size/less-than/string-holding-nul": {
+      "status": "unsupported",
+      "reason": "size() of a string needs its length, which the Query DSL cannot compare without scripts; over a string field only emptiness, and thresholds every length or no length satisfies, translate."
+    },
     "size/less-than/string-length-value-first": {
       "status": "unsupported",
       "reason": "size() of a string needs its length, which the Query DSL cannot compare without scripts; over a string field only emptiness, and thresholds every length or no length satisfies, translate."

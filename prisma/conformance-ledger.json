@@ -1,7 +1,8 @@
 {
   "adapter": "prisma",
   "lacks": {
-    "null-list": "The harness stores aNumberList as AdversarialNumberListElement rows, a one-to-many relation, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+    "null-list": {"reason": "The harness stores aNumberList as AdversarialNumberListElement rows, a one-to-many relation, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."},
+    "nul-in-string": {"reason": "PostgreSQL text cannot hold a NUL character, so a row whose string holds one cannot be stored. SQLite holds it, but Prisma reaches a string only through LIKE, which SQLite reads as C text up to the first NUL, and Prisma emits no other string function: size() and every string filter would answer for the prefix alone.", "stores": ["postgres", "sqlite"]}
   },
   "cases": {
     "arithmetic/add/int-beside-double-field": {
@@ -431,6 +432,10 @@
     "regex/matches/non-digit-class": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and \\D has no exact LIKE lowering, so the pattern is refused."
+    },
+    "regex/matches/nul-in-character-class": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and the translator lowers only patterns a combination of LIKE filters decides exactly: `[abx]+` is a repeated class, an unbounded repetition with no LIKE spelling."
     },
     "regex/matches/two-dot-star-gaps": {
       "status": "unsupported",

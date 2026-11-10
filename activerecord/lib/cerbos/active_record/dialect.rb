@@ -36,9 +36,20 @@ module Cerbos
       end
 
       # CEL `size()` counts characters. MySQL's `LENGTH` counts bytes, so MySQL uses
-      # `CHAR_LENGTH`. SQLite and PostgreSQL `LENGTH` already count characters.
+      # `CHAR_LENGTH`. PostgreSQL's `LENGTH` already counts characters. SQLite's stops at the
+      # first NUL, and its `REPLACE` cannot match one, so each NUL becomes a space inside the
+      # string's JSON text, where it is the escape \u0000.
       def char_length(expression)
-        ArelSupport.function(mysql? ? "CHAR_LENGTH" : "LENGTH", [expression])
+        return ArelSupport.function(mysql? ? "CHAR_LENGTH" : "LENGTH", [expression]) unless sqlite?
+
+        json = ArelSupport.function("REPLACE", [ArelSupport.function("JSON_QUOTE", [expression]), "\\\\", "\u0001"])
+        json = ArelSupport.function("REPLACE", [json, "\\u0000", " "])
+        json = ArelSupport.function("REPLACE", [json, "\u0001", "\\\\"])
+        ArelSupport.function("LENGTH", [ArelSupport.function("JSON_EXTRACT", [json, "$"])])
+      end
+
+      def sqlite?
+        %w[sqlite sqlite3].include?(adapter_name)
       end
 
       # Integer division truncating toward zero, as CEL's `int / int` does. SQLite's and

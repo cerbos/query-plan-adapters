@@ -1,7 +1,8 @@
 {
   "adapter": "efcore",
   "lacks": {
-    "null-list": "The harness stores aNumberList as NumberElement rows, a one-to-many navigation, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+    "null-list": {"reason": "The harness stores aNumberList as NumberElement rows, a one-to-many navigation, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."},
+    "nul-in-string": {"reason": "PostgreSQL text cannot hold a NUL character, so a row whose string holds one cannot be stored. SQLite holds it, but its length(), substr() and replace() read a string as C text up to the first NUL, and EF Core translates to no SQLite function that sees past one: size() and every string match would answer for the prefix alone.", "stores": ["postgres", "sqlite"]}
   },
   "cases": {
     "arithmetic/add/int-of-string-plus-constant": {

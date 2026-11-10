@@ -51,9 +51,16 @@ module Cerbos
         end
       end
 
-      # CEL +size()+ counts the characters of a string.
+      # CEL +size()+ counts the characters of a string. SQLite's +LENGTH+ stops at the first NUL,
+      # and its +REPLACE+ cannot match one, so each NUL becomes a space inside the string's JSON
+      # text, where it is the escape \u0000.
       def char_length(expression)
-        ::Sequel.char_length(expression)
+        return ::Sequel.char_length(expression) unless database_type == "sqlite"
+
+        json = ::Sequel.function(:replace, ::Sequel.function(:json_quote, expression), "\\\\", "\u0001")
+        json = ::Sequel.function(:replace, json, "\\u0000", " ")
+        json = ::Sequel.function(:replace, json, "\u0001", "\\\\")
+        ::Sequel.function(:length, ::Sequel.function(:json_extract, json, "$"))
       end
 
       # The type name that a CAST must use to get an IEEE-754 binary64 value. The correct name

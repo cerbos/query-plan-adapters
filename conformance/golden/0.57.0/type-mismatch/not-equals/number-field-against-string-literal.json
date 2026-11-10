@@ -33,7 +33,8 @@
     "j3",
     "j4",
     "k1",
-    "k2"
+    "k2",
+    "k3"
   ],
   "degenerateReason": null,
   "id": "type-mismatch/not-equals/number-field-against-string-literal",

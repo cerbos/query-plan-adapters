@@ -30,6 +30,8 @@ var storeCapabilities = map[string]bool{
 	// A list attribute sent as null, kept apart from []. A store that holds a list as child rows
 	// keeps both as zero rows (#548).
 	"null-list": true,
+	// A string holding a NUL. PostgreSQL text cannot store one (#675).
+	"nul-in-string": true,
 }
 
 // Dataset is the corpus as the PDP sees it: the principal verbatim, and one check() resource

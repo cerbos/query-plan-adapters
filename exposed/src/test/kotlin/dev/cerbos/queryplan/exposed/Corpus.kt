@@ -105,10 +105,13 @@ internal object Corpus {
         fun appliesTo(tag: String): Boolean = pdp == null || tag in pdp
     }
 
-    /** [lacks] maps each store capability this store lacks to the reason. */
+    /** A store capability the ledger lacks: on every store, or on [stores] alone. */
+    private data class Lack(val reason: String, val stores: List<String>? = null)
+
+    /** [lacks] maps each store capability some store lacks to the reason. */
     private data class Ledger(
         val adapter: String,
-        val lacks: Map<String, String> = emptyMap(),
+        val lacks: Map<String, Lack> = emptyMap(),
         val cases: Map<String, LedgerEntry>,
     )
 
@@ -122,8 +125,9 @@ internal object Corpus {
     fun ledger(): Map<String, LedgerEntry> = readLedger().cases
 
     /**
-     * The store capabilities this store lacks. A seed requiring one is a resource the store cannot
+     * The store capabilities [store] lacks. A seed requiring one is a resource the store cannot
      * hold: it is not loaded, and its id is struck from every golden's `allowed`.
      */
-    fun lacks(): Set<String> = readLedger().lacks.keys
+    fun lacks(store: String): Set<String> =
+        readLedger().lacks.filterValues { it.stores == null || store in it.stores }.keys
 }

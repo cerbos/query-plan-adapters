@@ -1,5 +1,8 @@
 {
   "adapter": "sqlalchemy",
+  "lacks": {
+    "nul-in-string": {"reason": "PostgreSQL text cannot hold a NUL character, so a row whose string holds one cannot be stored.", "stores": ["postgres"]}
+  },
   "cases": {
     "arithmetic/add/int-beside-double-field": {
       "status": "unsupported",

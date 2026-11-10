@@ -324,6 +324,11 @@ The adapter cannot set a collation or a pragma from inside a `where`.
   `string/contains/case-sensitive`, `string/starts-with/case-sensitive` and
   `string/ends-with/case-sensitive` cases.
 
+  A mapped string column must not hold a NUL character. SQLite's `LIKE` stops at the first NUL,
+  so `size()` and every string filter answer for the prefix before it: `size(x) < 2` returns
+  `"a\0x"`, which Cerbos denies. PostgreSQL `text` cannot store a NUL at all. The corpus's NUL seed
+  is lacked on both legs ([#675](https://github.com/cerbos/query-plan-adapters/issues/675)).
+
 See Prisma's [case-sensitivity documentation](https://docs.prisma.io/docs/orm/v6/prisma-client/queries/case-sensitivity).
 
 ## Supported operators
@@ -418,14 +423,14 @@ API and is out of scope.
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
 and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real Prisma
 queries over 43 of the corpus's 44 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL
-(under `utf8mb4_0900_bin`). The ledger lacks `null-list`, so j4 is not loaded. Passed cases on the
+(under `utf8mb4_0900_bin`). The ledger lacks `null-list`, so j4 is not loaded, and `nul-in-string` on PostgreSQL and SQLite, so k3 is not loaded there. Passed cases on the
 current PDP, 0.57.0, identical on all six combinations, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
 | core | 31 / 31 |
 | extended | 84 / 110 |
-| adversarial | 366 / 516 |
+| adversarial | 367 / 518 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.

@@ -103,7 +103,9 @@ class ShiftedInstant:
 class _CharLength(FunctionElement):
     """A string's length in characters, as CEL's ``size()`` counts it.
 
-    SQLite's and PostgreSQL's ``length()`` count characters; MySQL's counts bytes.
+    SQLite's and PostgreSQL's ``length()`` count characters; MySQL's counts bytes. SQLite's
+    stops at the first NUL, and its ``replace()`` cannot match one, so each NUL becomes a space
+    inside the string's JSON text, where it is the escape ``\\u0000``.
     """
 
     name = "cerbos_char_length"
@@ -114,6 +116,15 @@ class _CharLength(FunctionElement):
 @compiles(_CharLength)
 def _char_length(element, compiler, **kw):
     return f"length({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(_CharLength, "sqlite")
+def _sqlite_char_length(element, compiler, **kw):
+    quoted = f"json_quote({compiler.process(element.clauses, **kw)})"
+    return (
+        f"length(json_extract(replace(replace(replace({quoted}, '\\\\', char(1)), "
+        r"'\u0000', ' '), char(1), '\\'), '$'))"
+    )
 
 
 @compiles(_CharLength, "mysql")

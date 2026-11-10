@@ -258,6 +258,13 @@ cases:
   condition:
     match:
       expr: '!(size(R.attr.aOptionalString) < 5000000000) || R.attr.aNumber > 10'
+- id: 'size/less-than/string-holding-nul'
+  tier: adversarial
+  intent: 'size(aString) < 2 over k3, whose aString is "a", NUL, "x".'
+  trap: 'k3 is three code points, so it is denied. SQLite''s LENGTH stops at the NUL and counts 1, which grants k3.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) < 2'
 - id: 'size/less-than/string-length-value-first'
   tier: adversarial
   intent: 'A threshold on the left of a string length (5 < size(aString)).'

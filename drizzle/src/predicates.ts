@@ -2,6 +2,7 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, is, isNull, not, or, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
+import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { Param } from "drizzle-orm/sql";
 
 import { UnsupportedQueryPlanError } from "./errors";
@@ -150,14 +151,22 @@ export type StringMatchOperator = "contains" | "startsWith" | "endsWith";
  * and make `size()` disagree with the PDP (#473). MySQL's character count is `char_length()`,
  * which SQLite does not have — so, as `indexed.ts` does, the dialect is read off the Drizzle
  * class of whichever operand is a column, and the caller still declares none. With no column
- * among the operands there is no MySQL-side value to measure.
+ * among the operands there is no MySQL-side value to measure. SQLite's `length()` stops at the
+ * first NUL, and its `replace()` cannot match one, so each NUL becomes a space inside the string's
+ * JSON text, where it is the escape \u0000.
  */
 export const characterLength = (
   columns: readonly (AnyColumn | undefined)[],
-): ((expr: SQL) => SQL) =>
-  columns.some((column) => column !== undefined && is(column, MySqlColumn))
-    ? (expr) => sql`char_length(${expr})`
-    : (expr) => sql`length(${expr})`;
+): ((expr: SQL) => SQL) => {
+  if (columns.some((column) => column !== undefined && is(column, MySqlColumn))) {
+    return (expr) => sql`char_length(${expr})`;
+  }
+  if (columns.some((column) => column !== undefined && is(column, SQLiteColumn))) {
+    return (expr) =>
+      sql`length(json_extract(replace(replace(replace(json_quote(${expr}), '\\\\', char(1)), '\\u0000', ' '), char(1), '\\\\'), '$'))`;
+  }
+  return (expr) => sql`length(${expr})`;
+};
 
 /**
  * CEL-exact string matching: replace/substr are case-sensitive, interpret no LIKE

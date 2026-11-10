@@ -73,15 +73,34 @@ interface DerivedEntry {
   labels: (string | null)[];
 }
 
-// A seed requiring a capability the ledger's `lacks` names is a resource this store cannot hold:
-// it is not loaded, and its id is struck from every allowed set.
-const LACKS = Object.keys(
+const STORE_NAMES = ["sqlite", "postgres", "mysql"] as const;
+type StoreName = (typeof STORE_NAMES)[number];
+
+function selectedStoreName(): StoreName {
+  const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
+  // A typo must fail rather than silently fall back to SQLite (jest.adversarial.config.js rejects
+  // it first; the repeat keeps this file reading against a value it trusts).
+  if (!STORE_NAMES.includes(requested as StoreName)) {
+    throw new Error(
+      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
+    );
+  }
+  return requested as StoreName;
+}
+
+const STORE_NAME = selectedStoreName();
+
+// A seed requiring a capability the ledger's `lacks` names for this store is a resource it cannot
+// hold: it is not loaded, and its id is struck from every allowed set.
+const LACKS = Object.entries(
   (
     JSON.parse(
       fs.readFileSync(path.join(__dirname, "..", "conformance-ledger.json"), "utf8")
-    ) as { lacks?: Record<string, string> }
+    ) as { lacks?: Record<string, { reason: string; stores?: string[] }> }
   ).lacks ?? {}
-);
+)
+  .filter(([, entry]) => entry.stores?.includes(STORE_NAME) ?? true)
+  .map(([capability]) => capability);
 const UNHELD = new Set(
   (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds
     .filter((seed) => seed.requires?.some((capability) => LACKS.includes(capability)))
@@ -202,9 +221,6 @@ async function seedStore(): Promise<void> {
 
 // -- the store ------------------------------------------------------------------------------------
 
-const STORE_NAMES = ["sqlite", "postgres", "mysql"] as const;
-type StoreName = (typeof STORE_NAMES)[number];
-
 /**
  * How each leg asks its own connection which engine answered, and the first word of the answer.
  * Each spelling is a syntax error on the other two engines, so the anti-vacuity test fails in every
@@ -215,20 +231,6 @@ const STORE_BANNERS: Record<StoreName, { query: string; engine: string }> = {
   postgres: { query: "select version() as banner", engine: "PostgreSQL" },
   mysql: { query: "select @@version_comment as banner", engine: "MySQL" },
 };
-
-function selectedStoreName(): StoreName {
-  const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
-  // A typo must fail rather than silently fall back to SQLite (jest.adversarial.config.js rejects
-  // it first; the repeat keeps this file reading against a value it trusts).
-  if (!STORE_NAMES.includes(requested as StoreName)) {
-    throw new Error(
-      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
-    );
-  }
-  return requested as StoreName;
-}
-
-const STORE_NAME = selectedStoreName();
 
 /**
  * The six adversarial schemas — (Prisma 6, Prisma 7) x (SQLite, PostgreSQL, MySQL) — must hold one

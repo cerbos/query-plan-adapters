@@ -767,11 +767,11 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 // -- the suite ----------------------------------------------------------------------------------
 
 func TestAdversarialConformance(t *testing.T) {
-	corpus := loadCorpus(t)
 	mapper := buildMapper()
 
 	for _, tgt := range targets() {
 		t.Run(tgt.name, func(t *testing.T) {
+			corpus := loadCorpus(t, tgt.name)
 			s := openStore(t, tgt, corpus)
 			var fuzzResults []FuzzVerdict
 			defer func() { writeFuzzResults(t, "ent", tgt.name, fuzzResults) }()

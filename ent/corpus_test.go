@@ -126,7 +126,8 @@ type Corpus struct {
 	Tags []string
 }
 
-func loadCorpus(tb testing.TB) *Corpus {
+// loadCorpus reads the corpus as the named store holds it.
+func loadCorpus(tb testing.TB, store string) *Corpus {
 	tb.Helper()
 
 	dir := findConformanceDir(tb)
@@ -146,8 +147,12 @@ func loadCorpus(tb testing.TB) *Corpus {
 
 	var ledger struct {
 		Cases map[string]LedgerEntry `json:"cases"`
-		// Lacks maps each store capability this adapter's store lacks to the reason.
-		Lacks map[string]string `json:"lacks"`
+		// Lacks maps each store capability this adapter's stores lack to the reason, and to the
+		// stores that lack it when not all of them do.
+		Lacks map[string]struct {
+			Reason string   `json:"reason"`
+			Stores []string `json:"stores"`
+		} `json:"lacks"`
 	}
 	readJSON(tb, ledgerFile, &ledger)
 	c.Ledger = ledger.Cases
@@ -156,7 +161,10 @@ func loadCorpus(tb testing.TB) *Corpus {
 	// loaded, and its id is struck from every golden's allowed set.
 	var unheld []string
 	c.Seeds = slices.DeleteFunc(c.Seeds, func(s Seed) bool {
-		if slices.ContainsFunc(s.Requires, func(r string) bool { _, lacked := ledger.Lacks[r]; return lacked }) {
+		if slices.ContainsFunc(s.Requires, func(r string) bool {
+			l, lacked := ledger.Lacks[r]
+			return lacked && (l.Stores == nil || slices.Contains(l.Stores, store))
+		}) {
 			unheld = append(unheld, s.ID)
 			return true
 		}

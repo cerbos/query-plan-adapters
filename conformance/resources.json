@@ -1484,6 +1484,28 @@
         "tags": []
       },
       "id": "k2"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 39.3,
+        "aNumber": 39,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "a\u0000x",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "a\u0000x"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "k3"
     }
   ]
 }

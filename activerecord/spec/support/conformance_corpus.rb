@@ -11,9 +11,11 @@ module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
   LEDGER_FILE = File.expand_path("../../conformance-ledger.json", __dir__)
 
-  # A seed requiring a store capability the ledger lacks is a resource this store cannot hold: it
-  # is not loaded, and its id is struck from every golden's allowed set.
-  LACKS = JSON.parse(File.read(LEDGER_FILE)).fetch("lacks", {}).keys.freeze
+  # A seed requiring a store capability the ledger lacks on this store is a resource it cannot
+  # hold: it is not loaded, and its id is struck from every golden's allowed set.
+  STORE = ENV.fetch("ADAPTER_TEST_DB", "sqlite")
+  LACKS = JSON.parse(File.read(LEDGER_FILE)).fetch("lacks", {})
+    .select { |_, entry| entry.fetch("stores", [STORE]).include?(STORE) }.keys.freeze
   ALL_SEEDS = JSON.parse(File.read(File.join(DIR, "seeds.json"))).fetch("seeds")
   UNHELD = ALL_SEEDS.select { |seed| seed.fetch("requires", []).intersect?(LACKS) }
     .map { |seed| seed.fetch("id") }.freeze
@@ -135,5 +137,5 @@ module ConformanceCorpus
 end
 
 RSpec.configure do |config|
-  config.after(:suite) { ConformanceCorpus.write_fuzz_results(ENV.fetch("ADAPTER_TEST_DB", "sqlite")) }
+  config.after(:suite) { ConformanceCorpus.write_fuzz_results(ConformanceCorpus::STORE) }
 end

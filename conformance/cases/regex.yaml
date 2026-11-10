@@ -213,6 +213,13 @@ cases:
   condition:
     match:
       expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "*a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{2,1}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a\\" : "^h") || R.attr.aNumber == 5'
+- id: 'regex/matches/nul-in-character-class'
+  tier: adversarial
+  intent: 'matches("^[abx]+$") over k3, whose aString is "a", NUL, "x".'
+  trap: 'NUL is not in [abx], so k3 is denied and "ab" is allowed. A store that reads a string as C text (SQLite''s LENGTH and LIKE) stops at the NUL, so a residue that drops a, b and x reads as empty and grants k3.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^[abx]+$")'
 - id: 'regex/matches/negated-class'
   tier: adversarial
   intent: 'matches("^[^a]+$"): one or more characters, none of them a.'
