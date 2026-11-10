@@ -304,3 +304,10 @@ cases:
   condition:
     match:
       expr: 'R.attr.tagNames != ["public"]'
+- id: 'comparison/less-than/field-to-field'
+  tier: adversarial
+  intent: 'Two string attributes ordered against each other (aOptionalString < aString).'
+  trap: 'The operands keep their order, so d1 ("[SEC]" < "[SEC]ret") is allowed; swapping them allows the rows where aString sorts first instead, and a missing operand is an error that denies.'
+  condition:
+    match:
+      expr: 'R.attr.aOptionalString < R.attr.aString'

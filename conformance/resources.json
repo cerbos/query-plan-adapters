@@ -79,6 +79,7 @@
         {},
         {}
       ],
+      "nullString": null,
       "nullableStructs": [
         {
           "name": null

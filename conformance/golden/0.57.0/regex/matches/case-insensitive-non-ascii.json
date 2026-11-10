@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "h7"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/case-insensitive-non-ascii",
+  "intent": "matches(\"(?i)^É-X-É$\"): the (?i) flag over a pattern with non-ASCII letters.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "(?i)^É-X-É$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/case-insensitive-non-ascii",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"(?i)^É-X-É$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2 folds É to é, so h7 \"é-x-é\" matches; folding ASCII letters only, or a store lower() that leaves É alone, under-grants it."
+}

@@ -526,7 +526,7 @@ the current PDP (0.57.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 29 / 30 |
 | extended | 50 / 102 |
-| adversarial | 197 / 445 |
+| adversarial | 199 / 462 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
