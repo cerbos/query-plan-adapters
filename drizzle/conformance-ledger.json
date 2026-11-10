@@ -121,6 +121,10 @@
       "status": "unsupported",
       "reason": "Both lists are built from a computed element (`aDouble / 0.0`, NaN where aDouble is 0), and a SQL value expression has no list value, so the `list` constructor is refused."
     },
+    "hierarchy/overlaps/field-to-field": {
+      "status": "unsupported",
+      "reason": "Both hierarchies are read from columns, so there is no constant path to expand into prefixes, and splitting a column on a delimiter needs SQL no dialect shares."
+    },
     "logic/and/non-boolean-operand-in-value-negated": {
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: the SQL value-expression walk takes no logical connective as a comparison operand, so the adapter refuses it."

@@ -220,7 +220,7 @@ const buildFieldHierarchyFilter = (
     }
     filter = combined;
   } else if (fieldIsAncestor) {
-    filter = prefixes.length === 0 ? FALSE_CONDITION : isOneOfPrefixes();
+    filter = prefixes.length === 0 ? falseUnlessNull(fieldExpr) : isOneOfPrefixes();
   } else {
     filter = isDescendantOfConstant();
   }
@@ -288,6 +288,10 @@ const buildSegmentedHierarchyFilter = (
     : sql`(case when ${sql.join(nullable, sql` or `)} then null else ${core} end)`;
 };
 
+// A missing path is a CEL error, so a constant with no strict ancestors stays UNKNOWN for it.
+const falseUnlessNull = (expr: SQL): SQL =>
+  sql`(case when ${expr} is null then null else ${FALSE_CONDITION} end)`;
+
 /** A constant hierarchy as segments, for comparison with a `list()`-built one. */
 const constantSegments = (hierarchy: ConstantHierarchy): Segment[] =>
   hierarchy.segments.map((value) => ({ kind: "constant", value }));
@@ -320,7 +324,7 @@ const buildCharacterHierarchyFilter = (
     Array.from({ length: upTo + 1 }, (_, size) => sql`${characters.slice(0, size).join("")}`);
   const isPrefixOf = (includeWhole: boolean): SQL =>
     characters.length === 0 && !includeWhole
-      ? FALSE_CONDITION
+      ? falseUnlessNull(expr)
       : sql`${expr} in ${prefixes(includeWhole ? characters.length : characters.length - 1)}`;
   const startsWithPath = buildStringMatchCondition(
     "startsWith",

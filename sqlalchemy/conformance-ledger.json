@@ -301,6 +301,10 @@
       "status": "unsupported",
       "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the prefix LIKE `ancestor + delimiter + '%'` would become a bare prefix match that also matches the path itself, and the literal's ancestors would be split on no separator."
     },
+    "hierarchy/ancestor-of/empty-path-negated": {
+      "status": "unsupported",
+      "reason": "An empty delimiter is refused when the hierarchy operand is parsed, as for hierarchy/ancestor-of/empty-delimiter."
+    },
     "hierarchy/descendent-of/empty-delimiter": {
       "status": "unsupported",
       "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the descendant LIKE `prefix + delimiter + '%'` would become a bare prefix match that also matches the path itself."
@@ -308,6 +312,10 @@
     "hierarchy/overlaps/empty-delimiter": {
       "status": "unsupported",
       "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the prefix LIKE `ancestor + delimiter + '%'` would become a bare prefix match, so the ancestor arms of overlaps could not be told from equality."
+    },
+    "hierarchy/overlaps/field-to-field": {
+      "status": "unsupported",
+      "reason": "The two hierarchies split the column on different delimiters, and the translator compares a column only against a constant path's prefixes: SQL cannot split a column into segments."
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",

@@ -898,6 +898,13 @@ func ancestorOf(l, r value) (Expr, error) {
 		for i := first; i < len(parts); i++ {
 			prefixes = append(prefixes, strings.Join(parts[:i], delim))
 		}
+		if len(prefixes) == 0 {
+			aExpr, err := asExpr(ancestor.value)
+			if err != nil {
+				return nil, err
+			}
+			return Case{Whens: []When{{Cond: IsNull{X: aExpr, Negate: true}, Then: BoolConst{V: false}}}}, nil
+		}
 		return membership(ancestor.value, prefixes)
 
 	case aIsStr:

@@ -2223,6 +2223,15 @@ resourcePolicy:
       condition:
         match:
           expr: hierarchy(R.attr.scope, "").ancestorOf(hierarchy("dept.eng", ""))
+    # hierarchy/ancestor-of/empty-path-negated
+    - actions:
+        - hierarchy/ancestor-of/empty-path-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hierarchy(R.attr.scope, "").ancestorOf(hierarchy("", ""))'
     # hierarchy/ancestor-of/like-metacharacters-in-path
     - actions:
         - hierarchy/ancestor-of/like-metacharacters-in-path
@@ -2232,6 +2241,15 @@ resourcePolicy:
       condition:
         match:
           expr: hierarchy(R.attr.scope).ancestorOf(hierarchy("50%.a_b.x"))
+    # hierarchy/ancestor-of/single-segment-constant-negated
+    - actions:
+        - hierarchy/ancestor-of/single-segment-constant-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hierarchy(R.attr.scope).ancestorOf(hierarchy("dept"))'
     # hierarchy/descendent-of/bracket-in-path
     - actions:
         - hierarchy/descendent-of/bracket-in-path
@@ -2277,6 +2295,15 @@ resourcePolicy:
       condition:
         match:
           expr: hierarchy(R.attr.scope, ":").descendentOf(hierarchy("50%:a_b", ":"))
+    # hierarchy/descendent-of/single-segment-constant
+    - actions:
+        - hierarchy/descendent-of/single-segment-constant
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hierarchy(R.attr.scope).descendentOf(hierarchy("dept"))
     # hierarchy/overlaps/constant-path
     - actions:
         - hierarchy/overlaps/constant-path
@@ -2304,6 +2331,15 @@ resourcePolicy:
       condition:
         match:
           expr: hierarchy(R.attr.scope, "").overlaps(hierarchy("dept.eng", ""))
+    # hierarchy/overlaps/field-to-field
+    - actions:
+        - hierarchy/overlaps/field-to-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hierarchy(R.attr.scope, ":").overlaps(hierarchy(R.attr.scope))
     # hierarchy/overlaps/like-metacharacters-in-path
     - actions:
         - hierarchy/overlaps/like-metacharacters-in-path

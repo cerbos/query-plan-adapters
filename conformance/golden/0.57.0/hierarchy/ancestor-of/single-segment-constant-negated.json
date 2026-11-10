@@ -1,0 +1,85 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/ancestor-of/single-segment-constant-negated",
+  "intent": "!hierarchy(field).ancestorOf(hierarchy(\"dept\")): a one-segment path has no strict ancestors, so every present scope is allowed.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.scope"
+                      }
+                    ],
+                    "operator": "hierarchy"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "dept"
+                      }
+                    ],
+                    "operator": "hierarchy"
+                  }
+                }
+              ],
+              "operator": "ancestorOf"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/ancestor-of/single-segment-constant-negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!hierarchy(R.attr.scope).ancestorOf(hierarchy(\"dept\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The strict-prefix list is empty: folding it to false and negating admits rows missing scope (a7), an empty IN list fails to run, and counting the equal path as an ancestor drops a1."
+}

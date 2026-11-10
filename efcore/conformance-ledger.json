@@ -84,6 +84,10 @@
       "status": "unsupported",
       "reason": "Comparing a whole list built from a computed element (`aDouble / 0.0`) has no translation: the translator compares whole lists only as related rows, which have no order or multiplicity a single comparison can read."
     },
+    "hierarchy/overlaps/field-to-field": {
+      "status": "unsupported",
+      "reason": "Both hierarchies are read from columns, so there is no constant path to expand into prefixes, and EF Core cannot translate splitting a column on a delimiter."
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`in` over a map tests its keys, and the to-one `parent` is one joined row whose keys are its non-NULL columns, which SQL has no form for; the bare variable is refused as unmapped."
