@@ -14,8 +14,8 @@ import org.hibernate.dialect.PostgreSQLDialect;
 import org.hibernate.type.StandardBasicTypes;
 
 /**
- * Registers the collations CEL's string semantics need, whatever the column's: on MySQL
- * 8.0.17+, {@value ExactStrings#EXACT} reads a string under {@code utf8mb4_0900_bin}, since the
+ * Registers the collations CEL's string semantics need, whatever the column's: on MySQL,
+ * whatever version the dialect reports, {@value ExactStrings#EXACT} reads a string under {@code utf8mb4_0900_bin}, since the
  * default {@code utf8mb4_0900_ai_ci} folds case and accents; on PostgreSQL,
  * {@value ExactStrings#CODE_POINT_ORDER} orders a string under {@code "C"}, since a linguistic
  * collation does not order by code point. Discovered through
@@ -28,8 +28,7 @@ public final class ExactStringFunctionContributor implements FunctionContributor
         Dialect dialect = functionContributions.getDialect();
         String name;
         String pattern;
-        if (dialect instanceof MySQLDialect && !(dialect instanceof MariaDBDialect)
-                && dialect.getVersion().isSameOrAfter(8, 0, 17)) {
+        if (dialect instanceof MySQLDialect && !(dialect instanceof MariaDBDialect)) {
             name = ExactStrings.EXACT;
             pattern = "(convert(?1 using utf8mb4) collate utf8mb4_0900_bin)";
         } else if (dialect instanceof PostgreSQLDialect) {

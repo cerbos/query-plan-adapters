@@ -326,13 +326,14 @@ through `META-INF/services`, registers the collations below, and every string `=
 `contains`/`startsWith`/`endsWith`, `hasIntersection`, `hierarchy(...)`, `matches(...)`,
 `int()` of a string, `string()` and `+` comparison reads its string side through them:
 
-- **MySQL 8.0.17+:** `(convert(x using utf8mb4) collate utf8mb4_0900_bin)`, byte-exact and NO PAD,
+- **MySQL:** `(convert(x using utf8mb4) collate utf8mb4_0900_bin)`, byte-exact and NO PAD,
   so the default `utf8mb4_0900_ai_ci` no longer matches `'Finance'` for `'finance'`, and
   `utf8mb4_0900_as_cs` no longer ignores a soft hyphen
   ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). A comparison over a column
-  whose own collation differs cannot use that column's index. MariaDB and MySQL before 8.0.17
-  get no collation: give their string columns a byte-exact NO PAD collation yourself, such as
-  MariaDB's `utf8mb4_nopad_bin`.
+  whose own collation differs cannot use that column's index. It is
+  registered whatever server version Hibernate reports, so it holds with JDBC metadata access
+  off; MySQL before 8.0.17 rejects the query. MariaDB gets no collation: give its string columns
+  a byte-exact NO PAD collation yourself, such as `utf8mb4_nopad_bin`.
 - **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
   string ordering (`<`, `<=`, `>`, `>=`) runs under `collate "C"`, since a linguistic collation
   such as `en_US.utf8` sorts `'One'` after `'a'`
@@ -545,16 +546,13 @@ evaluate it as exact decimal, where `3 * 0.1 == 0.3` is TRUE but CEL says FALSE 
 - Connector/J's default client-side prepared statements inline doubles as `DECIMAL` literals.
 
 The adapter ships `MySqlDoubleCastFunctionContributor` (auto-discovered via `META-INF/services`),
-which on MySQL 8.0.17+ renders `cast(col as double)` for every arithmetic column. That keeps both
+which on MySQL renders `cast(col as double)` for every arithmetic column. That keeps both
 prepared-statement modes correct with **no JDBC settings**. H2 and PostgreSQL are unaffected.
 
 Set `useServerPrepStmts=true` in the JDBC URL if any of these apply:
 
-- MySQL older than 8.0.17.
 - MariaDB.
 - A non-Hibernate JPA provider (the adapter falls back to `cast(col as float(53))`).
-- `hibernate.boot.allow_jdbc_metadata_access=false` with only `hibernate.dialect` set (the
-  version-gated registration is skipped).
 
 CI's MySQL leg runs client-side mode so `arithmetic/multiply/inexact-fraction-equals` catches a regression;
 `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS=true` runs it server-side. Both must pass.

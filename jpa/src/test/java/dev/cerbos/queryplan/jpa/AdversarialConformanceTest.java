@@ -252,8 +252,12 @@ class AdversarialConformanceTest {
                 }
                 my.start();
                 database = my;
-                return Persistence.createEntityManagerFactory(
-                        "adversarial-pu", jdbcOverrides(my, "org.hibernate.dialect.MySQLDialect"));
+                // Without metadata access the dialect reports 8.0.0, so the contributors must
+                // not depend on the version it reports.
+                Map<String, Object> overrides =
+                        new java.util.HashMap<>(jdbcOverrides(my, "org.hibernate.dialect.MySQLDialect"));
+                overrides.put("hibernate.boot.allow_jdbc_metadata_access", "false");
+                return Persistence.createEntityManagerFactory("adversarial-pu", overrides);
             }
             default:
                 throw new IllegalArgumentException(
