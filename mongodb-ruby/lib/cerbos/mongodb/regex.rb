@@ -58,13 +58,6 @@ module Cerbos
         nil
       end
 
-      # Kept for callers that only accept a translatable pattern.
-      def normalise_re2(pattern)
-        translate(pattern)
-      rescue Invalid
-        raise UnsupportedError, "matches pattern is not valid RE2"
-      end
-
       # A recursive-descent reader of RE2 syntax.
       class Parser
         def initialize(pattern)

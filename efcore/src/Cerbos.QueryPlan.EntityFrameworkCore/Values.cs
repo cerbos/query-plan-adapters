@@ -298,24 +298,6 @@ internal static class Cel
 
     public static int CodePointLength(string s) => s.EnumerateRunes().Count();
 
-    /// <summary>Whether a string is well-formed UTF-16, so every character is one code point a store can hold.</summary>
-    public static bool IsWellFormed(string s)
-    {
-        for (var i = 0; i < s.Length; i++)
-        {
-            if (char.IsHighSurrogate(s[i]))
-            {
-                if (i + 1 >= s.Length || !char.IsLowSurrogate(s[i + 1])) return false;
-                i++;
-            }
-            else if (char.IsLowSurrogate(s[i]))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private static readonly Regex DurationPart = new(@"(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|ms|s|m|h)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     /// <summary>Parses a Go duration string, as CEL's <c>duration()</c> does.</summary>
