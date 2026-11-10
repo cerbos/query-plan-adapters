@@ -873,13 +873,9 @@ ADAPTER_TEST_ORM=floor ./gradlew test       # every suite on Exposed 1.0.0
 repository root, runs the conformance suite on each store leg CI runs, one at a time
 (`ADAPTER_TEST_ORM` passes through), in a JDK container when none is on `PATH`.
 
-Two tagged suites start containers of their own, use Docker when it is there, and skip when it is
-not: `ReviewOperandTypeTest` (`docker`) shows the coercion behind the operand-type rule on the
-pinned MySQL, and `OfflineRendererTest`'s `server-cross-check` cases assert that its stub
-PostgreSQL and MySQL connections render byte-identically to the real drivers. Each asks about the
-Exposed release or a server image, never about the store or the JDK, so the build excludes both tags
-on the non-H2 store legs and wherever `ADAPTER_TEST_CONTAINER_SUITES=skip`, which the workflow sets
-on its second JDK leg. `AdversarialConformanceTest` carries neither tag and runs on every leg.
+`ReviewOperandTypeTest` (tag `docker`) starts its own MySQL to show the coercion behind the
+operand-type rule, and skips when there is no Docker. The build excludes it on the non-H2 store legs
+and wherever `ADAPTER_TEST_CONTAINER_SUITES=skip`, which the workflow sets on its second JDK leg. `AdversarialConformanceTest` carries neither tag and runs on every leg.
 
 ## License
 

@@ -24,7 +24,7 @@ class ContractTest {
         OfflineRenderer.translate { ExposedQueryPlanAdapter.toFilter(Corpus.plan(caseId), options) }
 
     private fun sqlFor(caseId: String, options: Options = this.options): String =
-        OfflineRenderer.renderOn(OfflineRenderer.POSTGRESQL, filterFor(caseId, options).toOp()).sql
+        OfflineRenderer.renderOn(OfflineRenderer.H2, filterFor(caseId, options).toOp()).sql
 
     /** Kind 2: the harness translates every case with one mapping and one [Options]. */
     @Nested
@@ -155,6 +155,20 @@ class ContractTest {
                 )
             }
             assertTrue(error.message!!.contains("Protobuf Value has no kind set"), error.message)
+        }
+
+        @Test
+        fun `an operator the leaf does not know`() {
+            val error = assertThrows(UnsupportedPlanShapeException::class.java) {
+                translate(
+                    expression(
+                        "unsupported_op",
+                        variable("request.resource.attr.aString"),
+                        Operand.newBuilder().setValue(Value.newBuilder().setStringValue("one")).build(),
+                    ),
+                )
+            }
+            assertEquals("Unsupported operator: unsupported_op", error.message)
         }
 
         private fun translate(condition: Operand): QueryPlanFilter = ExposedQueryPlanAdapter.toFilter(

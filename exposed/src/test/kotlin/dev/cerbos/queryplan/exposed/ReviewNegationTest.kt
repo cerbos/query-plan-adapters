@@ -24,8 +24,7 @@ import org.junit.jupiter.api.Test
  *  - a shape a policy CAN reach that the corpus does not carry yet is a KIND 3 corpus gap, pinned
  *    here as a bridge and deleted when the action lands
  *    ([#414](https://github.com/cerbos/query-plan-adapters/issues/414));
- *  - a shape about the CALLER's query or about rendering — [ReviewCompositionTest],
- *    [ReviewDialectTest] — is KIND 2, which no corpus action can state at all, and is permanent.
+ *  - a shape about the CALLER's query — [ReviewCompositionTest] — is KIND 2, which no corpus action can state at all, and is permanent.
  *
  * Each class says which it is, and each caller states the CEL a real policy would write to reach
  * its shape. Where a fixture does exist, the review reads it (docs/adr/0006).

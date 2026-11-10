@@ -71,9 +71,8 @@ jobs:
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       # build.gradle.kts forwards ADAPTER_TEST_ORM to the suites and declares it as an input.
-      # ADAPTER_TEST_CONTAINER_SUITES skips the suites that start containers of their own
-      # (OfflineRendererTest's server cross-check, ReviewOperandTypeTest's MySQL): each answers a
-      # question about the Exposed release or a server image, which the JDK does not decide.
+      # ADAPTER_TEST_CONTAINER_SUITES skips ReviewOperandTypeTest's own MySQL container, which
+      # answers a question about the server image, not the JDK.
       - name: Build and test (${{ matrix.orm }}, JDK ${{ matrix.java-version }})
         run: ./gradlew build --no-daemon
         env:
