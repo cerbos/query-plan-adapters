@@ -157,7 +157,7 @@ module Cerbos
       # OPERATORS replaced it.
       ARITY = OPERATORS.filter_map { |name, operator| [name, operator.arity] if operator.arity }.to_h.freeze
 
-      def initialize(model:, attributes:, operator_overrides: {}, null_attribute_representation: :explicit)
+      def initialize(model:, attributes:, operator_overrides: {}, null_attribute_representation: :omitted)
         @dataset, @model = resolve_model(model)
         @attributes = attributes.transform_keys(&:to_s)
         @operator_overrides = operator_overrides.transform_keys(&:to_s)

@@ -18,7 +18,8 @@ RSpec.describe "conformance" do
 
   def ids(plan)
     Cerbos::Sequel.query_plan_to_dataset(
-      plan: plan, model: AdvResource, attributes: CorpusAttributes::ATTRIBUTES
+      plan: plan, model: AdvResource, attributes: CorpusAttributes::ATTRIBUTES,
+      null_attribute_representation: :explicit
     ).select_map(:id).sort
   end
 

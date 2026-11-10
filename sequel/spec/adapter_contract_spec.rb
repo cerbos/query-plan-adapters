@@ -272,6 +272,17 @@ RSpec.describe Cerbos::Sequel do
     end
   end
 
+  describe "the call-level NULL convention" do
+    it "defaults to :omitted, which refuses a null an undeclared attribute is compared against" do
+      expect {
+        described_class.query_plan_to_dataset(
+          plan: conditional(expression("in", variable("a"), expression("list", value(nil)))),
+          model: EdgeDocument, attributes: {"a" => field("title")}
+        )
+      }.to raise_error(Cerbos::Sequel::Error, /null_attribute_representation/)
+    end
+  end
+
   describe "membership between two columns under each NULL convention" do
     let(:plan) do
       conditional(expression("in", variable("a"), expression("list", variable("b"))))
@@ -281,7 +292,8 @@ RSpec.describe Cerbos::Sequel do
 
     it "treats two explicit nulls as equal" do
       sql = described_class.query_plan_to_dataset(
-        plan: plan, model: EdgeDocument, attributes: mapping
+        plan: plan, model: EdgeDocument, attributes: mapping,
+        null_attribute_representation: :explicit
       ).sql
       expect(sql).to match(/IS NULL\) AND .*IS NULL/)
     end
@@ -375,7 +387,7 @@ RSpec.describe Cerbos::Sequel do
 
   # `value in R.attr.<association>` compares the value under its own declared convention,
   # against a stored member that is a null value when NULL (#591). The corpus maps `owner` as
-  # `:explicit` and asserts its goldens only under the call's default, so only this suite can
+  # `:explicit` and asserts its goldens only under the call's `:explicit`, so only this suite can
   # check the rows returned under the other.
   describe "membership in an association under the value's declared convention" do
     let(:rows) do
@@ -429,7 +441,8 @@ RSpec.describe Cerbos::Sequel do
         plan: conditional(expression("in", value(nil),
           expression("list", variable("s")))),
         model: EdgeDocument,
-        attributes: {"s" => field("title")}
+        attributes: {"s" => field("title")},
+        null_attribute_representation: :explicit
       )
       expect(dataset.sql).to match(/`title` IS NULL/)
     end
@@ -937,7 +950,8 @@ RSpec.describe Cerbos::Sequel do
 
     def declared_sql(condition)
       described_class.query_plan_to_dataset(
-        plan: conditional(condition), model: EdgeDocument, attributes: declared
+        plan: conditional(condition), model: EdgeDocument, attributes: declared,
+        null_attribute_representation: :explicit
       ).sql
     end
 

@@ -6,7 +6,7 @@
 #
 # Null conventions (ADR 0004): a nullable scalar that resources.json omits when NULL declares
 # `:omitted`, and one it sends as an explicit null declares `:explicit`. The collections carry
-# null elements as explicit nulls, which is the call's default.
+# null elements as explicit nulls, so the harness passes `:explicit` for the call.
 module CorpusAttributes
   def self.field(path, **kwargs) = Cerbos::Sequel.field(path, **kwargs)
 
