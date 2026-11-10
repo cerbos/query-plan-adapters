@@ -23,6 +23,10 @@ module Cerbos
         database_type == "mysql"
       end
 
+      def postgres?
+        database_type == "postgres"
+      end
+
       def self.for(model)
         new(model.db.database_type)
       end

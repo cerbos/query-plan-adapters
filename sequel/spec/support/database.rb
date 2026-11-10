@@ -28,13 +28,9 @@ module Database
     }
   end
 
-  # MySQL's default collation makes `=` itself case- and accent-insensitive, and CEL's string
-  # equality is byte-exact. That is a store misconfiguration and not an adapter limitation, so
-  # the leg pins a binary collation on the tables (see conformance_store.rb) AND on the
-  # connection: the literals the adapter writes — the 'true' and 'false' of string() over a
-  # boolean — compare in the collation of the connection, not of a column. The README states the
-  # same requirement for a consumer.
-  MYSQL_COLLATION = "utf8mb4_0900_bin"
+  # MySQL's default, which folds case and accents (#474): the adapter compares strings byte for
+  # byte itself, on the tables and on the connection.
+  MYSQL_COLLATION = "utf8mb4_0900_ai_ci"
 
   DB =
     case STORE

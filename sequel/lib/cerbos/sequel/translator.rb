@@ -212,7 +212,9 @@ module Cerbos
         @now = nil
         @cel_errors = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
-        dataset.where(predicate(normalised.condition, environment))
+        SqlSupport.with_dialect(dialect, method(:column_type)) do
+          dataset.where(predicate(normalised.condition, environment))
+        end
       end
 
       # @api private

@@ -242,25 +242,25 @@ Refer to [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and
 > drops a `has(R.attr.x)` that only guards an access to `x`, as in
 > `has(R.attr.x) && R.attr.x == "a"`, because that access already denies a row without `x`.
 
-### The collation is part of the contract
+### Collations
 
-CEL string comparison is byte-exact. A case-insensitive or otherwise lenient collation makes
-`==`, `contains`, `startsWith` and `endsWith` match more rows than the policy allows. CEL also
-orders strings by code point, and `<`, `<=`, `>` and `>=` follow the collation.
+CEL compares strings byte for byte and orders them by code point. The adapter does not trust the
+column's collation for that:
 
+- **MySQL:** every string literal is written as `(CONVERT('…' USING utf8mb4) COLLATE
+  utf8mb4_0900_bin)`, and a string column compared with another column is read under the same
+  collation, so `==`, `in`, `contains`, `startsWith`, `endsWith` and ordering are byte-exact and
+  NO PAD even under the default `utf8mb4_0900_ai_ci`, on the columns or on the connection
+  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). String columns must use the
+  `utf8mb4` character set, and a comparison over a column whose own collation differs cannot use
+  that column's index.
+- **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
+  ordering over a string runs under `COLLATE "C"`, since a linguistic collation such as
+  `en_US.UTF-8` sorts `"One"` after `"a"`
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Avoid nondeterministic ICU
+  collations and `citext`.
 - **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
   point.
-- **PostgreSQL:** equality is exact, but string ordering needs a byte-order collation, `"C"`. A
-  linguistic one such as glibc's `en_US.UTF-8` sorts `"One"` after `"a"`, so `R.attr.name > "a"`
-  over-grants it ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Create the
-  database with `LC_COLLATE 'C'`, or declare `COLLATE "C"` on each column a policy orders.
-- **MySQL:** use `utf8mb4_0900_bin` on every column your policies read. `_cs` is not enough —
-  `utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), and `utf8mb4_bin` is PAD SPACE
-  ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)). Make the **connection**
-  collation byte-exact too: `string()` of a column is a `CAST` or a `CASE` over literals, so it
-  takes the connection collation. With the `trilogy` driver, set it with
-  `connect_sqls: ["SET collation_connection = utf8mb4_0900_bin"]`; `SET NAMES ... COLLATE`
-  crashes that driver.
 
 ### Timestamps are compared in the database timezone
 
@@ -273,8 +273,9 @@ Without that option Sequel's MySQL adapter drops the fraction of every Time it w
 0.123456 seconds past a policy's literal is stored on it and matches. The adapter refuses a
 literal with a fraction on such a connection, and reads `now()` to the second.
 
-The conformance harness replays the corpus on SQLite, PostgreSQL (initialised with
-`--lc-collate=C`) and MySQL (`utf8mb4_0900_bin` on the columns and the connection, `fractional_seconds: true`). The contract
+The conformance harness replays the corpus on SQLite, PostgreSQL (initialised under ICU's `en-US`)
+and MySQL (the default `utf8mb4_0900_ai_ci` on the columns and the connection,
+`fractional_seconds: true`). The contract
 suite runs on SQLite only.
 
 ## Requirements
