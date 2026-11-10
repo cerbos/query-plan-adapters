@@ -6,6 +6,7 @@
     "roles": ["USER"],
     "attr": {
       "zero": 0,
+      "nullString": null,
       "emptyTeams": [],
       "manyStructs": [{"name": "set"}, {"name": "same"}, {"name": ""}, {"name": "%_o"}, {"name": "X"}, {"name": "Y"}, {"name": "MIRROR"}, {"name": "filler-1"}, {"name": "filler-2"}, {"name": "filler-3"}, {"name": "filler-4"}],
       "nullableStructs": [{"name": null}, {"name": null}, {"name": null}, {"name": null}, {"name": null}, {"name": null}, {"name": null}, {"name": null}, {"name": null}, {"name": null}, {"name": null}],

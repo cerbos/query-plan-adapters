@@ -1,0 +1,52 @@
+{
+  "allowed": [
+    "a6",
+    "b2",
+    "b5",
+    "d1",
+    "h7",
+    "i7"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-than/field-to-field",
+  "intent": "Two string attributes ordered against each other (aOptionalString < aString).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aOptionalString"
+          },
+          {
+            "variable": "request.resource.attr.aString"
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/field-to-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aOptionalString < R.attr.aString"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The operands keep their order, so d1 (\"[SEC]\" < \"[SEC]ret\") is allowed; swapping them allows the rows where aString sorts first instead, and a missing operand is an error that denies."
+}

@@ -12,7 +12,6 @@ import { integer, sqliteTable } from "drizzle-orm/sqlite-core";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
-import { compileRegex } from "./regex";
 import type {
   Mapper,
   MapperEntry,
@@ -532,36 +531,6 @@ describe("what the stores cannot show", () => {
     );
     expect(offenders.map(([id]) => id)).toEqual([]);
   });
-});
-
-// KIND 3 — corpus gap (cerbos/query-plan-adapters#668). Every pattern here is policy-reachable, and
-// the corpus's regex cases witness only one pattern per rule. These pin the RE2 rules the
-// lowering relies on that no case exercises yet. Delete each when a case carrying it lands.
-describe("RE2 patterns lowered without a regex engine", () => {
-  test.each([
-    ["^a.*", [{ kind: "startsWith", literals: ["a"] }]],
-    ["^(?:a|b)c?$", [{ kind: "equals", literals: ["a", "ac", "b", "bc"] }]],
-    ["^\\.$", [{ kind: "equals", literals: ["."] }]],
-    ["a|", [{ kind: "contains", literals: ["a"] }, { kind: "contains", literals: [""] }]],
-  ])("Corpus gap. %p lowers to %p", (pattern, plans) => {
-    expect(compileRegex(pattern)).toEqual(plans);
-  });
-
-  // Each is rejected by Go's regexp.Compile, so CEL raises when it evaluates matches(). Lookaround
-  // is carried by regex/matches/lookahead-from-principal.
-  test.each(["*a", "a{2,1}", "(a", "a\\"])(
-    "Corpus gap. %p is an RE2 error, so the condition is UNKNOWN",
-    (pattern) => {
-      expect(compileRegex(pattern)).toBe("error");
-    },
-  );
-
-  test.each(["[^a]", "\\D", "a.b", "^a.*b.*c$", "(?i)^é$", "(?s)a", "\\bword", "^a$b"])(
-    "Corpus gap. %p is refused",
-    (pattern) => {
-      expect(() => compileRegex(pattern)).toThrow(UnsupportedQueryPlanError);
-    },
-  );
 });
 
 // KIND 3 — corpus gap (cerbos/query-plan-adapters#668). int() over a string or double column is

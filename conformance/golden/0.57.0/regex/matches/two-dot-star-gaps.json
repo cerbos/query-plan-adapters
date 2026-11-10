@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a4",
+    "a5"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/two-dot-star-gaps",
+  "intent": "matches(\"^x.*a.*y$\"): an anchored pattern with two .* gaps.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^x.*a.*y$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/two-dot-star-gaps",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^x.*a.*y$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a4 \"xa_by\" and a5 \"xaXby\" match and c2 \"xA_by\" does not; a case-insensitive lowering over-grants c2, and one that keeps only the outer anchors drops the inner a."
+}

@@ -84,6 +84,42 @@
       "status": "unsupported",
       "reason": "Same refusal as membership/in/map-attribute-keys, under negation."
     },
+    "regex/matches/case-insensitive-non-ascii": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; (?i) is expanded through a table of case-folding orbits and É is not tabulated, so the pattern is refused."
+    },
+    "regex/matches/dot-all-flag": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; only a leading (?i) and (?:...) groups are read, so (?s) is refused."
+    },
+    "regex/matches/end-anchor-mid-pattern": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; an anchor inside the pattern is not read, so the pattern is refused."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "matches() is lowered to a provider-neutral filter when the plan is translated, which needs a constant pattern; a pattern read from a row has no translation."
+    },
+    "regex/matches/negated-class": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; a negated character class matches an unbounded set of characters, so the pattern is refused."
+    },
+    "regex/matches/non-digit-class": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; the escape \\D is not read, so the pattern is refused."
+    },
+    "regex/matches/two-dot-star-gaps": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; two .* gaps are none of those, so the pattern is refused."
+    },
+    "regex/matches/unanchored-dot": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; a . between two literals is none of those, so the pattern is refused."
+    },
+    "regex/matches/word-boundary": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; the escape \\b is not read, so the pattern is refused."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "A timestamp column reaches CEL as an RFC 3339 string whose exact spelling the store does not keep, so comparing it as a string has no translation. Wrap it in timestamp()."

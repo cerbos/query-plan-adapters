@@ -23,6 +23,7 @@ module Cerbos
 
           # Any other arithmetic on a NaN/Infinity branch has no SQL form, so raise.
           require_scalars(operator, left, right)
+          return cel_type_error if left.nil? || right.nil?
           return cel_type_error if arithmetic_type_error?(operator, left, right)
           return cel_type_error if int_beside_non_int?(operator, left, right)
 
