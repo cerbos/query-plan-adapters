@@ -392,6 +392,9 @@ silently by returning documents the PDP denies.
   field and send the original string to Cerbos: the unindexed value is then excluded by a comparison
   and by its negation, matching CEL's conversion error. Without it Elasticsearch rejects the whole
   document. The corpus proves both polarities with an invalid date string.
+- **Unindexed values.** A value Elasticsearch keeps in `_source` but does not index (over
+  `ignore_above`, or rejected under `ignore_malformed`) is not found by `exists`; `!has()` also
+  excludes the fields `_ignored` lists, so such a document counts as present.
 - **Hierarchy paths** must be `keyword` (see [Hierarchy relations](#hierarchy-relations)).
 
 ## Supported operators
@@ -526,7 +529,7 @@ the current PDP (0.57.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 30 / 31 |
 | extended | 51 / 110 |
-| adversarial | 203 / 518 |
+| adversarial | 204 / 519 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in

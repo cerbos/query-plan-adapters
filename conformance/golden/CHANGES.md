@@ -2,11 +2,11 @@
 
 # PDP 0.56.0 → 0.57.0
 
-What changes for the 659 cases between the previous PDP (`0.56.0`) and the current one (`0.57.0`).
+What changes for the 660 cases between the previous PDP (`0.56.0`) and the current one (`0.57.0`).
 
 | Change | Cases |
 |---|---|
-| Plan | 16 |
+| Plan | 17 |
 | Allowed set | 0 |
 | Plan error | 0 |
 
@@ -164,6 +164,20 @@ What changes for the 659 cases between the previous PDP (`0.56.0`) and the curre
 
 ```json
 {"condition":{"expression":{"operands":[{"expression":{"operands":[{"expression":{"operands":[{"variable":"request.resource.attr.aString"}],"operator":"has"}}],"operator":"not"}},{"expression":{"operands":[{"variable":"request.resource.attr.aString"},{"value":"one"}],"operator":"eq"}}],"operator":"or"}},"kind":"KIND_CONDITIONAL"}
+```
+
+### `null/has/negated-unparseable-timestamp-string`
+
+`0.56.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"variable":"request.resource.attr.aNumber"},{"value":5}],"operator":"eq"}},"kind":"KIND_CONDITIONAL"}
+```
+
+`0.57.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"expression":{"operands":[{"expression":{"operands":[{"variable":"request.resource.attr.createdBy"}],"operator":"has"}}],"operator":"not"}},{"expression":{"operands":[{"variable":"request.resource.attr.aNumber"},{"value":5}],"operator":"eq"}}],"operator":"or"}},"kind":"KIND_CONDITIONAL"}
 ```
 
 ### `null/has/nested-map-key`

@@ -145,6 +145,13 @@ cases:
     pdp:
     - 0.56.0
     reason: 'Before 0.57.0 the planner folds has() to true and drops the DENY, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() calls send the omitted aOptionalString as absent, so the DENY matches and check() denies a2, a4, a8, c2 and e1. From 0.57.0 the plan carries the has().'
+- id: 'null/has/negated-unparseable-timestamp-string'
+  tier: adversarial
+  intent: '!has(createdBy) || aNumber == 5: absence of an attribute whose value some stores keep without indexing it.'
+  trap: 'h5 holds a createdBy that is not a timestamp, so has() is true and only aNumber decides it. Elasticsearch keeps that value in _source but leaves it out of the index under ignore_malformed, so a bare must_not exists returns h5.'
+  condition:
+    match:
+      expr: '!has(R.attr.createdBy) || R.attr.aNumber == 5'
 - id: 'null/has/explicit-null-attribute'
   tier: adversarial
   intent: 'has(owner) && aBool == true: a presence test on an attribute sent as an explicit null.'

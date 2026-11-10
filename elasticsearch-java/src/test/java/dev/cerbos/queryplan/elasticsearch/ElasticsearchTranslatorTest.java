@@ -247,7 +247,7 @@ class ElasticsearchTranslatorTest {
             Set<String> declared = Set.copyOf(Corpus.FIELD_MAP.values());
             List<String> stray = comparisons().stream()
                     .map(Comparison::field)
-                    .filter(field -> !declared.contains(field)
+                    .filter(field -> !declared.contains(field) && !"_ignored".equals(field)
                             && Corpus.NESTED_PATHS.stream()
                                     .noneMatch(path -> field.startsWith(path + ".")))
                     .distinct()
