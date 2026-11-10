@@ -149,15 +149,15 @@ field to `check()`, so it has to be told:
 | `{"x" => nil}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (missing attribute) | selects it — **over-grants** |
 
-`null_attribute_representation:` defaults to `:explicit`. If you omit NULL attributes, pass
-`:omitted`:
+`null_attribute_representation:` defaults to `:omitted`, the convention that fails closed when the
+guess is wrong. If you send NULL fields as explicit nulls, pass `:explicit`:
 
 ```ruby
-Cerbos::MongoDB.query_plan_to_filter(plan: plan, mapper: mapper, null_attribute_representation: :omitted)
+Cerbos::MongoDB.query_plan_to_filter(plan: plan, mapper: mapper, null_attribute_representation: :explicit)
 ```
 
 The call-level option is the default for every mapper entry that does not declare `nullable`, so
-under `:omitted` the adapter:
+under `:omitted`, the default, the adapter:
 
 - refuses every null comparison operand instead of translating it. The refusal is wider than the
   shapes that actually over-grant, because a leaf cannot tell whether an enclosing `not` will flip

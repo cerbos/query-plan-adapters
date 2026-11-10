@@ -20,7 +20,7 @@ RSpec.describe "Cerbos::MongoDB::Mongoid" do
 
   def result_for(id)
     plan = CASES.fetch(id) { ConformanceCorpus.golden(id).fetch("plan") }
-    Cerbos::MongoDB.query_plan_to_filter(plan: plan, mapper: CorpusMapper::MAPPER)
+    Cerbos::MongoDB.query_plan_to_filter(plan: plan, mapper: CorpusMapper::MAPPER, null_attribute_representation: :explicit)
   end
 
   # Compared as BSON bytes, not with ==, which calls 3 and 3.0 equal: a conversion from Float to

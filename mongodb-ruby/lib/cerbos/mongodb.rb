@@ -52,9 +52,9 @@ module Cerbos
     # @param mapper [Hash{String => Hash}, #call] how plan variables map to document paths; see
     #   {Mapper}. Omit it only when documents use the plan's own attribute paths verbatim.
     # @param null_attribute_representation [Symbol] how the application sends a NULL field to
-    #   +check()+. With +:explicit+ (the default) it sends an explicit null, so
+    #   +check()+. With +:explicit+ it sends an explicit null, so
     #   <tt>R.attr.x == null</tt> is true for that document and matching null agrees with the
-    #   PDP. With +:omitted+ it sends no attribute at all; CEL then raises a missing-attribute
+    #   PDP. With +:omitted+, the default, it sends no attribute at all; CEL then raises a missing-attribute
     #   error and the PDP denies, so every null comparison operand is refused rather than
     #   translated (cerbos/query-plan-adapters#302), and every mapper entry that does not declare
     #   +nullable+ is treated as +nullable: true+, relation +fields+ included, so a comparison
@@ -63,7 +63,7 @@ module Cerbos
     #   missing attribute, and +nullable: false+ to opt one out under +:omitted+.
     # @return [Result]
     # @raise [Error] if the plan cannot be translated faithfully
-    def self.query_plan_to_filter(plan:, mapper: {}, null_attribute_representation: :explicit)
+    def self.query_plan_to_filter(plan:, mapper: {}, null_attribute_representation: :omitted)
       translator = Translator.new(
         mapper: Mapper.wrap(mapper, nullable_default: null_attribute_representation == :omitted),
         null_representation: null_attribute_representation
