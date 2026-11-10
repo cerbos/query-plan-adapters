@@ -542,6 +542,9 @@ const withOperands = (
  * no overload (null).
  */
 const buildAdd = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+  if (operands.some((op) => isValue(op) && op.value === null)) {
+    throw new UnsupportedQueryPlanError("add has no overload for a null operand");
+  }
   if (operands.some((op) => isValue(op) && isString(op.value))) {
     // $concat raises on anything but a string, where CEL has no overload: null instead.
     return withOperands(operands, mapper, (values) => ({
