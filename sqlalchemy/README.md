@@ -113,9 +113,9 @@ If your models use `relationship()`, consider `query.with_only_columns(...)` to 
 
 - **A collection stored in one column** (JSON or PostgreSQL array) — declare it in
   [`collection_columns`](#collection-storage) to get `size()` and constant indexing.
-- **A collection in a related table** — `exists`, `all`, `in`, `size()` and the other macros go
-  through [`operator_override_fns`](#operator-overrides), where you write the correlated subquery.
-  Read [Mapping hazards](#mapping-hazards) before you do.
+- **A collection in a related table** — map it to a [`Relation`](#collections-in-a-related-table)
+  and pass `relation_overrides()` as `operator_override_fns`. Read
+  [Mapping hazards](#mapping-hazards) before you do.
 - **A collection the PDP already knows** (usually a principal attribute) — translated with no
   configuration; see [Collection macros over known values](#collection-macros-over-known-values).
 
@@ -124,7 +124,7 @@ If your models use `relationship()`, consider `query.with_only_columns(...)` to 
 | Option | Default | Use it when |
 | --- | --- | --- |
 | `table_mapping` | `None` | `attr_map` spans more than one table |
-| `operator_override_fns` | `None` | you need a dialect-specific operator, or a collection in a related table |
+| `operator_override_fns` | `None` | you need a dialect-specific operator, or `relation_overrides()` for a collection in a related table |
 | `null_attribute_representation` | `"omitted"` | your app sends explicit nulls for NULL columns (`"explicit"`) |
 | `attribute_null_representation` | `None` | the NULL convention differs per attribute |
 | `collection_columns` | `None` | a policy calls `size()`, indexes, or tests literal membership in a JSON / PostgreSQL array column |
@@ -274,8 +274,8 @@ The type is `dict[str, Callable[[GenericColumn, Any], GenericExpression]]`, wher
   only if your database's engine is equivalent.
 - An override's intermediate value reaching a default handler raises.
 
-For a collection reached through a to-one parent, wrap the override's result with
-[`require_hops`](#require_hops-the-one-hazard-with-a-library-helper).
+For a collection in a related table, use
+[`relation_overrides()`](#collections-in-a-related-table) rather than writing the macros yourself.
 
 ### Collection macros over known values
 
@@ -306,8 +306,57 @@ is `x in A || x in B`.
 
 `exists_one`, `filter`, `map` and `except` over a literal list raise, as does a `t.path` the element
 doesn't carry, a map or list element, and a two-variable comprehension (`exists(i, v, ...)`), whose
-index or map key has no SQL lowering. Macros over a column or relation (`R.attr.tags.exists(...)`)
-need an `operator_override_fns` entry.
+index or map key has no SQL lowering. Macros over a related table (`R.attr.tags.exists(...)`) need
+[`relation_overrides()`](#collections-in-a-related-table).
+
+### Collections in a related table
+
+Map the collection attribute to a `Relation`, map each lambda variable's fields to the element
+table's columns, and pass `relation_overrides()`:
+
+```python
+from cerbos_sqlalchemy import Relation, get_query, relation_overrides
+
+attr_map = {
+    "request.resource.attr.tags": Relation(
+        [Tag.resource_id == Resource.id],
+        correlate=[Resource],
+    ),
+    # The lambda variable in `R.attr.tags.exists(t, t.name == "public")`.
+    "t.name": Tag.name,
+    # A list of strings (`"public" in R.attr.tagNames`) needs the member column.
+    "request.resource.attr.tagNames": Relation(
+        [Tag.resource_id == Resource.id],
+        correlate=[Resource],
+        member=Tag.name,
+    ),
+}
+
+query = get_query(
+    plan, Resource, attr_map, operator_override_fns=relation_overrides()
+)
+```
+
+`Relation(correlation, correlate=(), *, member=None, hop_correlation=())`:
+
+- `correlation` joins an element row to the row that owns the collection, through every hop.
+- `correlate` lists the entities the subqueries correlate against: the queried table, plus every
+  enclosing lambda's table for a nested collection (`c.subCategories` inside `categories`).
+  SQLAlchemy auto-correlates only with the immediately enclosing `SELECT`.
+- `member` is the element column `in` and `hasIntersection` compare.
+- `hop_correlation` names the predicates that cross a to-one parent; see
+  [`require_hops`](#require_hops-the-one-hazard-with-a-library-helper).
+
+`relation_overrides()` translates `exists`, `all`, `exists_one`, `size()`, `in`,
+`hasIntersection`, `size(filter(...))`, `x in filter(...)`, `x in map(...)` and
+`hasIntersection(map(...), [...])` over a `Relation`. Each is three-valued: an element whose body is
+SQL NULL is a CEL error, which `exists` absorbs only beside a true element and `all` only beside a
+false one, so `!tags.exists(t, t.name == "x")` excludes a row with a nameless tag, as the PDP does.
+A plain `EXISTS (... WHERE body)` reads that tag as false and its negation selects the row. `in`,
+`size()` and `hasIntersection` over anything that is not a `Relation` fall back to the default
+handler. The dict is new on each call, so merge your own overrides into it.
+
+The conformance harness runs exactly these overrides, so the corpus proves them.
 
 
 ### Regular expressions
@@ -445,7 +494,7 @@ the planner leaves it unevaluated, and the plan carries no instant to measure fr
 | `literal in x`, `hasIntersection(x, [literals])` over a JSON or PostgreSQL array column | refused until declared | `collection_columns`, for an attribute `attr_map` does not map |
 | `exists`, `all` over a literal list (a principal attribute) or a list built from attributes | folded | — |
 | `in` over a list built from attributes, a ternary of lists, or a concatenation `A + B` | translated per element, branch or operand | — |
-| `exists`, `all`, `exists_one`, `filter`, `map`, `in`, `hasIntersection`, `size()` over a related table | — | overrides; `require_hops` for a chain through a to-one parent |
+| `exists`, `all`, `exists_one`, `filter`, `map`, `in`, `hasIntersection`, `size()` over a related table | — | `relation_overrides()` over a `Relation` |
 | `index` over any other storage | refused | an `index` override |
 | `exists_one` over a literal list, `size(filter(...))` and `in` over `map(...)` of one | folded, UNKNOWN where any body raises | — |
 | `matches()` whose pattern is a finite set of literals under anchors, every character from a set, or a prefix and suffix around `.*` | translated as exact string predicates | — |
@@ -508,16 +557,16 @@ The conformance contract proves the *plan* side. The other half is the *mapping*
 subquery reads must be the rows the application put into the resource attributes.** The shared
 corpus catalogues six ways that breaks, and every adapter records a position on each.
 
-**`get_query` has no relation model.** A collection-valued attribute reaches its rows only through
-[`operator_override_fns`](#operator-overrides), so *you* write the correlated subquery and every
-hazard below is yours. Which ones apply depends on how you write it:
+**A `Relation` is only the predicates you give it.** A collection-valued attribute reaches its rows
+through the correlation you write, so every hazard below but the last is yours. Which ones apply
+depends on how you write it:
 
 - Through a mapped **`relationship()`** (`Model.rel.any(...)`, `Model.rel.has(...)`,
   `select(...).join(Model.rel)`), SQLAlchemy applies the `primaryjoin` and, for a
   single-table-inheritance target, the
   [discriminator](https://docs.sqlalchemy.org/en/20/orm/queryguide/inheritance.html#single-inheritance-mappings).
-- Through a **hand-written correlated `select()`** over columns (what the conformance harness does),
-  none of that applies.
+- Through a **`Relation`**, or a hand-written correlated `select()` over columns (what the
+  conformance harness does), none of that applies.
 
 Check both against the SQLAlchemy version you run.
 
@@ -528,7 +577,7 @@ Check both against the SQLAlchemy version you run.
 | Subtype discrimination | **Caller-owned** | `polymorphic_identity` on a single-table-inheritance subclass. `select(Subclass)` carries the discriminator; `select(literal(1)).where(subclass_table.c.x == …)` over the shared table does not, and sees sibling subtypes |
 | To-one relation used as a collection | **Caller-owned** | A `relationship(uselist=False)` whose foreign key has no unique constraint. Nothing makes the database enforce the single row the application saw — add the constraint |
 | Composite association key | **Caller-owned** | A multi-column foreign key. An override is arbitrary SQLAlchemy, so a composite key *is* expressible — and nothing stops you writing half of it. Conjoin every column pair |
-| Absent to-one parent | **Reproduced by `require_hops`**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and siblings) | `cerbos_sqlalchemy.require_hops` — see below. Call it from every override that reaches a COLLECTION through an intermediate to-one hop. A SCALAR read through a to-one hop needs nothing: map it to a correlated scalar subquery and an absent hop is SQL NULL, excluded under both polarities. `attr_map` accepts any column expression for this, and it needs no `table_mapping` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
+| Absent to-one parent | **Reproduced by `Relation(hop_correlation=…)`**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and siblings) | `hop_correlation`, which `relation_overrides()` passes to `cerbos_sqlalchemy.require_hops` — see below. Set it on every `Relation` that reaches a COLLECTION through an intermediate to-one hop. A SCALAR read through a to-one hop needs nothing: map it to a correlated scalar subquery and an absent hop is SQL NULL, excluded under both polarities. `attr_map` accepts any column expression for this, and it needs no `table_mapping` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
 ### `require_hops`: the one hazard with a library helper
 
@@ -538,43 +587,33 @@ row can't tell an absent parent from a childless one, so `all` reads TRUE, `!exi
 the count reads 0, each admitting denied rows ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)).
 
 ```python
-from cerbos_sqlalchemy import get_query, require_hops
-from sqlalchemy import exists, literal, select
-
 # `mainCategory.subCategories`: the collection is reached THROUGH the category hop.
-HOP = [Category.resource_id == Resource.id]
-CORRELATE = [Resource]
-
-def sub_categories_exists(collection, body):
-    subquery = (
-        select(literal(1))
-        .where(SubCategory.category_id == Category.id)
-        .where(Category.resource_id == Resource.id)
-        .where(body)
-        .correlate(*CORRELATE)
-    )
-    return require_hops(exists(subquery), HOP, CORRELATE)
-
-query = get_query(
-    plan, Resource, attr_map, operator_override_fns={"exists": sub_categories_exists}
+attr_map["request.resource.attr.mainCategory.subCategories"] = Relation(
+    [SubCategory.category_id == Category.id, Category.resource_id == Resource.id],
+    correlate=[Resource],
+    hop_correlation=[Category.resource_id == Resource.id],
 )
 ```
 
-`require_hops(expression, hop_correlation, correlate=())` wraps the answer in a `CASE` with **no
+`relation_overrides()` routes every answer over a `Relation` through
+`require_hops(expression, hop_correlation, correlate=())`, which wraps it in a `CASE` with **no
 `ELSE`**: a missing hop yields NULL, which stays excluded under both polarities. With an empty
 `hop_correlation` (a direct relation) it returns the expression unchanged, so `!tags.exists(...)`
 over zero tags is still TRUE.
 
-Route **every** operator whose answer comes off a chain through it, not only the macros: a bare
-`EXISTS` is FALSE for an absent parent and its negation TRUE, which is how membership,
-`hasIntersection` ([#315](https://github.com/cerbos/query-plan-adapters/issues/315)) and
+An override of your own over a chain must route **every** operator through it, not only the
+macros: a bare `EXISTS` is FALSE for an absent parent and its negation TRUE, which is how
+membership, `hasIntersection` ([#315](https://github.com/cerbos/query-plan-adapters/issues/315)) and
 `!(size(chain) > 0)` ([#316](https://github.com/cerbos/query-plan-adapters/issues/316)) over-granted.
-
-Calling it is optional and not enforced; enforcing it would break every existing caller with a join
-chain.
+It must also keep a NULL body NULL, as `relation_overrides()` does; nothing checks either.
 
 ## Behaviour changes
 
+- Added ([#527](https://github.com/cerbos/query-plan-adapters/issues/527)): `Relation` and
+  `relation_overrides()`, the conformance harness's three-valued relation macros, now shipped. This
+  README used to show a hand-written `exists` override that put the body in `.where(body)`, which
+  reads a NULL body as false, so `!tags.exists(...)` selected rows the PDP denies. Replace overrides
+  copied from it with `relation_overrides()`. A widening.
 - Fixed: a string, number or temporal column read where CEL needs a boolean (`not R.attr.aString`, `R.attr.aString && R.attr.aBool`) renders as `NULL`, CEL's type error, which `AND` and `OR` absorb as `&&` and `||` absorb it. PostgreSQL rejected the query, and SQLite and MySQL over-granted by reading the text as a number.
 - **Breaking:** `null_attribute_representation` defaults to `"omitted"`, where it defaulted to
   `"explicit"`. A caller that sends explicit nulls and set nothing now gets `x == null` matching no

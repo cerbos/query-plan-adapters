@@ -202,7 +202,7 @@
     },
     "collection/exists/map-keys": {
       "status": "unsupported",
-      "reason": "exists() over the to-one parent ranges over the keys of a map, and the parent is a related row: SQL cannot enumerate which of its columns are non-NULL as the attribute's keys, so the harness's collection override refuses it."
+      "reason": "exists() over the to-one parent ranges over the keys of a map, and the parent is a related row: SQL cannot enumerate which of its columns are non-NULL as the attribute's keys, so relation_overrides() refuses it: the attribute is not a Relation."
     },
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
@@ -350,7 +350,7 @@
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
-      "reason": "in over the to-one parent tests the keys of a map, and the parent is a related row: SQL cannot read which of its columns are non-NULL as the attribute's keys, so the harness's membership override refuses it."
+      "reason": "in over the to-one parent tests the keys of a map, and the parent is a related row: SQL cannot read which of its columns are non-NULL as the attribute's keys, so relation_overrides() refuses it: the to-one row is no SQL operand the default in handler can lower."
     },
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
