@@ -64,12 +64,6 @@ public class ElasticsearchQueryPlanAdapter {
             Set<String> explicitNullAttributes,
             Map<String, ScalarType> scalarTypes) {
 
-        public Options(Map<String, String> fieldMap, Map<String, OperatorFunction> operatorOverrides,
-                       Set<String> nestedPaths, Set<String> collectionFields,
-                       Set<String> explicitNullAttributes) {
-            this(fieldMap, operatorOverrides, nestedPaths, collectionFields, explicitNullAttributes, Map.of());
-        }
-
         public Options {
             scalarTypes = Map.copyOf(Objects.requireNonNull(scalarTypes, "scalarTypes"));
             fieldMap = Map.copyOf(Objects.requireNonNull(fieldMap, "fieldMap"));
@@ -90,7 +84,7 @@ public class ElasticsearchQueryPlanAdapter {
          * @return new Options
          */
         public static Options of(Map<String, String> fieldMap) {
-            return new Options(fieldMap, Map.of(), Set.of(), Set.of(), Set.of());
+            return new Options(fieldMap, Map.of(), Set.of(), Set.of(), Set.of(), Map.of());
         }
 
         public Options withFieldMap(Map<String, String> fieldMap) {
@@ -229,54 +223,11 @@ public class ElasticsearchQueryPlanAdapter {
         return Operand.newBuilder().setExpression(rebuilt).build();
     }
 
-    // Convenience overloads: the Options form with the other declarations empty.
-
     /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResult, Options)}. */
     public static Result toElasticsearchQuery(
             PlanResourcesResult planResult,
             Map<String, String> fieldMap) {
         return toElasticsearchQuery(planResult, Options.of(fieldMap));
-    }
-
-    /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResult, Options)}. */
-    public static Result toElasticsearchQuery(
-            PlanResourcesResult planResult,
-            Map<String, String> fieldMap,
-            Map<String, OperatorFunction> operatorOverrides) {
-        return toElasticsearchQuery(planResult,
-                Options.of(fieldMap).withOperatorOverrides(operatorOverrides));
-    }
-
-    /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResult, Options)}. */
-    public static Result toElasticsearchQuery(
-            PlanResourcesResult planResult,
-            Map<String, String> fieldMap,
-            Set<String> nestedPaths) {
-        return toElasticsearchQuery(planResult, Options.of(fieldMap).withNestedPaths(nestedPaths));
-    }
-
-    /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResult, Options)}. */
-    public static Result toElasticsearchQuery(
-            PlanResourcesResult planResult,
-            Map<String, String> fieldMap,
-            Map<String, OperatorFunction> operatorOverrides,
-            Set<String> nestedPaths) {
-        return toElasticsearchQuery(planResult, Options.of(fieldMap)
-                .withOperatorOverrides(operatorOverrides)
-                .withNestedPaths(nestedPaths));
-    }
-
-    /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResult, Options)}. */
-    public static Result toElasticsearchQuery(
-            PlanResourcesResult planResult,
-            Map<String, String> fieldMap,
-            Map<String, OperatorFunction> operatorOverrides,
-            Set<String> nestedPaths,
-            Set<String> explicitNullAttributes) {
-        return toElasticsearchQuery(planResult, Options.of(fieldMap)
-                .withOperatorOverrides(operatorOverrides)
-                .withNestedPaths(nestedPaths)
-                .withExplicitNullAttributes(explicitNullAttributes));
     }
 
     /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResponse, Options)}. */
@@ -286,52 +237,6 @@ public class ElasticsearchQueryPlanAdapter {
         return toElasticsearchQuery(response, Options.of(fieldMap));
     }
 
-    /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResponse, Options)}. */
-    public static Result toElasticsearchQuery(
-            PlanResourcesResponse response,
-            Map<String, String> fieldMap,
-            Map<String, OperatorFunction> operatorOverrides) {
-        return toElasticsearchQuery(response,
-                Options.of(fieldMap).withOperatorOverrides(operatorOverrides));
-    }
-
-    /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResponse, Options)}. */
-    public static Result toElasticsearchQuery(
-            PlanResourcesResponse response,
-            Map<String, String> fieldMap,
-            Set<String> nestedPaths) {
-        return toElasticsearchQuery(response, Options.of(fieldMap).withNestedPaths(nestedPaths));
-    }
-
-    /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResponse, Options)}. */
-    public static Result toElasticsearchQuery(
-            PlanResourcesResponse response,
-            Map<String, String> fieldMap,
-            Map<String, OperatorFunction> operatorOverrides,
-            Set<String> nestedPaths) {
-        return toElasticsearchQuery(response, Options.of(fieldMap)
-                .withOperatorOverrides(operatorOverrides)
-                .withNestedPaths(nestedPaths));
-    }
-
-    /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResponse, Options)}. */
-    public static Result toElasticsearchQuery(
-            PlanResourcesResponse response,
-            Map<String, String> fieldMap,
-            Map<String, OperatorFunction> operatorOverrides,
-            Set<String> nestedPaths,
-            Set<String> explicitNullAttributes) {
-        return toElasticsearchQuery(response, Options.of(fieldMap)
-                .withOperatorOverrides(operatorOverrides)
-                .withNestedPaths(nestedPaths)
-                .withExplicitNullAttributes(explicitNullAttributes));
-    }
-
-    /**
-     * Rejects an equality-family comparison between a declared explicit-null attribute and a
-     * non-null value. Other operators error in CEL on null, which denies, matching what a missing
-     * field does here. A null literal is handled by the leaf translator.
-     */
     private static void assertNoExplicitNullAttributeComparisons(Operand operand, Options options) {
         Set<String> explicitNullAttributes = options.explicitNullAttributes();
         if (explicitNullAttributes.isEmpty() || operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {

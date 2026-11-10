@@ -158,8 +158,7 @@ Options options = Options.of(MAPPING)
 Specification<Contact> allowed = SpringDataQueryPlanAdapter.toSpecification(plan, options);
 ```
 
-The positional overloads, `toSpecification(plan, mapper, overrides, nullAttributeRepresentation)`,
-are shorthand for `Options`. A conditional plan is translated when Spring Data first evaluates the
+`toSpecification(plan, mapper)` is shorthand for `Options.of(mapper)`. A conditional plan is translated when Spring Data first evaluates the
 Specification, so that is where most refusals are raised; the `NullAttributeRepresentation.OMITTED`
 check and a missing condition are raised by `toSpecification`.
 
@@ -206,6 +205,11 @@ Fix it the usual JPA way: eager-fetch small collections, map to DTOs inside
 
 ## Behaviour changes
 
+- **Breaking:** the `toSpecification(plan, mapper, overrides[, nullAttributeRepresentation])`
+  overloads are gone; pass `Options.of(mapper).withOperatorOverrides(...)` instead. The
+  macro-depth system property is gone too; use `Options.withMaxMacroDepth`.
+- Fixed an over-grant, in the jpa translator: on MySQL without JDBC metadata access, string
+  comparisons ran under the column's case-insensitive collation.
 - Fixed an over-grant, in the jpa translator: an attribute whose Java type is not `Boolean` read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was compared with `true`.
 - **Breaking:** the translator moved to the [jpa](../jpa/) adapter, which this adapter now depends
   on ([ADR 0013](../docs/adr/0013-spring-data-wraps-the-jpa-core.md)). `toSpecification` and its

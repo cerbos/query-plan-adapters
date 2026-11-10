@@ -121,7 +121,7 @@ class RepositorySurfaceTest {
 
     private static Specification<ResourceEntity> specFor(String action) {
         PlanResourcesResponse plan = Corpus.plan(action);
-        return SpringDataQueryPlanAdapter.toSpecification(plan, MAPPING, Map.of());
+        return SpringDataQueryPlanAdapter.toSpecification(plan, MAPPING);
     }
 
     private static SimpleJpaRepository<ResourceEntity, String> repository(EntityManager em) {

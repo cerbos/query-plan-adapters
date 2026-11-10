@@ -157,7 +157,7 @@ class SpringDataQueryPlanAdapterTest {
         UnsupportedPlanShapeException ex = assertThrows(UnsupportedPlanShapeException.class,
                 () -> SpringDataQueryPlanAdapter.toSpecification(
                         buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, nullEq),
-                        MAPPER, Map.of(), NullAttributeRepresentation.OMITTED));
+                        MAPPER));
         assertTrue(ex.getMessage().contains("NullAttributeRepresentation.OMITTED"), ex.getMessage());
     }
 

@@ -11,7 +11,6 @@ import dev.cerbos.queryplan.jpa.JpaQueryPlanAdapter;
 import dev.cerbos.queryplan.jpa.JpaQueryPlanAdapter.Options;
 import dev.cerbos.queryplan.jpa.MalformedPlanException;
 import dev.cerbos.queryplan.jpa.NullAttributeRepresentation;
-import dev.cerbos.queryplan.jpa.OperatorFunction;
 import dev.cerbos.queryplan.jpa.QueryPlanFilter;
 import dev.cerbos.queryplan.jpa.UnmappedAttributeException;
 import dev.cerbos.queryplan.jpa.UnsupportedPlanShapeException;
@@ -90,134 +89,33 @@ public final class SpringDataQueryPlanAdapter {
     }
 
     /**
-     * Translates a plan from the Java SDK with the default operator translations.
+     * {@link #toSpecification(PlanResourcesResult, Options)} with {@code Options.of(mapper)}.
      *
      * @param <T> the entity type
      * @param planResult the SDK plan result
      * @param mapper maps each plan variable to a JPA path or relation; see
      *        {@link AttributeMapping}
      * @return a SELECT-only Specification selecting the rows the plan permits
-     * @throws MalformedPlanException if a conditional plan has no condition. Other refusals are
-     *         raised when the Specification is evaluated.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResult planResult, Map<String, AttributeMapping> mapper) {
-        return toSpecification(planResult, mapper, Map.of());
+        return toSpecification(planResult, Options.of(mapper));
     }
 
     /**
-     * Translates a plan from the Java SDK with operator overrides.
-     *
-     * @param <T> the entity type
-     * @param planResult the SDK plan result
-     * @param mapper maps each plan variable to a JPA path or relation
-     * @param overrides replacement translations keyed by Cerbos operator name; see
-     *        {@link OperatorFunction}
-     * @return a SELECT-only Specification selecting the rows the plan permits
-     * @throws MalformedPlanException if a conditional plan has no condition. Other refusals are
-     *         raised when the Specification is evaluated.
-     */
-    public static <T> Specification<T> toSpecification(
-            PlanResourcesResult planResult,
-            Map<String, AttributeMapping> mapper,
-            Map<String, OperatorFunction> overrides) {
-        return toSpecification(
-                planResult, mapper, overrides, NullAttributeRepresentation.OMITTED);
-    }
-
-    /**
-     * Translates a plan from the Java SDK, declaring how the caller sends NULL columns to
-     * {@code check()}. Under {@link NullAttributeRepresentation#OMITTED}, null comparison
-     * operands are rejected by this call.
-     *
-     * @param <T> the entity type
-     * @param planResult the SDK plan result
-     * @param mapper maps each plan variable to a JPA path or relation
-     * @param overrides replacement translations keyed by Cerbos operator name
-     * @param nullAttributeRepresentation the caller's NULL-column convention
-     * @return a SELECT-only Specification selecting the rows the plan permits
-     * @throws MalformedPlanException if a conditional plan has no condition
-     * @throws UnsupportedPlanShapeException if the plan has a null comparison operand under
-     *         {@link NullAttributeRepresentation#OMITTED}
-     */
-    public static <T> Specification<T> toSpecification(
-            PlanResourcesResult planResult,
-            Map<String, AttributeMapping> mapper,
-            Map<String, OperatorFunction> overrides,
-            NullAttributeRepresentation nullAttributeRepresentation) {
-        return toSpecification(planResult, Options.of(mapper)
-                .withOperatorOverrides(overrides)
-                .withNullAttributeRepresentation(nullAttributeRepresentation));
-    }
-
-    /**
-     * Translates a raw {@link PlanResourcesResponse} with the default operator translations.
+     * {@link #toSpecification(PlanResourcesResponse, Options)} with {@code Options.of(mapper)}.
      *
      * @param <T> the entity type
      * @param response the raw {@code PlanResources} response
      * @param mapper maps each plan variable to a JPA path or relation; see
      *        {@link AttributeMapping}
      * @return a SELECT-only Specification selecting the rows the plan permits
-     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter has
-     *         no condition. Other refusals are raised when the Specification is evaluated.
      */
     public static <T> Specification<T> toSpecification(
             PlanResourcesResponse response, Map<String, AttributeMapping> mapper) {
-        return toSpecification(response, mapper, Map.of());
+        return toSpecification(response, Options.of(mapper));
     }
 
-    /**
-     * Translates a raw {@link PlanResourcesResponse} with operator overrides.
-     *
-     * @param <T> the entity type
-     * @param response the raw {@code PlanResources} response
-     * @param mapper maps each plan variable to a JPA path or relation
-     * @param overrides replacement translations keyed by Cerbos operator name; see
-     *        {@link OperatorFunction}
-     * @return a SELECT-only Specification selecting the rows the plan permits
-     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter has
-     *         no condition. Other refusals are raised when the Specification is evaluated.
-     */
-    public static <T> Specification<T> toSpecification(
-            PlanResourcesResponse response,
-            Map<String, AttributeMapping> mapper,
-            Map<String, OperatorFunction> overrides) {
-        return toSpecification(
-                response, mapper, overrides, NullAttributeRepresentation.OMITTED);
-    }
-
-    /**
-     * Translates a raw {@link PlanResourcesResponse}, declaring how the caller sends NULL
-     * columns to {@code check()}. Under {@link NullAttributeRepresentation#OMITTED}, null
-     * comparison operands are rejected by this call.
-     *
-     * @param <T> the entity type
-     * @param response the raw {@code PlanResources} response
-     * @param mapper maps each plan variable to a JPA path or relation
-     * @param overrides replacement translations keyed by Cerbos operator name
-     * @param nullAttributeRepresentation the caller's NULL-column convention
-     * @return a SELECT-only Specification selecting the rows the plan permits
-     * @throws MalformedPlanException if the filter kind is unknown or a conditional filter has
-     *         no condition
-     * @throws UnsupportedPlanShapeException if the plan has a null comparison operand under
-     *         {@link NullAttributeRepresentation#OMITTED}
-     */
-    public static <T> Specification<T> toSpecification(
-            PlanResourcesResponse response,
-            Map<String, AttributeMapping> mapper,
-            Map<String, OperatorFunction> overrides,
-            NullAttributeRepresentation nullAttributeRepresentation) {
-        return toSpecification(response, Options.of(mapper)
-                .withOperatorOverrides(overrides)
-                .withNullAttributeRepresentation(nullAttributeRepresentation));
-    }
-
-    /**
-     * An always-allowed filter becomes {@link Specification#unrestricted()} (spring-data-jpa
-     * 3.5.2+), whose null predicate omits the {@code WHERE} clause. Any other filter builds its
-     * predicate on every invocation: a paged {@code findAll} runs a separate {@code COUNT} query
-     * with its own {@code Root}.
-     */
     private static <T> Specification<T> of(QueryPlanFilter filter) {
         if (filter.isAlwaysAllowed()) {
             return Specification.unrestricted();

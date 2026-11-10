@@ -172,10 +172,9 @@ Options options = Options.of(fieldMap)
 | `operatorOverrides` | plan operator | You need a different lowering. See [Custom operator overrides](#custom-operator-overrides) |
 | `explicitNullAttributes` | plan attribute | You send NULL columns to `check()` as explicit `null`. See [Attributes you send as explicit nulls](#attributes-you-send-as-explicit-nulls) |
 
-Positional convenience overloads exist — `toElasticsearchQuery(plan, fieldMap)`, and forms adding
-`operatorOverrides`, `nestedPaths` and `explicitNullAttributes` — for both input types. They are the
-`Options` form with everything else empty, **including `scalarTypes`**, so they translate a
-comparison only where an operator override owns the operator.
+`toElasticsearchQuery(plan, fieldMap)` is `Options.of(fieldMap)`: everything else is empty,
+**including `scalarTypes`**, so it translates a comparison only where an operator override owns the
+operator.
 
 ### Field map
 
@@ -591,6 +590,11 @@ applies to every field, and quietly returns more rows.
 
 ## Behaviour changes
 
+- **Breaking.** The positional overloads that took `operatorOverrides`, `nestedPaths` or
+  `explicitNullAttributes`, and the five-argument `Options` constructor, are gone; build `Options`
+  with its `with…` methods.
+- Fixed an over-grant: `!has(x)` returned a document whose value Elasticsearch kept in `_source`
+  but did not index (over `ignore_above`, or rejected under `ignore_malformed`).
 - 45 corpus shapes that threw now translate, none of them with a script. A CEL ternary, as a
   condition or inside a comparison operand, is one query per branch guarded by the condition and
   its negation; a predicate compared with a boolean literal is the predicate; `size()` over a
@@ -610,8 +614,8 @@ applies to every field, and quietly returns more rows.
   negation matched every document (over-grant fixes).
 - **Breaking.** A comparison against a field with no `scalarTypes` declaration throws
   `UnmappedAttributeException` instead of emitting a query Elasticsearch would coerce
-  ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). The positional overloads
-  carry no scalar types, so they translate comparisons only through overrides.
+  ([#496](https://github.com/cerbos/query-plan-adapters/issues/496)). `Options.of(fieldMap)`
+  carries no scalar types, so it translates comparisons only through overrides.
 - **Breaking.** Collection membership (`x in R.attr.list`) and `hasIntersection`, flat or over a
   `map()` projection, need the collection's element type in `scalarTypes` too, and drop a literal
   of the wrong type instead of letting Elasticsearch coerce it (`"2"` matched a `double` element 2.0).
