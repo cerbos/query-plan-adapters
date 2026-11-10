@@ -1,0 +1,115 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/equals/ternary-over-literal-instants",
+  "intent": "A ternary choosing between two timestamp literals, compared with the first ((aBool ? timestamp(\"2024-01-01T02:00:00+02:00\") : timestamp(\"2030-01-01T00:00:00Z\")) == timestamp(\"2024-01-01T00:00:00Z\")).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "2024-01-01T02:00:00+02:00"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "2030-01-01T00:00:00Z"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2024-01-01T00:00:00Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/equals/ternary-over-literal-instants",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aBool ? timestamp(\"2024-01-01T02:00:00+02:00\") : timestamp(\"2030-01-01T00:00:00Z\")) == timestamp(\"2024-01-01T00:00:00Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The first branch is the same instant with an offset, so exactly the aBool-true rows are allowed, and j3 (no aBool) denies. Comparing the branch spellings as strings denies every row; dropping the ternary allows every row or none."
+}

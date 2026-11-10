@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "a5",
+    "a7",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/greater-or-equal/literal-instant-value-first",
+  "intent": "timestamp(\"2024-06-01T00:00:00Z\") >= timestamp(createdAt), the constant instant on the left.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2024-06-01T00:00:00Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "ge"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/greater-or-equal/literal-instant-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(\"2024-06-01T00:00:00Z\") >= timestamp(R.attr.createdAt)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a4 and the earlier rows (a1, a5, a7, b3, h4) are allowed. Reading the operands positionally selects a4 and the later rows instead."
+}
