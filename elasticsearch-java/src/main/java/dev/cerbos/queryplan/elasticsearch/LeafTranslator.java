@@ -129,6 +129,9 @@ final class LeafTranslator {
         if ("hasIntersection".equals(normalizedOperator) && value instanceof List<?> values) {
             rejectNullIntersection(values);
             if (!options.operatorOverrides().containsKey("hasIntersection")) {
+                if (values.isEmpty()) {
+                    return Queries.matchNone();
+                }
                 List<?> members = typedIntersection(field, values, operands);
                 if (members.isEmpty()) {
                     return Queries.matchNone();

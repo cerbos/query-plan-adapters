@@ -567,6 +567,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(timestamp(R.attr.createdBy) < timestamp("2025-01-01T00:00:00Z"))'
+    # collection/all/conjunctive-body
+    - actions:
+        - collection/all/conjunctive-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.all(t, t.name == "public" && t.id != "t3b")
     # collection/all/empty-collection
     - actions:
         - collection/all/empty-collection
@@ -630,6 +639,15 @@ resourcePolicy:
       condition:
         match:
           expr: '["one"] + (R.attr.aBool ? ["three"] : []) + ["two"] == ["one", "three", "two"]'
+    # collection/except/as-lambda-body
+    - actions:
+        - collection/except/as-lambda-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.categories.exists(c, dyn(c.subCategories.map(s, s.name).except(["legal"]))) || R.attr.aNumber == 5
     # collection/except/as-whole-condition
     - actions:
         - collection/except/as-whole-condition
@@ -657,6 +675,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames.except(["public"]) == ["private"]
+    # collection/except/negated-as-whole-condition
+    - actions:
+        - collection/except/negated-as-whole-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!dyn(R.attr.tagNames.except(["public"])) || R.attr.aNumber == 5'
     # collection/except/size-of-difference
     - actions:
         - collection/except/size-of-difference
@@ -666,6 +693,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.tagNames.except(["public"])) > 0
+    # collection/exists-one/disjunctive-body
+    - actions:
+        - collection/exists-one/disjunctive-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists_one(t, t.id == "t3a" || t.id == "t6a" || t.name == "private")
     # collection/exists-one/several-matches
     - actions:
         - collection/exists-one/several-matches
@@ -966,6 +1002,33 @@ resourcePolicy:
       condition:
         match:
           expr: '!("public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool))'
+    # collection/has-intersection/deprecated-snake-case
+    - actions:
+        - collection/has-intersection/deprecated-snake-case
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has_intersection(R.attr.tagNames, ["private", "other"])
+    # collection/has-intersection/empty-literal-list
+    - actions:
+        - collection/has-intersection/empty-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(R.attr.tags, []) || R.attr.aNumber == 5
+    # collection/has-intersection/empty-literal-list-against-mapped-names
+    - actions:
+        - collection/has-intersection/empty-literal-list-against-mapped-names
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(R.attr.tags.map(t, t.name), []) || R.attr.aNumber == 5
     # collection/has-intersection/mapped-names-value-first
     - actions:
         - collection/has-intersection/mapped-names-value-first
@@ -984,6 +1047,15 @@ resourcePolicy:
       condition:
         match:
           expr: "hasIntersection(R.attr.tags.map(t, t.name), [\"public\", \"héllo\U0001F680\", \"100%_x\"])"
+    # collection/has-intersection/negated-empty-literal-list
+    - actions:
+        - collection/has-intersection/negated-empty-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.tagNames, []) && R.attr.aNumber < 5'
     # collection/has-intersection/negated-mapped-names
     - actions:
         - collection/has-intersection/negated-mapped-names
@@ -993,6 +1065,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!hasIntersection(R.attr.tags.map(t, t.name), ["public"])'
+    # collection/has-intersection/scalar-field-against-empty-literal-list
+    - actions:
+        - collection/has-intersection/scalar-field-against-empty-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(R.attr.aString, []) || R.attr.aNumber == 5
+    # collection/has-intersection/two-resource-lists
+    - actions:
+        - collection/has-intersection/two-resource-lists
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(R.attr.tagNames, R.attr.tags.map(t, t.id))
     # collection/has-intersection/value-first
     - actions:
         - collection/has-intersection/value-first
@@ -1380,6 +1470,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString > "a"
+    # comparison/greater-than/value-first
+    - actions:
+        - comparison/greater-than/value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 3 > R.attr.aNumber
     # comparison/less-or-equal/field-against-literal
     - actions:
         - comparison/less-or-equal/field-against-literal
@@ -2739,6 +2838,15 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(["public", null], R.attr.tags.map(t, t.name))
+    # null/has-intersection/literal-list-with-null-element-in-lambda-body
+    - actions:
+        - null/has-intersection/literal-list-with-null-element-in-lambda-body
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.categories.exists(c, hasIntersection(c.subCategories.map(s, s.name), ["finance", null]))
     # null/has-intersection/literal-list-with-null-element-value-first
     - actions:
         - null/has-intersection/literal-list-with-null-element-value-first
@@ -3203,6 +3311,15 @@ resourcePolicy:
       condition:
         match:
           expr: P.attr.fewTeams.exists(t, t == R.attr.aOptionalString)
+    # principal/filter/as-whole-condition
+    - actions:
+        - principal/filter/as-whole-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: dyn(P.attr.fewTeams.filter(t, t == R.attr.aOptionalString)) || R.attr.aNumber == 5
     # principal/filter/size-of-filtered-long-list
     - actions:
         - principal/filter/size-of-filtered-long-list
@@ -3230,6 +3347,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aOptionalString in P.attr.fewTeams
+    # principal/map/as-whole-condition
+    - actions:
+        - principal/map/as-whole-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: dyn(P.attr.fewTeams.map(t, t == R.attr.aOptionalString)) || R.attr.aNumber == 5
     # principal/map/membership-in-mapped-list
     - actions:
         - principal/map/membership-in-mapped-list
@@ -4292,6 +4418,24 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.tags) > 1
+    # size/greater-than/filtered-collection
+    - actions:
+        - size/greater-than/filtered-collection
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags.filter(t, t.name == "public")) > 1
+    # size/greater-than/filtered-collection-value-first
+    - actions:
+        - size/greater-than/filtered-collection-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 2 > size(R.attr.tags.filter(t, t.name == "public"))
     # size/greater-than/fractional-threshold
     - actions:
         - size/greater-than/fractional-threshold
@@ -4373,6 +4517,15 @@ resourcePolicy:
       condition:
         match:
           expr: 2 > size(R.attr.tags)
+    # size/greater-than/value-first-emptiness
+    - actions:
+        - size/greater-than/value-first-emptiness
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 1 > size(R.attr.tags)
     # size/less-or-equal/fractional-huge-threshold
     - actions:
         - size/less-or-equal/fractional-huge-threshold
@@ -4490,6 +4643,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.aNumberList) != 0
+    # size/not-equals/filtered-collection
+    - actions:
+        - size/not-equals/filtered-collection
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags.filter(t, t.name == "public")) != 1
     # size/not-equals/fractional-threshold
     - actions:
         - size/not-equals/fractional-threshold
@@ -5021,6 +5183,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? timestamp("2024-01-01T00:00:00Z") : timestamp("2030-01-01T00:00:00Z")) > timestamp("2025-01-01T00:00:00Z")'
+    # type-mismatch/contains/list-literal-needle
+    - actions:
+        - type-mismatch/contains/list-literal-needle
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.contains(dyn(["one"])) || R.attr.aNumber == 5
     # type-mismatch/contains/number-field-needle
     - actions:
         - type-mismatch/contains/number-field-needle
@@ -5084,6 +5255,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aBoolList[0] == 1 || R.attr.aNumber == 5
+    # type-mismatch/equals/list-literal-against-string-field-value-first
+    - actions:
+        - type-mismatch/equals/list-literal-against-string-field-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '["same"] == R.attr.aString || R.attr.aNumber == 5'
     # type-mismatch/equals/negated-on-missing-attribute
     - actions:
         - type-mismatch/equals/negated-on-missing-attribute
@@ -5255,6 +5435,33 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(R.attr.tags.map(t, t.name), ["public", 0])
+    # type-mismatch/has-intersection/negated-against-map-value
+    - actions:
+        - type-mismatch/has-intersection/negated-against-map-value
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.tagNames, dyn({"public": 1})) || R.attr.aNumber == 5'
+    # type-mismatch/has-intersection/negated-against-string-value
+    - actions:
+        - type-mismatch/has-intersection/negated-against-string-value
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.tagNames, dyn("public")) || R.attr.aNumber == 5'
+    # type-mismatch/has-intersection/negated-scalar-field-against-literal-list
+    - actions:
+        - type-mismatch/has-intersection/negated-scalar-field-against-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.aString, ["one"]) || R.attr.aNumber == 5'
     # type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list
     - actions:
         - type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list
@@ -5291,6 +5498,15 @@ resourcePolicy:
       condition:
         match:
           expr: '["public"] in R.attr.tagNames'
+    # type-mismatch/in/null-literal-in-string-field
+    - actions:
+        - type-mismatch/in/null-literal-in-string-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: null in R.attr.owner || R.attr.aNumber == 5
     # type-mismatch/in/number-field-in-mixed-literal-list
     - actions:
         - type-mismatch/in/number-field-in-mixed-literal-list
@@ -5327,6 +5543,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString in [["one"], ["same"]]
+    # type-mismatch/in/string-field-in-string-field
+    - actions:
+        - type-mismatch/in/string-field-in-string-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString in R.attr.aOptionalString || R.attr.aNumber == 5
     # type-mismatch/in/string-literal-in-resource-boolean-list
     - actions:
         - type-mismatch/in/string-literal-in-resource-boolean-list
@@ -5453,6 +5678,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString < R.attr.aNumber + 1.0 || R.attr.aNumber == 2
+    # type-mismatch/less-than/string-field-against-list-literal
+    - actions:
+        - type-mismatch/less-than/string-field-against-list-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString < dyn(["one"]) || R.attr.aNumber == 5
     # type-mismatch/less-than/string-field-against-timestamp
     - actions:
         - type-mismatch/less-than/string-field-against-timestamp
@@ -5462,6 +5696,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.createdAt < now() - duration("24h") || R.attr.aNumber == 2
+    # type-mismatch/matches/list-literal-pattern
+    - actions:
+        - type-mismatch/matches/list-literal-pattern
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches(dyn(["one"])) || R.attr.aNumber == 5
+    # type-mismatch/not-equals/list-literal-against-string-field-value-first
+    - actions:
+        - type-mismatch/not-equals/list-literal-against-string-field-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '["one", "same"] != R.attr.aString'
     # type-mismatch/not-equals/number-field-against-string-literal
     - actions:
         - type-mismatch/not-equals/number-field-against-string-literal
@@ -5471,6 +5723,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber != "5" && R.attr.aNumber > 3
+    # type-mismatch/not-equals/string-field-against-list-literal
+    - actions:
+        - type-mismatch/not-equals/string-field-against-list-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString != ["one", "same"]
     # type-mismatch/not-equals/string-field-against-map-literal
     - actions:
         - type-mismatch/not-equals/string-field-against-map-literal
@@ -5498,6 +5759,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.aNumber) > 0
+    # type-mismatch/starts-with/list-literal-needle
+    - actions:
+        - type-mismatch/starts-with/list-literal-needle
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.startsWith(dyn(["one"])) || R.attr.aNumber == 5
     # type-mismatch/starts-with/number-field-needle
     - actions:
         - type-mismatch/starts-with/number-field-needle

@@ -101,6 +101,20 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.tags) > 1'
+- id: 'size/greater-than/filtered-collection'
+  tier: extended
+  intent: 'size() of a filtered tag list above one (size(tags.filter(t, t.name == "public")) > 1).'
+  trap: 'The count is of matching elements; counting every element grants a6, whose second tag is private.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags.filter(t, t.name == "public")) > 1'
+- id: 'size/greater-than/filtered-collection-value-first'
+  tier: adversarial
+  intent: 'A constant greater than the size of a filtered tag list (2 > size(tags.filter(t, t.name == "public"))).'
+  trap: 'The comparison must be mirrored; reading it as size > 2 denies every row the PDP allows.'
+  condition:
+    match:
+      expr: '2 > size(R.attr.tags.filter(t, t.name == "public"))'
 - id: 'size/greater-than/fractional-threshold'
   tier: adversarial
   intent: 'size(tags) > 0.5.'
@@ -167,6 +181,13 @@ cases:
   condition:
     match:
       expr: '2 > size(R.attr.tags)'
+- id: 'size/greater-than/value-first-emptiness'
+  tier: adversarial
+  intent: 'A constant one greater than the size of a tag list (1 > size(tags)), an emptiness check written value-first.'
+  trap: 'The mirror is size < 1, NOT EXISTS; reading it as size > 1 grants rows with several tags and denies the empty ones.'
+  condition:
+    match:
+      expr: '1 > size(R.attr.tags)'
 - id: 'size/less-or-equal/fractional-huge-threshold'
   tier: adversarial
   intent: 'size(aString) <= 4294967296.5, a fractional threshold outside 32-bit int range.'
@@ -258,6 +279,13 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.aNumberList) != 0'
+- id: 'size/not-equals/filtered-collection'
+  tier: extended
+  intent: 'size() of a filtered tag list not equal to one (size(tags.filter(t, t.name == "public")) != 1).'
+  trap: 'Rows with no matching element count zero and are allowed; a translation through EXISTS drops them.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags.filter(t, t.name == "public")) != 1'
 - id: 'size/not-equals/fractional-threshold'
   tier: adversarial
   intent: 'size(tags) != dyn(1.5) AND''d with aNumber < 10.'

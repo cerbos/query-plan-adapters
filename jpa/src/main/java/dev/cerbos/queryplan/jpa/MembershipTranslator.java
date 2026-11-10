@@ -103,12 +103,8 @@ final class MembershipTranslator {
                 }
                 return membership;
             }
-            // A scalar on a Field mapping is equality; against null that is IS NULL.
-            if (val == null) {
-                return cb.isNull(path);
-            }
-            // The eq leaf decides a type mismatch as CEL's false instead of asking the database.
-            return leaf.defaultLeaf("eq", path, val);
+            // `in` over a scalar, either operand order, is a CEL no-overload error.
+            return tri.unknown();
         });
     }
 
@@ -208,17 +204,12 @@ final class MembershipTranslator {
                 && second.getNodeCase() == Operand.NodeCase.VALUE) {
             String var = first.getVariable();
             Object val = PlanValues.protoValueToJava(second.getValue());
-            List<?> values = asList(val);
-
-            if (scope.resolve(var) instanceof Scope.ResolvedRelation relRef) {
-                return collectionContainsAny(scope, relRef, values);
+            // hasIntersection over a scalar, or against one, is a CEL no-overload error.
+            if (!(val instanceof List<?> values)
+                    || !(scope.resolve(var) instanceof Scope.ResolvedRelation relRef)) {
+                return tri.unknown();
             }
-            Path<?> path = scope.path(var);
-            // Avoids an empty `IN ()`, which is dialect-dependent.
-            if (values.isEmpty()) {
-                return cb.disjunction();
-            }
-            return scalarInWithNullElements(path, values);
+            return collectionContainsAny(scope, relRef, values);
         }
 
         if (first.getNodeCase() == Operand.NodeCase.EXPRESSION
@@ -228,8 +219,10 @@ final class MembershipTranslator {
                 throw Refusals.unsupported(
                         "hasIntersection second operand must be a value list when used with map()");
             }
-            Object val = PlanValues.protoValueToJava(second.getValue());
-            return handleMapIntersection(first.getExpression(), asList(val), scope);
+            if (!(PlanValues.protoValueToJava(second.getValue()) instanceof List<?> values)) {
+                return tri.unknown();
+            }
+            return handleMapIntersection(first.getExpression(), values, scope);
         }
 
         // Two collection attributes, or a computed collection on either side.

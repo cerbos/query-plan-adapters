@@ -1,0 +1,83 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/except/negated-as-whole-condition",
+  "intent": "The negation of a two-list except(), a list where CEL needs a boolean (!dyn(tagNames.except([\"public\"]))), beside a discriminating disjunct.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.tagNames"
+                            },
+                            {
+                              "value": [
+                                "public"
+                              ]
+                            }
+                          ],
+                          "operator": "except"
+                        }
+                      }
+                    ],
+                    "operator": "dyn"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/except/negated-as-whole-condition",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!dyn(R.attr.tagNames.except([\"public\"])) || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "! over a list is a CEL error that only the other disjunct can absorb; reading the difference as emptiness grants rows the PDP denies."
+}

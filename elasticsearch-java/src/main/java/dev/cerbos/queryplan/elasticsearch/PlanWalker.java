@@ -108,6 +108,10 @@ final class PlanWalker {
                 yield operand(operands.get(0), scope, polarity.negate());
             }
             case "except" -> throw exceptUnsupported();
+            case "dyn" -> {
+                requireUnary("dyn", operands);
+                yield operand(operands.get(0), scope, polarity);
+            }
             case "if" -> {
                 if (operands.size() != 3) {
                     throw malformed("if requires exactly 3 operands, got " + operands.size());

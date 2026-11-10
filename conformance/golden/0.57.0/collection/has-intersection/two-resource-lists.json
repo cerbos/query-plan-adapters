@@ -1,0 +1,67 @@
+{
+  "allowed": [
+    "b4"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-intersection/two-resource-lists",
+  "intent": "hasIntersection of two resource lists (tagNames against the mapped tag ids).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "t.id"
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "map"
+            }
+          }
+        ],
+        "operator": "hasIntersection"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-intersection/two-resource-lists",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hasIntersection(R.attr.tagNames, R.attr.tags.map(t, t.id))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Neither side is a constant; comparing either list against itself, or against a constant, grants rows whose ids and names never meet."
+}

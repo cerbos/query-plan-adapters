@@ -659,7 +659,17 @@ def _size_fn(target: Any, _: Any):
 def _has_intersection_fn(mapped: Any, values: Any):
     if isinstance(mapped, list):
         mapped, values = values, mapped
-    if isinstance(values, list) and not values:
+    if not isinstance(values, list):
+        raise UnsupportedPlanError(
+            "hasIntersection is translated only against a literal list"
+        )
+    if not isinstance(mapped, _Relation) and not (
+        isinstance(mapped, tuple) and mapped[0] == "map"
+    ):
+        raise UnsupportedPlanError(
+            "hasIntersection is translated only over a relation or its map() projection"
+        )
+    if not values:
         rel = mapped if isinstance(mapped, _Relation) else mapped[1]
         return _require_hops(rel, false())
     if isinstance(mapped, _Relation):
@@ -673,10 +683,6 @@ def _has_intersection_fn(mapped: Any, values: Any):
         )
 
     # map never absorbs errors, so the error check comes first.
-    if not (isinstance(mapped, tuple) and mapped[0] == "map"):
-        raise UnsupportedPlanError(
-            f"hasIntersection over unsupported operand: {mapped!r}"
-        )
     _, rel, projected = mapped
     return _require_hops(
         rel,

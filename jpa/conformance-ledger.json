@@ -60,6 +60,10 @@
       "status": "unsupported",
       "reason": "createdBy is stored as a String; timestamp comparisons require an absolute-instant Java column type, rather than lexicographic string ordering or database-specific parsing."
     },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only against a literal list, not between a stored collection and a map() projection."
+    },
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
       "reason": "Cerbos's intersect() keeps duplicates from whichever list is shorter, so its size depends on comparing the two lengths row by row; the adapter translates intersect() only compared with an empty list (as hasIntersection) and refuses size(intersect(...))."
@@ -135,6 +139,10 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"
+    },
+    "type-mismatch/in/string-field-in-string-field": {
+      "status": "unsupported",
+      "reason": "`in` with an attribute haystack needs a Relation mapping; aOptionalString is a scalar column, over which CEL raises a no-overload error."
     }
   }
 }

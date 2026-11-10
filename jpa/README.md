@@ -462,9 +462,9 @@ total but not as passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 30 / 30 |
-| extended | 99 / 103 |
-| adversarial | 425 / 465 |
+| core | 31 / 31 |
+| extended | 102 / 106 |
+| adversarial | 449 / 491 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 21 are `unsupported`, where the adapter

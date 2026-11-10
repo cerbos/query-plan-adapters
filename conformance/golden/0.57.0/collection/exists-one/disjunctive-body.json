@@ -1,0 +1,108 @@
+{
+  "allowed": [
+    "a3",
+    "a4"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists-one/disjunctive-body",
+  "intent": "exists_one() whose body is a disjunction over two element fields (tags.exists_one(t, t.id == \"t3a\" || t.id == \"t6a\" || t.name == \"private\")).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tags"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "t.id"
+                                  },
+                                  {
+                                    "value": "t3a"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "t.id"
+                                  },
+                                  {
+                                    "value": "t6a"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            }
+                          ],
+                          "operator": "or"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "value": "private"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                },
+                {
+                  "variable": "t"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists_one"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists-one/disjunctive-body",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tags.exists_one(t, t.id == \"t3a\" || t.id == \"t6a\" || t.name == \"private\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Counting rows that satisfy any disjunct, or lowering to exists(), grants a6, where t6a and t6b both match."
+}
