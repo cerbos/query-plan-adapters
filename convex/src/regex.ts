@@ -10,30 +10,23 @@ export interface CompiledRegex {
   test(input: string): boolean;
 }
 
-/** A pattern RE2 itself rejects: evaluating `matches()` with it is a CEL error on every row. */
-export class InvalidRegexError extends Error {
-  override readonly name = "InvalidRegexError";
-}
+const CACHE = new Map<string, CompiledRegex | null>();
 
-const CACHE = new Map<string, CompiledRegex | InvalidRegexError>();
-
-/** Compiles `pattern` as RE2 reads it, or throws `InvalidRegexError` for one RE2 rejects. */
-export const compileRe2 = (pattern: string): CompiledRegex => {
+/**
+ * `pattern` compiled as RE2 reads it, or null for one RE2 itself rejects: evaluating `matches()`
+ * with it is a CEL error on every row.
+ */
+export const compileRe2 = (pattern: string): CompiledRegex | null => {
   const cached = CACHE.get(pattern);
-  if (cached instanceof InvalidRegexError) throw cached;
   if (cached !== undefined) return cached;
-  let compiled: RE2JS;
+  let result: CompiledRegex | null;
   try {
-    compiled = RE2JS.compile(pattern);
+    const compiled = RE2JS.compile(pattern);
+    result = { test: (input) => compiled.matcher(input).find() };
   } catch (error) {
     if (!(error instanceof RE2JSException)) throw error;
-    const invalid = new InvalidRegexError(error.message);
-    if (CACHE.size < 1000) CACHE.set(pattern, invalid);
-    throw invalid;
+    result = null;
   }
-  const result: CompiledRegex = {
-    test: (input) => compiled.matcher(input).find(),
-  };
   if (CACHE.size < 1000) CACHE.set(pattern, result);
   return result;
 };
