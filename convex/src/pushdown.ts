@@ -13,6 +13,7 @@ import type {
 import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper } from "./index";
 import {
+  isComparisonOperator,
   isExpression,
   isNullableField,
   isValue,
@@ -21,6 +22,7 @@ import {
   resolveField,
 } from "./operands";
 import type { ComparisonOperator } from "./operands";
+import { isBoolean, lookup, typeofValue } from "./narrowing";
 
 /**
  * What Convex's filter engine can answer on its own, and the builder calls that answer it.
@@ -145,7 +147,7 @@ const sameTypeAs = (
   q: AnyFilterBuilder,
   field: Field,
 ): Expression<boolean> | undefined => {
-  switch (typeof literal) {
+  switch (typeofValue(literal)) {
     case "number":
       return q.and(q.gt(field, INT64_MAX), q.lt(field, false));
     case "boolean":
@@ -172,7 +174,11 @@ const comparisonParts = (
     );
   }
 
-  const cel = operator as ComparisonOperator;
+  if (!isComparisonOperator(operator)) {
+    throw new UnsupportedQueryPlanError(`${operator} is not a comparison`);
+  }
+
+  const cel = operator;
 
   const compare =
     CONVEX_COMPARISON[pair.swapped ? MIRRORED_COMPARISON[cel] : cel];
@@ -233,7 +239,7 @@ const orderingRule: PushdownRule = {
   },
 };
 
-const PUSHDOWN_RULES: Record<string, PushdownRule> = {
+const PUSHDOWN_RULES = {
   // Negation is pushed inward (De Morgan) rather than wrapped around the built predicate, so each
   // leaf sees its own polarity. That is sound under CEL's three-valued logic: `!(a && b)` is true
   // exactly when `!a` or `!b` is true, with an error in either counting as not true.
@@ -294,11 +300,11 @@ const PUSHDOWN_RULES: Record<string, PushdownRule> = {
       return negated ? q.not(built) : built;
     },
   },
-};
+} satisfies Record<string, PushdownRule>;
 
 const ruleFor = (operator: string): PushdownRule | undefined =>
   Object.prototype.hasOwnProperty.call(PUSHDOWN_RULES, operator)
-    ? PUSHDOWN_RULES[operator]
+    ? lookup(PUSHDOWN_RULES, operator)
     : undefined;
 
 /** Whether Convex's filter engine answers `expression` exactly as CEL does. */
@@ -339,7 +345,7 @@ const emitExpression = (
     negated ? q.not(built) : built;
 
   if (isValue(expression)) {
-    if (typeof expression.value === "boolean") {
+    if (isBoolean(expression.value)) {
       return polarised(q.eq(true, expression.value));
     }
 

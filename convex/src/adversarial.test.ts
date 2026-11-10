@@ -3,6 +3,7 @@ import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import { ConvexHttpClient } from "convex/browser";
+import type { GenericDocument } from "convex/server";
 
 import { api } from "../convex/_generated/api.js";
 import { MAPPER } from "../convex/adversarialMapper";
@@ -69,12 +70,12 @@ interface DerivedEntry {
   labels: (string | null)[];
 }
 
-const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+const SEEDS = (readCorpusJson<{ seeds: Seed[] }>("seeds.json")).seeds;
 
 const DERIVED = (
-  readCorpusJson("derived-fields.json") as {
+  readCorpusJson<{
     derived: Record<string, DerivedEntry>;
-  }
+  }>("derived-fields.json")
 ).derived;
 
 function derivedFor(seed: Seed): DerivedEntry {
@@ -228,6 +229,7 @@ interface LedgerEntry {
 }
 
 const LEDGER = (
+  // SAFETY: validate-corpus.sh checks every conformance-ledger.json against its schema.
   JSON.parse(
     fs.readFileSync(
       path.join(__dirname, "..", "conformance-ledger.json"),
@@ -350,10 +352,11 @@ describe("conformance (convex)", () => {
   });
 
   test("each stored document is its resource in resources.json", async () => {
-    const { resources } = readCorpusJson("resources.json") as {
-      resources: { id: string; attr: Record<string, unknown> }[];
-    };
+    const { resources } = readCorpusJson<{
+      resources: { id: string; attr: GenericDocument }[];
+    }>("resources.json");
 
+    // SAFETY: listAll returns every stored document, and each carries its corpus id.
     const stored = (await convex.query(api.adversarial.listAll, {})) as {
       id: string;
     }[];

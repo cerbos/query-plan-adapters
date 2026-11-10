@@ -1,12 +1,15 @@
 import { beforeAll, describe, expect, test } from "@jest/globals";
+import type { JsonValue } from "@bufbuild/protobuf";
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
+  Value,
 } from "@cerbos/core";
 import type {
   DataModelFromSchemaDefinition,
   Expression,
   FilterBuilder,
+  GenericDocument,
   GenericTableInfo,
   NamedTableInfo,
   Query,
@@ -14,6 +17,7 @@ import type {
 
 // The mapper the Convex backend translates every conformance case with.
 import { MAPPER } from "../convex/adversarialMapper";
+import type { ConformanceMapper } from "../convex/adversarialMapper";
 import { PlanKind, queryPlanToConvex, UnsupportedQueryPlanError } from ".";
 import { evaluate } from "./evaluate";
 import type {
@@ -30,6 +34,12 @@ import {
   readGolden,
   readGoldens,
 } from "./corpus";
+import type { Value as ConvexValue } from "convex/values";
+import { isBigint, isBoolean, isNumber, isObject, isString, lookup } from "./narrowing";
+
+/** `response` with `field` replaced by a value its type rules out: a plan the SDK never decodes. */
+const overwritten = (response: PlanResourcesResponse, field: string, value: Value): PlanResourcesResponse =>
+  Object.defineProperty({ ...response }, field, { value, enumerable: true });
 
 /**
  * Offline unit tests: what a caller can pass that the conformance corpus cannot vary (mapper forms,
@@ -73,39 +83,42 @@ function planFor(id: string): PlanResourcesResponse {
  * deployment. Membership is tracked in a `WeakSet`, so a plan literal can never be mistaken for a
  * recorded call.
  */
+type Recorded = FilterNode | ConvexValue | undefined;
+
 interface FilterNode {
   op: string;
-  args: unknown[];
+  args: Recorded[];
 }
 
 const RECORDED_NODES = new WeakSet<object>();
 
-const record = (op: string, args: unknown[]): FilterNode => {
+const record = (op: string, args: Recorded[]): FilterNode => {
   const node: FilterNode = { op, args };
   RECORDED_NODES.add(node);
 
   return node;
 };
 
-const isRecordedNode = (value: unknown): value is FilterNode =>
-  typeof value === "object" && value !== null && RECORDED_NODES.has(value);
+const isRecordedNode = (value: Recorded | Expression<boolean>): value is FilterNode =>
+  isObject(value) && RECORDED_NODES.has(value);
 
 const RECORDER = {
-  field: (name: string): unknown => record("field", [name]),
-  eq: (a: unknown, b: unknown): unknown => record("eq", [a, b]),
-  neq: (a: unknown, b: unknown): unknown => record("neq", [a, b]),
-  lt: (a: unknown, b: unknown): unknown => record("lt", [a, b]),
-  lte: (a: unknown, b: unknown): unknown => record("lte", [a, b]),
-  gt: (a: unknown, b: unknown): unknown => record("gt", [a, b]),
-  gte: (a: unknown, b: unknown): unknown => record("gte", [a, b]),
-  and: (...args: unknown[]): unknown => record("and", args),
-  or: (...args: unknown[]): unknown => record("or", args),
-  not: (a: unknown): unknown => record("not", [a]),
+  field: (name: string): FilterNode => record("field", [name]),
+  eq: (a: Recorded, b: Recorded): FilterNode => record("eq", [a, b]),
+  neq: (a: Recorded, b: Recorded): FilterNode => record("neq", [a, b]),
+  lt: (a: Recorded, b: Recorded): FilterNode => record("lt", [a, b]),
+  lte: (a: Recorded, b: Recorded): FilterNode => record("lte", [a, b]),
+  gt: (a: Recorded, b: Recorded): FilterNode => record("gt", [a, b]),
+  gte: (a: Recorded, b: Recorded): FilterNode => record("gte", [a, b]),
+  and: (...args: Recorded[]): FilterNode => record("and", args),
+  or: (...args: Recorded[]): FilterNode => record("or", args),
+  not: (a: Recorded): FilterNode => record("not", [a]),
 };
 
-// Convex's `Expression` is nominal, so a fake builder can only stand in for the real one by cast.
-const RECORDING_BUILDER =
-  RECORDER as unknown as FilterBuilder<GenericTableInfo>;
+// SAFETY: Convex's `Expression` is nominal and its class is not exported, so a recorder can only
+// stand in for the real builder by cast; every method the adapter calls is defined above.
+// oxlint-disable-next-line anti-slop/no-chained-type-assertions
+const RECORDING_BUILDER = RECORDER as unknown as FilterBuilder<GenericTableInfo>;
 
 interface TranslateOptions {
   mapper?: Mapper;
@@ -144,7 +157,7 @@ function translated(
 
 /** The calls the emitted filter makes against Convex's builder. */
 function recordFilter(label: string, filter: ConvexFilter) {
-  const emitted: unknown = filter(RECORDING_BUILDER);
+  const emitted = filter(RECORDING_BUILDER);
 
   if (!isRecordedNode(emitted)) {
     throw new Error(
@@ -188,9 +201,9 @@ beforeAll(async () => {
 // The documents as the PDP saw them (conformance/resources.json), which is also exactly what the
 // conformance harness stores — so a post-filter can be run against them offline.
 const DOCUMENTS = (
-  readCorpusJson("resources.json") as {
-    resources: { id: string; attr: Record<string, unknown> }[];
-  }
+  readCorpusJson<{
+    resources: { id: string; attr: GenericDocument }[];
+  }>("resources.json")
 ).resources.map(({ id, attr }) => ({ id, ...attr }));
 
 describe("the refusal type", () => {
@@ -337,7 +350,7 @@ describe("mapper forms", () => {
   const DEEP_CASE = "collection/exists/nested-three-levels";
 
   test("a function mapper resolves the same references as a record mapper", () => {
-    const asFunction: Mapper = (reference) => MAPPER[reference] ?? {};
+    const asFunction: Mapper = (reference) => lookup(MAPPER, reference) ?? {};
 
     const decisions = (mapper: Mapper) => {
       const result = translate(DEEP_CASE, { mapper });
@@ -380,10 +393,11 @@ describe("mapper forms", () => {
   });
 
   test("an unmapped reference is refused when a function mapper returns no entry", () => {
+    // SAFETY: returns undefined, which Mapper rules out, as an untyped caller's mapper can.
     const mapper = ((reference: string) =>
       reference === "request.resource.attr.aNumber"
         ? undefined
-        : MAPPER[reference]) as Mapper;
+        : lookup(MAPPER, reference)) as Mapper;
 
     expect(() => translate("logic/not/greater-than", { mapper })).toThrow(
       "No mapper entry for request.resource.attr.aNumber",
@@ -414,13 +428,13 @@ describe("nullAttributeRepresentation", () => {
   // check(): the plan cannot reveal that, so the adapter has to be told.
   const MISSING = "null/equals/null-literal-on-missing-attribute";
 
-  const carriesNullLiteral = (node: unknown): boolean => {
+  const carriesNullLiteral = (node: JsonValue | undefined): boolean => {
     if (Array.isArray(node)) return node.some(carriesNullLiteral);
 
-    if (typeof node !== "object" || node === null) return false;
+    if (!isObject(node)) return false;
 
     if ("value" in node) {
-      const { value } = node as { value: unknown };
+      const { value } = node;
 
       return value === null || (Array.isArray(value) && value.includes(null));
     }
@@ -442,7 +456,7 @@ describe("nullAttributeRepresentation", () => {
     ).map(({ id }) => id);
 
     const carrying = TRANSLATED.filter(({ id }) =>
-      carriesNullLiteral(golden(id).plan.condition ?? null),
+      carriesNullLiteral(golden(id).plan["condition"] ?? null),
     ).map(({ id }) => id);
 
     expect(rejected).toEqual(carrying);
@@ -468,7 +482,7 @@ describe("omitted: an undeclared entry is nullable", () => {
 
   // The corpus mapping declares `aString` and `aNumber` nullable, so each case strips the
   // declaration from the field it reads, leaving the entry for the call-level default to decide.
-  const undeclared = (field: string): Mapper =>
+  const undeclared = (field: string): ConformanceMapper =>
     Object.fromEntries(
       Object.entries(MAPPER).map(([key, config]) => {
         if (key !== `request.resource.attr.${field}`) return [key, config];
@@ -521,7 +535,7 @@ describe("omitted: an undeclared entry is nullable", () => {
   });
 
   test("a function mapper takes the default too", () => {
-    const mapper = undeclared("aString") as Record<string, MapperConfig>;
+    const mapper = undeclared("aString");
     const asFunction: Mapper = (reference) => mapper[reference]!;
     expect(
       omitted("string/equals/case-sensitive", { mapper: asFunction }).path,
@@ -602,36 +616,50 @@ describe("an ordering against a value of another type, on a non-nullable field",
     "object",
   ];
 
-  const convexType = (value: unknown): string => {
+  const convexType = (value: Recorded): string => {
     if (value === null) return "null";
 
     if (value instanceof ArrayBuffer) return "bytes";
 
     if (Array.isArray(value)) return "array";
 
-    return typeof value;
+    if (isBigint(value)) return "bigint";
+
+    if (isNumber(value)) return "number";
+
+    if (isBoolean(value)) return "boolean";
+
+    if (isString(value)) return "string";
+
+    return value === undefined ? "undefined" : "object";
   };
 
-  const convexCompare = (a: unknown, b: unknown): number => {
+  const convexCompare = (a: Recorded, b: Recorded): number => {
     const byType =
       CONVEX_TYPE_ORDER.indexOf(convexType(a)) -
       CONVEX_TYPE_ORDER.indexOf(convexType(b));
 
     if (byType !== 0) return byType;
 
-    if (convexType(a) === "bytes") {
-      return (a as ArrayBuffer).byteLength - (b as ArrayBuffer).byteLength;
+    if (a instanceof ArrayBuffer && b instanceof ArrayBuffer) {
+      return a.byteLength - b.byteLength;
     }
 
-    const [x, y] = [a, b] as [number, number];
+    if ((isNumber(a) || isBigint(a)) && (isNumber(b) || isBigint(b))) {
+      return a < b ? -1 : a > b ? 1 : 0;
+    }
 
-    return x < y ? -1 : x > y ? 1 : 0;
+    if ((isString(a) && isString(b)) || (isBoolean(a) && isBoolean(b))) {
+      return a < b ? -1 : a > b ? 1 : 0;
+    }
+
+    return 0;
   };
 
   const convexEvaluate = (
-    node: unknown,
-    doc: Record<string, unknown>,
-  ): unknown => {
+    node: Recorded,
+    doc: GenericDocument,
+  ): Recorded => {
     if (!isRecordedNode(node)) return node;
     const [a, b] = node.args.map((arg) => convexEvaluate(arg, doc));
 
@@ -663,14 +691,14 @@ describe("an ordering against a value of another type, on a non-nullable field",
 
   const ORDERING = new Set(["lt", "le", "gt", "ge"]);
 
-  const ordersSomething = (node: unknown): boolean => {
+  const ordersSomething = (node: JsonValue | undefined): boolean => {
     if (Array.isArray(node)) return node.some(ordersSomething);
 
-    if (typeof node !== "object" || node === null) return false;
-    const { operator } = node as { operator?: unknown };
+    if (!isObject(node)) return false;
+    const operator = node["operator"];
 
     return (
-      (typeof operator === "string" && ORDERING.has(operator)) ||
+      (isString(operator) && ORDERING.has(operator)) ||
       Object.values(node).some(ordersSomething)
     );
   };
@@ -685,7 +713,7 @@ describe("an ordering against a value of another type, on a non-nullable field",
 
   beforeAll(() => {
     PUSHED_ORDERINGS = GOLDENS.filter((g) =>
-      ordersSomething(g.plan.condition ?? null),
+      ordersSomething(g.plan["condition"] ?? null),
     ).flatMap((g) => {
       const result = translated(g.id, { mapper: NON_NULLABLE });
       const queryPlan = planFor(g.id);
@@ -725,13 +753,13 @@ describe("an ordering against a value of another type, on a non-nullable field",
 
         return FIELDS.flatMap((field) =>
           VALUES.flatMap((value) => {
-            const doc: Record<string, unknown> = {
+            const doc = {
               aNumber: 3,
               aBool: true,
               aString: "s",
               owner: "o",
               [field]: value,
-            };
+            } satisfies GenericDocument;
 
             const cel =
               evaluate(condition, {
@@ -756,15 +784,19 @@ describe("an ordering against a value of another type, on a non-nullable field",
 // -- hand-built plans ------------------------------------------------------------------------------
 
 /** A conditional plan around a hand-built condition, for the two sections below that need one. */
-const plan = (condition: unknown): PlanResourcesResponse =>
-  ({
-    kind: PlanKind.CONDITIONAL,
-    condition: condition as PlanExpressionOperand,
-    cerbosCallId: "",
-    requestId: "",
-    validationErrors: [],
-    metadata: undefined,
-  }) as PlanResourcesResponse;
+const plan = (condition: Value): PlanResourcesResponse =>
+  overwritten(
+    {
+      kind: PlanKind.CONDITIONAL,
+      condition: { value: true },
+      cerbosCallId: "",
+      requestId: "",
+      validationErrors: [],
+      metadata: undefined,
+    },
+    "condition",
+    condition,
+  );
 
 // -- plans the planner cannot produce --------------------------------------------------------------
 
@@ -781,7 +813,11 @@ describe("plans the planner cannot produce", () => {
   test("an unrecognised plan kind", () => {
     expect(() =>
       queryPlanToConvex({
-        queryPlan: { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse,
+        queryPlan: overwritten(
+          { kind: PlanKind.ALWAYS_ALLOWED, cerbosCallId: "", requestId: "", validationErrors: [], metadata: undefined },
+          "kind",
+          "INVALID_KIND",
+        ),
         mapper: MAPPER,
       }),
     ).toThrow("Invalid query plan.");
@@ -814,7 +850,7 @@ describe("plans the planner cannot produce", () => {
 
   // The planner emits `set-field` only as a `struct` entry, and a two-variable lambda only under
   // `exists`, `all` and `exists_one` (CEL's two-variable `transformList` is its own operator).
-  test.each([
+  test.each<[string, Value]>([
     [
       "a set-field outside a map literal",
       {
@@ -892,9 +928,9 @@ describe("shapes the corpus does not reach yet", () => {
   describe("a macro over a literal value-list collection", () => {
     const macroPostFilter = (
       macro: string,
-      elements: unknown[],
-      body: unknown,
-    ): ((doc: Record<string, unknown>) => boolean) => {
+      elements: Value[],
+      body: Value,
+    ): ((doc: GenericDocument) => boolean) => {
       const result = queryPlanToConvex({
         queryPlan: plan({
           operator: macro,
@@ -913,7 +949,7 @@ describe("shapes the corpus does not reach yet", () => {
       return result.postFilter;
     };
 
-    const compare = (operator: string, right: unknown) => ({
+    const compare = (operator: string, right: Value) => ({
       operator,
       operands: [{ name: "request.resource.attr.aString" }, right],
     });
@@ -968,7 +1004,7 @@ test("result types require the payload declared by each execution path", () => {
     kind: PlanKind.CONDITIONAL;
     path: "split";
     filter: ConvexFilter;
-    postFilter: (doc: Record<string, unknown>) => boolean;
+    postFilter: (doc: GenericDocument) => boolean;
   }> = true;
 
   expect([

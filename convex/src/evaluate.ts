@@ -32,14 +32,16 @@ import {
 import type { ArithmeticOperator } from "./cel";
 import type { Mapper } from "./index";
 import {
+  isComparisonOperator,
   isExpression,
   isValue,
   isVariable,
   operandAt,
   resolveField,
 } from "./operands";
-import type { ComparisonOperator } from "./operands";
 import { compileRe2 } from "./regex";
+import { isBigint, isNumber, isString, lookup, triple } from "./narrowing";
+import type { CelMap, CelValue } from "./cel";
 
 /**
  * The adapter's own CEL evaluator: the post-filter that answers, one document at a time, every
@@ -51,10 +53,10 @@ import { compileRe2 } from "./regex";
  * the translation-time check that refuses that form before a filter exists.
  */
 
-type Bindings = Record<string, unknown>;
+type Bindings = CelMap;
 
 interface Scope {
-  doc: Record<string, unknown>;
+  doc: CelMap;
   mapper: Mapper;
   /** Lambda variables in scope, by name. */
   bindings: Bindings;
@@ -72,7 +74,7 @@ interface Call {
 }
 
 interface Operator {
-  evaluate: (call: Call) => unknown;
+  evaluate: (call: Call) => CelValue;
   /** Throws for a node of this operator that has no faithful translation. */
   validate?: (expression: PlanExpression) => void;
 }
@@ -81,7 +83,7 @@ interface Operator {
 export const evaluate = (
   operand: PlanExpressionOperand,
   scope: Scope,
-): unknown => {
+): CelValue => {
   if (isValue(operand)) return operand.value;
 
   if (isVariable(operand)) return lookUp(operand.name, scope);
@@ -109,7 +111,7 @@ export const evaluate = (
  * A lambda variable (or a path through one) first, then the mapped document field. A bare lambda
  * variable is a list element, which a caller cannot omit, so only a path reads a null as missing.
  */
-const lookUp = (name: string, scope: Scope): unknown => {
+const lookUp = (name: string, scope: Scope): CelValue => {
   const { doc, mapper, bindings } = scope;
   const dotIdx = name.indexOf(".");
 
@@ -133,12 +135,12 @@ const lookUp = (name: string, scope: Scope): unknown => {
  * `has(name)`: the key at the end of the path is present, resolving the path as `lookUp` does. A
  * stored null is absent under the omitted convention, where the caller sends no attribute for it.
  */
-const hasPath = (name: string, scope: Scope): unknown => {
+const hasPath = (name: string, scope: Scope): CelValue => {
   const { doc, mapper, bindings, nullIsMissing } = scope;
   const dotIdx = name.indexOf(".");
   const root = dotIdx === -1 ? name : name.substring(0, dotIdx);
 
-  const [base, path] =
+  const [base, path]: [CelValue, string] =
     dotIdx !== -1 && root in bindings
       ? [bindings[root], name.substring(dotIdx + 1)]
       : [doc, resolveField(name, mapper)];
@@ -155,11 +157,11 @@ const hasPath = (name: string, scope: Scope): unknown => {
   return value !== undefined && !(nullIsMissing && value === null);
 };
 
-const readPath = (value: unknown, { nullIsMissing }: Scope): unknown =>
+const readPath = (value: CelValue, { nullIsMissing }: Scope): CelValue =>
   nullIsMissing && value === null ? EVALUATION_ERROR : value;
 
 /** Evaluates the operand at `index`, failing with `"<operator> <role>"` when it is missing. */
-const arg = (call: Call, index: number, role: string): unknown =>
+const arg = (call: Call, index: number, role: string): CelValue =>
   evaluate(
     operandAt(call.operands, index, `${call.operator} ${role}`),
     call.scope,
@@ -170,7 +172,7 @@ const arg = (call: Call, index: number, role: string): unknown =>
 /** CEL's commutative `&&` / `||`: a deciding operand wins over an error in any position. */
 const junction =
   (decisive: boolean) =>
-  ({ operands, scope }: Call): unknown => {
+  ({ operands, scope }: Call): CelValue => {
     let sawError = false;
 
     for (const operand of operands) {
@@ -184,20 +186,22 @@ const junction =
     return sawError ? EVALUATION_ERROR : !decisive;
   };
 
-const comparison = (call: Call): unknown =>
-  compareValues(
-    call.operator as ComparisonOperator,
-    arg(call, 0, "left operand"),
-    arg(call, 1, "right operand"),
-  );
+const comparison = (call: Call): CelValue =>
+  isComparisonOperator(call.operator)
+    ? compareValues(
+        call.operator,
+        arg(call, 0, "left operand"),
+        arg(call, 1, "right operand"),
+      )
+    : EVALUATION_ERROR;
 
 const stringTest =
   (argumentRole: string, test: (receiver: string, arg: string) => boolean) =>
-  (call: Call): unknown => {
+  (call: Call): CelValue => {
     const receiver = arg(call, 0, "receiver");
     const argument = arg(call, 1, argumentRole);
 
-    return typeof receiver === "string" && typeof argument === "string"
+    return isString(receiver) && isString(argument)
       ? test(receiver, argument)
       : EVALUATION_ERROR;
   };
@@ -206,6 +210,8 @@ const looksLikeLambdaVariable = (
   operand: PlanExpressionOperand,
 ): operand is PlanExpressionVariable =>
   isVariable(operand) && !operand.name.includes(".");
+
+type LambdaComponents = { body: PlanExpressionOperand; variables: PlanExpressionVariable[] };
 
 /**
  * A lambda's body and its variables. With one variable the planner does not fix the order of the
@@ -216,17 +222,13 @@ const looksLikeLambdaVariable = (
  */
 export const lambdaComponents = (
   lambda: PlanExpressionOperand,
-): { body: PlanExpressionOperand; variables: PlanExpressionVariable[] } => {
+): LambdaComponents => {
   if (!isExpression(lambda) || lambda.operator !== "lambda") {
     throw new UnsupportedQueryPlanError("Expected a lambda operand");
   }
 
   if (lambda.operands.length === 3) {
-    const [body, first, second] = lambda.operands as [
-      PlanExpressionOperand,
-      PlanExpressionOperand,
-      PlanExpressionOperand,
-    ];
+    const [body, first, second] = triple(lambda.operands);
 
     if (looksLikeLambdaVariable(first) && looksLikeLambdaVariable(second)) {
       return { body, variables: [first, second] };
@@ -275,16 +277,18 @@ const validateMacro =
     }
   };
 
+type Lambda = {
+  arity: number;
+  body: (first: CelValue, second?: CelValue) => CelValue;
+};
+
 /**
  * The macro's lambda (its second operand) as a function of one collection item: the element, or
  * for two variables the (index, element) or (key, value) pair.
  */
 const lambdaOf = (
   call: Call,
-): {
-  arity: number;
-  body: (first: unknown, second?: unknown) => unknown;
-} => {
+): Lambda => {
   const { body, variables } = lambdaComponents(
     operandAt(call.operands, 1, `${call.operator} lambda`),
   );
@@ -310,8 +314,8 @@ const lambdaOf = (
  * or a map's (key, value) pairs.
  */
 const comprehensionPairs = (
-  collection: unknown,
-): [unknown, unknown][] | undefined => {
+  collection: CelValue,
+): [CelValue, CelValue][] | undefined => {
   if (Array.isArray(collection)) {
     return collection.map((element, index) => [index, element]);
   }
@@ -322,7 +326,7 @@ const comprehensionPairs = (
 };
 
 /** What a macro ranges over, and what `in` tests: a list's elements, or a map's keys. */
-const macroItems = (collection: unknown): unknown[] | undefined => {
+const macroItems = (collection: CelValue): CelValue[] | undefined => {
   if (Array.isArray(collection)) return collection;
 
   if (isRecord(collection)) return Object.keys(collection);
@@ -331,11 +335,11 @@ const macroItems = (collection: unknown): unknown[] | undefined => {
 };
 
 /** `exists`, `exists_one` and `all`, with CEL's error absorption across elements. */
-const quantifier = (call: Call): unknown => {
+const quantifier = (call: Call): CelValue => {
   const { arity, body } = lambdaOf(call);
   const target = arg(call, 0, "collection");
 
-  const items: unknown[][] | undefined =
+  const items: CelValue[][] | undefined =
     arity === 2
       ? comprehensionPairs(target)
       : macroItems(target)?.map((item) => [item]);
@@ -378,7 +382,7 @@ const INDETERMINATE_ZERO_DIVISOR_MESSAGE =
   "JSON-encoded on its way into a Convex function and JSON has no -0, so the " +
   "adapter cannot tell +Infinity from -Infinity";
 
-const arithmetic = (call: Call): unknown => {
+const arithmetic = (call: Call): CelValue => {
   const { operator } = call;
 
   if (
@@ -396,6 +400,7 @@ const arithmetic = (call: Call): unknown => {
   // Over two int operands CEL does int arithmetic: `int(3) / 2` truncates to 1, where JavaScript
   // divides to 1.5. The plan carries no numeric type, so the mode is chosen from the expression.
   if (isIntExpression({ operator, operands })) {
+    // SAFETY: OPERATORS dispatches only the arithmetic operators here.
     return intArithmetic(operator as ArithmeticOperator, left, right);
   }
 
@@ -415,8 +420,8 @@ const arithmetic = (call: Call): unknown => {
   // (cerbos/query-plan-adapters#376).
   if (
     operator === "add" &&
-    typeof left === "string" &&
-    typeof right === "string"
+    isString(left) &&
+    isString(right)
   ) {
     return left + right;
   }
@@ -426,7 +431,7 @@ const arithmetic = (call: Call): unknown => {
     return [...left, ...right];
   }
 
-  if (typeof left !== "number" || typeof right !== "number") {
+  if (!isNumber(left) || !isNumber(right)) {
     return EVALUATION_ERROR;
   }
 
@@ -515,7 +520,7 @@ const temporalResultKind = (
  * timestamp - timestamp. An overflow, a result outside CEL's timestamp range, and any pairing CEL
  * has no overload for (a duration beside a number or a string attribute) are errors.
  */
-const temporalArithmetic = (call: Call): unknown => {
+const temporalArithmetic = (call: Call): CelValue => {
   const [leftOperand, rightOperand] = call.operands;
 
   const kind = temporalResultKind(
@@ -529,10 +534,10 @@ const temporalArithmetic = (call: Call): unknown => {
 
   if (kind === undefined) return EVALUATION_ERROR;
 
-  const nanosOf = (value: unknown): bigint | undefined =>
+  const nanosOf = (value: CelValue): bigint | undefined =>
     value instanceof CelDuration
       ? value.nanos
-      : typeof value === "bigint"
+      : isBigint(value)
         ? value
         : undefined;
 
@@ -593,7 +598,7 @@ const isDoubleOperand = (
 ): boolean => {
   if (isValue(operand)) {
     return (
-      typeof operand.value === "number" && !Number.isInteger(operand.value)
+      isNumber(operand.value) && !Number.isInteger(operand.value)
     );
   }
 
@@ -606,7 +611,7 @@ const isDoubleOperand = (
 // resource or principal attribute reaches the PDP as a protobuf Value), so a field read as either
 // operand is a no-such-overload error on every row, and an int modulus by zero is an error too.
 // JavaScript's `%` would answer both, and a negation would turn that answer into a grant.
-const modulo = (call: Call, left: number, right: number): unknown => {
+const modulo = (call: Call, left: number, right: number): CelValue => {
   if (call.operands.some(isVariable) || right === 0) return EVALUATION_ERROR;
 
   return left % right;
@@ -690,7 +695,7 @@ const numericTypeOf = (
   operand: PlanExpressionOperand,
 ): NumericType | undefined => {
   if (isValue(operand)) {
-    return typeof operand.value === "number" && !Number.isInteger(operand.value)
+    return isNumber(operand.value) && !Number.isInteger(operand.value)
       ? "double"
       : undefined;
   }
@@ -724,7 +729,7 @@ const rendersUntypedConstant = (
 
     return (
       type === undefined &&
-      typeof value === "number" &&
+      isNumber(value) &&
       Number.isInteger(value) &&
       convertToString(value, true) !== convertToString(value, false)
     );
@@ -825,7 +830,7 @@ const validateDivision = (expression: PlanExpression): void => {
 const validatePattern = ({ operands }: PlanExpression): void => {
   const pattern = operands[1];
 
-  if (!pattern || !isValue(pattern) || typeof pattern.value !== "string") {
+  if (!pattern || !isValue(pattern) || !isString(pattern.value)) {
     throw new UnsupportedQueryPlanError(
       "matches requires a constant string pattern: the post-filter compiles it at translation",
     );
@@ -834,7 +839,7 @@ const validatePattern = ({ operands }: PlanExpression): void => {
   compileRe2(pattern.value);
 };
 
-const hierarchyRelation = (call: Call): unknown => {
+const hierarchyRelation = (call: Call): CelValue => {
   const left = arg(call, 0, "left");
   const right = arg(call, 1, "right");
 
@@ -854,8 +859,8 @@ const hierarchyRelation = (call: Call): unknown => {
 
 /** Cerbos's list operations: both operands lists, or an error. */
 const listOperation =
-  (operation: (left: unknown[], right: unknown[]) => unknown) =>
-  (call: Call): unknown => {
+  (operation: (left: CelValue[], right: CelValue[]) => CelValue) =>
+  (call: Call): CelValue => {
     const left = arg(call, 0, "left");
     const right = arg(call, 1, "right");
 
@@ -864,7 +869,7 @@ const listOperation =
       : EVALUATION_ERROR;
   };
 
-const listContains = (list: unknown[], value: unknown): boolean =>
+const listContains = (list: CelValue[], value: CelValue): boolean =>
   list.some((member) => valuesEqual(member, value));
 
 /** A struct literal's entries: `set-field` nodes, each a constant string key and a value. */
@@ -875,7 +880,7 @@ const validateStruct = ({ operands }: PlanExpression): void => {
       entry.operator !== "set-field" ||
       entry.operands.length !== 2 ||
       !isValue(entry.operands[0]!) ||
-      typeof entry.operands[0].value !== "string"
+      !isString(entry.operands[0].value)
     ) {
       throw new UnsupportedQueryPlanError(
         "A map literal's entries must each be a set-field with a constant string key",
@@ -886,7 +891,7 @@ const validateStruct = ({ operands }: PlanExpression): void => {
 
 // -- the roster ----------------------------------------------------------------------------------
 
-const OPERATORS: Record<string, Operator> = {
+const OPERATORS = {
   and: { evaluate: junction(false) },
   or: { evaluate: junction(true) },
   not: {
@@ -943,7 +948,7 @@ const OPERATORS: Record<string, Operator> = {
       const receiver = arg(call, 0, "receiver");
       const pattern = arg(call, 1, "pattern");
 
-      if (typeof receiver !== "string" || typeof pattern !== "string") {
+      if (!isString(receiver) || !isString(pattern)) {
         return EVALUATION_ERROR;
       }
 
@@ -977,7 +982,7 @@ const OPERATORS: Record<string, Operator> = {
   // A list literal holding an expression; any element's error is the list's.
   list: {
     evaluate: (call) => {
-      const elements: unknown[] = [];
+      const elements: CelValue[] = [];
 
       for (const operand of call.operands) {
         const value = evaluate(operand, call.scope);
@@ -992,12 +997,11 @@ const OPERATORS: Record<string, Operator> = {
   // A map literal. A repeated key is an error in CEL, at evaluation.
   struct: {
     evaluate: (call) => {
-      const entries: Record<string, unknown> = Object.create(null) as Record<
-        string,
-        unknown
-      >;
+      const entries: CelMap = Object.create(null);
 
+      // SAFETY: validateStruct admits only set-field entries keyed by a constant string.
       for (const entry of call.operands as PlanExpression[]) {
+        // SAFETY: as above.
         const key = (entry.operands[0] as PlanExpressionValue).value as string;
         const value = evaluate(entry.operands[1]!, call.scope);
 
@@ -1027,8 +1031,10 @@ const OPERATORS: Record<string, Operator> = {
   // Cerbos 0.57.0. A missing value is never an error here, only `false`; selecting through a
   // missing or non-map parent is, as it is in CEL.
   has: {
-    evaluate: ({ operands, scope }) =>
-      hasPath((operands[0] as PlanExpressionVariable).name, scope),
+    evaluate: ({ operands: [operand], scope }) =>
+      operand !== undefined && isVariable(operand)
+        ? hasPath(operand.name, scope)
+        : EVALUATION_ERROR,
     validate: ({ operands }: PlanExpression): void => {
       const [operand] = operands;
 
@@ -1064,7 +1070,7 @@ const OPERATORS: Record<string, Operator> = {
 
       if (collection === undefined) return EVALUATION_ERROR;
       const { body } = lambdaOf(call);
-      const filtered: unknown[] = [];
+      const filtered: CelValue[] = [];
 
       for (const item of collection) {
         const value = asBoolean(body(item));
@@ -1084,7 +1090,7 @@ const OPERATORS: Record<string, Operator> = {
 
       if (collection === undefined) return EVALUATION_ERROR;
       const { body } = lambdaOf(call);
-      const mapped: unknown[] = [];
+      const mapped: CelValue[] = [];
 
       for (const item of collection) {
         const value = body(item);
@@ -1120,7 +1126,7 @@ const OPERATORS: Record<string, Operator> = {
       // string keys (a document map, or a literal whose keys `validateStruct` fixed as strings),
       // so a key of any other type is absent too.
       if (isRecord(collection)) {
-        return typeof index === "string" &&
+        return isString(index) &&
           Object.prototype.hasOwnProperty.call(collection, index)
           ? collection[index]
           : EVALUATION_ERROR;
@@ -1128,7 +1134,7 @@ const OPERATORS: Record<string, Operator> = {
 
       if (
         !Array.isArray(collection) ||
-        typeof index !== "number" ||
+        !isNumber(index) ||
         !Number.isInteger(index) ||
         index < 0 ||
         index >= collection.length
@@ -1146,7 +1152,7 @@ const OPERATORS: Record<string, Operator> = {
 
       const field = isVariable(fieldOperand)
         ? fieldOperand.name
-        : isValue(fieldOperand) && typeof fieldOperand.value === "string"
+        : isValue(fieldOperand) && isString(fieldOperand.value)
           ? fieldOperand.value
           : undefined;
 
@@ -1159,7 +1165,7 @@ const OPERATORS: Record<string, Operator> = {
     evaluate: (call) => {
       const value = arg(call, 0, "operand");
 
-      if (typeof value === "string") return Array.from(value).length;
+      if (isString(value)) return Array.from(value).length;
 
       if (Array.isArray(value)) return value.length;
 
@@ -1186,7 +1192,7 @@ const OPERATORS: Record<string, Operator> = {
     evaluate: (call) => {
       const value = arg(call, 0, "operand");
 
-      return typeof value === "string"
+      return isString(value)
         ? value.replace(/[a-z]/g, (letter) => letter.toUpperCase())
         : EVALUATION_ERROR;
     },
@@ -1195,7 +1201,7 @@ const OPERATORS: Record<string, Operator> = {
     evaluate: (call) => {
       const value = arg(call, 0, "operand");
 
-      return typeof value === "string"
+      return isString(value)
         ? parseCelDuration(value)
         : EVALUATION_ERROR;
     },
@@ -1208,7 +1214,7 @@ const OPERATORS: Record<string, Operator> = {
 
       if (
         temporalKindOf(operand) !== "timestamp" ||
-        typeof value !== "bigint"
+        !isBigint(value)
       ) {
         return EVALUATION_ERROR;
       }
@@ -1220,7 +1226,7 @@ const OPERATORS: Record<string, Operator> = {
     evaluate: (call) => {
       const value = arg(call, 0, "operand");
 
-      if (typeof value !== "string") return EVALUATION_ERROR;
+      if (!isString(value)) return EVALUATION_ERROR;
 
       return parseRfc3339Timestamp(value);
     },
@@ -1244,21 +1250,20 @@ const OPERATORS: Record<string, Operator> = {
       if (delimiterOperand) {
         const delimiter = evaluate(delimiterOperand, call.scope);
 
-        return typeof value === "string" && typeof delimiter === "string"
+        return isString(value) && isString(delimiter)
           ? splitHierarchy(value, delimiter)
           : EVALUATION_ERROR;
       }
 
       // One argument: a string split on ".", a list of string segments, or a hierarchy.
-      if (typeof value === "string") return splitHierarchy(value, ".");
+      if (isString(value)) return splitHierarchy(value, ".");
 
       if (value instanceof Hierarchy) return value;
 
-      if (
-        Array.isArray(value) &&
-        value.every((segment) => typeof segment === "string")
-      ) {
-        return new Hierarchy(value as string[]);
+      const segments = Array.isArray(value) ? [...value] : [];
+
+      if (Array.isArray(value) && segments.every(isString)) {
+        return new Hierarchy(segments);
       }
 
       return EVALUATION_ERROR;
@@ -1267,10 +1272,10 @@ const OPERATORS: Record<string, Operator> = {
   ancestorOf: { evaluate: hierarchyRelation },
   descendentOf: { evaluate: hierarchyRelation },
   overlaps: { evaluate: hierarchyRelation },
-};
+} satisfies Record<string, Operator>;
 
 /** The operator's entry, or undefined for one the adapter does not know. */
 export const operatorFor = (name: string): Operator | undefined =>
   Object.prototype.hasOwnProperty.call(OPERATORS, name)
-    ? OPERATORS[name]
+    ? lookup(OPERATORS, name)
     : undefined;

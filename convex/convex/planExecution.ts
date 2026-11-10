@@ -3,6 +3,8 @@ import type {
   PlanResourcesResponse,
 } from "@cerbos/core";
 
+import type { Value as ConvexValue } from "convex/values";
+
 import { PlanKind } from "../src/index";
 import type { QueryPlanToConvexResult } from "../src/index";
 
@@ -10,7 +12,11 @@ import type { QueryPlanToConvexResult } from "../src/index";
 // crosses the Convex boundary as `v.any()`, and reports which half of the adapter's output
 // actually answered the query.
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+interface ConvexRecord {
+  [key: string]: ConvexValue;
+}
+
+const isRecord = (value: unknown): value is ConvexRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isPlanOperand = (value: unknown): value is PlanExpressionOperand => {

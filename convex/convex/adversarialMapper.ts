@@ -22,8 +22,12 @@ import type { MapperConfig } from "../src/index";
  * the two scalar lists) are always present and are not `nullable`.
  */
 
+export interface ConformanceMapper {
+  [reference: string]: MapperConfig;
+}
+
 // Typed as the record arm of `Mapper`, so the unit suite can index it to build a function mapper.
-export const MAPPER: Record<string, MapperConfig> = {
+export const MAPPER: ConformanceMapper = {
   // The primary key, reached as `request.resource.id` rather than through `attr` (the
   // `identifier/*` cases). An adapter that resolves references by stripping a `request.resource.attr.` prefix
   // never sees this name. It maps to the corpus id field rather than Convex's own `_id`, which

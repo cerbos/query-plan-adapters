@@ -8,7 +8,7 @@
  * `@cerbos/orm-convex` out of node_modules, where run.sh installed the artifact `npm publish`
  * would upload, resolving it through the published `exports` map and `files` allowlist.
  *
- * The plan arrives as `v.any()` and is cast, exactly as the adapter's README's "Trusted usage
+ * The plan arrives as `v.any()` and is taken as the plan, exactly as the adapter's README's "Trusted usage
  * pattern" shows: this argument must be the response Cerbos returned. Note what the crossing
  * costs — @cerbos/core builds a plan out of `PlanExpression` class instances, and Convex's
  * argument encoding keeps the fields and drops the prototypes. The adapter classifies operands by
@@ -67,6 +67,8 @@ const applicationFilterValidator = v.object({
 
 type ApplicationFilter = Infer<typeof applicationFilterValidator>;
 
+type Translation = { kind: PlanKind; filter: Predicate | undefined };
+
 /**
  * `allowPostFilter` is left at its default of `false` on purpose. Every shape in
  * demo/policies/document.yaml is a flat comparison Convex's filter engine evaluates itself, so a
@@ -75,10 +77,10 @@ type ApplicationFilter = Infer<typeof applicationFilterValidator>;
  * before the whole authorization predicate has run.
  */
 const translate = (
-  queryPlan: unknown,
-): { kind: PlanKind; filter: Predicate | undefined } => {
+  queryPlan: PlanResourcesResponse,
+): Translation => {
   const result = queryPlanToConvex({
-    queryPlan: queryPlan as PlanResourcesResponse,
+    queryPlan,
     mapper: MAPPER,
   });
 
@@ -168,7 +170,7 @@ export const list = query({
 
     // Short-circuited before any predicate is built: the application's predicate must not be able
     // to turn a denial into a query that returns rows.
-    if (kind === PlanKind.ALWAYS_DENIED) return { kind, ids: [] as string[] };
+    if (kind === PlanKind.ALWAYS_DENIED) return { kind, ids: [] };
 
     const documents = await withPredicate(
       ctx.db.query("documents"),
@@ -193,7 +195,7 @@ export const page = query({
     const { kind, filter } = translate(args.queryPlan);
 
     if (kind === PlanKind.ALWAYS_DENIED) {
-      return { kind, ids: [] as string[], isDone: true, cursor: null };
+      return { kind, ids: [], isDone: true, cursor: null };
     }
 
     // The adapter's filter alone: shape 4 pages over the adapter's answer, not over a composed

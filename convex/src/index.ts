@@ -1,12 +1,12 @@
 import {
   PlanResourcesResponse,
   PlanExpressionOperand,
-  PlanExpression,
   PlanKind,
 } from "@cerbos/core";
 import type {
   Expression,
   FilterBuilder,
+  GenericDocument,
   GenericTableInfo,
 } from "convex/server";
 
@@ -80,7 +80,7 @@ export interface QueryPlanToConvexArgs {
   nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
-type PostFilter = (doc: Record<string, unknown>) => boolean;
+type PostFilter = (doc: GenericDocument) => boolean;
 
 // `filter` is only ever the whole condition, so applying it alone is correct wherever it appears.
 // The pushable half of a split condition is a `prefilter`: it narrows the candidates and decides
@@ -164,7 +164,7 @@ const conjunction = (
 ): PlanExpressionOperand =>
   operands.length === 1
     ? operands[0]!
-    : ({ operator: "and", operands } as PlanExpression);
+    : { operator: "and", operands };
 
 const convexFilter =
   (expression: PlanExpressionOperand, mapper: Mapper): ConvexFilter =>

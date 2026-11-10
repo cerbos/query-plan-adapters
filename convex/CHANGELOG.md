@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `postFilter` compares two `bytes` values by their contents. It used to read each as an empty
+  map, so any two were equal.
+
+- **Breaking (types only):** `postFilter` takes a `GenericDocument` from `convex/server`, which is
+  what `ctx.db` returns, where it took a `Record<string, unknown>`.
+
 - Fixed an over-grant: arithmetic over a ternary takes the type of the arm the document selects, so `(c ? R.attr.d : int(x)) + int(x)` is CEL's int-beside-double error where `c` picks the double arm, where it was summed.
 
 - `postFilter` reads a ternary whose branches are ints, or an element of a constant list of

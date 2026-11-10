@@ -48,7 +48,7 @@ interface Seeds {
   documents: SeedDocument[];
 }
 
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
+// SAFETY: demo/seeds.json is a repository-controlled corpus file, checked structurally by
 // demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
 const seeds = JSON.parse(
   readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
@@ -172,6 +172,7 @@ async function plan(principalId: string, action: string): Promise<QueryPlan> {
     action,
   });
 
+  // SAFETY: a JSON round trip keeps the plan's fields and drops only its class prototypes.
   return JSON.parse(JSON.stringify(queryPlan)) as QueryPlan;
 }
 
@@ -196,12 +197,12 @@ function asPlanKind(reported: string): PlanKind {
   return kind;
 }
 
-interface ShapeResult {
+interface UsageResult {
   kind: PlanKind;
   ids: string[];
 }
 
-interface PaginatedShapeResult extends ShapeResult {
+interface PaginatedUsageResult extends UsageResult {
   pageSize: number;
   pageSizes: number[];
 }
@@ -219,13 +220,13 @@ async function listed(
   principalId: string,
   action: string,
   applicationFilter?: typeof APPLICATION_FILTER
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const queryPlan = await plan(principalId, action);
 
-  const result = await convex.query(listDocuments, {
-    queryPlan,
-    ...(applicationFilter ? { applicationFilter } : {}),
-  });
+  const result = await convex.query(
+    listDocuments,
+    applicationFilter ? { queryPlan, applicationFilter } : { queryPlan },
+  );
 
   return { kind: asPlanKind(result.kind), ids: result.ids };
 }
@@ -241,7 +242,7 @@ async function paginated(
   principalId: string,
   action: string,
   pageSize: number
-): Promise<PaginatedShapeResult> {
+): Promise<PaginatedUsageResult> {
   const queryPlan = await plan(principalId, action);
 
   const pageSizes: number[] = [];
@@ -291,7 +292,7 @@ async function main(): Promise<void> {
   await convex.mutation(seedDocuments, { documents: seeds.documents });
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
+  const usages = {
     filtered: {
       "alice/view": await listed("alice", "view"),
       "bob/view": await listed("bob", "view"),
@@ -319,7 +320,7 @@ async function main(): Promise<void> {
   };
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "convex", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "convex", shapes: usages }, null, 2)}\n`
   );
 }
 
