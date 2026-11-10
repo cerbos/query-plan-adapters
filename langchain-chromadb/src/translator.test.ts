@@ -233,6 +233,22 @@ describe("what an emitted filter may contain", () => {
    * A translator change that quietly emitted an inequality over an optional key would be an
    * authorization bug.
    */
+  /**
+   * CEL allows `!x` only where `x` is false: over a string or a number it errors, and the PDP
+   * denies. `$ne: true` matches every non-boolean value, so under `required` a negated bare variable
+   * must be `$eq: false`. The corpus mapping leaves every key optional, so only this mapping reaches it.
+   */
+  test("a negated bare variable admits only false, whatever the key holds", () => {
+    const negated = COMPARISONS_IF_PRESENT.filter(
+      ({ action, field }) => action.startsWith("logic/not/bare-") && field !== "aNumber",
+    );
+
+    expect(negated.map(({ action }) => action)).toEqual(
+      expect.arrayContaining(["logic/not/bare-boolean-attribute", "logic/not/bare-string-attribute"]),
+    );
+    expect(negated.filter(({ operator, value }) => !(operator === "$eq" && value === false))).toEqual([]);
+  });
+
   test("an inequality is emitted only over a field declared required", () => {
     const required = new Set(requiredMetadataKeys());
 
