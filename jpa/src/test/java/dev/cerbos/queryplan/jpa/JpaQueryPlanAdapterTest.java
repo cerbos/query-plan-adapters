@@ -1334,60 +1334,6 @@ class JpaQueryPlanAdapterTest {
         withResource(row, () -> assertEquals(0, runCount(cond)));
     }
 
-    @Nested
-    class HierarchyOperators {
-
-        private Operand hierarchy(Operand inner, String delimiter) {
-            return exprOp("hierarchy", inner, sval(delimiter));
-        }
-
-        private Operand hierarchy(Operand inner) {
-            return exprOp("hierarchy", inner);
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: The corpus's hierarchy constants are two segments or
-         * more; a single-segment ancestor, which has no strict ancestors at all, is not carried.
-         */
-        @Test
-        void ancestorOfSingleSegmentConstantMatchesNothing() {
-            // "a" has no strict ancestors, and a path is not its own ancestor: no rows.
-            Operand cond = exprOp("ancestorOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("a"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of(), scopeIds(cond)));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: A single-segment descendant prefix, under which the
-         * sibling branch is a genuine descendant, is not carried.
-         */
-        @Test
-        void descendentOfSingleSegmentConstant() {
-            // LIKE 'a:%': everything under "a", including "a:bb:c", but not "a" itself.
-            Operand cond = exprOp("descendentOf",
-                    hierarchy(var("request.resource.attr.aString"), ":"),
-                    hierarchy(sval("a"), ":"));
-            withScopeRows(SCOPES, () ->
-                    assertEquals(Set.of("a:b", "a:b:c", "a:b:c:d", "a:bb:c"), scopeIds(cond)));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code overlaps} between two column hierarchies is not
-         * carried.
-         */
-        @Test
-        void twoFieldHierarchiesInOverlapThrows() {
-            assertConditionThrows(
-                    exprOp("overlaps",
-                            hierarchy(var("request.resource.attr.aString"), ":"),
-                            hierarchy(var("request.resource.attr.createdBy"), ":")),
-                    "two field-reference hierarchies");
-        }
-
-    }
-
     // Arithmetic as a comparison operand. Attribute values are CEL doubles, so the adapter
     // computes in double arithmetic. mod is refused: CEL's % is int-only, so it always fails
     // on an attribute.

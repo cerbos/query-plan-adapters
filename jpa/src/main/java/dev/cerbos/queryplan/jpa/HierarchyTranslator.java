@@ -144,7 +144,7 @@ final class HierarchyTranslator {
         if (ancestor instanceof Hierarchy.FieldRef a && descendant instanceof Hierarchy.Constant d) {
             List<String> prefixes = getStrictPrefixes(d.segments(), a.delimiter());
             if (prefixes.isEmpty()) {
-                return cb.disjunction();
+                return tri.baseUnlessUnknown(cb.disjunction(), () -> cb.isNull(a.path()));
             }
             if (prefixes.size() == 1) {
                 return cb.equal(a.path(), prefixes.get(0));

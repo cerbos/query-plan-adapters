@@ -168,6 +168,10 @@
       "status": "unsupported",
       "reason": "Each list holds `aDouble / 0.0`, a division by a constant zero kept as a conditional value (NaN or a signed infinity per row), which a list constructor cannot hold as a plain SQL expression."
     },
+    "hierarchy/overlaps/field-to-field": {
+      "reason": "The translator lowers a hierarchy relation only against a constant path, whose prefixes it expands at translation time; here both sides are the column split on different delimiters, so there is nothing to expand.",
+      "status": "unsupported"
+    },
     "hierarchy/overlaps/path-built-from-identifier": {
       "reason": "hierarchy() over a list of segments has no lowering: it compares segment by segment, and the translator lowers only a delimited string.",
       "status": "unsupported"

@@ -177,8 +177,8 @@ divergence is skipped, and counts toward the total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 31 / 31 |
-| extended | 101 / 105 |
-| adversarial | 447 / 488 |
+| extended | 102 / 106 |
+| adversarial | 449 / 491 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json), which holds the jpa adapter's entries: the

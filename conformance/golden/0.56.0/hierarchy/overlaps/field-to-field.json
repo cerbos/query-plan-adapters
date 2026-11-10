@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a1",
+    "a8",
+    "a9"
+  ],
+  "degenerateReason": null,
+  "id": "hierarchy/overlaps/field-to-field",
+  "intent": "overlaps between two hierarchies read from columns: scope split on ':' against scope split on '.'.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                },
+                {
+                  "value": ":"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.scope"
+                }
+              ],
+              "operator": "hierarchy"
+            }
+          }
+        ],
+        "operator": "overlaps"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "hierarchy/overlaps/field-to-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "hierarchy(R.attr.scope, \":\").overlaps(hierarchy(R.attr.scope))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Neither side is a constant to expand into prefixes, so an adapter must compare segment-wise at query time or refuse; only paths that are one segment under both delimiters (a1, a8, a9) overlap."
+}
