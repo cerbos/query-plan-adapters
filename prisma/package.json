@@ -6,7 +6,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/cerbos/query-plan-adapters",
-    "directory": "packages/prisma"
+    "directory": "prisma"
   },
   "bugs": {
     "url": "https://github.com/cerbos/query-plan-adapters/issues"
@@ -36,13 +36,11 @@
   },
   "//test": "`test` is the translator unit test: offline, so no Cerbos sidecar, no `db push`, and no generated client. It is also engine-agnostic — it produces where-inputs and never hands one to a Prisma client — which is why it has no v6/v7 split. Only `test:adversarial*` needs a store; it replays the recorded goldens and starts no PDP.",
   "scripts": {
-    "clean": "rimraf lib",
     "build": "tsc --build",
     "typecheck": "npm run typecheck:v7 && npm run typecheck:v6",
     "typecheck:v6": "tsc -p tsconfig.typecheck.v6.json",
     "typecheck:v7": "tsc -p tsconfig.typecheck.json",
     "prepare": "npm run build",
-    "version": "git add -A src",
     "prisma:generate": "bash scripts/generate-clients.sh all",
     "prisma:generate:v6": "bash scripts/generate-clients.sh 6",
     "prisma:generate:v7": "bash scripts/generate-clients.sh 7",
@@ -83,9 +81,7 @@
     "mariadb": "^3.5.3",
     "prisma": "^7.5.0",
     "prisma-v6": "npm:prisma@^6.0.0",
-    "rimraf": "^6.0.0",
     "ts-jest": "^29.4.6",
-    "ts-node": "^10.4.0",
     "typescript": "^6.0.0"
   },
   "peerDependencies": {

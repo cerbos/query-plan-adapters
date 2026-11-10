@@ -6,7 +6,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/cerbos/query-plan-adapters",
-    "directory": "packages/convex"
+    "directory": "convex"
   },
   "bugs": {
     "url": "https://github.com/cerbos/query-plan-adapters/issues"
@@ -39,8 +39,6 @@
     "build": "tsc --build",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "prepare": "npm run build",
-    "version": "git add -A src",
-    "postversion": "git push && git push --tags",
     "test": "jest",
     "test:adversarial": "jest --config jest.adversarial.config.js --runInBand",
     "convex:deploy": "npx convex deploy --url ${CONVEX_URL:-http://127.0.0.1:3210} --admin-key ${CONVEX_ADMIN_KEY}",
@@ -63,7 +61,6 @@
     "@types/node": "^24.0.0",
     "convex": "^1.21.0",
     "ts-jest": "^29.0.0",
-    "ts-node": "^10.4.0",
     "typescript": "^6.0.0"
   },
   "dependencies": {

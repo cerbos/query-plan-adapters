@@ -1,4 +1,3 @@
-import 'dotenv/config'
 import { defineConfig } from 'prisma/config'
 
 // The adversarial harness is the only suite that reaches a Prisma client, so its SQLite schema is
@@ -7,9 +6,6 @@ import { defineConfig } from 'prisma/config'
 // pointing at a schema that exists.
 export default defineConfig({
   schema: 'prisma/schema.adversarial.prisma',
-  migrations: {
-    path: 'prisma/migrations',
-  },
   datasource: {
     url: "file:./prisma/dev-adversarial.db",
   },
