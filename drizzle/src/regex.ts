@@ -1,4 +1,5 @@
 import { UnsupportedQueryPlanError } from "./errors";
+import { lookup } from "./narrowing";
 
 /**
  * CEL's `matches()` without a SQL regex engine.
@@ -75,7 +76,7 @@ const WORD = [...DIGITS, ...UPPER, ...LOWER, "_"];
 const SPACE = ["\t", "\n", "\f", "\r", " "];
 
 /** RE2's ASCII POSIX classes, `[[:name:]]`. */
-const POSIX_CLASSES: Record<string, string[]> = {
+const POSIX_CLASSES = {
   alnum: [...DIGITS, ...UPPER, ...LOWER],
   alpha: [...UPPER, ...LOWER],
   blank: [" ", "\t"],
@@ -85,19 +86,19 @@ const POSIX_CLASSES: Record<string, string[]> = {
   upper: UPPER,
   word: WORD,
   xdigit: [...DIGITS, ...range("A", "F"), ...range("a", "f")],
-};
+} satisfies Record<string, string[]>;
 
 /** Perl classes RE2 accepts, outside and inside brackets. */
-const PERL_CLASSES: Record<string, string[]> = { d: DIGITS, s: SPACE, w: WORD };
+const PERL_CLASSES = { d: DIGITS, s: SPACE, w: WORD } satisfies Record<string, string[]>;
 
-const LITERAL_ESCAPES: Record<string, string> = {
+const LITERAL_ESCAPES = {
   a: "\x07",
   f: "\f",
   n: "\n",
   r: "\r",
   t: "\t",
   v: "\v",
-};
+} satisfies Record<string, string>;
 
 /**
  * Every character RE2's `(?i)` treats as the same as `character`. Its case folding follows Unicode
@@ -302,10 +303,10 @@ class Parser {
     if (character === "A") return { kind: "begin" };
 
     if (character === "z") return { kind: "end" };
-    const perl = PERL_CLASSES[character];
+    const perl = lookup(PERL_CLASSES, character);
 
     if (perl) return { kind: "set", characters: perl };
-    const control = LITERAL_ESCAPES[character];
+    const control = lookup(LITERAL_ESCAPES, character);
 
     if (control) return this.literal(control);
 
@@ -344,7 +345,7 @@ class Parser {
       if (character === "[" && this.peek(1) === ":") {
         const rest = this.characters.slice(this.position).join("");
         const match = /^\[:([a-z]+):\]/.exec(rest);
-        const posix = match ? POSIX_CLASSES[match[1]!] : undefined;
+        const posix = match ? lookup(POSIX_CLASSES, match[1]!) : undefined;
 
         if (!match || !posix) {
           throw unsupported(this.pattern, "only ASCII POSIX classes are read");
@@ -396,10 +397,10 @@ class Parser {
 
     if (escaped === undefined) throw new InvalidPattern();
     this.position += 1;
-    const perl = PERL_CLASSES[escaped];
+    const perl = lookup(PERL_CLASSES, escaped);
 
     if (perl) return perl;
-    const control = LITERAL_ESCAPES[escaped];
+    const control = lookup(LITERAL_ESCAPES, escaped);
 
     if (control) return control;
 
@@ -569,13 +570,15 @@ const planAlternative = (pattern: string, sequence: Node[]): RegexPlan | "never"
 
     // `^P.*S$`: finite prefix and suffix around one unbounded run of `.`.
     const runs = nodes.flatMap((node, index) =>
-      node.kind === "repeat" && node.node.kind === "dot" && node.max === undefined ? [index] : [],
+      node.kind === "repeat" && node.node.kind === "dot" && node.max === undefined
+        ? [{ index, min: node.min }]
+        : [],
     );
 
     if (runs.length === 1) {
       const run = runs[0]!;
-      const prefixes = finiteSequence(nodes.slice(0, run));
-      const suffixes = finiteSequence(nodes.slice(run + 1));
+      const prefixes = finiteSequence(nodes.slice(0, run.index));
+      const suffixes = finiteSequence(nodes.slice(run.index + 1));
 
       if (prefixes !== undefined && suffixes !== undefined) {
         const pairs = prefixes.flatMap((prefix) =>
@@ -588,7 +591,7 @@ const planAlternative = (pattern: string, sequence: Node[]): RegexPlan | "never"
           pairs.length <= MAX_LITERALS &&
           pairs.every(([prefix, suffix]) => !`${prefix}${suffix}`.includes("\n"))
         ) {
-          return { kind: "prefixSuffix", pairs, min: (nodes[run] as { min: number }).min };
+          return { kind: "prefixSuffix", pairs, min: run.min };
         }
       }
     }

@@ -10,6 +10,7 @@ import { getMappingEntry, isMappingConfig, resolveFieldReference } from "./mappe
 import { isNameOperand, isValueOperand } from "./operands";
 import type { BuildFilterOptions, Mapper } from "./types";
 import { UNKNOWN_CONDITION } from "./predicates";
+import { isBoolean, isNumber, isString } from "./narrowing";
 
 /**
  * Constant positional access — `R.attr.list[0] == x` — over a column whose ordered storage the
@@ -82,12 +83,17 @@ export function indexedEquality({
   throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
 }
 
-function listShape(column: AnyColumn, indexable: Indexable): { isArray: SQL; length: SQL } {
-  if (indexable === "pgArray" || is(column, PgColumn)) {
-    const source =
-      indexable === "pgArray"
-        ? (assertPgArrayColumn(column), sql`to_jsonb(${column})`)
-        : (assertPgJsonColumn(column as PgColumn), sql`cast(${column} as jsonb)`);
+type ListProbes = { isArray: SQL; length: SQL };
+
+function listProbes(column: AnyColumn, indexable: Indexable): ListProbes {
+  const source =
+    indexable === "pgArray"
+      ? (assertPgArrayColumn(column), sql`to_jsonb(${column})`)
+      : is(column, PgColumn)
+        ? (assertPgJsonColumn(column), sql`cast(${column} as jsonb)`)
+        : undefined;
+
+  if (source !== undefined) {
 
     return { isArray: sql`jsonb_typeof(${source}) = 'array'`, length: sql`jsonb_array_length(${source})` };
   }
@@ -107,7 +113,7 @@ function listShape(column: AnyColumn, indexable: Indexable): { isArray: SQL; len
 
 /** `size(R.attr.list)` over declared ordered storage; a NULL or non-array column is UNKNOWN. */
 export function indexedListSize(column: AnyColumn, indexable: Indexable): SQL {
-  const { isArray, length } = listShape(column, indexable);
+  const { isArray, length } = listProbes(column, indexable);
 
   return sql`(case when ${isArray} then ${length} end)`;
 }
@@ -129,9 +135,9 @@ export function indexedListEquality({
 }): SQL {
   const scalars = values.map((value): Scalar => {
     if (
-      (value !== null && typeof value !== "string" && typeof value !== "boolean" &&
-        typeof value !== "number") ||
-      (typeof value === "number" && !Number.isFinite(value))
+      (value !== null && !isString(value) && !isBoolean(value) &&
+        !isNumber(value)) ||
+      (isNumber(value) && !Number.isFinite(value))
     ) {
       throw new UnsupportedQueryPlanError(
         "Whole-list comparison over declared indexed storage supports only finite scalar elements",
@@ -141,7 +147,7 @@ export function indexedListEquality({
     return value;
   });
 
-  const { isArray, length } = listShape(column, indexable);
+  const { isArray, length } = listProbes(column, indexable);
 
   const elements = scalars.map((value, index) =>
     indexedEquality({ column, indexable, index, value }),
@@ -174,15 +180,15 @@ export function indexedMembership({
 }): SQL {
   const scalars = values.map((value): Scalar => {
     if (
-      value !== null && typeof value !== "string" &&
-      typeof value !== "boolean" && typeof value !== "number"
+      value !== null && !isString(value) &&
+      !isBoolean(value) && !isNumber(value)
     ) {
       throw new UnsupportedQueryPlanError(
         "Membership in declared indexed storage supports only scalar literals",
       );
     }
 
-    if (typeof value === "number" && !Number.isFinite(value)) {
+    if (isNumber(value) && !Number.isFinite(value)) {
       throw new UnsupportedQueryPlanError("Indexed numeric comparisons require a finite literal");
     }
 
@@ -304,12 +310,14 @@ export const resolveIndexedList = (
   return { column: mapping.column, indexable: mapping.indexable };
 };
 
+type IndexedColumn = { column: AnyColumn; indexable: Indexable; index: number };
+
 /** Resolve the opt-in column separately from a relation used for collection predicates. */
 export const resolveIndexedColumn = (
   operands: PlanExpressionOperand[],
   mapper: Mapper,
   options: BuildFilterOptions,
-): { column: AnyColumn; indexable: Indexable; index: number } => {
+): IndexedColumn => {
   const [collection, position] = operands;
 
   if (
@@ -345,7 +353,7 @@ export const resolveIndexedColumn = (
   }
 
   if (
-    !isValueOperand(position) || typeof position.value !== "number" ||
+    !isValueOperand(position) || !isNumber(position.value) ||
     !Number.isSafeInteger(position.value) || position.value < 0 ||
     position.value > 2147483647
   ) {
@@ -381,7 +389,7 @@ export const buildIndexedComparison = (
   if (
     collection !== undefined && isNameOperand(collection) &&
     position !== undefined && isValueOperand(position) &&
-    typeof position.value === "number" &&
+    isNumber(position.value) &&
     (position.value < 0 || !Number.isInteger(position.value))
   ) {
     resolveFieldReference(collection.name, mapper);
@@ -393,15 +401,15 @@ export const buildIndexedComparison = (
 
   if (
     (operator !== "eq" && operator !== "ne") || !isValueOperand(other) ||
-    (other.value !== null && typeof other.value !== "string" &&
-     typeof other.value !== "boolean" && typeof other.value !== "number")
+    (other.value !== null && !isString(other.value) &&
+     !isBoolean(other.value) && !isNumber(other.value))
   ) {
     throw new UnsupportedQueryPlanError(
       "Indexed values support only direct eq/ne comparisons with scalar literals",
     );
   }
 
-  if (typeof other.value === "number" && !Number.isFinite(other.value)) {
+  if (isNumber(other.value) && !Number.isFinite(other.value)) {
     throw new UnsupportedQueryPlanError("Indexed numeric comparisons require a finite literal");
   }
 
@@ -430,7 +438,7 @@ function postgresMembership(
 
 /** One jsonb element against a literal: a number by its double value, anything else as jsonb. */
 function postgresElementEquality(element: SQL, value: Scalar): SQL {
-  return typeof value === "number"
+  return isNumber(value)
     ? sql`(case when jsonb_typeof(${element}) = 'number' then cast(${element} #>> '{}' as float(53)) = cast(${value} as float(53)) else false end)`
     : sql`${element} = cast(${JSON.stringify(value)} as jsonb)`;
 }
@@ -442,7 +450,7 @@ function postgresElementEquality(element: SQL, value: Scalar): SQL {
  * negation TRUE (#472). Anything else is compared as JSON, whose comparator keeps the type.
  */
 function mysqlElementEquality(element: SQL, value: Scalar): SQL {
-  return typeof value === "number"
+  return isNumber(value)
     ? sql`(case when json_type(${element}) in ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') then cast(json_unquote(${element}) as float(53)) = cast(${value} as float(53)) else false end)`
     : sql`${element} = cast(${JSON.stringify(value)} as json)`;
 }
@@ -453,11 +461,11 @@ function sqliteElementEquality(type: SQL, element: SQL, value: Scalar): SQL {
     return sql`${type} = 'null'`;
   }
 
-  if (typeof value === "boolean") {
+  if (isBoolean(value)) {
     return sql`${type} = ${value ? "true" : "false"}`;
   }
 
-  if (typeof value === "number") {
+  if (isNumber(value)) {
     return sql`(case when ${type} in ('integer', 'real') then cast(${element} as real) = cast(${value} as real) else false end)`;
   }
 

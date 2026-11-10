@@ -6,7 +6,7 @@ import {
   getTableName,
   sql,
 } from "drizzle-orm";
-import type { AnyColumn, SQL, Table } from "drizzle-orm";
+import type { SQL, Table } from "drizzle-orm";
 
 import { FALSE_CONDITION, TRUE_CONDITION } from "./predicates";
 import type { BuildFilterOptions, RelationMapping } from "./types";
@@ -38,7 +38,7 @@ export const relationCorrelation = (
   const targetColumn =
     alias === undefined
       ? relation.targetColumn
-      : aliasedTableColumn(relation.targetColumn as AnyColumn, alias);
+      : aliasedTableColumn(relation.targetColumn, alias);
 
   const joinCondition = eq(targetColumn, relation.sourceColumn);
 

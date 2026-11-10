@@ -1,6 +1,6 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { and, is, isNull, not, or, sql } from "drizzle-orm";
-import type { AnyColumn, SQL } from "drizzle-orm";
+import type { AnyColumn, SQL, SQLWrapper } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { Param } from "drizzle-orm/sql";
@@ -20,6 +20,7 @@ import type {
   ComparisonOperator,
   NullAttributeRepresentation,
 } from "./types";
+import { isFunction, isString, typeofValue } from "./narrowing";
 
 /**
  * The leaf SQL the adapter emits: constants, bound values, null guards, string matching, and a
@@ -258,8 +259,8 @@ const definiteEquality = (
 /** `left <op> right`, or `undefined` for an operator that is not a binary comparison. */
 const binaryComparison = (
   operator: ComparisonOperator,
-  left: unknown,
-  right: unknown,
+  left: SQLWrapper,
+  right: SQLWrapper,
 ): SQL | undefined => {
   switch (operator) {
     case "eq":
@@ -415,7 +416,7 @@ const SCALAR_DATA_TYPES = new Set(["string", "number", "boolean"]);
  * types, or a list or map, which equals no scalar at all.
  */
 const isCrossTypeScalar = (dataType: string, value: Value): boolean =>
-  SCALAR_DATA_TYPES.has(dataType) && value !== null && typeof value !== dataType;
+  SCALAR_DATA_TYPES.has(dataType) && value !== null && typeofValue(value) !== dataType;
 
 /** `column IN (values)`, with CEL's reading of a null element and of an explicit-null column. */
 const buildColumnMembership = (
@@ -512,7 +513,7 @@ const applyColumnComparison = (
     case "contains":
     case "startsWith":
     case "endsWith":
-      if (typeof value !== "string") {
+      if (!isString(value)) {
         throw new UnsupportedQueryPlanError(`The '${operator}' operator requires a string value`);
       }
 
@@ -576,7 +577,7 @@ export const applyComparison = (
     return applyRelationComparison(operator);
   }
 
-  if (typeof mapping === "function") {
+  if (isFunction(mapping)) {
     return mapping({ operator, value });
   }
 

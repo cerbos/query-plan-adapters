@@ -2,19 +2,20 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 
 import { isExpressionOperand, isValueOperand } from "./operands";
 import type { ExpressionOperand } from "./operands";
+import { isBoolean, isNumber, isString } from "./narrowing";
 
 /**
  * Constant folding in JavaScript's IEEE double space — CEL's own number space — for the
  * arithmetic and comparisons SQL cannot be trusted with: division by zero, NaN and infinities.
  */
 
-export const ARITHMETIC_OPERATORS: Record<string, string> = {
+export const ARITHMETIC_OPERATORS = {
   add: "+",
   sub: "-",
   mult: "*",
   div: "/",
   mod: "%",
-};
+} satisfies Record<string, string>;
 
 export type LeafComparisonOperator = "eq" | "ne" | "lt" | "le" | "gt" | "ge";
 
@@ -56,7 +57,7 @@ export const resolveConstantNumber = (
   operand: PlanExpressionOperand,
 ): number | undefined => {
   if (isValueOperand(operand)) {
-    return typeof operand.value === "number" ? operand.value : undefined;
+    return isNumber(operand.value) ? operand.value : undefined;
   }
 
   const arithmetic = foldableArithmetic(operand);
@@ -148,7 +149,7 @@ export const foldWithSubstitution = (
   }
 
   if (isValueOperand(operand)) {
-    return typeof operand.value === "number" ? operand.value : undefined;
+    return isNumber(operand.value) ? operand.value : undefined;
   }
 
   // A modulus is not foldable, so it fails closed here rather than being answered.
@@ -200,9 +201,9 @@ export const evaluateScalarValueComparison = (
   left: Value,
   right: Value,
 ): boolean | undefined => {
-  const bothNumbers = typeof left === "number" && typeof right === "number";
-  const bothStrings = typeof left === "string" && typeof right === "string";
-  const bothBooleans = typeof left === "boolean" && typeof right === "boolean";
+  const bothNumbers = isNumber(left) && isNumber(right);
+  const bothStrings = isString(left) && isString(right);
+  const bothBooleans = isBoolean(left) && isBoolean(right);
   const bothNull = left === null && right === null;
 
   if (!bothNumbers && !bothStrings && !bothBooleans && !bothNull) {

@@ -18,6 +18,7 @@ import { extractLambdaComponents, isNameOperand, isOperatorCall, isValueOperand 
 import { constantCondition, UNKNOWN_CONDITION, withPolarity } from "./predicates";
 import { chainCorrelation, relationSource, requireLeadingHops } from "./relations";
 import type { BuildFilterOptions, Mapper } from "./types";
+import { isNumber, typeofValue } from "./narrowing";
 
 /**
  * Reads that need the ORDER of a to-many relation's rows — a constant positional access and an
@@ -66,7 +67,7 @@ const resolvePositionedScope = (
   const position: AnyColumn =
     scope.alias === undefined
       ? primary.position
-      : aliasedTableColumn(primary.position as AnyColumn, scope.alias);
+      : aliasedTableColumn(primary.position, scope.alias);
 
   return {
     scope,
@@ -134,7 +135,7 @@ const bindElement = (value: Scalar, element: Element): Param => new Param(value,
 /** A list of scalars of the element column's type; anything else has no row to equal. */
 const typedList = (values: readonly Value[], element: Element, context: string): Scalar[] =>
   values.map((value) => {
-    if (!isScalar(value) || typeof value !== element.column.dataType) {
+    if (!isScalar(value) || typeofValue(value) !== element.column.dataType) {
       throw new UnsupportedQueryPlanError(
         `${context} supports only ${element.column.dataType} literals over '${element.column.name}'`,
       );
@@ -167,7 +168,7 @@ const positionedRead = (
 
   if (
     collection === undefined || position === undefined || !isNameOperand(collection) ||
-    !isValueOperand(position) || typeof position.value !== "number"
+    !isValueOperand(position) || !isNumber(position.value)
   ) {
     return undefined;
   }
@@ -234,7 +235,7 @@ export const buildPositionedComparison = (
   const present = sql`exists (select 1 from ${positioned.source} where ${atPosition})`;
   let filter: SQL;
 
-  if (typeof other.value !== element.column.dataType) {
+  if (typeofValue(other.value) !== element.column.dataType) {
     if (op !== "eq" && op !== "ne") return UNKNOWN_CONDITION;
     const guard = element.explicitNull ? sql`not ${present}` : sql`${value} is null`;
     filter = sql`(case when ${guard} then null else ${constantCondition(op === "ne")} end)`;

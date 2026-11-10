@@ -56,7 +56,7 @@ interface Seeds {
   }[];
 }
 
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
+// SAFETY: demo/seeds.json is a repository-controlled corpus file, checked structurally by
 // demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
 const seeds = JSON.parse(
   readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
@@ -153,12 +153,12 @@ function findIds(where: Where): string[] {
     .sort();
 }
 
-interface ShapeResult {
+interface UsageResult {
   kind: PlanKind;
   ids: string[];
 }
 
-interface PaginatedShapeResult extends ShapeResult {
+interface PaginatedUsageResult extends UsageResult {
   pageSize: number;
   pageSizes: number[];
 }
@@ -171,7 +171,7 @@ interface PaginatedShapeResult extends ShapeResult {
 async function filtered(
   principalId: string,
   action: string
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
 
@@ -187,7 +187,7 @@ async function paginated(
   principalId: string,
   action: string,
   pageSize: number
-): Promise<PaginatedShapeResult> {
+): Promise<PaginatedUsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
@@ -232,7 +232,7 @@ async function paginated(
 async function composed(
   principalId: string,
   action: string
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
@@ -253,7 +253,7 @@ async function main(): Promise<void> {
   seed();
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
+  const usages = {
     filtered: {
       "alice/view": await filtered("alice", "view"),
       "bob/view": await filtered("bob", "view"),
@@ -277,7 +277,7 @@ async function main(): Promise<void> {
   };
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "drizzle", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "drizzle", shapes: usages }, null, 2)}\n`
   );
 }
 

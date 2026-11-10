@@ -17,6 +17,7 @@ import type {
   ResolvedMapping,
   ScopedRelationEntry,
 } from "./types";
+import { isFunction } from "./narrowing";
 
 /**
  * Resolving a CEL attribute reference through the caller's mapper: which column, transform or
@@ -87,7 +88,7 @@ export const getMappingEntry = (
   reference: string,
   mapper: Mapper,
 ): MapperEntry | undefined =>
-  typeof mapper === "function" ? mapper(reference) : mapper[reference];
+  isFunction(mapper) ? mapper(reference) : mapper[reference];
 
 /** Every `[prefix, suffix]` split of a dotted reference, longest prefix first. */
 function* referencePrefixes(reference: string): Generator<[string, string[]]> {
@@ -151,8 +152,9 @@ const resolveRelationField = (
   }
 
   // A segment the relation does not declare falls back to the table's own column of that name.
-  const inferredColumn =
-    segment in relation.table ? (relation.table as never)[segment] : undefined;
+  const inferredColumn: BaseMapperEntry | undefined = Object.entries(relation.table).find(
+    ([key]) => key === segment,
+  )?.[1];
 
   if (inferredColumn !== undefined) {
     if (rest.length > 0) {
@@ -317,19 +319,21 @@ const aliasElementMapping = (
   const { mapping } = resolved;
 
   if (isMappingConfig(mapping)) {
-    if (mapping.transform || mapping.relation || !mapping.column) refuse();
+    const { column } = mapping;
+
+    if (mapping.transform || mapping.relation || !column) return refuse();
 
     return {
       relations: resolved.relations,
-      mapping: { ...mapping, column: rebind(mapping.column as AnyColumn) },
+      mapping: { ...mapping, column: rebind(column) },
     };
   }
 
-  if (!isColumn(mapping)) refuse();
+  if (!isColumn(mapping)) return refuse();
 
   return {
     relations: resolved.relations,
-    mapping: rebind(mapping as AnyColumn),
+    mapping: rebind(mapping),
   };
 };
 
@@ -429,7 +433,7 @@ export const createCollectionScope = (
     primaryRelation,
     leadingRelations,
     skipRelations: new Set([primaryRelation, ...leadingRelations]),
-    ...(alias === undefined ? {} : { alias }),
+    alias,
   };
 };
 
@@ -464,7 +468,7 @@ export const buildColumnExpression = (
     );
   }
 
-  if (typeof mapping === "function") {
+  if (isFunction(mapping)) {
     throw new UnsupportedQueryPlanError(
       `Cannot use transform mapping for '${reference}' as a value expression`,
     );

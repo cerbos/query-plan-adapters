@@ -31,6 +31,7 @@ import {
 } from "./relations";
 import { normalizeRfc3339Milliseconds, timestampColumnForm } from "./timestamp";
 import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
+import { isNumber, isString, lookup, typeofValue } from "./narrowing";
 
 /**
  * Operands in VALUE position — the sides of a comparison: constants, columns, arithmetic,
@@ -74,7 +75,7 @@ const NUMERIC_CONVERSION_REFUSAL =
   "requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL " +
   "truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies";
 
-const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
+const UNSUPPORTED_CONVERSIONS = {
   int: NUMERIC_CONVERSION_REFUSAL,
   double: NUMERIC_CONVERSION_REFUSAL,
   string:
@@ -84,7 +85,7 @@ const UNSUPPORTED_CONVERSIONS: Record<string, string> = {
     "the number in the store's own format rather than CEL's (SQLite spells 2.0 as '2.0' where " +
     "CEL spells it '2'), and no cast target is shared by every store: TEXT is a syntax error on " +
     "MySQL, whose CHAR is character(1) on PostgreSQL",
-};
+} satisfies Record<string, string>;
 
 /**
  * CEL's `string()` over a boolean column, lowered through a CASE rather than a CAST
@@ -308,7 +309,7 @@ export const buildCheckedIntComparison = (
   if (
     !isOperatorCall(conversion, "int") || !isExpressionOperand(conversion) ||
     conversion.operands.length !== 1 ||
-    !isValueOperand(constant) || typeof constant.value !== "number" ||
+    !isValueOperand(constant) || !isNumber(constant.value) ||
     !(Math.abs(constant.value) < EXACT_DOUBLE_INTEGER_BOUND)
   ) {
     return undefined;
@@ -373,7 +374,7 @@ const isCelIntExpression = (operand: PlanExpressionOperand): boolean => {
 
   const isIntOrWhole = (side: PlanExpressionOperand): boolean =>
     isCelIntExpression(side) ||
-    (isValueOperand(side) && typeof side.value === "number" && Number.isInteger(side.value));
+    (isValueOperand(side) && isNumber(side.value) && Number.isInteger(side.value));
 
   return operand.operands.every(isIntOrWhole) && operand.operands.some(isCelIntExpression);
 };
@@ -404,7 +405,7 @@ const mixesIntWithDouble = (
     isNameOperand(operand) ||
     isOperatorCall(operand, "double") ||
     (isValueOperand(operand) &&
-      typeof operand.value === "number" &&
+      isNumber(operand.value) &&
       !Number.isInteger(operand.value));
 
   return (
@@ -517,7 +518,7 @@ const isStringConcatenation = (
 ): boolean =>
   operands.some((operand) => {
     if (isValueOperand(operand)) {
-      return typeof operand.value === "string";
+      return isString(operand.value);
     }
 
     // `string(flag) + string(flag)` is CEL's string `+`. Read as arithmetic it would coerce both
@@ -582,9 +583,9 @@ const buildConcatenation = (
 ): SQL => {
   if (
     isValueOperand(leftOperand) &&
-    typeof leftOperand.value === "string" &&
+    isString(leftOperand.value) &&
     isValueOperand(rightOperand) &&
-    typeof rightOperand.value === "string"
+    isString(rightOperand.value)
   ) {
     return bindConstant(leftOperand.value + rightOperand.value);
   }
@@ -616,7 +617,7 @@ const operandKind = (
   mapper: Mapper,
 ): string | undefined => {
   if (isValueOperand(operand)) {
-    const type = typeof operand.value;
+    const type = typeofValue(operand.value);
 
     return type === "string" || type === "number" || type === "boolean" ? type : undefined;
   }
@@ -646,9 +647,9 @@ const buildArithmeticExpression = (
   if (
     operator === "div" &&
     isValueOperand(leftOperand) &&
-    typeof leftOperand.value === "number" &&
+    isNumber(leftOperand.value) &&
     isValueOperand(rightOperand) &&
-    typeof rightOperand.value === "number"
+    isNumber(rightOperand.value)
   ) {
     // Fold pure-constant division in JavaScript's IEEE double space. SQL engines
     // disagree on division by zero (SQLite returns NULL, PostgreSQL throws), while
@@ -704,7 +705,7 @@ const buildArithmeticExpression = (
     return sql`(cast(${left} as float(53)) / ${right})`;
   }
 
-  return sql`(${left} ${sql.raw(ARITHMETIC_OPERATORS[operator]!)} ${right})`;
+  return sql`(${left} ${sql.raw(lookup(ARITHMETIC_OPERATORS, operator)!)} ${right})`;
 };
 
 /** `size()` of a relation (a correlated COUNT), a filtered relation, or a string column. */
@@ -823,7 +824,7 @@ const buildTimestampExpression = (
     return buildValueExpression(inner, mapper, options);
   }
 
-  if (!isValueOperand(inner) || typeof inner.value !== "string") {
+  if (!isValueOperand(inner) || !isString(inner.value)) {
     throw new UnsupportedQueryPlanError(
       "'timestamp' requires an RFC-3339 string value or field reference",
     );
@@ -905,7 +906,7 @@ export const buildValueExpression = (
     );
   }
 
-  const unsupportedConversion = UNSUPPORTED_CONVERSIONS[operator];
+  const unsupportedConversion = lookup(UNSUPPORTED_CONVERSIONS, operator);
 
   if (unsupportedConversion !== undefined) {
     throw new UnsupportedQueryPlanError(`Cannot translate ${operator}(): ${unsupportedConversion}`);

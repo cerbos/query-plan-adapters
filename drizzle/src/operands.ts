@@ -1,5 +1,6 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isString } from "./narrowing";
 
 /** Shape tests over the planner's operand union, and the lambda-unpacking every macro shares. */
 
@@ -48,6 +49,8 @@ export const extractArrayValue = (
 const looksLikeLambdaVariable = (operand: NamedOperand): boolean =>
   !operand.name.includes(".");
 
+type LambdaComponents = { variable: NamedOperand; expression: PlanExpressionOperand };
+
 /**
  * Split a `lambda` operand into its iteration variable and its body.
  *
@@ -58,7 +61,7 @@ const looksLikeLambdaVariable = (operand: NamedOperand): boolean =>
 export const extractLambdaComponents = (
   lambdaOperand: PlanExpressionOperand,
   context: string,
-): { variable: NamedOperand; expression: PlanExpressionOperand } => {
+): LambdaComponents => {
   if (!isOperatorCall(lambdaOperand, "lambda")) {
     throw new UnsupportedQueryPlanError(`${context} must be a lambda expression`);
   }
@@ -126,7 +129,7 @@ export const foldConstantConstructors = (
 
       if (
         field.operands.length !== 2 || key === undefined || value === undefined ||
-        !isValueOperand(key) || typeof key.value !== "string" || !isValueOperand(value) ||
+        !isValueOperand(key) || !isString(key.value) || !isValueOperand(value) ||
         entries.some(([existing]) => existing === key.value)
       ) {
         break;

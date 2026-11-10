@@ -4,7 +4,7 @@ import * as path from "path";
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import Database from "better-sqlite3";
 import { sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import type { AnyColumn, SQL } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
 import type { MySql2Database } from "drizzle-orm/mysql2";
@@ -18,7 +18,7 @@ import { Pool } from "pg";
 
 import type { PlanResourcesResponse } from "@cerbos/core";
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
-import type { Mapper, MapperEntry } from ".";
+import type { Mapper } from ".";
 import {
   assertFuzzVerdict,
   buildMapper,
@@ -34,7 +34,9 @@ import {
   sqliteSchema,
   writeFuzzResults,
 } from "./corpus";
-import type { FuzzVerdict, Golden } from "./corpus";
+import type { ConformanceMapper, FuzzVerdict, Golden } from "./corpus";
+import { isMappingConfig } from "./mapper";
+import { isObject, isString } from "./narrowing";
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -90,13 +92,15 @@ function selectedStoreName(): StoreName {
 
   // A typo must fail rather than silently fall back to SQLite: a CI leg that believes it is
   // proving PostgreSQL while replaying SQLite is exactly the coverage gap this leg closes.
-  if (!STORE_NAMES.includes(requested as StoreName)) {
+  const store = STORE_NAMES.find((name) => name === requested);
+
+  if (store === undefined) {
     throw new Error(
       `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`,
     );
   }
 
-  return requested as StoreName;
+  return store;
 }
 
 const STORE_NAME = selectedStoreName();
@@ -105,6 +109,7 @@ const STORE_NAME = selectedStoreName();
 // hold: it is not loaded, and its id is struck from every allowed set.
 const LACKS = Object.entries(
   (
+    // SAFETY: validate-corpus.sh checks every conformance-ledger.json against its schema.
     JSON.parse(
       fs.readFileSync(path.join(__dirname, "..", "conformance-ledger.json"), "utf8"),
     ) as { lacks?: Record<string, { reason: string; stores?: string[] }> }
@@ -113,7 +118,7 @@ const LACKS = Object.entries(
   .filter(([, entry]) => entry.stores?.includes(STORE_NAME) ?? true)
   .map(([capability]) => capability);
 
-const ALL_SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+const ALL_SEEDS = (readCorpusJson<{ seeds: Seed[] }>("seeds.json")).seeds;
 
 const UNHELD = new Set(
   ALL_SEEDS.filter((seed) => seed.requires?.some((capability) => LACKS.includes(capability))).map(
@@ -124,7 +129,7 @@ const UNHELD = new Set(
 const SEEDS = ALL_SEEDS.filter((seed) => !UNHELD.has(seed.id));
 
 const DERIVED = (
-  readCorpusJson("derived-fields.json") as { derived: Record<string, DerivedEntry> }
+  readCorpusJson<{ derived: Record<string, DerivedEntry> }>("derived-fields.json")
 ).derived;
 
 function derivedFor(seed: Seed): DerivedEntry {
@@ -343,8 +348,8 @@ const STORE_ENGINES: Record<StoreName, string> = {
  */
 interface AdversarialStore {
   readonly name: StoreName;
-  readonly mapper: Record<string, MapperEntry>;
-  readonly indexMappers?: Record<string, MapperEntry>[];
+  readonly mapper: ConformanceMapper;
+  readonly indexMappers?: ConformanceMapper[];
   start(): Promise<void>;
   stop(): Promise<void>;
   selectIds(filter: SQL | undefined): Promise<string[]>;
@@ -459,7 +464,11 @@ function sqliteStore(): AdversarialStore {
     async serverBanner(): Promise<string> {
       const row = sqlite.prepare("select sqlite_version() as version").get();
 
-      return `SQLite ${(row as { version: string }).version}`;
+      if (!isObject(row) || !("version" in row) || !isString(row.version)) {
+        throw new Error("sqlite_version() returned no version");
+      }
+
+      return `SQLite ${row.version}`;
     },
   };
 }
@@ -891,11 +900,10 @@ function mysqlStore(): AdversarialStore {
     async serverBanner(): Promise<string> {
       // drizzle types every mysql2 `execute` as an INSERT-style result header; a SELECT hands
       // back `[rows, fields]`, which is what this reads.
-      const result = (await connected().execute(
-        sql`select @@version_comment as version`,
-      )) as unknown as [{ version: string }[]];
+      const [rows] = await connected().execute(sql`select @@version_comment as version`);
+      const first = Array.isArray(rows) ? rows[0] : undefined;
 
-      return result[0][0]?.version ?? "";
+      return isObject(first) && "version" in first && isString(first.version) ? first.version : "";
     },
   };
 }
@@ -952,15 +960,21 @@ const MAPPER = store.mapper;
 
 /** `base` with the three ordered lists moved to other columns, every other declaration kept. */
 function withListColumns(
-  base: Record<string, MapperEntry>,
+  base: ConformanceMapper,
   indexable: "pgArray" | "json",
-  columns: Record<"tagNames" | "aNumberList" | "aBoolList", unknown>,
-): Record<string, MapperEntry> {
+  columns: Record<"tagNames" | "aNumberList" | "aBoolList", AnyColumn>,
+): ConformanceMapper {
   const mapper = { ...base };
 
   for (const [name, column] of Object.entries(columns)) {
     const reference = `request.resource.attr.${name}`;
-    mapper[reference] = { ...(base[reference] as object), column, indexable } as MapperEntry;
+    const entry = base[reference];
+
+    if (entry === undefined || !isMappingConfig(entry)) {
+      throw new Error(`${reference} is not a column mapping`);
+    }
+
+    mapper[reference] = { ...entry, column, indexable };
   }
 
   return mapper;
@@ -976,6 +990,7 @@ interface LedgerEntry {
 }
 
 const LEDGER = (
+  // SAFETY: validate-corpus.sh checks every conformance-ledger.json against its schema.
   JSON.parse(
     fs.readFileSync(path.join(__dirname, "..", "conformance-ledger.json"), "utf8"),
   ) as { cases: Record<string, LedgerEntry> }

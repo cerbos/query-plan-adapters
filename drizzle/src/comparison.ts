@@ -70,6 +70,7 @@ import type {
   RelationMapping,
   ResolvedMapping,
 } from "./types";
+import { isBoolean, isNumber, isObject, isString, typeofValue } from "./narrowing";
 
 /**
  * `eq`, `ne`, `lt`, `le`, `gt`, `ge` between two operands, each of which may be a field, a
@@ -112,7 +113,7 @@ const LEAF_COMPARISON_OPERATORS = new Set(["eq", "ne", "lt", "le", "gt", "ge"]);
  * predicate, a logical connective, or a ternary whose two arms are.
  */
 const isBooleanExpression = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
-  if (isValueOperand(operand)) return typeof operand.value === "boolean";
+  if (isValueOperand(operand)) return isBoolean(operand.value);
 
   if (isNameOperand(operand)) return columnForOperand(operand, mapper)?.dataType === "boolean";
 
@@ -154,7 +155,7 @@ const isIntExpression = (operand: PlanExpressionOperand): boolean => {
 
   const integral = (arm: PlanExpressionOperand) =>
     isIntExpression(arm) ||
-    (isValueOperand(arm) && typeof arm.value === "number" && Number.isSafeInteger(arm.value));
+    (isValueOperand(arm) && isNumber(arm.value) && Number.isSafeInteger(arm.value));
 
   return arms.some(isIntExpression) && arms.every(integral);
 };
@@ -193,7 +194,7 @@ const buildRenderedComparison = (
     !isExpressionOperand(conversion) ||
     conversion.operands.length !== 1 ||
     !isValueOperand(literal) ||
-    typeof literal.value !== "string"
+    !isString(literal.value)
   ) {
     return undefined;
   }
@@ -516,17 +517,15 @@ const buildMixedTypeComparison = (
  * MySQL `datetime` / `timestamp`'s `fsp` (MySQL's default is 0).
  */
 const timestampColumnDigits = (column: AnyColumn): number | undefined => {
-  const declared = column as AnyColumn & { precision?: number; fsp?: number };
-
   if (is(column, PgColumn) && column.columnType.startsWith("PgTimestamp")) {
-    return declared.precision ?? 6;
+    return "precision" in column && isNumber(column.precision) ? column.precision : 6;
   }
 
   if (
     is(column, MySqlColumn) &&
     (column.columnType.startsWith("MySqlDateTime") || column.columnType.startsWith("MySqlTimestamp"))
   ) {
-    return declared.fsp ?? 0;
+    return "fsp" in column && isNumber(column.fsp) ? column.fsp : 0;
   }
 
   return undefined;
@@ -556,7 +555,7 @@ const timestampLiteral = (operand: PlanExpressionOperand): string | undefined =>
   return operand.operands.length === 1 &&
     inner !== undefined &&
     isValueOperand(inner) &&
-    typeof inner.value === "string"
+    isString(inner.value)
     ? inner.value
     : undefined;
 };
@@ -580,10 +579,12 @@ const buildSqliteTextTimestampComparison = (
   if (leftColumn?.form !== "sqlite-text" && rightColumn?.form !== "sqlite-text") return undefined;
   const reference = (leftColumn ?? rightColumn)!.name;
 
+  type ComparisonSide = { expr: SQL; relations: RelationMapping[] };
+
   const side = (
     operand: PlanExpressionOperand,
     column: ReturnType<typeof timestampColumnOperand>,
-  ): { expr: SQL; relations: RelationMapping[] } => {
+  ): ComparisonSide => {
     if (column?.form === "sqlite-text") {
       return {
         expr: sqliteTextInstant(buildColumnExpression(column.resolved.mapping, column.name)),
@@ -703,7 +704,7 @@ const subMillisecondTimestampLiteral = (operand: PlanExpressionOperand): string 
   return operand.operands.length === 1 &&
     inner !== undefined &&
     isValueOperand(inner) &&
-    typeof inner.value === "string" &&
+    isString(inner.value) &&
     exceedsMillisecondPrecision(inner.value)
     ? inner.value
     : undefined;
@@ -780,7 +781,7 @@ const scalarType = (
   mapper: Mapper,
 ): string | undefined => {
   if (isValueOperand(operand)) {
-    return operand.value === null ? undefined : typeof operand.value;
+    return operand.value === null ? undefined : typeofValue(operand.value);
   }
 
   // CEL's `string()` returns a string whatever it converts. Typing it here routes
@@ -935,7 +936,7 @@ export const buildComparisonFilter = (
     if (
       isBooleanValued(predicate) &&
       isValueOperand(literal) &&
-      typeof literal.value === "boolean"
+      isBoolean(literal.value)
     ) {
       const same = (operator === "eq") === literal.value;
 
@@ -1025,14 +1026,14 @@ export const buildComparisonFilter = (
 
   if (
     listField !== undefined && listLiteral !== undefined && isValueOperand(listLiteral) &&
-    (operator === "eq" || operator === "ne")
+    Array.isArray(listLiteral.value) && (operator === "eq" || operator === "ne")
   ) {
     const indexed = resolveIndexedList(listField.name, mapper);
 
     if (indexed) {
       const equality = indexedListEquality({
         ...indexed,
-        values: listLiteral.value as Value[],
+        values: listLiteral.value,
       });
 
       return withPolarity(equality, (operator === "ne") !== negated);
@@ -1089,11 +1090,11 @@ export const buildComparisonFilter = (
     const leftConversion = numberStringConversion(left, mapper);
     const rightConversion = numberStringConversion(right, mapper);
 
-    if (leftConversion && isValueOperand(right) && typeof right.value === "string") {
+    if (leftConversion && isValueOperand(right) && isString(right.value)) {
       return buildNumberStringComparison(context, leftConversion, right.value);
     }
 
-    if (rightConversion && isValueOperand(left) && typeof left.value === "string") {
+    if (rightConversion && isValueOperand(left) && isString(left.value)) {
       return buildNumberStringComparison(context, rightConversion, left.value);
     }
   }
@@ -1104,7 +1105,7 @@ export const buildComparisonFilter = (
   // A map literal equals no string, number or boolean — but a JSON column may hold a map equal to
   // it, so the heterogeneous answer is only given against a scalar column.
   const isMapLiteral = (operand: PlanExpressionOperand): boolean =>
-    isValueOperand(operand) && operand.value !== null && typeof operand.value === "object" &&
+    isValueOperand(operand) && isObject(operand.value) &&
     !Array.isArray(operand.value);
 
   if (

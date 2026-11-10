@@ -29,6 +29,7 @@ import {
   wrapWithRelations,
 } from "./relations";
 import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
+import { isObject } from "./narrowing";
 
 /**
  * CEL's collection macros — `exists`, `all`, `exists_one`, `except`, `filter` — over a relation
@@ -345,8 +346,7 @@ const substituteLambdaVariable = (
         .slice(variableName.length + 1)
         .split(".")) {
         if (
-          current === null ||
-          typeof current !== "object" ||
+          !isObject(current) ||
           Array.isArray(current) ||
           !(segment in current)
         ) {

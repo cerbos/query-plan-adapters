@@ -21,6 +21,7 @@ import {
 } from "./predicates";
 import { wrapRelationChain } from "./relations";
 import type { BuildFilterOptions, Mapper, ResolvedMapping } from "./types";
+import { isString } from "./narrowing";
 
 /**
  * Cerbos's `hierarchy()` operators — `ancestorOf`, `descendentOf`, `overlaps` — between one
@@ -67,9 +68,11 @@ const resolveSegments = (
   mapper: Mapper,
 ): Segment[] | "error" => {
   if (isValueOperand(listOperand) && Array.isArray(listOperand.value)) {
-    if (listOperand.value.some((segment) => typeof segment !== "string")) return "error";
+    const segments = listOperand.value.filter(isString);
 
-    return listOperand.value.map((value) => ({ kind: "constant", value: value as string }));
+    if (segments.length !== listOperand.value.length) return "error";
+
+    return segments.map((value) => ({ kind: "constant", value }));
   }
 
   if (!isOperatorCall(listOperand, "list")) {
@@ -82,7 +85,7 @@ const resolveSegments = (
 
   const segments = listOperand.operands.map((segment): Segment => {
     if (isValueOperand(segment)) {
-      if (typeof segment.value !== "string") {
+      if (!isString(segment.value)) {
         error = true;
 
         return { kind: "constant", value: "" };
@@ -141,7 +144,7 @@ const resolveHierarchy = (
   if (delimiterOperand) {
     if (
       !isValueOperand(delimiterOperand) ||
-      typeof delimiterOperand.value !== "string"
+      !isString(delimiterOperand.value)
     ) {
       throw new UnsupportedQueryPlanError("Hierarchy delimiter must be a string value");
     }
@@ -150,7 +153,7 @@ const resolveHierarchy = (
   }
 
   if (isValueOperand(pathOperand) && !Array.isArray(pathOperand.value)) {
-    if (typeof pathOperand.value !== "string") {
+    if (!isString(pathOperand.value)) {
       throw new UnsupportedQueryPlanError(
         "Hierarchy path must be a string value or field reference",
       );

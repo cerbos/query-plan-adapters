@@ -1,8 +1,6 @@
 import { beforeAll, describe, expect, test } from "@jest/globals";
-import type {
-  PlanExpressionOperand,
-  PlanResourcesResponse,
-} from "@cerbos/core";
+import type { JsonValue } from "@bufbuild/protobuf";
+import type { PlanResourcesResponse, Value } from "@cerbos/core";
 import { eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { MySqlDialect } from "drizzle-orm/mysql-core/dialect";
@@ -17,6 +15,7 @@ import type {
   MapperEntry,
   NullAttributeRepresentation,
   QueryPlanToDrizzleResult,
+  RelationMapping,
 } from ".";
 import {
   buildMapper,
@@ -28,6 +27,12 @@ import {
   readGoldens,
   sqliteSchema,
 } from "./corpus";
+import { isNumber, isObject, isTypeofObject } from "./narrowing";
+import { isMappingConfig } from "./mapper";
+
+/** `response` with `field` replaced by a value its type rules out: a plan the SDK never decodes. */
+const overwritten = (response: PlanResourcesResponse, field: string, value: Value): PlanResourcesResponse =>
+  Object.defineProperty({ ...response }, field, { value, enumerable: true });
 
 /**
  * Offline unit tests: what a caller can pass that the conformance corpus cannot vary (mapper forms,
@@ -64,13 +69,11 @@ function withoutNullDeclarations(
 ): Record<string, MapperEntry> {
   return Object.fromEntries(
     Object.entries(mapper).map(([reference, entry]) => {
-      if (typeof entry !== "object" || entry === null || !("nullAttributeRepresentation" in entry)) {
-        return [reference, entry];
-      }
+      if (!isMappingConfig(entry)) return [reference, entry];
 
       const { nullAttributeRepresentation: _stripped, ...rest } = entry;
 
-      return [reference, rest as MapperEntry];
+      return [reference, rest];
     }),
   );
 }
@@ -108,7 +111,9 @@ async function filterFor(
   return result.filter;
 }
 
-function render(store: Store, filter: SQL): { sql: string; params: unknown[] } {
+type Rendered = { sql: string; params: unknown[] };
+
+function render(store: Store, filter: SQL): Rendered {
   const query = DIALECTS[store].sqlToQuery(filter);
 
   return { sql: query.sql, params: query.params };
@@ -174,7 +179,7 @@ describe("declared index storage", () => {
   test("refuses an undeclared storage shape", async () => {
     const entry = MAPPERS.postgresql[reference];
 
-    if (!entry || typeof entry !== "object" || !("indexable" in entry)) {
+    if (!entry || !isTypeofObject(entry) || !("indexable" in entry)) {
       throw new Error("The shared mapper must declare index storage");
     }
 
@@ -230,19 +235,20 @@ describe("relation subqueryFilter", () => {
   const VISIBLE_ONLY = ne(schema.tags.tagId, "hidden");
   const DECLARATION = '"tag_id" <> ';
 
-  const mapperFor = (subqueryFilter?: SQL): Mapper => ({
-    "request.resource.attr.tags": {
-      relation: {
-        type: "many",
-        table: schema.tags,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.tags.resourceId,
-        field: schema.tags.name,
-        fields: { name: schema.tags.name, id: schema.tags.tagId },
-        ...(subqueryFilter ? { subqueryFilter } : {}),
-      },
-    },
-  });
+  const mapperFor = (subqueryFilter?: SQL): Mapper => {
+    const relation: RelationMapping = {
+      type: "many",
+      table: schema.tags,
+      sourceColumn: schema.resources.id,
+      targetColumn: schema.tags.resourceId,
+      field: schema.tags.name,
+      fields: { name: schema.tags.name, id: schema.tags.tagId },
+    };
+
+    if (subqueryFilter) relation.subqueryFilter = subqueryFilter;
+
+    return { "request.resource.attr.tags": { relation } };
+  };
 
   const sqlFor = async (id: string, subqueryFilter?: SQL): Promise<string> =>
     render("postgresql", await filterFor("postgresql", id, { mapper: mapperFor(subqueryFilter) }))
@@ -374,9 +380,11 @@ describe("nullAttributeRepresentation", () => {
   // operators. Every `IS NULL` left in the SQL sits in a guard that makes the row NULL, never a
   // match, unless it compares an indexed list ELEMENT, which is a value, not a missing attribute.
   test("under omitted, no null literal selects the NULL rows unless it compares an indexed element", async () => {
-    const carriesNull = (node: unknown): boolean => {
-      if (typeof node !== "object" || node === null) return false;
-      const record = node as Record<string, unknown>;
+    const carriesNull = (node: JsonValue | undefined): boolean => {
+      if (Array.isArray(node)) return node.some(carriesNull);
+
+      if (!isObject(node)) return false;
+      const record = node;
 
       if ("value" in record) {
         const value = record["value"];
@@ -431,21 +439,20 @@ describe("nullAttributeRepresentation", () => {
   });
 });
 
-const timestampPlan = (operator: string, instant: string): PlanResourcesResponse =>
-  ({
-    kind: PlanKind.CONDITIONAL,
-    condition: {
-      operator,
-      operands: [
-        { operator: "timestamp", operands: [{ name: "request.resource.attr.createdAt" }] },
-        { operator: "timestamp", operands: [{ value: instant }] },
-      ],
-    } as unknown as PlanExpressionOperand,
-    cerbosCallId: "",
-    requestId: "",
-    validationErrors: [],
-    metadata: undefined,
-  }) as PlanResourcesResponse;
+const timestampPlan = (operator: string, instant: string): PlanResourcesResponse => ({
+  kind: PlanKind.CONDITIONAL,
+  condition: {
+    operator,
+    operands: [
+      { operator: "timestamp", operands: [{ name: "request.resource.attr.createdAt" }] },
+      { operator: "timestamp", operands: [{ value: instant }] },
+    ],
+  },
+  cerbosCallId: "",
+  requestId: "",
+  validationErrors: [],
+  metadata: undefined,
+});
 
 describe("timestamp literals", () => {
   // `timestamp/less-than/relative-window` compares against the literal the planner folds
@@ -561,7 +568,7 @@ describe("what the stores cannot show", () => {
   test.each(STORES)("binds no non-finite number (%s)", (store) => {
     const offenders = translatedBy(MAPPERS[store]).filter(([, filter]) =>
       render(store, filter).params.some(
-        (param) => typeof param === "number" && !Number.isFinite(param),
+        (param) => isNumber(param) && !Number.isFinite(param),
       ),
     );
 
@@ -572,17 +579,21 @@ describe("what the stores cannot show", () => {
 describe("plans the planner cannot produce", () => {
   // Input validation on a public function: malformed by construction, so there is no golden to
   // read. A shape CEL *can* express belongs in the corpus instead.
-  const plan = (condition: unknown): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition: condition as PlanExpressionOperand,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
+  const plan = (condition: Value): PlanResourcesResponse =>
+    overwritten(
+      {
+        kind: PlanKind.CONDITIONAL,
+        condition: { value: true },
+        cerbosCallId: "",
+        requestId: "",
+        validationErrors: [],
+        metadata: undefined,
+      },
+      "condition",
+      condition,
+    );
 
-  const lambdaOver = (collection: unknown, field: string) =>
+  const lambdaOver = (collection: Value, field: string) =>
     plan({
       operator: "exists",
       operands: [
@@ -598,7 +609,15 @@ describe("plans the planner cannot produce", () => {
     });
 
   test.each([
-    ["an unrecognised plan kind", { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse, /Invalid plan kind/],
+    [
+      "an unrecognised plan kind",
+      overwritten(
+        { kind: PlanKind.ALWAYS_ALLOWED, cerbosCallId: "", requestId: "", validationErrors: [], metadata: undefined },
+        "kind",
+        "INVALID_KIND",
+      ),
+      /Invalid plan kind/,
+    ],
     ["an unknown operator", plan({ operator: "unsupported", operands: [] }), /Unsupported operator: unsupported/],
     [
       "a collection macro over a value that is not a list",
