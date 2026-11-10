@@ -148,8 +148,11 @@ final class Corpus {
         }
     }
 
-    /** {@code lacks} maps each store capability this store lacks to the reason. */
-    private record Ledger(String adapter, Map<String, String> lacks, Map<String, LedgerEntry> cases) {}
+    /** A store capability the ledger lacks: on every store, or on {@code stores} alone. */
+    private record Lack(String reason, List<String> stores) {}
+
+    /** {@code lacks} maps each store capability some store lacks to the reason. */
+    private record Ledger(String adapter, Map<String, Lack> lacks, Map<String, LedgerEntry> cases) {}
 
     private static Ledger readLedger() {
         Path file = Path.of(System.getProperty("user.dir"), "conformance-ledger.json");
@@ -165,12 +168,18 @@ final class Corpus {
     }
 
     /**
-     * The store capabilities this store lacks. A seed requiring one is a resource the store cannot
-     * hold: it is not loaded, and its id is struck from every allowed set.
+     * The store capabilities {@code store} lacks. A seed requiring one is a resource the store
+     * cannot hold: it is not loaded, and its id is struck from every allowed set.
      */
-    static Set<String> lacks() {
-        Map<String, String> lacks = readLedger().lacks();
-        return lacks == null ? Set.of() : lacks.keySet();
+    static Set<String> lacks(String store) {
+        Map<String, Lack> lacks = readLedger().lacks();
+        if (lacks == null) {
+            return Set.of();
+        }
+        return lacks.entrySet().stream()
+                .filter(e -> e.getValue().stores() == null || e.getValue().stores().contains(store))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     // -- the corpus mapped onto the JPA model ---------------------------------------------------

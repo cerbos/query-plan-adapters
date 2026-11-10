@@ -119,6 +119,14 @@ module ConformanceStore
     raise "MySQL must run on #{Database::MYSQL_COLLATION}: columns #{columns}, session #{session}"
   end
 
+  # Sequel writes a string literal into the SQL text, and SQLite's parser stops at a NUL, so a
+  # string holding one goes in as a blob cast to text.
+  def text(value)
+    return value unless Database::STORE == "sqlite" && value&.include?("\0")
+
+    ::Sequel.cast(::Sequel.blob(value), :text)
+  end
+
   # Each row gets its own category graph, so no two resources share relation rows.
   #
   # The rows go in through the datasets and not through the models: the models exist for the
@@ -131,7 +139,7 @@ module ConformanceStore
       DB[:adversarial_resources].insert(
         id: id,
         a_bool: seed.fetch("aBool"),
-        a_string: seed.fetch("aString"),
+        a_string: text(seed.fetch("aString")),
         a_number: seed.fetch("aNumber"),
         a_double: ConformanceCorpus.derived(seed, "aDouble"),
         a_optional_string: seed.fetch("aOptionalString"),

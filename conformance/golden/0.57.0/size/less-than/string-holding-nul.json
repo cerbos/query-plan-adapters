@@ -1,0 +1,55 @@
+{
+  "allowed": [
+    "a8",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "size/less-than/string-holding-nul",
+  "intent": "size(aString) < 2 over k3, whose aString is \"a\", NUL, \"x\".",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 2
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/less-than/string-holding-nul",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aString) < 2"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "k3 is three code points, so it is denied. SQLite's LENGTH stops at the NUL and counts 1, which grants k3."
+}

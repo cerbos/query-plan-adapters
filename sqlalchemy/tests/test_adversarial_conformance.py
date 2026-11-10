@@ -53,11 +53,40 @@ with open(
     os.path.join(os.path.dirname(__file__), "..", "conformance-ledger.json"),
     encoding="utf-8",
 ) as _f:
-    LEDGER: dict[str, dict[str, Any]] = json.load(_f)["cases"]
+    _LEDGER_FILE = json.load(_f)
+LEDGER: dict[str, dict[str, Any]] = _LEDGER_FILE["cases"]
 
 GOLDEN = {tag: golden_cases(tag) for tag in PDP_TAGS}
 
 STORES = ("sqlite", "sqlite-async", "postgresql-json", "postgresql-pgArray", "mysql")
+
+#: The store each leg runs on, as the ledger's ``lacks`` names it.
+_LEDGER_STORE = {
+    "sqlite": "sqlite",
+    "sqlite-async": "sqlite",
+    "postgresql-json": "postgres",
+    "postgresql-pgArray": "postgres",
+    "mysql": "mysql",
+}
+
+
+def _unheld(ledger_store: str) -> set[str]:
+    """The seeds ``ledger_store`` cannot hold: each requires a capability it lacks there.
+
+    They are not loaded, and their ids are struck from every allowed set.
+    """
+    lacks = {
+        capability
+        for capability, entry in _LEDGER_FILE.get("lacks", {}).items()
+        if ledger_store in entry.get("stores", [ledger_store])
+    }
+    return {seed["id"] for seed in SEEDS if lacks & set(seed.get("requires", []))}
+
+
+def _held(store: str, allowed: list[str]) -> list[str]:
+    unheld = _unheld(_LEDGER_STORE[store])
+    return [seed_id for seed_id in allowed if seed_id not in unheld]
+
 
 #: ``(tier, outcome)`` per store and tag, printed by ``conftest.py`` after the run.
 RESULTS: dict[str, Counter] = {}
@@ -82,10 +111,12 @@ def _params():
 # -- the store --------------------------------------------------------------
 
 
-def _seed(engine) -> None:
-    """Create the corpus schema on ``engine`` and store every seed row in it."""
+def _seed(engine, ledger_store: str) -> None:
+    """Create the corpus schema on ``engine`` and store every seed row it can hold."""
     AdvBase.metadata.create_all(engine)
-    by_id = {seed["id"]: seed for seed in SEEDS}
+    unheld = _unheld(ledger_store)
+    seeds = [seed for seed in SEEDS if seed["id"] not in unheld]
+    by_id = {seed["id"]: seed for seed in seeds}
 
     def parent_of(seed):
         return None if seed["parentSeedId"] is None else by_id[seed["parentSeedId"]]
@@ -113,7 +144,7 @@ def _seed(engine) -> None:
             AdvLabel,
         )
     }
-    for seed in SEEDS:
+    for seed in seeds:
         derived = DERIVED[seed["id"]]
         tags, sub_names = seed["tags"], seed["subCategoryNames"]
         tag_names = [tag["name"] for tag in tags]
@@ -204,7 +235,7 @@ def sqlite_url(tmp_path_factory):
     # A file, so the async engine sees the rows the sync engine seeded.
     path = tmp_path_factory.mktemp("conformance") / "seeds.sqlite"
     engine = create_engine(f"sqlite:///{path}")
-    _seed(engine)
+    _seed(engine, "sqlite")
     engine.dispose()
     return str(path)
 
@@ -248,7 +279,7 @@ def pg_engine():
         "POSTGRES_INITDB_ARGS", initdb_args
     ) as container:
         engine = create_engine(container.get_connection_url())
-        _seed(engine)
+        _seed(engine, "postgres")
         with engine.begin() as conn:
             for column, array_type in _PG_ARRAY_COLUMNS.items():
                 conn.execute(
@@ -302,7 +333,7 @@ def mysql_engine():
         url = make_url(container.get_connection_url()).set(drivername="mysql+pymysql")
         engine = create_engine(url)
         event.listen(engine, "connect", _mysql_connection_collation)
-        _seed(engine)
+        _seed(engine, "mysql")
         with engine.connect() as conn:
             collations = conn.execute(
                 text(
@@ -377,7 +408,9 @@ def test_case(store, tag, case, request):
     if FUZZ_DIR:
         try:
             verdict = fuzz_verdict(
-                case, case["allowed"], _execute(store, _translate(store, case), request)
+                case,
+                _held(store, case["allowed"]),
+                _execute(store, _translate(store, case), request),
             )
         except Exception as error:  # noqa: BLE001 - every throw is judged, not raised
             verdict = fuzz_thrown(case, error, UnsupportedPlanError)
@@ -395,6 +428,7 @@ def test_case(store, tag, case, request):
     if entry is not None and tag not in entry.get("pdp", [tag]):
         entry = None
     status = entry["status"] if entry else "pass"
+    allowed = _held(store, case["allowed"])
 
     if status == "unsupported":
         with pytest.raises(UnsupportedPlanError):
@@ -402,11 +436,11 @@ def test_case(store, tag, case, request):
     else:
         returned = _execute(store, _translate(store, case), request)
         if status == "divergent":
-            assert sorted(returned) != sorted(case["allowed"]), (
+            assert sorted(returned) != sorted(allowed), (
                 f"{case['id']} now matches the PDP: remove its divergent ledger entry"
             )
         else:
-            assert sorted(returned) == sorted(case["allowed"])
+            assert sorted(returned) == sorted(allowed)
     tally[(case["tier"], status)] += 1
 
 

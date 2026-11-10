@@ -803,22 +803,6 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
-  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #675; delete it when its corpus action lands.
-  describe "matches() against RE2's own parse" do
-    def matches(pattern) = expression("matches", variable("request.resource.attr.aString"), value(pattern))
-
-    # Corpus gap. SQLite's LENGTH stops at a NUL, so a residue holding one must not read as empty.
-    it "keeps a NUL out of a character set" do
-      row = AdvResource.create!(id: "zz-nul", a_string: "a\u0000x", created_by: "nobody")
-      begin
-        expect(translate(conditional(matches("^[ax]+$"))).where(id: row.id)).to be_empty
-      ensure
-        row.destroy!
-      end
-    end
-  end
-
   # A plan the planner never emits: it folds `x in` a map literal, a dyn() map or a principal map
   # to its keys. The adapter accepts plans from any source, and answering FALSE would grant the
   # negation.

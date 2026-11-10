@@ -30,7 +30,8 @@
     "j1",
     "j4",
     "k1",
-    "k2"
+    "k2",
+    "k3"
   ],
   "degenerateReason": null,
   "id": "conditional/ternary/value-first",

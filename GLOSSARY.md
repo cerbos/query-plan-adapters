@@ -58,8 +58,9 @@ _Avoid_: classification, actions.json, skip list
 **Store capability**:
 Something a seed needs of a store beyond holding its attributes, such as `null-list` (a list sent as
 null, kept apart from `[]`). A seed declares it under `requires`; an adapter whose store cannot hold
-such a row declares it under its ledger's `lacks`, with the reason, and its harness does not load
-the seed and strikes its id from `allowed`. A property of the store, never of a case.
+such a row declares it under its ledger's `lacks`, with the reason and, when only some of its stores
+lack it, their names under `stores`. Its harness does not load the seed on those stores and strikes
+its id from `allowed`. A property of the store, never of a case.
 _Avoid_: skipped seed, optional row
 
 **Conformance harness**:

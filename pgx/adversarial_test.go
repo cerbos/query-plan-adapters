@@ -560,7 +560,7 @@ func selectIDs(ctx context.Context, pool *pgxpool.Pool, query string, args []any
 // -- the suite ----------------------------------------------------------------------------------
 
 func TestAdversarialConformance(t *testing.T) {
-	corpus := loadCorpus(t)
+	corpus := loadCorpus(t, "postgres")
 	pool := startPostgres(t, corpus)
 	mapper := buildMapper()
 	var fuzzResults []FuzzVerdict

@@ -15,8 +15,10 @@ import org.jetbrains.exposed.v1.core.vendors.currentDialect
  * `LENGTH` is not portable for this: on MySQL it counts BYTES, so every multibyte string would be
  * measured against the wrong threshold and `size(s) > 4` would return rows the PDP denies.
  * `CHAR_LENGTH` is the standard spelling and is what PostgreSQL, MySQL and H2 all accept; SQLite
- * has no `CHAR_LENGTH` at all, and its `LENGTH` already counts characters for a text value. H2's
- * `CHAR_LENGTH` counts UTF-16 units, so each astral character is replaced by one unit first.
+ * has no `CHAR_LENGTH` at all, and its `LENGTH` counts characters only up to the first NUL. Its
+ * `REPLACE` cannot match a NUL either, so each NUL becomes a space inside the string's JSON text,
+ * where it is the escape \u0000. H2's `CHAR_LENGTH` counts UTF-16 units, so each astral character
+ * is replaced by one unit first.
  *
  * The dialect is only known at RENDER time — an `Op` is built outside any transaction and rendered
  * inside the caller's — so the branch lives here rather than in the translation.
@@ -25,7 +27,10 @@ internal class CountChars(private val value: Expression<*>) : Function<Int>(Inte
     override fun toQueryBuilder(queryBuilder: QueryBuilder) {
         queryBuilder {
             when (currentDialect) {
-                is SQLiteDialect -> append("LENGTH(", value, ")")
+                is SQLiteDialect -> append(
+                    "LENGTH(JSON_EXTRACT(REPLACE(REPLACE(REPLACE(JSON_QUOTE(", value,
+                    "), '\\\\', CHAR(1)), '\\u0000', ' '), CHAR(1), '\\\\'), '\$'))",
+                )
                 is H2Dialect -> append("CHAR_LENGTH(REGEXP_REPLACE(", value, ", '[\\x{10000}-\\x{10FFFF}]', '_'))")
                 else -> append("CHAR_LENGTH(", value, ")")
             }

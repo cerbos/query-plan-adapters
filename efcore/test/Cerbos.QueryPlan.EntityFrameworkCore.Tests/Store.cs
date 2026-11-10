@@ -80,7 +80,7 @@ public sealed class Store : IAsyncLifetime
 
     private async Task Seed(CorpusContext db)
     {
-        var lacks = Corpus.ReadLedger().Lacks?.Keys.ToHashSet() ?? [];
+        var lacks = Corpus.ReadLedger().Lacks?.Where(l => l.Value.AppliesTo(Name)).Select(l => l.Key).ToHashSet() ?? [];
         var all = Corpus.Seeds();
         foreach (var s in all.Where(s => s.Requires?.Any(lacks.Contains) == true)) Unheld.Add(s.Id);
         var seeds = all.Where(s => !Unheld.Contains(s.Id)).ToList();

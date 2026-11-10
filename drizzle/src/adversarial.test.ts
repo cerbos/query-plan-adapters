@@ -68,6 +68,8 @@ interface Seed {
   parentSeedId: string | null;
   aNumberList: (number | null)[];
   aBoolList: (boolean | null)[];
+  /** The store capabilities the row needs (conformance/README.md, "The harness contract"). */
+  requires?: string[];
 }
 
 interface DerivedEntry {
@@ -79,7 +81,41 @@ interface DerivedEntry {
   labels: (string | null)[];
 }
 
-const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+const STORE_NAMES = ["sqlite", "postgres", "mysql"] as const;
+type StoreName = (typeof STORE_NAMES)[number];
+
+function selectedStoreName(): StoreName {
+  const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
+  // A typo must fail rather than silently fall back to SQLite: a CI leg that believes it is
+  // proving PostgreSQL while replaying SQLite is exactly the coverage gap this leg closes.
+  if (!STORE_NAMES.includes(requested as StoreName)) {
+    throw new Error(
+      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`,
+    );
+  }
+  return requested as StoreName;
+}
+
+const STORE_NAME = selectedStoreName();
+
+// A seed requiring a capability the ledger's `lacks` names for this store is a resource it cannot
+// hold: it is not loaded, and its id is struck from every allowed set.
+const LACKS = Object.entries(
+  (
+    JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "conformance-ledger.json"), "utf8"),
+    ) as { lacks?: Record<string, { reason: string; stores?: string[] }> }
+  ).lacks ?? {},
+)
+  .filter(([, entry]) => entry.stores?.includes(STORE_NAME) ?? true)
+  .map(([capability]) => capability);
+const ALL_SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+const UNHELD = new Set(
+  ALL_SEEDS.filter((seed) => seed.requires?.some((capability) => LACKS.includes(capability))).map(
+    (seed) => seed.id,
+  ),
+);
+const SEEDS = ALL_SEEDS.filter((seed) => !UNHELD.has(seed.id));
 const DERIVED = (
   readCorpusJson("derived-fields.json") as { derived: Record<string, DerivedEntry> }
 ).derived;
@@ -271,9 +307,6 @@ function seedRows(): SeedRows {
 }
 
 // -- store targets ------------------------------------------------------------------------------
-
-const STORE_NAMES = ["sqlite", "postgres", "mysql"] as const;
-type StoreName = (typeof STORE_NAMES)[number];
 
 /**
  * The engine each leg must find itself talking to, in the spelling that engine's own banner
@@ -875,19 +908,6 @@ function toMysqlResourceRow(row: ResourceRow): ResourceRow {
 /** Container start dominates the PostgreSQL and MySQL legs' setup; SQLite finishes instantly. */
 const STORE_STARTUP_TIMEOUT_MS = 180_000;
 
-function selectedStoreName(): StoreName {
-  const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
-  // A typo must fail rather than silently fall back to SQLite: a CI leg that believes it is
-  // proving PostgreSQL while replaying SQLite is exactly the coverage gap this leg closes.
-  if (!STORE_NAMES.includes(requested as StoreName)) {
-    throw new Error(
-      `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`,
-    );
-  }
-  return requested as StoreName;
-}
-
-const STORE_NAME = selectedStoreName();
 const STORE_FACTORIES: Record<StoreName, () => AdversarialStore> = {
   sqlite: sqliteStore,
   postgres: postgresStore,
@@ -964,7 +984,15 @@ async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
 }
 
 const TAGS = pdpTags();
-const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
+const GOLDENS = new Map(
+  TAGS.map((tag) => [
+    tag,
+    readGoldens(tag).map((golden) => ({
+      ...golden,
+      allowed: golden.allowed.filter((id) => !UNHELD.has(id)),
+    })),
+  ]),
+);
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
 const skipped: Record<string, number> = {};

@@ -93,7 +93,12 @@ public static class Corpus
         public bool AppliesTo(string tag) => Pdp is null || Pdp.Contains(tag);
     }
 
-    public sealed record Ledger(string Adapter, Dictionary<string, string>? Lacks, Dictionary<string, LedgerEntry> Cases);
+    public sealed record Lack(string Reason, List<string>? Stores)
+    {
+        public bool AppliesTo(string store) => Stores is null || Stores.Contains(store);
+    }
+
+    public sealed record Ledger(string Adapter, Dictionary<string, Lack>? Lacks, Dictionary<string, LedgerEntry> Cases);
 
     private static readonly JsonSerializerOptions LedgerOptions = new(Strict) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
 

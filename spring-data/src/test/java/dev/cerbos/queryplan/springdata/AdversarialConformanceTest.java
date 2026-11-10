@@ -241,7 +241,7 @@ class AdversarialConformanceTest {
     }
 
     private static Set<String> unheldSeeds() {
-        Set<String> lacks = Corpus.lacks();
+        Set<String> lacks = Corpus.lacks("h2");
         return allSeeds().stream()
                 .filter(s -> s.requires() != null && s.requires().stream().anyMatch(lacks::contains))
                 .map(Seed::id)

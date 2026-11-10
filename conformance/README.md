@@ -123,8 +123,8 @@ Each adapter implements this once, in its own language. It needs no PDP.
    read back through the mapping, is the resource in `resources.json`. One mapping serves every case;
    there are no per-case options. Drizzle also replays list-reading cases under `indexMappers`, on top
    of the single-mapper pass. A seed that `requires` a store capability the adapter's ledger
-   `lacks` is a resource that store cannot hold: do not load it, and strike its id from every
-   golden's `allowed` before comparing.
+   `lacks` on this store is a resource that store cannot hold: do not load it, and strike its id
+   from every golden's `allowed` before comparing.
 2. **For each PDP in `pdp-versions.json`** (current and previous), **for each golden file**:
    - If `plannerDivergence` is set, skip the case.
    - Look the case up in the adapter's ledger. An entry applies unless its `pdp` list excludes this tag.
@@ -157,7 +157,8 @@ new service's repository to its `IMAGE_REPOSITORIES`.
 {
   "adapter": "prisma",
   "lacks": {
-    "null-list": "The harness stores aNumberList as AdversarialNumberListElement rows, …"
+    "null-list": {"reason": "The harness stores aNumberList as AdversarialNumberListElement rows, …"},
+    "nul-in-string": {"reason": "PostgreSQL text cannot hold a NUL character, …", "stores": ["postgres"]}
   },
   "cases": {
     "regex/matches/digit-class": {
@@ -177,6 +178,9 @@ new service's repository to its `IMAGE_REPOSITORIES`.
 - `lacks` (optional) maps a store capability to the reason the store lacks it. It names a property
   of the store, not of a case: the seeds that require the capability are not loaded, and every case
   still runs over the rest. Only a capability some seed in `seeds.json` requires may be named.
+  `stores` limits an entry to some of the adapter's stores, for a capability one engine lacks and
+  another has. A harness with several store legs names each leg by its engine: `sqlite`,
+  `postgres`, `mysql`, `sqlserver`, `h2`, `mongo`, `elasticsearch`, `chroma` or `convex`.
 - `reason` names the real mechanism, in the store's own terms. `divergent` also requires `issue`.
 - An optional `pdp: ["0.55.0"]` limits an entry to one PDP tag, for a case whose plan differs between
   the two.
@@ -257,6 +261,13 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   nor `divergent`. The generator knows each capability (`storeCapabilities` in
   `generator/resources.go`), and refuses a requiring seed that another seed names as its parent
   ([#548](https://github.com/cerbos/query-plan-adapters/issues/548)).
+- **A NUL inside a string.** Seed `k3`'s `aString` is `"a"`, NUL, `"x"`. SQLite's `LENGTH` and
+  `LIKE` read a string as C text and stop at the NUL, so a translation built on them sees `"a"`
+  alone. PostgreSQL `text` cannot hold a NUL at all, so `k3` requires `nul-in-string` and every
+  PostgreSQL leg lacks it with `"stores": ["postgres"]`, which keeps the seed on that adapter's
+  other legs. Prisma and EF Core lack it on SQLite too: SQLite holds the row, but neither emits a
+  SQLite string function that reads past a NUL
+  ([#675](https://github.com/cerbos/query-plan-adapters/issues/675)).
 - **The real to-one relation.** `parentSeedId` names the seed whose `aBool`, `aNumber`, `aString`
   and `aOptionalString` form this row's `parent`. That seed's own parent forms `parent.inner`, and the
   chain stops there.

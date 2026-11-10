@@ -553,12 +553,13 @@ const buildMatchesFilter = (
         return anyOf(plan.literals.map((literal) => match(plan.kind, literal)));
       case "allCharactersIn": {
         // Remove every allowed character; nothing may be left. REPLACE is case-sensitive and
-        // literal on all three stores, as `contains` already relies on.
+        // literal on all three stores, as `contains` already relies on. The residue is compared
+        // with '' rather than measured: SQLite's LENGTH stops at a NUL.
         const rest = plan.characters.reduce<SQL>(
           (current, character) => sql`replace(${current}, ${character}, '')`,
           expr,
         );
-        return and(sql`length(${rest}) = 0`, atLeast(plan.min))!;
+        return and(sql`${rest} = ''`, atLeast(plan.min))!;
       }
       case "noNewline":
         return and(noNewline(), atLeast(plan.min))!;

@@ -37,7 +37,8 @@
     "j3",
     "j4",
     "k1",
-    "k2"
+    "k2",
+    "k3"
   ],
   "degenerateReason": null,
   "id": "timestamp/less-or-equal/literal-instant-value-first",

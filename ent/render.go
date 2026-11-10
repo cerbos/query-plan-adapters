@@ -333,7 +333,17 @@ func writeCall(b *sql.Builder, c queryplan.Call) error {
 
 	// CEL's size() counts Unicode code points. SQLite's and PostgreSQL's length() do too, but
 	// MySQL's LENGTH() counts bytes — "héllo🚀" is 6 to CEL and 10 to MySQL — so it needs
-	// CHAR_LENGTH instead.
+	// CHAR_LENGTH instead. SQLite's stops at the first NUL, and its replace() cannot match one, so
+	// each NUL becomes a space inside the string's JSON text, where it is the escape \u0000.
+	if c.Name == queryplan.FuncCharLength && b.Dialect() == dialect.SQLite {
+		b.WriteString(`length(json_extract(replace(replace(replace(json_quote(`)
+		if err := write(b, c.Args[0]); err != nil {
+			return err
+		}
+		b.WriteString(`), '\\', char(1)), '\u0000', ' '), char(1), '\\'), '$'))`)
+		return nil
+	}
+
 	name := functionNames[c.Name]
 	if c.Name == queryplan.FuncCharLength && b.Dialect() == dialect.MySQL {
 		name = "char_length"

@@ -1,7 +1,8 @@
 {
   "adapter": "jpa",
   "lacks": {
-    "null-list": "The harness stores aNumberList as NumberListElementEntity rows, a one-to-many association, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
+    "null-list": {"reason": "The harness stores aNumberList as NumberListElementEntity rows, a one-to-many association, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."},
+    "nul-in-string": {"reason": "PostgreSQL text cannot hold a NUL character, so a row whose string holds one cannot be stored.", "stores": ["postgres"]}
   },
   "cases": {
     "arithmetic/add/int-of-string-plus-constant": {

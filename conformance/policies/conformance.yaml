@@ -3824,6 +3824,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "*a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{2,1}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a\\" : "^h") || R.attr.aNumber == 5'
+    # regex/matches/nul-in-character-class
+    - actions:
+        - regex/matches/nul-in-character-class
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^[abx]+$")
     # regex/matches/negated-class
     - actions:
         - regex/matches/negated-class
@@ -4805,6 +4814,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(size(R.attr.aOptionalString) < 5000000000) || R.attr.aNumber > 10'
+    # size/less-than/string-holding-nul
+    - actions:
+        - size/less-than/string-holding-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) < 2
     # size/less-than/string-length-value-first
     - actions:
         - size/less-than/string-length-value-first

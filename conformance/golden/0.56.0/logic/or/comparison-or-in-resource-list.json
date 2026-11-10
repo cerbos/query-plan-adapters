@@ -36,7 +36,8 @@
     "j2",
     "j4",
     "k1",
-    "k2"
+    "k2",
+    "k3"
   ],
   "degenerateReason": null,
   "id": "logic/or/comparison-or-in-resource-list",

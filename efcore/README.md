@@ -138,7 +138,10 @@ does the same; otherwise the database decides differently from the PDP, which is
   Avoid `citext` and nondeterministic ICU collations.
 - **SQLite.** The default `BINARY` collation is exact. Do not declare `NOCASE` on a mapped column.
   The adapter avoids `LIKE`, which is case-insensitive in SQLite, and matches with `substr` and
-  `instr` instead.
+  `instr` instead. A mapped string must not hold a NUL character: SQLite's `length` and `substr`
+  stop at the first one, so `size()` and every string match answer for the prefix before it, and
+  `size(x) < 2` returns `"a\0x"`, which Cerbos denies. PostgreSQL `text` cannot store a NUL at all
+  ([#675](https://github.com/cerbos/query-plan-adapters/issues/675)).
 
 The conformance harness runs SQL Server with a case-insensitive collation as a sanity check; it
 reports 149 over-grants.
@@ -186,7 +189,7 @@ division by a column other than the dividend, the sign of a zero, `string()` of 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
 plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 of the
 corpus's 44 seed rows on SQLite, PostgreSQL and SQL Server, and compares the returned ids with the
-`check()` decisions the PDP recorded. The ledger lacks `null-list`, so j4 is not loaded. No PDP runs
+`check()` decisions the PDP recorded. The ledger lacks `null-list`, so j4 is not loaded, and `nul-in-string` on PostgreSQL and SQLite, so k3 is not loaded there. No PDP runs
 in the test. Results for the current PDP (0.57.0), where the total is every golden case of that
 tier; a case marked as a planner divergence is skipped, and counts toward the total but not as
 passed:
@@ -195,7 +198,7 @@ passed:
 | --- | --- |
 | core | 31 / 31 |
 | extended | 105 / 110 |
-| adversarial | 464 / 516 |
+| adversarial | 466 / 518 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json). All 21 are `unsupported`: the adapter throws
