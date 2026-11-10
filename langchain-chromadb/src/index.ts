@@ -28,6 +28,13 @@ export interface FieldNameMapperConfig {
    * Mutually exclusive with `numericType`.
    */
   valueType?: "boolean" | "json";
+  /** `valueType: "json"` only: a native list key holding the non-null elements, absent when none. */
+  listElements?: ListElements;
+}
+
+export interface ListElements {
+  field: string;
+  type: "string" | "integer";
 }
 
 type FieldNameMapperValue = string | FieldNameMapperConfig;
@@ -354,6 +361,7 @@ type ResolvedField = {
   name: string;
   numericType?: "integer" | "float";
   valueType?: "boolean" | "json";
+  listElements?: ListElements;
   required: boolean;
   /**
    * Set for a key declared `valueType: "json"`: the path from the document the key holds to the
@@ -391,6 +399,7 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
               name: mapped.field,
               numericType: mapped.numericType,
               valueType: mapped.valueType,
+              listElements: mapped.listElements,
               required: mapped.required ?? false,
             }
           : { name: key, required: false };
@@ -410,6 +419,23 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
       throw Error(
         `Field ${field.name} cannot declare both valueType and numericType`,
       );
+    }
+    if (field.listElements !== undefined) {
+      const { field: key, type } = field.listElements;
+      if (field.valueType !== "json") {
+        throw Error(
+          `Field ${field.name} declares listElements without valueType: "json"`,
+        );
+      }
+      if (!key)
+        throw Error(
+          `Field ${field.name} declares listElements without a field`,
+        );
+      if (type !== "string" && type !== "integer") {
+        throw Error(
+          `Unknown listElements type ${JSON.stringify(type)} for field ${field.name}`,
+        );
+      }
     }
     if (field.valueType === "json") field.jsonPath = jsonPath ?? [];
     return field;
@@ -547,6 +573,13 @@ function mapComparison(
   resolveField: FieldResolver,
   negate: boolean,
 ): Where {
+  const membership = mapListMembership(
+    planOperator,
+    operands,
+    resolveField,
+    negate,
+  );
+  if (membership !== undefined) return membership;
   // Checked before the operands are read, so a non-negatable shape keeps its refusal site under
   // negation whatever its operands are.
   if (negate) {
@@ -560,6 +593,73 @@ function mapComparison(
   const operator = negate ? negationOf(oriented) : oriented;
 
   return compare(resolveField(variable.name), operator, value);
+}
+
+function isListElement(type: ListElements["type"], value: unknown): boolean {
+  switch (type) {
+    case "string":
+      return typeof value === "string";
+    case "integer":
+      return typeof value === "number" && Number.isSafeInteger(value);
+  }
+}
+
+// `$not_contains` matches a record whose attribute is missing or null, where the PDP denies, so the
+// negated forms need `required`. Any other shape returns undefined and takes the refusals below.
+function mapListMembership(
+  planOperator: string,
+  operands: PlanExpressionOperand[],
+  resolveField: FieldResolver,
+  negate: boolean,
+): Where | undefined {
+  if (operands.length !== 2) return undefined;
+  const [left, right] = operands as [
+    PlanExpressionOperand,
+    PlanExpressionOperand,
+  ];
+  let variable: PlanExpressionVariable;
+  let needles: unknown[];
+  if (planOperator === "in" && isValue(left) && isVariable(right)) {
+    variable = right;
+    needles = [left.value];
+  } else if (planOperator === "hasIntersection") {
+    const pair =
+      isVariable(left) && isValue(right)
+        ? { variable: left, value: right.value }
+        : isValue(left) && isVariable(right)
+          ? { variable: right, value: left.value }
+          : undefined;
+    if (
+      pair === undefined ||
+      !Array.isArray(pair.value) ||
+      pair.value.length === 0
+    ) {
+      return undefined;
+    }
+    variable = pair.variable;
+    needles = pair.value;
+  } else {
+    return undefined;
+  }
+  const field = resolveField(variable.name);
+  const list = field.listElements;
+  if (list === undefined || field.jsonPath?.length !== 0) return undefined;
+  if (!needles.every((needle) => isListElement(list.type, needle)))
+    return undefined;
+  if (negate && !field.required) {
+    throw new UnsupportedOperatorError(
+      planOperator,
+      `negated ${planOperator} is unsafe for ${field.name} unless it is required, because $not_contains matches records missing ${list.field}`,
+    );
+  }
+  const clauses = needles.map(
+    (needle) =>
+      ({
+        [list.field]: { [negate ? "$not_contains" : "$contains"]: needle },
+      }) as Where,
+  );
+  if (clauses.length === 1) return clauses[0]!;
+  return negate ? { $and: clauses } : { $or: clauses };
 }
 
 /** `key <operator> literal`, with the operator already mirrored and negated into key-first form. */

@@ -78,6 +78,7 @@ interface FieldNameMapperConfig {
   required?: boolean;
   numericType?: "integer" | "float";
   valueType?: "boolean" | "json";
+  listElements?: { field: string; type: "string" | "integer" };
 }
 ```
 
@@ -89,6 +90,7 @@ interface FieldNameMapperConfig {
 | `numericType: "integer"` | Every value stored under the key is an integer. An inequality then needs no `$ne` and no `required`: `x != 5` becomes `$or` of `$lt: 5` and `$gt: 5`, and `x != "5"` (a string or boolean literal, which no integer equals) becomes `$or` of `$lt: 0` and `$gte: 0`. A fractional literal (`x != 2.5`) still takes `$ne` and needs `required: true`, because Chroma compares a fractional threshold with integer metadata inexactly. |
 | `valueType: "boolean"` | Every value stored under the key is a boolean. An inequality against a boolean then needs no `$ne` and no `required`: `x != true` and `!x` become `$eq: false`. Cannot be combined with `numericType`. |
 | `valueType: "json"` | The key holds the attribute as JSON text (`JSON.stringify(value)`): a list, a map, a null, or a scalar, exactly as the application sends it to the PDP. Chroma metadata cannot hold a list with a null element or an empty list, a map, or a null, and this is how such an attribute reaches the [post-filter](#post-filtering), which parses it. No `Where` clause reads it: a comparison against it is refused, or answered by the post-filter under `allowPostFilter`. A reference below the attribute (`R.attr.doc.tags`) resolves through the entry for `R.attr.doc`. Cannot be combined with `numericType`. |
+| `listElements` | With `valueType: "json"` only, for a list of strings or integers: a second key holding the list's non-null elements as native Chroma list metadata, so membership narrows the search. See [List membership](#list-membership). |
 
 A key declared `"json"` must hold what the PDP saw, as text: a key that holds the JSON of a list
 but is declared as a plain key reads as a string, so `size(R.attr.list)` would count its characters.
@@ -121,6 +123,41 @@ A plain string entry, a string from a function, and an unmapped path are all tre
 carries, so the filter silently selects nothing; map every attribute your policies reference. The
 post-filter does not share that fallback: it refuses a reference the mapper has no entry for (a
 function mapper declares one by returning a value).
+
+## List membership
+
+Chroma stores a list of strings or integers as metadata and tests membership with `$contains`, but
+it cannot hold the list the PDP sees: it rejects an empty list, a null element and mixed types, and
+has no positional read. So the list stays under its `valueType: "json"` key, which the post-filter
+reads, and `listElements` names a second key the application writes beside it:
+
+- the list's non-null elements, in any order, all of the declared `type`;
+- **no key at all** when the list has no non-null element (empty, all null), or is null or missing.
+
+```ts
+"request.resource.attr.teams": {
+  field: "teams",
+  valueType: "json",
+  required: true,
+  listElements: { field: "teams.elements", type: "string" },
+},
+```
+
+```ts
+metadata["teams"] = JSON.stringify(teams);
+const elements = (teams ?? []).filter((team) => team !== null);
+if (elements.length > 0) metadata["teams.elements"] = elements;
+```
+
+With that convention, `"x" in R.attr.teams` becomes `{ "teams.elements": { $contains: "x" } }` and
+`hasIntersection(R.attr.teams, ["x", "y"])` an `$or` of `$contains`, with or without
+`allowPostFilter`. An absent elements key holds no non-null needle, so the positive forms are exact
+over an optional attribute. The negated forms become `$not_contains`, which also matches a record
+missing the key: it stands for an empty list only when the attribute is a list on every record, so
+negated membership is emitted only when the entry declares `required: true`, and refused (or
+post-filtered) otherwise. A null needle, a needle of another type than `type` (a fractional or
+unsafe integer against `"integer"`), an empty literal list, a list of objects, a reference below
+the attribute, `size()` and positional reads keep their refusals.
 
 ## NULL attribute representation
 
@@ -199,8 +236,8 @@ A `Where` clause compares one metadata key with a literal, so these throw unless
   membership in a list-valued key (`"x" in R.attr.list`) and whole-list equality. The pinned
   server stores a homogeneous list, but `$eq` on a list key and a dotted `key.N` both match
   nothing, there is no count function, and there is no quantifier over a list's elements. Its
-  position-blind `$contains` is not translated: Chroma stores an empty list as an absent key and
-  rejects null elements and mixed types, so a list cannot always be stored as the PDP sees it
+  `$contains` answers membership against a literal, and `hasIntersection` with a literal list,
+  only over a key declaring [`listElements`](#list-membership)
   ([#475](https://github.com/cerbos/query-plan-adapters/issues/475)). The post-filter reads a list,
   a map or a list of objects from a key declared `valueType: "json"`;
 - field-to-field comparisons, arithmetic, casts, ternaries, hierarchy and timestamp operations: an
@@ -349,9 +386,9 @@ caller must. Passed cases on the current PDP, 0.57.0, out of every golden case i
 | extended | 96 / 110 |
 | adversarial | 454 / 518 |
 
-Without `allowPostFilter`, the 388 cases the post-filter answers throw `UnsupportedOperatorError`
-instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 74
-passing: 21, 12 and 41 in the three tiers.
+Without `allowPostFilter`, the 384 cases the post-filter answers throw `UnsupportedOperatorError`
+instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 78
+passing: 22, 12 and 44 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
@@ -374,11 +411,17 @@ no `Where` form, so the post-filter answers it. The corpus therefore proves no `
 spell the others.
 
 The harness stores every scalar the dataset has, `createdBy` and `scope` included, and maps each.
-What a scalar key cannot hold (#475) it stores as JSON text under a key declared
+What a scalar key cannot hold it stores as JSON text under a key declared
 `valueType: "json"`: the lists (`tagNames`, `aNumberList`, `aBoolList`, `tags`), `categories` and
 `mainCategory`, `owner` and `coOwner`, which reach `check()` as an explicit null on some rows, and
 `parent` and `obj` whole, beside their flattened scalar keys. Each is written as the generator
-builds the resource, so the record read back is the resource. The 35 cases that remain refused
+builds the resource, so the record read back is the resource. `tagNames` and `aNumberList` also
+carry their non-null elements under a [`listElements`](#list-membership) key, so membership against
+a literal is a `$contains` filter (`membership/in/literal-in-resource-number-list`,
+`collection/has-intersection/value-first`). Only `tagNames` is declared `required`, since
+`aNumberList` is null on j4: `membership/in/negated-literal-in-resource-list` is a `$not_contains`
+filter, while `membership/in/negated-literal-in-null-resource-list` is refused by the `Where` and
+answered by the post-filter. The 35 cases that remain refused
 turn on a type the plan does not carry (an integral literal next to a stored number, `0 / 0` in a
 ternary) or on the sign of a stored zero.
 
@@ -437,6 +480,12 @@ flat metadata on the record being matched, and every shape that would reach a se
 - **Fix, opt-in:** the post-filter compares hierarchies segment by segment, as Cerbos does, so
   `hierarchy("a:b", ":")` overlaps `hierarchy("a.b")`, and `size()` of a hierarchy counts its
   segments. It used to require both sides to share a delimiter, and denied such a pair.
+
+- **Widening:** a key declared `valueType: "json"` can name a native list key with `listElements`
+  (new), which turns `"x" in R.attr.list` and `hasIntersection` against a literal list into
+  `$contains`, and their negations into `$not_contains` when the entry is `required`, with or
+  without `allowPostFilter`. Each used to throw `UnsupportedOperatorError`, or be answered only by
+  the post-filter ([#475](https://github.com/cerbos/query-plan-adapters/issues/475)).
 
 - **Widening:** an inequality over a key declared `valueType: "boolean"` (new) or
   `numericType: "integer"` is spelled without `$ne`, so it no longer needs `required: true`

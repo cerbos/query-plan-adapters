@@ -187,6 +187,14 @@ function metadataFor(seed: Seed): Metadata {
     ]);
   }
   for (const [key, value] of json) metadata[key] = JSON.stringify(value);
+  const lists: [string, (string | number | null)[] | null][] = [
+    ["tagNames.elements", seed.tags.map(({ name }) => name)],
+    ["aNumberList.elements", seed.aNumberList],
+  ];
+  for (const [key, list] of lists) {
+    const elements = (list ?? []).filter((element) => element !== null);
+    if (elements.length > 0) metadata[key] = elements as Metadata[string];
+  }
   return metadata;
 }
 

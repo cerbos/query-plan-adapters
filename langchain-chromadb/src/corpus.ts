@@ -435,8 +435,19 @@ export const FIELD_NAME_MAPPER: Record<string, string | FieldNameMapperConfig> =
     // `obj` is also read whole, by the map macro cases, beside its flattened `obj.inner`.
     "request.resource.attr.owner": { field: "owner", valueType: "json" },
     "request.resource.attr.coOwner": { field: "coOwner", valueType: "json" },
-    "request.resource.attr.tagNames": { field: "tagNames", valueType: "json" },
-    "request.resource.attr.aNumberList": { field: "aNumberList", valueType: "json" },
+    // The scalar lists also carry their non-null elements as a native list key, absent when there
+    // are none. aNumberList is null on j4, so only tagNames is required.
+    "request.resource.attr.tagNames": {
+      field: "tagNames",
+      valueType: "json",
+      required: true,
+      listElements: { field: "tagNames.elements", type: "string" },
+    },
+    "request.resource.attr.aNumberList": {
+      field: "aNumberList",
+      valueType: "json",
+      listElements: { field: "aNumberList.elements", type: "integer" },
+    },
     "request.resource.attr.aBoolList": { field: "aBoolList", valueType: "json" },
     "request.resource.attr.tags": { field: "tags", valueType: "json" },
     "request.resource.attr.categories": { field: "categories", valueType: "json" },
@@ -458,6 +469,8 @@ export function requiredMetadataKeys(): string[] {
       (entry): entry is FieldNameMapperConfig =>
         typeof entry !== "string" && entry.required === true,
     )
-    .map((entry) => entry.field)
+    .flatMap((entry) =>
+      entry.listElements ? [entry.field, entry.listElements.field] : [entry.field],
+    )
     .sort();
 }

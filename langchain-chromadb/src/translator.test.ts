@@ -213,9 +213,9 @@ describe("what an emitted filter may contain", () => {
   /**
    * The adapter's central over-grant guard, stated as a rule over the whole corpus.
    *
-   * Chroma's `$ne`/`$nin` MATCH a document that is missing the metadata key, where CEL raises a
-   * missing-attribute error and the PDP denies. So an inequality is only sound over a key the
-   * integrator has asserted is present on every document, and the adapter refuses it otherwise.
+   * Chroma's `$ne`/`$nin`/`$not_contains` MATCH a document that is missing the metadata key, where
+   * CEL raises a missing-attribute error and the PDP denies. So an inequality is only sound over a
+   * key the integrator has asserted is present on every document, and the adapter refuses it otherwise.
    * A translator change that quietly emitted an inequality over an optional key would be an
    * authorization bug.
    */
@@ -223,7 +223,7 @@ describe("what an emitted filter may contain", () => {
     const required = new Set(requiredMetadataKeys());
     const unsafe = ALL_COMPARISONS.filter(
       ({ field, operator }) =>
-        ["$ne", "$nin"].includes(operator) && !required.has(field),
+        ["$ne", "$nin", "$not_contains"].includes(operator) && !required.has(field),
     ).map(({ action, field, operator }) => `${action}: ${field} ${operator}`);
 
     expect(unsafe).toEqual([]);
@@ -259,7 +259,7 @@ describe("what an emitted filter may contain", () => {
     const emitsInequality = [
       ...new Set(
         COMPARISONS_IF_PRESENT.filter(({ operator }) =>
-          ["$ne", "$nin"].includes(operator),
+          ["$ne", "$nin", "$not_contains"].includes(operator),
         ).map(({ action }) => action),
       ),
     ];
@@ -277,8 +277,8 @@ describe("what an emitted filter may contain", () => {
     const untyped: Record<string, FieldNameMapperConfig> = Object.fromEntries(
       Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => {
         if (typeof entry === "string") return [reference, { field: entry }];
-        const { valueType: _v, numericType: _n, ...rest } = entry;
-        return [reference, rest];
+        const { valueType, numericType: _n, ...rest } = entry;
+        return [reference, valueType === "json" ? { ...rest, valueType } : rest];
       }),
     );
     const translated = new Set(TRANSLATED.map(({ id }) => id));
@@ -302,6 +302,38 @@ describe("what an emitted filter may contain", () => {
         ({ id, operator }) => !translated.has(id) || operator !== "ne",
       ),
     ).toEqual([]);
+  });
+
+  /**
+   * `listElements` is a caller-supplied declaration the corpus cannot vary: without it, every
+   * action that reads a list through `$contains` or `$not_contains` is refused again, and nothing
+   * else changes.
+   */
+  test("clearing listElements refuses exactly the actions that emit $contains", async () => {
+    const withoutLists: Record<string, FieldNameMapperConfig> = Object.fromEntries(
+      Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => {
+        if (typeof entry === "string") return [reference, { field: entry }];
+        const { listElements: _l, ...rest } = entry;
+        return [reference, rest];
+      }),
+    );
+    const readsList = CONDITIONAL.filter(({ filters }) =>
+      literalsOf(filters).some(({ operator }) =>
+        ["$contains", "$not_contains"].includes(operator),
+      ),
+    ).map(({ id }) => id);
+
+    const ids = TRANSLATED.map(({ id }) => id);
+    const raised = await Promise.all(
+      ids.map((id) => thrownBy(() => translate(id, { fieldNameMapper: withoutLists }))),
+    );
+    const nowRefused = ids.filter((_id, index) => raised[index]);
+
+    expect(nowRefused).toEqual(readsList);
+    expect(readsList.length).toBeGreaterThan(0);
+    for (const error of raised.filter(Boolean)) {
+      expect(error).toBeInstanceOf(UnsupportedOperatorError);
+    }
   });
 
   /**
@@ -600,6 +632,18 @@ describe("type declarations a mapper cannot combine", () => {
       { field: "aBool", valueType: "boolean", numericType: "integer" },
     ],
     ["an unknown valueType", { field: "aBool", valueType: "string" }],
+    [
+      "listElements without valueType json",
+      { field: "aBool", listElements: { field: "aBool.elements", type: "string" } },
+    ],
+    [
+      "an unknown listElements type",
+      {
+        field: "aBool",
+        valueType: "json",
+        listElements: { field: "aBool.elements", type: "float" },
+      },
+    ],
   ])("%s is a plain Error", async (_label, entry) => {
     const raised = await thrownBy(() =>
       translate("logic/not/bare-boolean-attribute", {
