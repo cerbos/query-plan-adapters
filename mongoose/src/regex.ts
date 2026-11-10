@@ -1,6 +1,7 @@
 import { RE2JS, RE2JSException } from "re2js";
 
 import { UnsupportedQueryPlanError } from "./errors";
+import { lookup } from "./narrowing";
 
 /** Escapes every regex metacharacter so the value matches itself literally. */
 export const escapeRegexValue = (value: string): string =>
@@ -37,8 +38,8 @@ const POSIX_CLASSES = new Set([
 ]);
 
 /** Escapes both engines read as the same one character. */
-const CONTROL_ESCAPES: Record<string, string> = { n: "\\n", t: "\\t", r: "\\r", f: "\\f", a: "\\a" };
-const CONTROL_CODE_POINTS: Record<string, number> = { n: 0x0a, t: 0x09, r: 0x0d, f: 0x0c, a: 0x07 };
+const CONTROL_ESCAPES = { n: "\\n", t: "\\t", r: "\\r", f: "\\f", a: "\\a" } satisfies Record<string, string>;
+const CONTROL_CODE_POINTS = { n: 0x0a, t: 0x09, r: 0x0d, f: 0x0c, a: 0x07 } satisfies Record<string, number>;
 
 /** Perl classes both engines read over ASCII only: `\s` is left out, since PCRE2's includes \v. */
 const PERL_CLASSES = new Set(["d", "D", "w", "W"]);
@@ -54,6 +55,8 @@ type Node =
 class InvalidRe2Pattern extends Error {}
 
 const isWordChar = (c: string): boolean => /^[A-Za-z0-9_]$/.test(c);
+
+type RepeatOperator = { out: string; min: number; max: number; counted: boolean };
 
 class Parser {
   private readonly chars: string[];
@@ -136,11 +139,9 @@ class Parser {
    * reads it (digits without a leading zero). A brace that does not spell one is a literal, left
    * for `parseAtom`. A lazy `?` suffix changes which match is found, never whether one is.
    */
-  private parseRepeatOperator():
-    | { out: string; min: number; max: number; counted: boolean }
-    | undefined {
+  private parseRepeatOperator(): RepeatOperator | undefined {
     const c = this.peek();
-    let result: { out: string; min: number; max: number; counted: boolean };
+    let result: RepeatOperator;
 
     if (c === "*" || c === "+" || c === "?") {
       this.pos += 1;
@@ -338,7 +339,7 @@ class Parser {
       return { kind: "atom", out: `[^${SPACE_MEMBERS}]`, caseless: false };
     }
 
-    const control = CONTROL_ESCAPES[c];
+    const control = lookup(CONTROL_ESCAPES, c);
 
     if (control !== undefined) {
       return { kind: "atom", out: control, caseless: false };
@@ -465,7 +466,7 @@ class Parser {
         return { kind: "class", out: node.out };
       }
 
-      const codePoint = CONTROL_CODE_POINTS[escaped] ?? escaped.codePointAt(0)!;
+      const codePoint = lookup(CONTROL_CODE_POINTS, escaped) ?? escaped.codePointAt(0)!;
 
       return { kind: "char", out: node.out, codePoint };
     }

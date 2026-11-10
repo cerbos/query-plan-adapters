@@ -7,6 +7,7 @@ import type {
 import { UnsupportedQueryPlanError } from "./errors";
 import type { MongooseFilter } from "./index";
 import { getOperandAt, isExpression, isVariable } from "./operands";
+import { isObject } from "./narrowing";
 
 // Operators whose second operand is a lambda that binds an iteration variable.
 export const LAMBDA_BINDING_OPERATORS = new Set([
@@ -42,18 +43,15 @@ export const substituteLambdaVariable = (
       for (const segment of operand.name
         .slice(variableName.length + 1)
         .split(".")) {
-        if (
-          current === null ||
-          typeof current !== "object" ||
-          Array.isArray(current) ||
-          !(segment in current)
-        ) {
+        const next = isObject(current) && !Array.isArray(current) && segment in current ? current[segment] : undefined;
+
+        if (next === undefined) {
           throw new UnsupportedQueryPlanError(
             `Cannot resolve "${operand.name}": collection element has no field "${segment}"`,
           );
         }
 
-        current = current[segment] as Value;
+        current = next;
       }
 
       return { value: current };

@@ -19,6 +19,8 @@ import {
   RFC3339_TIMESTAMP_MONGO_PATTERN,
   isRfc3339Timestamp,
 } from "./timestamp";
+import { isBoolean, isNumber, isObject, isString, lookup, pair, triple, typeofValue } from "./narrowing";
+import { isMongoDocument, type MongoValue } from "./expression";
 
 /**
  * Aggregation-expression lowering, for everything that has to be evaluated inside `$expr`:
@@ -46,18 +48,18 @@ export const COMPARISON_OPERATORS = {
 
 export type ComparisonOperator = keyof typeof COMPARISON_OPERATORS;
 
-const isComparison = (operator: string): operator is ComparisonOperator =>
+export const isComparison = (operator: string): operator is ComparisonOperator =>
   Object.hasOwn(COMPARISON_OPERATORS, operator);
 
 /** The comparisons that are orderings: between two types an ordering is an error to CEL, `==` false. */
 export const ORDERINGS = new Set(["lt", "le", "gt", "ge"]);
 
-const ARITHMETIC: Record<string, string> = {
+const ARITHMETIC = {
   add: "$add",
   sub: "$subtract",
   mult: "$multiply",
   div: "$divide",
-};
+} satisfies Record<string, string>;
 
 /** Operators whose second operand is a lambda, which the three-valued evaluation evaluates. */
 export const LAMBDA_OPERATORS = new Set(["exists", "exists_one", "all", "filter", "map", "lambda"]);
@@ -69,14 +71,10 @@ const NOT_NULL_GUARDED = new Set([
   "hasIntersection", "map", "intersect", "isSubset", "upperAscii", "timeSince",
 ]);
 
-const isNumber = (value: unknown): value is number => typeof value === "number";
-const isString = (value: unknown): value is string => typeof value === "string";
+const isComposite = (value: MongoValue): boolean =>
+  Array.isArray(value) || (isObject(value) && !(value instanceof Date));
 
-const isComposite = (value: unknown): boolean =>
-  Array.isArray(value) || (typeof value === "object" && value !== null && !(value instanceof Date));
-
-const isMap = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
+const isMap = isMongoDocument;
 
 /**
  * A plan operand as an aggregation expression: a variable becomes a `$field.path`, a value a
@@ -85,7 +83,7 @@ const isMap = (value: unknown): value is Record<string, unknown> =>
 export const buildAggregationExpression = (
   operand: PlanExpressionOperand,
   mapper: ScopedMapper,
-): unknown => {
+): MongoValue => {
   if (isVariable(operand)) return fieldPath(operand.name, mapper);
 
   if (isValue(operand)) return buildConstant(operand.value);
@@ -101,7 +99,7 @@ const build = buildAggregationExpression;
  * the dotted path would skip an element that lacks the field instead of reading it as null, and
  * so shorten the list.
  */
-const fieldPath = (name: string, mapper: ScopedMapper): unknown => {
+const fieldPath = (name: string, mapper: ScopedMapper): MongoValue => {
   const { path, relation } = resolveFieldReference(name, mapper);
 
   if (relation?.type !== "many") return `$${path.join(".")}`;
@@ -121,7 +119,7 @@ const fieldPath = (name: string, mapper: ScopedMapper): unknown => {
 export const relationElements = (
   relation: { name: string; requiresParent?: string },
   field: string | undefined,
-): unknown => {
+): MongoValue => {
   const parent = relation.requiresParent!;
 
   if (!relation.name.startsWith(`${parent}.`)) {
@@ -170,7 +168,7 @@ export const relationElements = (
  * documents the PDP denies (cerbos/query-plan-adapters#575). `$literal` keeps each such constant
  * the value it is.
  */
-export const buildConstant = (value: unknown): unknown => {
+export const buildConstant = (value: MongoValue): MongoValue => {
   if (isMap(value) || (Array.isArray(value) && value.some((element) => !isComparableElement(element)))) {
     throw new UnsupportedQueryPlanError(
       "A map constant inside an expression is unsupported: MongoDB compares embedded documents in stored field order, CEL's maps ignore it",
@@ -183,7 +181,7 @@ export const buildConstant = (value: unknown): unknown => {
 };
 
 /** An element a constant list may hold inside `$expr`: a scalar other than NaN, or a map of one such scalar. */
-const isComparableElement = (element: unknown): boolean => {
+const isComparableElement = (element: MongoValue): boolean => {
   if (isMap(element)) {
     const values = Object.values(element);
 
@@ -196,7 +194,7 @@ const isComparableElement = (element: unknown): boolean => {
 export const buildAggregationExpressionFromExpression = (
   expression: PlanExpression,
   mapper: ScopedMapper,
-): unknown => {
+): MongoValue => {
   const { operator, operands } = expression;
 
   if (operator === "and" || operator === "or") {
@@ -468,11 +466,7 @@ const isExprGuard = (guard: MongooseFilter): boolean =>
  * which denies more than CEL does but never less.
  */
 const branchGuards = (expression: PlanExpression, mapper: ScopedMapper): MongooseFilter[] => {
-  const [condition, whenTrue, whenFalse] = expression.operands as [
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-  ];
+  const [condition, whenTrue, whenFalse] = triple(expression.operands);
 
   const conditionGuards = buildEvaluationGuards(condition, mapper);
   const thenGuards = buildEvaluationGuards(whenTrue, mapper);
@@ -594,8 +588,8 @@ const notNullGuard = (expression: PlanExpression, mapper: ScopedMapper): Mongoos
 const withOperands = (
   operands: PlanExpressionOperand[],
   mapper: ScopedMapper,
-  body: (values: string[]) => unknown,
-): unknown => {
+  body: (values: string[]) => MongoValue,
+): MongoValue => {
   const names = operands.map((_, index) => `operand${index}`);
 
   return {
@@ -613,7 +607,7 @@ const withOperands = (
  * strings concatenate, two numbers add as doubles, two lists concatenate, and anything else has
  * no overload (null).
  */
-const buildAdd = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+const buildAdd = (operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
   if (operands.some((op) => isValue(op) && op.value === null)) {
     throw new UnsupportedQueryPlanError("add has no overload for a null operand");
   }
@@ -636,7 +630,7 @@ const buildAdd = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unkn
   if (operands.some((op) => isIntTyped(op) || isValue(op))) return buildArithmetic("add", operands, mapper);
 
   return withOperands(operands, mapper, (values) => {
-    const all = (check: (value: string) => unknown) => ({ $and: values.map(check) });
+    const all = (check: (value: string) => MongoValue) => ({ $and: values.map(check) });
 
     return {
       $switch: {
@@ -656,7 +650,7 @@ const buildAdd = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unkn
  * does, which agrees with CEL's equality for scalars but NaN, which CEL never finds; a map or
  * list needle is null too, since MongoDB compares embedded documents in stored field order.
  */
-const buildIn = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+const buildIn = (operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
   const [needle, list] = operands;
 
   if (!needle || !list) throw new UnsupportedQueryPlanError("in requires two operands");
@@ -693,8 +687,8 @@ const buildIn = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unkno
 const scalarLists = (
   operands: PlanExpressionOperand[],
   mapper: ScopedMapper,
-  body: () => unknown,
-): unknown => {
+  body: () => MongoValue,
+): MongoValue => {
   const [left, right] = operands;
 
   if (!left || !right) throw new UnsupportedQueryPlanError("A list function requires two operands");
@@ -719,18 +713,18 @@ const scalarLists = (
 
 type CelKind = "string" | "number" | "bool" | "timestamp" | "duration";
 
-const TEMPORAL_RESULTS: Record<string, CelKind> = {
+const TEMPORAL_RESULTS = {
   "add,timestamp,duration": "timestamp",
   "add,duration,timestamp": "timestamp",
   "sub,timestamp,duration": "timestamp",
   "sub,timestamp,timestamp": "duration",
   "add,duration,duration": "duration",
   "sub,duration,duration": "duration",
-};
+} satisfies Record<string, CelKind>;
 
 /** The CEL type of a temporal `+` or `-`, or undefined where CEL has no such overload. */
 const temporalResult = (operator: string, kinds: (CelKind | undefined)[]): CelKind | undefined =>
-  TEMPORAL_RESULTS[[operator, ...kinds].join(",")];
+  lookup(TEMPORAL_RESULTS, [operator, ...kinds].join(","));
 
 /**
  * The CEL type `operand` evaluates to, as far as the plan and the mapper settle it: a constant's
@@ -743,7 +737,7 @@ const celKind = (operand: PlanExpressionOperand, mapper: ScopedMapper): CelKind 
 
     if (isString(value)) return "string";
 
-    if (typeof value === "boolean") return "bool";
+    if (isBoolean(value)) return "bool";
 
     return isNumber(value) ? "number" : undefined;
   }
@@ -815,7 +809,7 @@ const buildTemporalArithmetic = (
   operator: string,
   operands: PlanExpressionOperand[],
   mapper: ScopedMapper,
-): unknown => {
+): MongoValue => {
   const kinds = operands.map((op) => celKind(op, mapper));
   const result = temporalResult(operator, kinds);
 
@@ -831,7 +825,7 @@ const buildTemporalArithmetic = (
       kinds[index] === "timestamp" ? { $eq: [{ $type: value }, "date"] } : { $isNumber: value },
     );
 
-    let computed: unknown = { [ARITHMETIC[operator]!]: values };
+    let computed: MongoValue = { [lookup(ARITHMETIC, operator)!]: values };
 
     if (result === "timestamp") {
       computed = {
@@ -888,8 +882,13 @@ const isMapLiteralIndex = (operands: PlanExpressionOperand[]): boolean => {
  * that key, or null, CEL's no-such-key error, where the map holds none. Only a map of scalars
  * other than null and NaN is read this way: a null value could not be told from the error.
  */
-const buildMapLookup = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
-  const [map, key] = operands as [PlanExpressionOperand & { value: Record<string, unknown> }, PlanExpressionOperand];
+const buildMapLookup = (operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
+  const [map, key] = pair(operands);
+
+  if (!isValue(map) || !isMongoDocument(map.value)) {
+    throw new UnsupportedQueryPlanError("A map lookup needs a map literal");
+  }
+
   const entries = Object.entries(map.value);
 
   if (!entries.every(([, value]) => value !== null && !isMap(value) && isComparableElement(value))) {
@@ -921,7 +920,7 @@ const buildMapLookup = (operands: PlanExpressionOperand[], mapper: ScopedMapper)
  * an empty one splits into code points, as Go's strings.Split does), or a list of strings as it
  * is. Anything else is null (a CEL error).
  */
-const buildHierarchy = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+const buildHierarchy = (operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
   const [path, separator] = operands;
 
   if (!path) throw new UnsupportedQueryPlanError("hierarchy requires a path");
@@ -930,14 +929,14 @@ const buildHierarchy = (operands: PlanExpressionOperand[], mapper: ScopedMapper)
     throw new UnsupportedQueryPlanError("hierarchy separator must be a string constant");
   }
 
-  const delimiter = separator && isValue(separator) ? (separator.value as string) : ".";
+  const delimiter = separator && isValue(separator) && isString(separator.value) ? separator.value : ".";
 
   const split =
     delimiter === ""
       ? { $map: { input: { $range: [0, { $strLenCP: "$$cerbos_path" }] }, in: { $substrCP: ["$$cerbos_path", "$$this", 1] } } }
       : { $split: ["$$cerbos_path", buildConstant(delimiter)] };
 
-  const branches: unknown[] = [{ case: { $eq: [{ $type: "$$cerbos_path" }, "string"] }, then: split }];
+  const branches: MongoValue[] = [{ case: { $eq: [{ $type: "$$cerbos_path" }, "string"] }, then: split }];
 
   if (!separator) {
     const everyString = {
@@ -954,7 +953,7 @@ const buildHierarchy = (operands: PlanExpressionOperand[], mapper: ScopedMapper)
  * ancestorOf (the second strictly longer, starting with the first) and overlaps (the shorter
  * starting the longer) between two hierarchies; null where either is not one.
  */
-const hierarchyPrefix = (hierarchies: unknown[], relation: "ancestor" | "overlaps"): unknown => {
+const hierarchyPrefix = (hierarchies: MongoValue[], relation: "ancestor" | "overlaps"): MongoValue => {
   const [first, second] = hierarchies;
 
   if (first === undefined || second === undefined) {
@@ -995,8 +994,8 @@ const hierarchyPrefix = (hierarchies: unknown[], relation: "ancestor" | "overlap
  * element by element, so NaN inside them is compared the same way (see `equalityDecidable` for
  * the lists and maps that are not compared at all).
  */
-export const compare = (operator: ComparisonOperator, left: unknown, right: unknown): unknown => {
-  let scalar: unknown = { [COMPARISON_OPERATORS[operator]]: ["$$left", "$$right"] };
+export const compare = (operator: ComparisonOperator, left: MongoValue, right: MongoValue): MongoValue => {
+  let scalar: MongoValue = { [COMPARISON_OPERATORS[operator]]: ["$$left", "$$right"] };
 
   if (operator === "eq" || operator === "ne") {
     // Every array operator reads an operand that is an array on any document: MongoDB 9 folds a
@@ -1049,7 +1048,7 @@ export const compare = (operator: ComparisonOperator, left: unknown, right: unkn
  * (MongoDB compares embedded documents in stored field order, CEL ignores it), nor between two
  * lists where either holds a list or a map. Those are kept out under either polarity.
  */
-const equalityDecidable = (left: unknown, right: unknown): unknown => {
+const equalityDecidable = (left: MongoValue, right: MongoValue): MongoValue => {
   const composite = (list: string) => ({
     $anyElementTrue: [
       { $map: { input: { $cond: [{ $isArray: list }, list, []] }, in: { $in: [{ $type: "$$this" }, ["object", "array"]] } } },
@@ -1086,7 +1085,7 @@ const equalityDecidable = (left: unknown, right: unknown): unknown => {
  * NaN false whatever the right side is, and one whose right side is NaN false when the left side
  * is a number, a string, a boolean or a timestamp; it raises for null, a list or a map on the left.
  */
-export const orderable = (left: unknown, right: unknown): unknown => ({
+export const orderable = (left: MongoValue, right: MongoValue): MongoValue => ({
   $let: {
     vars: { left, right },
     in: {
@@ -1122,14 +1121,14 @@ export const orderable = (left: unknown, right: unknown): unknown => ({
  *
  * Arithmetic over a CEL int is int arithmetic instead (`buildIntArithmetic`).
  */
-const buildArithmetic = (operator: string, operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+const buildArithmetic = (operator: string, operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
   if (operands.some((op) => isTemporal(op, mapper))) return buildTemporalArithmetic(operator, operands, mapper);
 
   if (operands.some(isIntTyped)) return buildIntArithmetic(operator, operands, mapper);
 
   return withOperands(operands, mapper, (values) => {
     const doubles = values.map((value) => ({ $toDouble: value }));
-    let result: unknown;
+    let result: MongoValue;
 
     if (operator === "div") {
       const [numerator, denominator] = doubles;
@@ -1141,7 +1140,7 @@ const buildArithmetic = (operator: string, operands: PlanExpressionOperand[], ma
         result = { $cond: [{ $eq: [denominator, 0] }, divideByZero(numerator, denominator), { $divide: doubles }] };
       }
     } else {
-      result = { [ARITHMETIC[operator]!]: doubles };
+      result = { [lookup(ARITHMETIC, operator)!]: doubles };
     }
 
     return { $cond: [{ $and: values.map((value) => ({ $isNumber: value })) }, result, null] };
@@ -1149,7 +1148,7 @@ const buildArithmetic = (operator: string, operands: PlanExpressionOperand[], ma
 };
 
 /** A constant denominator's sign is settled here rather than read back from the server. */
-const divideByZero = (numerator: unknown, denominator: unknown, constant?: number): unknown => {
+const divideByZero = (numerator: MongoValue, denominator: MongoValue, constant?: number): MongoValue => {
   const negativeZero = constant === undefined ? { $eq: [{ $toString: denominator }, "-0"] } : Object.is(constant, -0);
 
   return {
@@ -1161,7 +1160,7 @@ const divideByZero = (numerator: unknown, denominator: unknown, constant?: numbe
   };
 };
 
-const buildString = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+const buildString = (operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
   const operand = getOperandAt(operands, 0, "string conversion requires an operand");
 
   if (rendersUntypedIntegralConstant(operand)) {
@@ -1211,7 +1210,7 @@ const rendersUntypedIntegralConstant = (operand: PlanExpressionOperand): boolean
  * ASCII digits. Anything else raises, and is null here. $convert on its own would parse a
  * numeric prefix and round.
  */
-const buildInt = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+const buildInt = (operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
   const input = build(getOperandAt(operands, 0, "int conversion requires an operand"), mapper);
 
   return {
@@ -1258,7 +1257,7 @@ const buildInt = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unkn
  * literal. Go's ParseFloat also reads "Inf", "NaN" and hexadecimal forms, which this leaves to
  * null, and denied, where CEL might allow.
  */
-const buildDouble = (operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+const buildDouble = (operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
   const input = build(getOperandAt(operands, 0, "double conversion requires an operand"), mapper);
 
   return {
@@ -1331,7 +1330,7 @@ const isIntOperand = (operand: PlanExpressionOperand): boolean =>
  * boolean: int(), size() and `%` are ints, arithmetic is an int when every operand is, a ternary
  * when the branch it selects is, and an attribute never is.
  */
-const intSelected = (operand: PlanExpressionOperand, mapper: ScopedMapper): unknown => {
+const intSelected = (operand: PlanExpressionOperand, mapper: ScopedMapper): MongoValue => {
   if (isValue(operand)) return isNumber(operand.value);
 
   if (!isExpression(operand)) return false;
@@ -1360,7 +1359,7 @@ const intSelected = (operand: PlanExpressionOperand, mapper: ScopedMapper): unkn
       if (!condition || !whenTrue || !whenFalse) return false;
       const branches = [intSelected(whenTrue, mapper), intSelected(whenFalse, mapper)];
 
-      if (branches[0] === branches[1] && typeof branches[0] === "boolean") return branches[0];
+      if (branches[0] === branches[1] && isBoolean(branches[0])) return branches[0];
 
       return { $cond: [build(condition, mapper), ...branches] };
     }
@@ -1380,7 +1379,7 @@ const SAFE_INTEGER = 9007199254740992;
  * raise; division truncates toward zero, spelled exactly as (n - n % d) / d while both are within
  * 2^53 and null (denied) beyond.
  */
-const buildIntArithmetic = (operator: string, operands: PlanExpressionOperand[], mapper: ScopedMapper): unknown => {
+const buildIntArithmetic = (operator: string, operands: PlanExpressionOperand[], mapper: ScopedMapper): MongoValue => {
   if (!operands.every(isIntOperand)) return null;
 
   for (const op of operands) {
@@ -1391,7 +1390,7 @@ const buildIntArithmetic = (operator: string, operands: PlanExpressionOperand[],
 
   return withOperands(operands, mapper, (values) => {
     const longs = values.map((value) => ({ $toLong: value }));
-    let result: unknown;
+    let result: MongoValue;
 
     if (operator === "div" || operator === "mod") {
       const [numerator, denominator] = longs;
@@ -1416,7 +1415,7 @@ const buildIntArithmetic = (operator: string, operands: PlanExpressionOperand[],
     } else {
       result = {
         $let: {
-          vars: { long: { [ARITHMETIC[operator]!]: longs } },
+          vars: { long: { [lookup(ARITHMETIC, operator)!]: longs } },
           in: { $cond: [{ $eq: [{ $type: "$$long" }, "long"] }, "$$long", null] },
         },
       };
@@ -1437,8 +1436,8 @@ const buildIntArithmetic = (operator: string, operands: PlanExpressionOperand[],
 const buildStringPredicate = (
   { operator, operands }: PlanExpression,
   mapper: ScopedMapper,
-  predicate: (index: unknown, receiver: unknown, needle: unknown) => unknown,
-): unknown => {
+  predicate: (index: MongoValue, receiver: MongoValue, needle: MongoValue) => MongoValue,
+): MongoValue => {
   const [receiverOperand, needleOperand] = operands;
 
   if (!receiverOperand || !needleOperand) throw new UnsupportedQueryPlanError(`${operator} requires two operands`);
@@ -1476,7 +1475,6 @@ const constantIndex = (
   return [collection, position];
 };
 
-
 /** `number` is a double, or a numeric constant whose int or double type the plan does not carry;
  * `int` is the result of `int()`. */
 type CelScalarType = "number" | "int" | "string" | "boolean" | "timestamp" | "duration";
@@ -1491,7 +1489,7 @@ export const celScalarType = (
   mapper: ScopedMapper,
 ): CelScalarType | "mixed" | undefined => {
   if (isValue(operand)) {
-    const type = typeof operand.value;
+    const type = typeofValue(operand.value);
 
     return type === "number" || type === "string" || type === "boolean"
       ? type
@@ -1598,7 +1596,6 @@ export const celScalarType = (
   }
 };
 
-
 /**
  * CEL's `string()` of a double: every attribute number reaches CEL as a double, which cel-go
  * prints as Go's shortest `%g` (`strconv.FormatFloat(d, 'g', -1, 64)`). `$toString` agrees with
@@ -1608,7 +1605,7 @@ export const celScalarType = (
  * 1e6 <= |d| < 1e16 the fixed form holds exactly the shortest digits, so moving the point is
  * enough.
  */
-const celDoubleToString = (double: unknown): unknown => ({
+const celDoubleToString = (double: MongoValue): MongoValue => ({
   $let: {
     vars: { d: double },
     in: {
@@ -1700,8 +1697,7 @@ const celDoubleToString = (double: unknown): unknown => ({
   },
 });
 
-
-const DURATION_UNIT_NANOSECONDS: Record<string, bigint> = {
+const DURATION_UNIT_NANOSECONDS = {
   ns: 1n,
   us: 1_000n,
   "µs": 1_000n,
@@ -1710,7 +1706,7 @@ const DURATION_UNIT_NANOSECONDS: Record<string, bigint> = {
   s: 1_000_000_000n,
   m: 60_000_000_000n,
   h: 3_600_000_000_000n,
-};
+} satisfies Record<string, bigint>;
 
 /**
  * A Go duration string ("86400s", "1h30m", "-1.5s", "250ms") as a whole number of milliseconds.
@@ -1736,7 +1732,7 @@ function parseDurationMilliseconds(literal: string): number {
   for (const [, digits, unit] of literal
     .slice(match[1]!.length)
     .matchAll(/(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)/g)) {
-    const scale = DURATION_UNIT_NANOSECONDS[unit!]!;
+    const scale = lookup(DURATION_UNIT_NANOSECONDS, unit!)!;
     const [whole = "", fraction = ""] = digits!.split(".");
     const fractionScale = 10n ** BigInt(fraction.length);
     const fractional = BigInt(fraction || "0") * scale;
@@ -1761,7 +1757,6 @@ function parseDurationMilliseconds(literal: string): number {
   return Number(milliseconds);
 }
 
-
 /**
  * The strings CEL's `int()` reads, Go's `strconv.ParseInt` in base 10: an optional sign and
  * decimal digits, the whole string. The `+` is trimmed before `$convert`, and a value past
@@ -1781,12 +1776,11 @@ const CEL_DOUBLE_STRING_PATTERN =
 const MIN_CEL_INT_DOUBLE = -9223372036854775808;
 const MAX_CEL_INT_DOUBLE = 9223372036854775808;
 
-
 /**
  * A field as a CEL timestamp: a stored date as-is, an RFC 3339 string converted, anything else —
  * including an instant outside CEL's range — null.
  */
-function buildTimestampConversion(input: unknown): MongooseFilter {
+function buildTimestampConversion(input: MongoValue): MongooseFilter {
   const converted = {
     $cond: {
       if: { $eq: [{ $type: input }, "date"] },

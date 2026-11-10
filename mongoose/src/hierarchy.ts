@@ -7,6 +7,7 @@ import type { ScopedMapper } from "./mapper";
 import { resolveFieldReference, resolveMapperConfig } from "./mapper";
 import { isExpression, isValue, isVariable } from "./operands";
 import { escapeRegexValue } from "./regex";
+import { isString } from "./narrowing";
 
 export type HierarchyOperator = "ancestorOf" | "descendentOf" | "overlaps";
 
@@ -33,7 +34,7 @@ const parseHierarchyOperand = (
   if (separatorOperand) {
     if (
       !isValue(separatorOperand) ||
-      typeof separatorOperand.value !== "string" ||
+      !isString(separatorOperand.value) ||
       !separatorOperand.value
     ) {
       throw new UnsupportedQueryPlanError("hierarchy separator must be a non-empty string");
@@ -46,7 +47,7 @@ const parseHierarchyOperand = (
     return { kind: "field", name: valueOperand.name, separator };
   }
 
-  if (isValue(valueOperand) && typeof valueOperand.value === "string") {
+  if (isValue(valueOperand) && isString(valueOperand.value)) {
     return { kind: "value", value: valueOperand.value, separator };
   }
 

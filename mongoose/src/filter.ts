@@ -1,4 +1,4 @@
-import type { PlanExpression, PlanExpressionOperand, Value } from "@cerbos/core";
+import type { PlanExpression, PlanExpressionOperand, PlanExpressionValue, Value } from "@cerbos/core";
 
 import { FinalUnsupportedQueryPlanError, UnsupportedQueryPlanError } from "./errors";
 import {
@@ -9,6 +9,7 @@ import {
   buildEvaluationGuards,
   celScalarType,
   compare,
+  isComparison,
   isListTyped,
   temporalMismatch,
 } from "./aggregation";
@@ -21,7 +22,7 @@ import type { TranslateContext } from "./context";
 import {
   buildFieldFilter,
   buildGuardedFieldFilter,
-  buildListShapeGuard,
+  buildListTypeGuard,
   withEvaluationGuards,
   withNullableGuards,
 } from "./guards";
@@ -65,6 +66,8 @@ const toOneMacroRefusal = (operator: string): UnsupportedQueryPlanError =>
 
 import { escapeRegexValue, lowerRe2PatternForMongo } from "./regex";
 import { subMillisecondTimestampBounds } from "./timestamp";
+import { isBoolean, isNumber, isObject, isString, lookup, pair, typeofValue } from "./narrowing";
+import type { MongoValue } from "./expression";
 
 /** Translates a CONDITIONAL plan's condition into a Mongoose filter. */
 export const translateCondition = (
@@ -109,7 +112,7 @@ const selectMapMembers = (
     key !== undefined &&
     isVariable(collection) &&
     isValue(key) &&
-    typeof key.value === "string" &&
+    isString(key.value) &&
     SELECTABLE_KEY.test(key.value) &&
     // A to-many relation is a list to CEL, where a string index is an error, not a member.
     relationOfReference(collection.name, mapper)?.type !== "many" &&
@@ -142,9 +145,9 @@ const foldConstructor = (
       return undefined;
     }
 
-    const [key, value] = field.operands as [PlanExpressionOperand, PlanExpressionOperand];
+    const [key, value] = pair(field.operands);
 
-    if (!isValue(key) || typeof key.value !== "string" || !isValue(value)) return undefined;
+    if (!isValue(key) || !isString(key.value) || !isValue(value)) return undefined;
     entries.push([key.value, value.value]);
   }
 
@@ -168,7 +171,7 @@ const foldSubMillisecondComparison = (
   const floorOf = (operand: PlanExpressionOperand | undefined) => {
     const literal = operand !== undefined && isExpression(operand) && operand.operator === "timestamp" ? operand.operands[0] : undefined;
 
-    return literal !== undefined && isValue(literal) && typeof literal.value === "string"
+    return literal !== undefined && isValue(literal) && isString(literal.value)
       ? subMillisecondTimestampBounds(literal.value)?.floor
       : undefined;
   };
@@ -189,9 +192,10 @@ const foldSubMillisecondComparison = (
 
   const atMost: PlanExpressionOperand = { operator: "le", operands: [other, floor] };
   const above: PlanExpressionOperand = { operator: "gt", operands: [other, floor] };
-  const op = operator as ComparisonOperator;
 
-  switch (literalAt === 1 ? op : MIRRORED_COMPARISON[op]) {
+  if (!isComparison(operator)) return undefined;
+
+  switch (literalAt === 1 ? operator : MIRRORED_COMPARISON[operator]) {
     case "lt":
     case "le":
       return atMost;
@@ -238,7 +242,7 @@ type FilterOperator = (
  * Every operator that can appear in boolean position. Adding one is adding an entry here; an
  * operator that can also appear inside `$expr` needs an entry in aggregation.ts as well.
  */
-const FILTER_OPERATORS: Record<string, FilterOperator> = {
+const FILTER_OPERATORS = {
   and: ({ operands }, ctx) => ({
     $and: operands.map((op) => buildFilter(op, ctx)),
   }),
@@ -300,7 +304,7 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
   ancestorOf: hierarchy("ancestorOf"),
   descendentOf: hierarchy("descendentOf"),
   overlaps: hierarchy("overlaps"),
-};
+} satisfies Record<string, FilterOperator>;
 
 /** Builds Mongoose conditions from a Cerbos expression in boolean position. */
 const buildFilter = (
@@ -362,7 +366,7 @@ const buildFilterDirect = (
     throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
 
-  return FILTER_OPERATORS[operator]!(expression, ctx);
+  return lookup(FILTER_OPERATORS, operator)!(expression, ctx);
 };
 
 /** The operators whose refusal at the root the three-valued evaluation may answer instead. */
@@ -422,7 +426,7 @@ function listInBooleanPosition(expression: PlanExpression, ctx: TranslateContext
 const emitLeafComparison = (
   ctx: TranslateContext,
   fieldName: string,
-  comparison: unknown,
+  comparison: MongoValue,
   guards: { nullable: boolean; requireExists: boolean },
 ): MongooseFilter => {
   assertCollectionScopedReference(fieldName, ctx);
@@ -447,8 +451,8 @@ const emitLeafComparison = (
 const emitValueComparison = (
   ctx: TranslateContext,
   fieldName: string,
-  comparison: unknown,
-  constant: unknown,
+  comparison: MongoValue,
+  constant: MongoValue,
   nullOperandContext: string,
 ): MongooseFilter => {
   const nullable = isNullableReference(fieldName, ctx.mapper);
@@ -639,9 +643,9 @@ const negateGenerally = (operand: PlanExpressionOperand, ctx: TranslateContext):
   }
 
   const guarded = withEvaluationGuards(negated, [operand], ctx.mapper);
-  const listShape = buildListShapeGuard(operand, ctx.mapper, ctx.scope.kind === "root");
+  const listGuard = buildListTypeGuard(operand, ctx.mapper, ctx.scope.kind === "root");
 
-  return listShape ? { $and: [listShape, guarded] } : guarded;
+  return listGuard ? { $and: [listGuard, guarded] } : guarded;
 };
 
 /**
@@ -765,10 +769,7 @@ const emptyListComparison = (
     return undefined;
   }
 
-  const [first, second] = setOperation.operands as [
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-  ];
+  const [first, second] = pair(setOperation.operands);
 
   const empty = operator === "eq";
 
@@ -818,7 +819,7 @@ const mapLiteralLookupMembership = (
     return undefined;
   }
 
-  const [map, key] = lookup.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [map, key] = pair(lookup.operands);
 
   if (!isExpression(map) || map.operator !== "struct" || !isVariable(key)) {
     return undefined;
@@ -873,19 +874,19 @@ const MIRRORED_COMPARISON: Record<ComparisonOperator, ComparisonOperator> = {
 };
 
 /** `!(a < b)` is `a >= b` whenever CEL can order `a` and `b` at all. */
-const COMPLEMENTED_ORDERING: Partial<Record<string, ComparisonOperator>> = {
+const COMPLEMENTED_ORDERING = {
   lt: "ge",
   le: "gt",
   gt: "le",
   ge: "lt",
-};
+} satisfies Partial<Record<string, ComparisonOperator>>;
 
 /** The complement of an ordering between one field and one constant; undefined for anything else. */
 const complementedOrdering = (
   operand: PlanExpressionOperand,
 ): PlanExpression | undefined => {
   if (!isExpression(operand)) return undefined;
-  const complement = COMPLEMENTED_ORDERING[operand.operator];
+  const complement = lookup(COMPLEMENTED_ORDERING, operand.operator);
   const [left, right] = operand.operands;
 
   if (
@@ -966,13 +967,13 @@ const translateComparison = (
   }
 
   const composite = bothOperands.find(
-    (operand) => isValue(operand) && typeof operand.value === "object" && operand.value !== null,
+    (operand): operand is PlanExpressionValue => isValue(operand) && isObject(operand.value),
   );
 
   const other = composite && bothOperands.find((operand) => operand !== composite);
 
   if (composite && other && (operator === "eq" || operator === "ne") && !isValue(other)) {
-    return translateCompositeEquality(operator, other, (composite as { value: unknown }).value, ctx);
+    return translateCompositeEquality(operator, other, composite.value, ctx);
   }
 
   if (composite && other && isExpression(other)) {
@@ -1110,7 +1111,7 @@ const roundSubMillisecondTimestampLiteral = (
   const bounds = (operand: PlanExpressionOperand) => {
     const literal = isExpression(operand) && operand.operator === "timestamp" ? operand.operands[0] : undefined;
 
-    return literal !== undefined && isValue(literal) && typeof literal.value === "string"
+    return literal !== undefined && isValue(literal) && isString(literal.value)
       ? subMillisecondTimestampBounds(literal.value)
       : undefined;
   };
@@ -1270,8 +1271,8 @@ const translateIn = (
   );
 };
 
-const isScalarConstant = (value: unknown): boolean =>
-  value === null || ["string", "number", "boolean"].includes(typeof value);
+const isScalarConstant = (value: MongoValue): boolean =>
+  value === null || isString(value) || isNumber(value) || isBoolean(value);
 
 /**
  * `needle in (cond ? [..] : [..])` with constant branches: the membership is decided per branch
@@ -1279,7 +1280,7 @@ const isScalarConstant = (value: unknown): boolean =>
  * This is how the planner spells `"role" in runtime.effectiveDerivedRoles`.
  */
 const membershipInConditionalList = (
-  needle: unknown,
+  needle: MongoValue,
   conditional: PlanExpression,
 ): PlanExpressionOperand => {
   const [condition, thenOperand, elseOperand] = conditional.operands;
@@ -1351,7 +1352,7 @@ const membershipInConditionalList = (
 const emitUncastListMembership = (
   ctx: TranslateContext,
   fieldName: string,
-  needles: unknown[],
+  needles: MongoValue[],
   carriesNull: boolean,
   nullOperandContext: string,
 ): MongooseFilter | undefined => {
@@ -1404,7 +1405,7 @@ const translateMatches = (
   if (
     !isVariable(fieldOperand) ||
     !isValue(patternOperand) ||
-    typeof patternOperand.value !== "string"
+    !isString(patternOperand.value)
   ) {
     throw new UnsupportedQueryPlanError("matches operator requires a string regex pattern");
   }
@@ -1429,7 +1430,7 @@ const matchesInvalidPattern = (operand: PlanExpression): boolean => {
     operand.operator === "matches" &&
     pattern !== undefined &&
     isValue(pattern) &&
-    typeof pattern.value === "string" &&
+    isString(pattern.value) &&
     "invalid" in lowerRe2PatternForMongo(pattern.value)
   );
 };
@@ -1457,7 +1458,7 @@ function translateStringPredicate(
   if (
     !isVariable(leftOperand) ||
     !isValue(rightOperand) ||
-    typeof rightOperand.value !== "string" ||
+    !isString(rightOperand.value) ||
     !isStringOrUntyped(resolveMapperConfig(leftOperand.name, mapper)?.valueType)
   ) {
     if (ctx.scope.kind === "collection") {
@@ -1593,13 +1594,13 @@ const translateHasIntersection = (
  */
 const canEqualDeclaredType = (
   reference: string,
-  constant: unknown,
+  constant: MongoValue,
   mapper: ScopedMapper,
 ): boolean => {
   const declared = declaredScalarType(reference, mapper);
 
   return (
-    declared === undefined || constant === null || typeof constant === declared
+    declared === undefined || constant === null || typeofValue(constant) === declared
   );
 };
 
@@ -1610,28 +1611,28 @@ const canEqualDeclaredType = (
  */
 const canOrderAgainstDeclaredType = (
   reference: string,
-  constant: unknown,
+  constant: MongoValue,
   mapper: ScopedMapper,
 ): boolean => {
   if (
-    typeof constant !== "number" &&
-    typeof constant !== "string" &&
-    typeof constant !== "boolean"
+    !isNumber(constant) &&
+    !isString(constant) &&
+    !isBoolean(constant)
   ) {
     return false;
   }
 
   const declared = declaredScalarType(reference, mapper);
 
-  return declared === undefined || typeof constant === declared;
+  return declared === undefined || typeofValue(constant) === declared;
 };
 
 /** A constant list without the elements `reference`'s declared type can never equal. */
 const withoutUnequalConstants = (
   reference: string,
-  constants: unknown[],
+  constants: MongoValue[],
   mapper: ScopedMapper,
-): unknown[] =>
+): MongoValue[] =>
   constants.filter((constant) =>
     canEqualDeclaredType(reference, constant, mapper),
   );
@@ -1919,10 +1920,7 @@ const foldConstructedList = (
     );
   }
 
-  const [body, variable] = lambda.operands as [
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-  ];
+  const [body, variable] = pair(lambda.operands);
 
   if (!isVariable(variable)) {
     throw new UnsupportedQueryPlanError("Lambda variable must have a name");
@@ -2047,7 +2045,7 @@ function hierarchy(operator: HierarchyOperator): FilterOperator {
 const translateCompositeEquality = (
   operator: "eq" | "ne",
   other: PlanExpressionOperand,
-  constant: unknown,
+  constant: MongoValue,
   ctx: TranslateContext,
 ): MongooseFilter => {
   const { mapper } = ctx;
@@ -2081,11 +2079,11 @@ const translateCompositeEquality = (
 };
 
 /** A scalar CEL and MongoDB's `$eq` agree on: a string, a boolean, null, or a number other than NaN. */
-const isComparableScalar = (value: unknown): boolean =>
+const isComparableScalar = (value: MongoValue): boolean =>
   value === null ||
-  typeof value === "string" ||
-  typeof value === "boolean" ||
-  (typeof value === "number" && !Number.isNaN(value));
+  isString(value) ||
+  isBoolean(value) ||
+  (isNumber(value) && !Number.isNaN(value));
 
 /**
  * The list `operand` stands for, as an aggregation expression, and the filter requiring it to be
@@ -2096,7 +2094,7 @@ const isComparableScalar = (value: unknown): boolean =>
 const listExpression = (
   operand: PlanExpressionOperand,
   mapper: ScopedMapper,
-): [unknown, MongooseFilter | undefined] => {
+): [MongoValue, MongooseFilter | undefined] => {
   if (isVariable(operand)) {
     const resolved = resolveFieldReference(operand.name, mapper);
 
@@ -2128,7 +2126,7 @@ const listExpression = (
     );
   }
 
-  const [collection, lambda] = operand.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [collection, lambda] = pair(operand.operands);
   const projectionOperand = isExpression(lambda) ? lambda.operands[0] : undefined;
   const elementOperand = isExpression(lambda) ? lambda.operands[1] : undefined;
 
@@ -2175,7 +2173,7 @@ const projectedList = (
   relation: NonNullable<MapperConfig["relation"]>,
   field: string,
   mapper: ScopedMapper,
-): [unknown, MongooseFilter] => {
+): [MongoValue, MongooseFilter] => {
   const config = relation.fields?.[field];
   const nullable = config?.nullable ?? mapper.nullableDefault;
 

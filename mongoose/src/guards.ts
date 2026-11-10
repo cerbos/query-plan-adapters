@@ -11,10 +11,18 @@ import {
 import { UnsupportedQueryPlanError } from "./errors";
 import { LAMBDA_BINDING_OPERATORS } from "./lambda";
 import { collectVariableNames, isExpression, isVariable } from "./operands";
+import { isMongoDocument, type MongoValue } from "./expression";
 
 /** `["a", "b"]`, `v` → `{ a: { b: v } }`; an empty path is `v` itself. */
-export const buildFieldFilter = (path: string[], value: unknown): any =>
-  path.reduceRight((acc: unknown, key) => ({ [key]: acc }), value);
+export const buildFieldFilter = (path: string[], value: MongoValue): MongooseFilter => {
+  const filter = path.reduceRight<MongoValue>((acc, key) => ({ [key]: acc }), value);
+
+  if (!isMongoDocument(filter)) {
+    throw new UnsupportedQueryPlanError("A field filter needs a field path or an operator document");
+  }
+
+  return filter;
+};
 
 /**
  * A single-field comparison, with the field required to exist (`requireExists`) and/or to be
@@ -22,7 +30,7 @@ export const buildFieldFilter = (path: string[], value: unknown): any =>
  */
 export const buildGuardedFieldFilter = (
   path: string[],
-  value: unknown,
+  value: MongoValue,
   nullable: boolean,
   requireExists = false,
 ): MongooseFilter => {
@@ -197,7 +205,7 @@ const collectListReads = (
  * ternary may be skipped by CEL, where the guard would deny a document the PDP allows. Those, and
  * a list read inside a collection predicate (whose path is element-relative), are refused.
  */
-export const buildListShapeGuard = (
+export const buildListTypeGuard = (
   operand: PlanExpressionOperand,
   mapper: ScopedMapper,
   rootScope: boolean,
@@ -259,9 +267,11 @@ export const withEvaluationGuards = (
   // The absent to-one parent is the other way an operand can be undefined, and it belongs
   // here with the rest: a filter-level conjunct applies to whatever `filter` already is, so
   // both the plain comparison and the `$nor` a negation wraps it in inherit it (#315, #316).
-  const requiredParents = operands
-    .map((operand) => buildRequiredParentsFilter(operand, mapper))
-    .filter((parents): parents is MongooseFilter => parents !== undefined);
+  const requiredParents = operands.flatMap((operand) => {
+    const parents = buildRequiredParentsFilter(operand, mapper);
+
+    return parents === undefined ? [] : [parents];
+  });
 
   const conjuncts = [...guards, ...requiredParents];
 

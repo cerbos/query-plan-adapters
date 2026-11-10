@@ -1,4 +1,6 @@
 import type { Mapper, MapperConfig } from "./index";
+import { isFunction } from "./narrowing";
+import type { MongoValue } from "./expression";
 
 /**
  * The caller's mapper as one translation scope reads it. `queryPlanToMongoose` builds the root
@@ -65,23 +67,18 @@ export const declaredScalarType = (
 const nullableByDefault = (config: MapperConfig): MapperConfig => {
   const fields = config.relation?.fields;
 
-  return {
-    ...config,
-    nullable: config.nullable ?? true,
-    ...(config.relation && fields
-      ? {
-          relation: {
-            ...config.relation,
-            fields: Object.fromEntries(
-              Object.entries(fields).map(([key, field]) => [
-                key,
-                nullableByDefault(field),
-              ]),
-            ),
-          },
-        }
-      : {}),
-  };
+  const defaulted: MapperConfig = { ...config, nullable: config.nullable ?? true };
+
+  if (config.relation && fields) {
+    defaulted.relation = {
+      ...config.relation,
+      fields: Object.fromEntries(
+        Object.entries(fields).map(([key, field]) => [key, nullableByDefault(field)]),
+      ),
+    };
+  }
+
+  return defaulted;
 };
 
 /**
@@ -104,7 +101,7 @@ export const withOmittedNullDefault =
 
 /** The root scope: the caller's mapper, in either of its two forms, under the call's convention. */
 export const rootMapper = (mapper: Mapper, nullableDefault: boolean): ScopedMapper => {
-  if (typeof mapper === "function") {
+  if (isFunction(mapper)) {
     return {
       lookup: nullableDefault ? withOmittedNullDefault(mapper) : mapper,
       nullableDefault,
@@ -128,9 +125,9 @@ export const isNullableReference = (
 
 export const applyValueParser = (
   reference: string,
-  value: unknown,
+  value: MongoValue,
   mapper: ScopedMapper,
-): unknown => {
+): MongoValue => {
   // Unlike resolveMapperConfig, a reference's own entry does not shadow its relation's parser.
   const parser =
     mapper.lookup(reference)?.valueParser ||
