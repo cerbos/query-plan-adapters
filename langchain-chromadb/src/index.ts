@@ -628,7 +628,7 @@ function mapBooleanVariable(
   resolveField: FieldResolver,
   negate: boolean,
 ): Where {
-  return compare(resolveField(variable.name), negate ? "ne" : "eq", true);
+  return compare(resolveField(variable.name), "eq", !negate);
 }
 
 function mapComparison(

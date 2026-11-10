@@ -22,7 +22,7 @@ import {
   resolveField,
 } from "./operands";
 import type { ComparisonOperator } from "./operands";
-import { isBoolean, lookup, typeofValue } from "./narrowing";
+import { isBoolean, isNumber, lookup, typeofValue } from "./narrowing";
 
 /**
  * What Convex's filter engine can answer on its own, and the builder calls that answer it.
@@ -63,9 +63,18 @@ type Comparison = (
   literal: Value,
 ) => Expression<boolean>;
 
+/**
+ * CEL reads an int64 field holding `3n` as equal to the plan's `3`, while Convex orders every int64
+ * apart from every float64: an integral literal matches either representation.
+ */
+const equalsLiteral = (q: AnyFilterBuilder, field: Field, literal: Value): Expression<boolean> =>
+  isNumber(literal) && Number.isInteger(literal)
+    ? q.or(q.eq(field, literal), q.eq(field, BigInt(literal)))
+    : q.eq(field, literal);
+
 const CONVEX_COMPARISON: Record<ComparisonOperator, Comparison> = {
-  eq: (q, field, literal) => q.eq(field, literal),
-  ne: (q, field, literal) => q.neq(field, literal),
+  eq: (q, field, literal) => equalsLiteral(q, field, literal),
+  ne: (q, field, literal) => q.not(equalsLiteral(q, field, literal)),
   lt: (q, field, literal) => q.lt(field, literal),
   le: (q, field, literal) => q.lte(field, literal),
   gt: (q, field, literal) => q.gt(field, literal),
@@ -290,12 +299,15 @@ const PUSHDOWN_RULES = {
       const field = resolveField(membership.field.name, mapper);
       const { values } = membership;
 
+      const equalities = values.map((v) => equalsLiteral(q, q.field(field), v));
+      const [only] = equalities;
+
       const built =
-        values.length === 0
+        only === undefined
           ? q.eq(true, false)
-          : values.length === 1
-            ? q.eq(q.field(field), values[0])
-            : q.or(...values.map((v) => q.eq(q.field(field), v)));
+          : equalities.length === 1
+            ? only
+            : q.or(...equalities);
 
       return negated ? q.not(built) : built;
     },
@@ -352,10 +364,10 @@ const emitExpression = (
     throw new UnsupportedQueryPlanError("Unexpected bare value in expression");
   }
 
+  // Only a stored boolean is a condition: `!x` over any other value is a CEL error, so the negated
+  // form matches a stored false rather than everything that is not true.
   if (isVariable(expression)) {
-    return polarised(
-      q.eq(q.field(resolveField(expression.name, mapper)), true),
-    );
+    return q.eq(q.field(resolveField(expression.name, mapper)), !negated);
   }
 
   if (!isExpression(expression)) {

@@ -703,6 +703,20 @@ describe("an ordering against a value of another type, on a non-nullable field",
     );
   };
 
+  // Whether every attribute the condition reads is one of `fields`.
+  const readsOnly = (node: JsonValue | undefined, fields: readonly string[]): boolean => {
+    if (Array.isArray(node)) return node.every((child) => readsOnly(child, fields));
+
+    if (!isObject(node)) return true;
+    const name = node["variable"];
+
+    if (isString(name) && name.startsWith("request.resource.attr.")) {
+      return fields.some((field) => name === `request.resource.attr.${field}`);
+    }
+
+    return Object.values(node).every((child) => readsOnly(child, fields));
+  };
+
   type PushedOrdering = {
     id: string;
     condition: PlanExpressionOperand;
@@ -776,6 +790,44 @@ describe("an ordering against a value of another type, on a non-nullable field",
         );
       },
     );
+
+    expect(disagreements).toEqual([]);
+  });
+
+  // A bare field in condition position and an equality reach the engine the same way an ordering
+  // does once the field is declared non-nullable: a non-boolean under `!` must not match
+  // (cerbos/query-plan-adapters#685), and an int64 field must equal the number it holds
+  // (cerbos/query-plan-adapters#688).
+  test("every pushed condition: Convex never returns a document CEL denies, for a field of every type", () => {
+    const pushed = GOLDENS.filter((g) => readsOnly(g.plan["condition"] ?? null, FIELDS)).flatMap((g) => {
+      const result = translated(g.id, { mapper: NON_NULLABLE });
+      const queryPlan = planFor(g.id);
+
+      return result !== "refused" && result.path === "db" && queryPlan.kind === PlanKind.CONDITIONAL
+        ? [{ id: g.id, condition: queryPlan.condition, filter: engineHalf(result)! }]
+        : [];
+    });
+
+    // Anti-vacuity: a negated bare field and a negated equality are among what reaches the engine.
+    expect(pushed.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(["logic/not/bare-string-attribute", "comparison/not-equals/value-first"]),
+    );
+
+    const disagreements = pushed.flatMap(({ id, condition, filter }) => {
+      const emitted = recordFilter(id, filter);
+
+      return FIELDS.flatMap((field) =>
+        [...VALUES, 0n, 2n, 5n].flatMap((value) => {
+          const doc = { aNumber: 3, aBool: true, aString: "s", owner: "o", [field]: value } satisfies GenericDocument;
+          const cel = evaluate(condition, { doc, mapper: NON_NULLABLE, bindings: {}, nullIsMissing: false }) === true;
+          const convex = convexEvaluate(emitted, doc) === true;
+
+          // An int64 field ordered against a number literal stays an under-grant: the guard confines
+          // the ordering to float64.
+          return convex && !cel ? [{ id, field, value: `${isBigint(value) ? "int64" : "value"} ${String(value)}` }] : [];
+        }),
+      );
+    });
 
     expect(disagreements).toEqual([]);
   });
