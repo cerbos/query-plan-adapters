@@ -17,6 +17,7 @@ import {
 } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isBoolean, isObject, isString } from "./narrowing";
 
 /** The boolean collection macros: each takes a collection and a lambda. */
 export const COLLECTION_OPERATORS = new Set([
@@ -67,8 +68,7 @@ export function substituteLambdaVariable(
         .slice(variableName.length + 1)
         .split(".")) {
         if (
-          current === null ||
-          typeof current !== "object" ||
+          !isObject(current) ||
           Array.isArray(current) ||
           !(segment in current) ||
           current[segment] === undefined
@@ -420,7 +420,7 @@ export function constantFoldExpression(
       const [condition, thenBranch, elseBranch] = operands;
 
       if (condition !== undefined && isValueOperand(condition)) {
-        if (typeof condition.value !== "boolean") {
+        if (!isBoolean(condition.value)) {
           throw new UnsupportedQueryPlanError("if (ternary) condition must be a boolean expression");
         }
 
@@ -454,8 +454,8 @@ export function constantFoldExpression(
     case "endsWith": {
       if (
         bothConstant &&
-        typeof first.value === "string" &&
-        typeof second.value === "string"
+        isString(first.value) &&
+        isString(second.value)
       ) {
         const receiver = first.value;
         const needle = second.value;

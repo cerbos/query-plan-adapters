@@ -21,6 +21,7 @@ import {
 } from "./translate";
 import { normalizeRfc3339Milliseconds } from "./timestamp";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isBoolean, isString, lookup } from "./narrowing";
 
 /** What one ternary branch contributes: a known constant, or a filter to be guarded. */
 type TernaryBranchPredicate =
@@ -28,20 +29,22 @@ type TernaryBranchPredicate =
   | { kind: "filter"; filter: PrismaFilter };
 
 // The comparison that holds exactly when `operator` does not, over two definite operands.
-const COMPLEMENT_OPERATOR: Record<string, string> = {
+const COMPLEMENT_OPERATOR = {
   eq: "ne",
   ne: "eq",
   lt: "ge",
   le: "gt",
   gt: "le",
   ge: "lt",
-};
+} satisfies Record<string, string>;
 
-function getTernaryOperands(operands: PlanExpressionOperand[]): {
+type TernaryOperands = {
   condition: PlanExpressionOperand;
   thenBranch: PlanExpressionOperand;
   elseBranch: PlanExpressionOperand;
-} {
+};
+
+function getTernaryOperands(operands: PlanExpressionOperand[]): TernaryOperands {
   if (operands.length !== 3) {
     throw new UnsupportedQueryPlanError(
       `if (ternary) requires exactly 3 operands (condition, then, else), got ${operands.length}`
@@ -71,7 +74,7 @@ function getConstantBooleanCondition(
     return undefined;
   }
 
-  if (typeof condition.value !== "boolean") {
+  if (!isBoolean(condition.value)) {
     throw new UnsupportedQueryPlanError("if (ternary) condition must be a boolean expression");
   }
 
@@ -89,7 +92,7 @@ function buildBooleanBranchFilter(
     };
   }
 
-  if (typeof branch.value !== "boolean") {
+  if (!isBoolean(branch.value)) {
     throw new UnsupportedQueryPlanError(
       "if (ternary) branch in boolean position must be a boolean"
     );
@@ -195,7 +198,7 @@ function constantOf(
   ) {
     const literal = operand.operands[0];
 
-    if (literal !== undefined && isValueOperand(literal) && typeof literal.value === "string") {
+    if (literal !== undefined && isValueOperand(literal) && isString(literal.value)) {
       return { value: normalizeRfc3339Milliseconds(literal.value), timestamp: true };
     }
   }
@@ -277,7 +280,7 @@ function buildTernaryComparisonBranch(
     kind: "filter",
     filter: handleRelationalOperator(
       assertDefined(
-        COMPLEMENT_OPERATOR[normalized.operator],
+        lookup(COMPLEMENT_OPERATOR, normalized.operator),
         "Unsupported negated comparison"
       ),
       normalized.operands,
@@ -298,7 +301,7 @@ export function tryHandleTernaryComparison(
   context: TranslationContext,
   negated = false
 ): PrismaFilter | null {
-  if (CERBOS_TO_PRISMA_OPERATOR[operator] === undefined && operator !== "in") {
+  if (lookup(CERBOS_TO_PRISMA_OPERATOR, operator) === undefined && operator !== "in") {
     return null;
   }
 

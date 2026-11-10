@@ -7,6 +7,7 @@ import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
 import { substituteLambdaVariable } from "./rewrite";
+import { isNumber, isObject, isString, lookup, pair } from "./narrowing";
 
 /** Past this many elements, `exists`/`all` are left to the translator's own fold. */
 const MAX_UNROLLED_ELEMENTS = 100;
@@ -75,7 +76,7 @@ function expandSizeComparison(expr: OperatorOperand): PlanExpressionOperand | un
   }
 
   if (counted.operator !== "except" || counted.operands.length !== 2) return undefined;
-  const [minuend, subtrahend] = counted.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [minuend, subtrahend] = pair(counted.operands);
 
   if (isOperatorOperand(subtrahend) && subtrahend.operator === "lambda") return undefined;
 
@@ -144,7 +145,7 @@ function countMembership(
     const value = project(element, path);
 
     // An element without the field errors on its own; a non-scalar compares structurally.
-    if (value === undefined || (value !== null && typeof value === "object")) return undefined;
+    if (value === undefined || (isObject(value))) return undefined;
     projected.push(value);
   }
 
@@ -222,11 +223,11 @@ function project(element: Value, path: string[]): Value | undefined {
   let current: Value | undefined = element;
 
   for (const segment of path) {
-    if (current === null || typeof current !== "object" || Array.isArray(current)) {
+    if (!isObject(current) || Array.isArray(current)) {
       return undefined;
     }
 
-    current = (current as Record<string, Value>)[segment];
+    current = current[segment];
   }
 
   return current;
@@ -238,15 +239,15 @@ function project(element: Value, path: string[]): Value | undefined {
 function sizeComparison(
   expr: OperatorOperand
 ): { counted: OperatorOperand; holds: (count: number) => boolean } | undefined {
-  const mirrored: Record<string, string> = { lt: "gt", gt: "lt", le: "ge", ge: "le" };
+  const mirrored = { lt: "gt", gt: "lt", le: "ge", ge: "le" } satisfies Record<string, string>;
 
   if (!["eq", "ne", "lt", "le", "gt", "ge"].includes(expr.operator)) return undefined;
 
   if (expr.operands.length !== 2) return undefined;
-  const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [first, second] = pair(expr.operands);
 
   const [size, threshold, operator] = isValueOperand(first)
-    ? [second, first, mirrored[expr.operator] ?? expr.operator]
+    ? [second, first, lookup(mirrored, expr.operator) ?? expr.operator]
     : [first, second, expr.operator];
 
   if (
@@ -254,7 +255,7 @@ function sizeComparison(
     size.operator !== "size" ||
     size.operands.length !== 1 ||
     !isValueOperand(threshold) ||
-    typeof threshold.value !== "number" ||
+    !isNumber(threshold.value) ||
     !Number.isFinite(threshold.value)
   ) {
     return undefined;
@@ -303,7 +304,7 @@ function literalMacro(
   }
 
   const elements = literalList(collection);
-  const [body, variable] = lambda.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [body, variable] = pair(lambda.operands);
 
   if (elements === undefined || !isNamedOperand(variable)) return undefined;
 
@@ -348,10 +349,10 @@ export function literalValue(operand: PlanExpressionOperand): Value | undefined 
       return undefined;
     }
 
-    const [key, value] = field.operands as [PlanExpressionOperand, PlanExpressionOperand];
+    const [key, value] = pair(field.operands);
     const literal = literalValue(value);
 
-    if (!isValueOperand(key) || typeof key.value !== "string" || literal === undefined) {
+    if (!isValueOperand(key) || !isString(key.value) || literal === undefined) {
       return undefined;
     }
 

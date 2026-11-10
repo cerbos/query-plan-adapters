@@ -11,6 +11,7 @@ import {
 } from "./plan";
 import type { OperatorOperand } from "./plan";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isString, pair } from "./narrowing";
 
 const RFC3339_MILLISECOND_TIMESTAMP =
   /^((?!0000)\d{4})-(\d{2})-(\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d{1,9}))?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
@@ -40,15 +41,17 @@ export function normalizeRfc3339Milliseconds(value: string): string {
   return iso;
 }
 
+type ParsedInstant = {
+  iso: string;
+  subMillisecond: boolean;
+};
+
 /**
  * Parses an RFC 3339 literal like normalizeRfc3339Milliseconds, except that an instant between
  * two milliseconds is accepted: `iso` is then the NEXT millisecond, and `subMillisecond` says so.
  * A comparison against it has to be rewritten for that rounding (see roundSubMillisecond).
  */
-export function parseRfc3339Instant(value: string): {
-  iso: string;
-  subMillisecond: boolean;
-} {
+export function parseRfc3339Instant(value: string): ParsedInstant {
   const match = RFC3339_MILLISECOND_TIMESTAMP.exec(value);
   const yearText = match?.[1];
   const monthText = match?.[2];
@@ -151,7 +154,7 @@ export function rewriteTemporalComparison(
   now: number = Date.now()
 ): PlanExpressionOperand | undefined {
   if (!COMPARISON_OPERATORS.has(expr.operator) || expr.operands.length !== 2) return undefined;
-  let [left, right] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  let [left, right] = pair(expr.operands);
   let operator = expr.operator;
 
   if (!isTemporalArithmetic(left) && isTemporalArithmetic(right)) {
@@ -179,7 +182,7 @@ export function rewriteTemporalComparison(
     return undefined;
   }
 
-  const [a, b] = left.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [a, b] = pair(left.operands);
   let column: OperatorOperand;
   let duration: number | undefined;
 
@@ -247,7 +250,7 @@ function durationMilliseconds(operand: PlanExpressionOperand): number | undefine
 
   const [literal] = operand.operands;
 
-  if (!isValueOperand(literal!) || typeof literal.value !== "string") return undefined;
+  if (!isValueOperand(literal!) || !isString(literal.value)) return undefined;
   const match = PROTOBUF_DURATION.exec(literal.value);
 
   if (!match) return undefined;
@@ -273,7 +276,7 @@ function instantMilliseconds(operand: PlanExpressionOperand): number | undefined
 
   const [literal] = operand.operands;
 
-  if (!isValueOperand(literal!) || typeof literal.value !== "string") return undefined;
+  if (!isValueOperand(literal!) || !isString(literal.value)) return undefined;
 
   try {
     const { iso, subMillisecond } = parseRfc3339Instant(literal.value);

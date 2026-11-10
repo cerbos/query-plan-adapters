@@ -50,6 +50,8 @@ import {
 } from "./translate";
 import { presence } from "./types";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isNumber, isObject, isString, lookup, pair, typeofValue } from "./narrowing";
+import { isPrismaFilter } from "./value";
 
 /**
  * Helper function to process relational operators (eq, ne, lt, etc.)
@@ -75,7 +77,7 @@ export function handleRelationalOperator(
 
   ({ operator, operands } = normalizeBinaryOperands(operator, operands));
 
-  if (!CERBOS_TO_PRISMA_OPERATOR[operator]) {
+  if (!lookup(CERBOS_TO_PRISMA_OPERATOR, operator)) {
     throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
 
@@ -212,15 +214,16 @@ export function tryHandleMapLiteralLookup(
   const lookupIndex = operands.findIndex(isMapLiteralLookup);
 
   if (lookupIndex === -1) return null;
-  const lookup = operands[lookupIndex] as OperatorOperand;
+  const lookup = operands[lookupIndex];
+
+  if (lookup === undefined || !isOperatorOperand(lookup)) return null;
   const other = operands[1 - lookupIndex]!;
-  const [mapOperand, key] = lookup.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [mapOperand, key] = pair(lookup.operands);
   const map = literalValue(mapOperand);
 
   if (
     map === undefined ||
-    map === null ||
-    typeof map !== "object" ||
+    !isObject(map) ||
     Array.isArray(map) ||
     !isValueOperand(other) ||
     !isNamedOperand(key)
@@ -281,7 +284,9 @@ function tryHandleUpperAsciiComparison(
   );
 
   if (callIndex === -1) return null;
-  const call = operands[callIndex] as OperatorOperand;
+  const call = operands[callIndex];
+
+  if (call === undefined || !isOperatorOperand(call)) return null;
   const other = operands[1 - callIndex]!;
   const [subject] = call.operands;
 
@@ -290,7 +295,7 @@ function tryHandleUpperAsciiComparison(
     subject === undefined ||
     !isNamedOperand(subject) ||
     !isValueOperand(other) ||
-    typeof other.value !== "string"
+    !isString(other.value)
   ) {
     throw new UnsupportedQueryPlanError(
       "upperAscii() is translated only as a column compared with a string literal: a Prisma " +
@@ -518,7 +523,7 @@ function handleSizeComparison(
 
   const count = valueOperand.value;
 
-  if (typeof count !== "number" || !Number.isFinite(count)) {
+  if (!isNumber(count) || !Number.isFinite(count)) {
     throw new UnsupportedQueryPlanError("size comparison requires a numeric value");
   }
 
@@ -588,7 +593,7 @@ function buildFieldToFieldFilter(
   right: ResolvedFieldReference
 ): PrismaFilter {
   const prismaOperator = assertDefined(
-    CERBOS_TO_PRISMA_OPERATOR[operator],
+    lookup(CERBOS_TO_PRISMA_OPERATOR, operator),
     `Unsupported operator: ${operator}`
   );
 
@@ -833,17 +838,17 @@ function handleArithmeticComparison(
   const declaredString = declared === "string";
 
   if (
-    (typeof constant === "string" && declared !== undefined && !declaredString) ||
-    (typeof constant === "number" &&
+    (isString(constant) && declared !== undefined && !declaredString) ||
+    (isNumber(constant) &&
       (declaredString || declared === "boolean" || declared === "dateTime"))
   ) {
     throw new UnsupportedQueryPlanError(
-      `${arithOp} over a ${declared} field and a ${typeof constant} is a CEL no-overload error`
+      `${arithOp} over a ${declared} field and a ${typeofValue(constant)} is a CEL no-overload error`
     );
   }
 
   // String concatenation solving (eq/ne only).
-  if (arithOp === "add" && typeof constant === "string") {
+  if (arithOp === "add" && isString(constant)) {
     if (effectiveOperator !== "eq" && effectiveOperator !== "ne") {
       throw new UnsupportedQueryPlanError(
         `Operator ${effectiveOperator} is not supported with string concatenation`
@@ -866,7 +871,7 @@ function handleArithmeticComparison(
     return buildComparisonFilter(context, fieldRef, effectiveOperator, solvedValue);
   }
 
-  if (typeof constant !== "number" || typeof other.value !== "number") {
+  if (!isNumber(constant) || !isNumber(other.value)) {
     throw new UnsupportedQueryPlanError(`${arithOp} comparison requires numeric operands`);
   }
 
@@ -911,11 +916,19 @@ function handleArithmeticComparison(
     }
   };
 
-  const solved = solveMonotone(
-    f,
-    effectiveOperator === "ne" ? "eq" : (effectiveOperator as "eq" | "lt" | "le" | "gt" | "ge"),
-    other.value
-  );
+  const solvedOperator = effectiveOperator === "ne" ? "eq" : effectiveOperator;
+
+  if (
+    solvedOperator !== "eq" &&
+    solvedOperator !== "lt" &&
+    solvedOperator !== "le" &&
+    solvedOperator !== "gt" &&
+    solvedOperator !== "ge"
+  ) {
+    throw new UnsupportedQueryPlanError(`Operator ${effectiveOperator} is not supported with arithmetic`);
+  }
+
+  const solved = solveMonotone(f, solvedOperator, other.value);
 
   const interval = decreasing ? negateInterval(solved) : solved;
   const filter = buildIntervalFilter(context, fieldRef, interval);
@@ -961,9 +974,11 @@ function buildIntervalFilter(
   }
 
   // Each bound may itself be a bracket (see fractionalBracket); one flat AND reads better.
-  const flat = bounds.flatMap((bound) =>
-    Object.keys(bound).length === 1 && Array.isArray(bound["AND"]) ? bound["AND"] : [bound]
-  );
+  const flat = bounds.flatMap((bound) => {
+    const conjuncts = bound["AND"];
+
+    return Object.keys(bound).length === 1 && Array.isArray(conjuncts) ? conjuncts.filter(isPrismaFilter) : [bound];
+  });
 
   return flat.length === 1 ? flat[0]! : { AND: flat };
 }
@@ -977,7 +992,7 @@ function solveAdd(
   addConstant: Value,
   fieldIsLeft: boolean
 ): Value | null {
-  if (typeof comparisonValue === "string" && typeof addConstant === "string") {
+  if (isString(comparisonValue) && isString(addConstant)) {
     if (fieldIsLeft) {
       if (!comparisonValue.endsWith(addConstant)) return null;
 
@@ -992,7 +1007,7 @@ function solveAdd(
     return comparisonValue.slice(addConstant.length);
   }
 
-  if (typeof comparisonValue === "number" && typeof addConstant === "number") {
+  if (isNumber(comparisonValue) && isNumber(addConstant)) {
     return comparisonValue - addConstant;
   }
 

@@ -12,6 +12,7 @@ import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import { CERBOS_TO_PRISMA_OPERATOR, assertDefined } from "./plan";
 import { wrapInRelations } from "./relations";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isBoolean, isNumber, isObject, lookup, typeofValue } from "./narrowing";
 
 /**
  * Prisma has no model-agnostic always-false `where` shape — empty logical arrays are ignored —
@@ -134,7 +135,7 @@ function assertScalarValue(
   value: Value,
   operator: string
 ): void {
-  if (value !== null && typeof value === "object") {
+  if (isObject(value)) {
     throw new UnsupportedQueryPlanError(
       `${operator} requires scalar values: Prisma cannot compare list or map elements`
     );
@@ -144,7 +145,7 @@ function assertScalarValue(
     value !== null &&
     fieldRef.valueType !== undefined &&
     fieldRef.valueType !== "dateTime" &&
-    typeof value !== fieldRef.valueType
+    typeofValue(value) !== fieldRef.valueType
   ) {
     throw new UnsupportedQueryPlanError(
       `${operator} value type does not match mapped ${fieldRef.valueType} field`
@@ -309,13 +310,13 @@ export function buildComparisonFilter(
   value: Value
 ): PrismaFilter {
   const prismaOperator = assertDefined(
-    CERBOS_TO_PRISMA_OPERATOR[operator],
+    lookup(CERBOS_TO_PRISMA_OPERATOR, operator),
     `Unsupported operator: ${operator}`
   );
 
   assertScalarValue(fieldRef, value, operator);
 
-  if (typeof value === "boolean" && operator !== "eq" && operator !== "ne") {
+  if (isBoolean(value) && operator !== "eq" && operator !== "ne") {
     return buildBooleanOrderingFilter(fieldRef, operator, value);
   }
 
@@ -347,7 +348,7 @@ export function buildComparisonFilter(
     return operator === "eq" ? equality : { NOT: equality };
   }
 
-  if (typeof value === "number" && !Number.isInteger(value)) {
+  if (isNumber(value) && !Number.isInteger(value)) {
     const bracket = fractionalBracket(
       getLeafField(fieldRef.path),
       operator,

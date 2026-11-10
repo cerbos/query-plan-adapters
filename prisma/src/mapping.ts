@@ -11,6 +11,7 @@ import type {
 } from "./index";
 import { isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isFunction } from "./narrowing";
 
 // Each translation owns its lambda scopes, including when a function mapper re-enters the
 // adapter. Scopes collect nullable element fields for three-valued-logic guards.
@@ -95,7 +96,7 @@ export function lookupMapping(
   mapper: Mapper,
   key: string
 ): MapperConfig | undefined {
-  return typeof mapper === "function" ? mapper(key) : mapper[key];
+  return isFunction(mapper) ? mapper(key) : mapper[key];
 }
 
 /**
@@ -398,7 +399,7 @@ export function enterLambdaScope(
     }
 
     // Keys not referencing the collection element resolve through the enclosing mapper.
-    if (typeof fullMapper === "function") {
+    if (isFunction(fullMapper)) {
       return fullMapper(key);
     }
 

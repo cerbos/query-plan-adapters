@@ -10,6 +10,7 @@ import { isResolvedFieldReference, resolveFieldReference } from "./mapping";
 import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import { isNamedOperand, isValueOperand } from "./plan";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isString, pair } from "./narrowing";
 
 /** Past this many alternatives, a pattern is refused rather than spelled out. */
 const MAX_ALTERNATIVES = 256;
@@ -467,9 +468,8 @@ function alternativeFilter(
   fieldRef: ResolvedFieldReference,
   { begin, end, tokens }: Expansion
 ): PrismaFilter {
-  const literal = tokens.every((token) => "char" in token)
-    ? tokens.map((token) => (token as { char: string }).char).join("")
-    : undefined;
+  const characters = tokens.flatMap((token) => ("char" in token ? [token.char] : []));
+  const literal = characters.length === tokens.length ? characters.join("") : undefined;
 
   if (literal !== undefined && begin && end) {
     return buildFieldFilter(fieldRef, "equals", literal);
@@ -512,7 +512,7 @@ function alternativeFilter(
 
   if (segments.length > 2) refuse(pattern, "more than one .* in one alternative");
   // `A.*B`: A at the start, B at the end, and room for both without overlapping.
-  const [head, tail] = segments as [string, string];
+  const [head, tail] = pair(segments);
   const filters: PrismaFilter[] = [];
 
   if (head !== "") filters.push(buildFieldFilter(fieldRef, "startsWith", head));
@@ -560,7 +560,7 @@ export function handleMatchesOperator(
     !isNamedOperand(receiver) ||
     patternOperand === undefined ||
     !isValueOperand(patternOperand) ||
-    typeof patternOperand.value !== "string"
+    !isString(patternOperand.value)
   ) {
     throw new UnsupportedQueryPlanError(
       "matches() is translated only for a column receiver and a literal pattern"

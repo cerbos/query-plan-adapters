@@ -262,8 +262,13 @@ function handleFieldOverlaps(
   }
 
   // The caller routes here only when at least one side is a field hierarchy.
-  const field = (left.type === "field" ? left : right) as FieldHierarchy;
-  const other = left.type === "field" ? right : left;
+  const field = left.type === "field" ? left : right.type === "field" ? right : undefined;
+
+  if (field === undefined) {
+    throw new UnsupportedQueryPlanError("overlaps: neither side is a field-reference hierarchy");
+  }
+
+  const other = field === left ? right : left;
 
   if (other.type !== "constant") {
     throw new UnsupportedQueryPlanError("overlaps: segmented hierarchies with field hierarchies are not supported");

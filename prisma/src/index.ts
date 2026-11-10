@@ -11,10 +11,11 @@ import { rewriteFunctionCalls } from "./functions";
 import { expandLiteralCollections } from "./literals";
 import { settleTypeMismatches } from "./types";
 import { UnsupportedQueryPlanError } from "./errors";
+import type { PrismaFilter } from "./value";
 
 export { PlanKind, UnsupportedQueryPlanError };
 
-export type PrismaFilter = Record<string, any>;
+export type { PrismaFilter, PrismaValue } from "./value";
 
 export type MapperConfig = {
   field?: string;

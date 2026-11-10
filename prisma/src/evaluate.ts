@@ -2,6 +2,7 @@
 
 import type { Value } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isNumber, isObject, isString } from "./narrowing";
 
 export const ARITHMETIC_OPERATORS = new Set(["add", "sub", "mult", "div"]);
 
@@ -26,8 +27,8 @@ export function evaluateConstantComparison(
     case "gt":
     case "ge": {
       if (
-        typeof left === "number" &&
-        typeof right === "number" &&
+        isNumber(left) &&
+        isNumber(right) &&
         (Number.isNaN(left) || Number.isNaN(right))
       ) {
         return false;
@@ -35,8 +36,8 @@ export function evaluateConstantComparison(
 
       if (
         !(
-          (typeof left === "number" && typeof right === "number") ||
-          (typeof left === "string" && typeof right === "string")
+          (isNumber(left) && isNumber(right)) ||
+          (isString(left) && isString(right))
         )
       ) {
         throw new UnsupportedQueryPlanError(
@@ -67,11 +68,11 @@ function compareConstantValues(
   left: number | string,
   right: number | string
 ): number {
-  if (typeof left === "number" && typeof right === "number") {
+  if (isNumber(left) && isNumber(right)) {
     return left === right ? 0 : left < right ? -1 : 1;
   }
 
-  if (typeof left !== "string" || typeof right !== "string") {
+  if (!isString(left) || !isString(right)) {
     throw new UnsupportedQueryPlanError("Cannot order constant values of different types");
   }
 
@@ -114,8 +115,8 @@ function areValuesEqual(left: Value, right: Value): boolean {
     return false;
   }
 
-  if (typeof left === "object" && left !== null) {
-    if (typeof right !== "object" || right === null) {
+  if (isObject(left)) {
+    if (!isObject(right)) {
       return false;
     }
 
@@ -144,13 +145,13 @@ export function foldArithmetic(
 
   if (
     operator === "add" &&
-    typeof left === "string" &&
-    typeof right === "string"
+    isString(left) &&
+    isString(right)
   ) {
     return left + right;
   }
 
-  if (typeof left !== "number" || typeof right !== "number") {
+  if (!isNumber(left) || !isNumber(right)) {
     throw new UnsupportedQueryPlanError(`${operator} operator requires string or number operands`);
   }
 

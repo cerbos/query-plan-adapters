@@ -13,6 +13,7 @@ import type { TranslationContext } from "./mapping";
 import { assertDefined } from "./plan";
 import { resolveOperand } from "./translate";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isString } from "./narrowing";
 
 // Upper bound on the IN-list produced when enumerating a constant receiver's substrings.
 const MAX_ENUMERATED_NEEDLES = 1000;
@@ -80,7 +81,7 @@ export function handleStringOperator(
   if (isResolvedFieldReference(receiver) && isResolvedValue(needle)) {
     const { value } = needle;
 
-    if (typeof value !== "string") {
+    if (!isString(value)) {
       throw new UnsupportedQueryPlanError(`${operator} operator requires string value`);
     }
 
@@ -115,7 +116,7 @@ export function handleStringOperator(
   // candidate needle the constant admits into an exact IN filter. No LIKE, so no escaping
   // hazards; a NULL needle column stays excluded (CEL missing-attribute deny).
   if (isResolvedValue(receiver) && isResolvedFieldReference(needle)) {
-    if (typeof receiver.value !== "string") {
+    if (!isString(receiver.value)) {
       throw new UnsupportedQueryPlanError(`${operator} operator requires a string receiver`);
     }
 

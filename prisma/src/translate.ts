@@ -41,6 +41,7 @@ import { handleStringOperator } from "./strings";
 import { handleBooleanTernaryOperator, tryHandleTernaryComparison } from "./ternary";
 import { normalizeRfc3339Milliseconds, parseRfc3339Instant } from "./timestamp";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isString, lookup, triple } from "./narrowing";
 
 /**
  * Builds a Prisma filter from a Cerbos expression.
@@ -239,11 +240,7 @@ export function buildNegatedFilter(
       // condition is UNKNOWN, which neither guarded branch matched.
       case "if":
         if (operand.operands.length === 3) {
-          const [condition, thenBranch, elseBranch] = operand.operands as [
-            PlanExpressionOperand,
-            PlanExpressionOperand,
-            PlanExpressionOperand,
-          ];
+          const [condition, thenBranch, elseBranch] = triple(operand.operands);
 
           return handleBooleanTernaryOperator(
             [
@@ -332,7 +329,7 @@ function resolveIdentityCast(
   expression: OperatorOperand,
   context: TranslationContext
 ): ResolvedOperand | undefined {
-  const target = IDENTITY_CASTS[expression.operator];
+  const target = lookup(IDENTITY_CASTS, expression.operator);
   const [operand] = expression.operands;
 
   if (
@@ -351,7 +348,7 @@ function resolveIdentityCast(
   return { ...fieldRef, nullAttributeRepresentation: "omitted" };
 }
 
-const IDENTITY_CASTS: Record<string, string> = { string: "string", double: "number" };
+const IDENTITY_CASTS = { string: "string", double: "number" } satisfies Record<string, string>;
 
 function resolveTimestampOperand(
   expression: OperatorOperand,
@@ -379,7 +376,7 @@ function resolveTimestampOperand(
     return { ...fieldRef, timestampWrapped: true };
   }
 
-  if (!isValueOperand(operand) || typeof operand.value !== "string") {
+  if (!isValueOperand(operand) || !isString(operand.value)) {
     throw new UnsupportedQueryPlanError("timestamp() requires a field reference or RFC 3339 string");
   }
 

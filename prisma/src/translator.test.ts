@@ -1,7 +1,9 @@
 import { describe, expect, test } from "@jest/globals";
+import type { JsonValue } from "@bufbuild/protobuf";
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
+  Value,
 } from "@cerbos/core";
 
 import { queryPlanToPrisma, PlanKind, UnsupportedQueryPlanError } from ".";
@@ -13,6 +15,13 @@ import type {
   QueryPlanToPrismaResult,
 } from ".";
 import { MAPPER, MODEL, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
+import { isObject } from "./narrowing";
+
+type Relation = NonNullable<MapperConfig["relation"]>;
+
+/** `response` with `field` replaced by a value its type rules out: a plan the SDK never decodes. */
+const overwritten = (response: PlanResourcesResponse, field: string, value: Value): PlanResourcesResponse =>
+  Object.defineProperty({ ...response }, field, { value, enumerable: true });
 
 /**
  * Offline unit tests: what a caller can pass that the conformance corpus cannot vary (mapper forms,
@@ -59,7 +68,7 @@ describe("the refusal type", () => {
 
     expect(raised).toBeInstanceOf(UnsupportedQueryPlanError);
     expect(raised).toBeInstanceOf(Error);
-    expect((raised as Error).name).toBe("UnsupportedQueryPlanError");
+    expect(raised).toMatchObject({ name: "UnsupportedQueryPlanError" });
   });
 
   test("mapper misconfiguration is a plain Error, not a refusal", async () => {
@@ -74,7 +83,7 @@ describe("the refusal type", () => {
 
     expect(raised).toBeInstanceOf(Error);
     expect(raised).not.toBeInstanceOf(UnsupportedQueryPlanError);
-    expect((raised as Error).message).toContain("requires the `model` option");
+    expect(raised).toHaveProperty("message", expect.stringContaining("requires the `model` option"));
   });
 });
 
@@ -101,9 +110,11 @@ const UNDECLARED: Record<string, MapperConfig> = Object.fromEntries(
 );
 
 /** Whether any operand anywhere in the wire plan is a literal null, or a list containing one. */
-function carriesNullLiteral(node: unknown): boolean {
-  if (typeof node !== "object" || node === null) return false;
-  const record = node as Record<string, unknown>;
+function carriesNullLiteral(node: JsonValue | undefined): boolean {
+  if (Array.isArray(node)) return node.some(carriesNullLiteral);
+
+  if (!isObject(node)) return false;
+  const record = node;
 
   if ("value" in record) {
     const value = record["value"];
@@ -334,18 +345,19 @@ describe("relation subqueryFilter", () => {
    */
   const VISIBLE_ONLY: PrismaFilter = { name: { not: "hidden" } };
 
-  const mapperFor = (subqueryFilter?: PrismaFilter): Mapper => ({
-    "request.resource.attr.tags": {
-      relation: {
-        name: "tags",
-        type: "many",
-        // `nullable: false` keeps the element NULL guard (see "relation element nullability"
-        // below) out of these filters, so they isolate what the declaration changes.
-        fields: { name: { field: "name", nullable: false } },
-        ...(subqueryFilter ? { subqueryFilter } : {}),
-      },
-    },
-  });
+  const mapperFor = (subqueryFilter?: PrismaFilter): Mapper => {
+    const relation: Relation = {
+      name: "tags",
+      type: "many",
+      // `nullable: false` keeps the element NULL guard (see "relation element nullability"
+      // below) out of these filters, so they isolate what the declaration changes.
+      fields: { name: { field: "name", nullable: false } },
+    };
+
+    if (subqueryFilter) relation.subqueryFilter = subqueryFilter;
+
+    return { "request.resource.attr.tags": { relation } };
+  };
 
   const filtersFor = async (action: string, subqueryFilter?: PrismaFilter) => {
     const result = await translate(action, { mapper: mapperFor(subqueryFilter) });
@@ -495,22 +507,23 @@ describe("the mapper contract", () => {
 
     const unguarded = { tags: { every: { name: { equals: "public" } } } };
 
-    const allFor = (fields?: Record<string, MapperConfig>) =>
-      translate("collection/all/empty-collection", {
-        mapper: {
-          "request.resource.attr.tags": {
-            relation: { name: "tags", type: "many", ...(fields ? { fields } : {}) },
-          },
-        },
-      });
+    const allFor = (fields?: Relation["fields"]) => {
+      const relation: Relation = { name: "tags", type: "many" };
 
-    test.each([
+      if (fields) relation.fields = fields;
+
+      return translate("collection/all/empty-collection", {
+        mapper: { "request.resource.attr.tags": { relation } },
+      });
+    };
+
+    test.each<[string, Relation["fields"], PrismaFilter]>([
       ["undeclared", { name: { field: "name" } }, guarded],
       ["nullable: true", { name: { field: "name", nullable: true } }, guarded],
       ["nullable: false", { name: { field: "name", nullable: false } }, unguarded],
       ["an element with no field mapping at all", undefined, guarded],
-    ] as const)("%s", async (_label, fields, filters) => {
-      expect(await allFor(fields as Record<string, MapperConfig> | undefined)).toStrictEqual({
+    ])("%s", async (_label, fields, filters) => {
+      expect(await allFor(fields)).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters,
       });
@@ -533,12 +546,12 @@ describe("which patterns RE2 rejects", () => {
   // backslash is a backreference to RE2 only on its own, and an octal escape when another octal
   // digit follows, so `\11` is a tab.
   const matches = (pattern: string, sibling = false): PlanResourcesResponse => {
-    const test = {
+    const test: PlanExpressionOperand = {
       operator: "matches",
       operands: [{ name: "request.resource.attr.aString" }, { value: pattern }],
     };
 
-    const condition = sibling
+    const condition: PlanExpressionOperand = sibling
       ? {
           operator: "or",
           operands: [test, { operator: "eq", operands: [{ name: "request.resource.attr.aNumber" }, { value: 5 }] }],
@@ -547,12 +560,12 @@ describe("which patterns RE2 rejects", () => {
 
     return {
       kind: PlanKind.CONDITIONAL,
-      condition: condition as PlanExpressionOperand,
+      condition,
       cerbosCallId: "",
       requestId: "",
       validationErrors: [],
       metadata: undefined,
-    } as PlanResourcesResponse;
+    };
   };
 
   test("an octal escape is the character it names, not a backreference", () => {
@@ -586,20 +599,28 @@ describe("plans the planner cannot produce", () => {
   // pinned here by hand-built plan before #377 and are now
   // [#394](https://github.com/cerbos/query-plan-adapters/issues/394).
 
-  const plan = (condition: unknown): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition: condition as PlanExpressionOperand,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
+  const plan = (condition: Value): PlanResourcesResponse =>
+    overwritten(
+      {
+        kind: PlanKind.CONDITIONAL,
+        condition: { value: true },
+        cerbosCallId: "",
+        requestId: "",
+        validationErrors: [],
+        metadata: undefined,
+      },
+      "condition",
+      condition,
+    );
 
   test("an unrecognised plan kind", () => {
     expect(() =>
       queryPlanToPrisma({
-        queryPlan: { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse,
+        queryPlan: overwritten(
+          { kind: PlanKind.ALWAYS_ALLOWED, cerbosCallId: "", requestId: "", validationErrors: [], metadata: undefined },
+          "kind",
+          "INVALID_KIND"
+        ),
         mapper: {},
       })
     ).toThrow("Invalid query plan.");
@@ -709,7 +730,7 @@ describe("plans the planner cannot produce", () => {
   // folder would otherwise reduce it to `true` before the translator saw it
   // (cerbos/query-plan-adapters#495). The empty disjunction is refused alongside it: neither is
   // something the planner emits.
-  test.each([
+  test.each<[string, Value, string]>([
     ["an empty and", { operator: "and", operands: [] }, "and requires at least one operand"],
     ["an empty or", { operator: "or", operands: [] }, "or requires at least one operand"],
     [

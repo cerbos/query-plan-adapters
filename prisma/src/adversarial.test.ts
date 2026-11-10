@@ -10,6 +10,7 @@ import {
 import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
 
 import { queryPlanToPrisma, PlanKind, UnsupportedQueryPlanError } from ".";
+import type { PrismaFilter } from ".";
 import {
   assertFuzzVerdict,
   FUZZ_DIR,
@@ -82,13 +83,15 @@ function selectedStoreName(): StoreName {
 
   // A typo must fail rather than silently fall back to SQLite (jest.adversarial.config.js rejects
   // it first; the repeat keeps this file reading against a value it trusts).
-  if (!STORE_NAMES.includes(requested as StoreName)) {
+  const store = STORE_NAMES.find((name) => name === requested);
+
+  if (store === undefined) {
     throw new Error(
       `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
     );
   }
 
-  return requested as StoreName;
+  return store;
 }
 
 const STORE_NAME = selectedStoreName();
@@ -97,6 +100,7 @@ const STORE_NAME = selectedStoreName();
 // hold: it is not loaded, and its id is struck from every allowed set.
 const LACKS = Object.entries(
   (
+    // SAFETY: validate-corpus.sh checks every conformance-ledger.json against its schema.
     JSON.parse(
       fs.readFileSync(path.join(__dirname, "..", "conformance-ledger.json"), "utf8")
     ) as { lacks?: Record<string, { reason: string; stores?: string[] }> }
@@ -106,12 +110,12 @@ const LACKS = Object.entries(
   .map(([capability]) => capability);
 
 const UNHELD = new Set(
-  (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds
+  (readCorpusJson<{ seeds: Seed[] }>("seeds.json")).seeds
     .filter((seed) => seed.requires?.some((capability) => LACKS.includes(capability)))
     .map((seed) => seed.id)
 );
 
-const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds.filter(
+const SEEDS = (readCorpusJson<{ seeds: Seed[] }>("seeds.json")).seeds.filter(
   (seed) => !UNHELD.has(seed.id)
 );
 
@@ -120,7 +124,7 @@ function held(allowed: string[]): string[] {
 }
 
 const DERIVED = (
-  readCorpusJson("derived-fields.json") as { derived: Record<string, DerivedEntry> }
+  readCorpusJson<{ derived: Record<string, DerivedEntry> }>("derived-fields.json")
 ).derived;
 
 function derivedFor(seed: Seed): DerivedEntry {
@@ -196,19 +200,17 @@ async function seedStore(): Promise<void> {
         numberList: { create: seed.aNumberList.map((value) => ({ value })) },
         boolList: { create: seed.aBoolList.map((value) => ({ value })) },
         tags: { create: seed.tags.map((t) => ({ tagId: t.id, name: t.name })) },
-        // The to-one chain, one owned row per level. A seed with no parent gets no row at all.
-        ...(parentSeed === undefined
-          ? {}
-          : {
-              parent: {
+        // The to-one chain, one owned row per level. A seed with no parent gets no row at all:
+        // Prisma reads an undefined relation as no write.
+        parent:
+          parentSeed === undefined
+            ? undefined
+            : {
                 create: {
                   ...relationColumns(parentSeed),
-                  ...(innerSeed === undefined
-                    ? {}
-                    : { inner: { create: relationColumns(innerSeed) } }),
+                  inner: innerSeed === undefined ? undefined : { create: relationColumns(innerSeed) },
                 },
               },
-            }),
         // One category holding every subcategory name (conformance/README.md, "The dataset").
         categories: {
           create:
@@ -270,7 +272,7 @@ function modelBlocks(schema: string): string {
   return models.join("\n").replace(/[ \t]+/g, " ").replace(/\n\s*\n/g, "\n").trim();
 }
 
-async function selectIds(where: object): Promise<string[]> {
+async function selectIds(where: PrismaFilter): Promise<string[]> {
   const rows = await prisma.adversarialResource.findMany({ where, select: { id: true } });
 
   return rows.map((row) => row.id).sort();
@@ -305,6 +307,7 @@ interface LedgerEntry {
 }
 
 const LEDGER = (
+  // SAFETY: validate-corpus.sh checks every conformance-ledger.json against its schema.
   JSON.parse(
     fs.readFileSync(path.join(__dirname, "..", "conformance-ledger.json"), "utf8")
   ) as { cases: Record<string, LedgerEntry> }
@@ -515,14 +518,14 @@ describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
 
     const negate = (condition: PlanExpressionOperand) => new PlanExpression("not", [condition]);
 
-    for (const [shape, condition] of [
+    for (const [label, condition] of [
       ["size(chain) == 0", compare("eq", 0)],
       ["size(chain) <= 0", compare("le", 0)],
       ["size(chain) < 1", compare("lt", 1)],
       ["!(size(chain) >= 1)", negate(compare("ge", 1))],
       ["!(size(chain) > 0)", negate(compare("gt", 0))],
     ] as const) {
-      expect([shape, await synthetic(condition)]).toEqual([shape, []]);
+      expect([label, await synthetic(condition)]).toEqual([label, []]);
     }
 
     // The mirror image, so the loop above cannot pass by denying everything.

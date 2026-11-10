@@ -14,6 +14,7 @@ import { constantFoldExpression } from "./rewrite";
 import { rewriteTemporalComparison } from "./timestamp";
 import { COMPARISON_OPERATORS, isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import type { NamedOperand, OperatorOperand } from "./plan";
+import { isBoolean, isNumber, isString, pair, triple, typeofValue } from "./narrowing";
 
 /**
  * The CEL type an operand is known to have. Numbers are one family: CEL's heterogeneous equality
@@ -218,11 +219,11 @@ function distributeTernary(
 
   if (index === -1) return undefined;
 
-  const [condition, whenTrue, whenFalse] = (expr.operands[index] as OperatorOperand).operands as [
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-  ];
+  const ternary = expr.operands[index];
+
+  if (ternary === undefined || !isOperatorOperand(ternary)) return undefined;
+
+  const [condition, whenTrue, whenFalse] = triple(ternary.operands);
 
   if (!isNamedOperand(condition)) return undefined;
   const fieldRef = resolveFieldReference(condition.name, context);
@@ -296,12 +297,12 @@ function unwrapBooleanComparison(expr: OperatorOperand): PlanExpressionOperand |
     return undefined;
   }
 
-  const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [first, second] = pair(expr.operands);
   const [inner, literal] = isValueOperand(first) ? [second, first] : [first, second];
 
   if (
     !isValueOperand(literal) ||
-    typeof literal.value !== "boolean" ||
+    !isBoolean(literal.value) ||
     !isOperatorOperand(inner) ||
     !BOOLEAN_OPERATORS.has(inner.operator)
   ) {
@@ -337,7 +338,7 @@ function rewriteCastComparison(
   const { operator } = expr;
 
   if ((operator !== "eq" && operator !== "ne") || expr.operands.length !== 2) return undefined;
-  const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [first, second] = pair(expr.operands);
   const [cast, literal] = isOperatorOperand(first) ? [first, second] : [second, first];
 
   if (
@@ -352,7 +353,7 @@ function rewriteCastComparison(
   const column = cast.operands[0]!;
   const value = literal.value;
 
-  if (cast.operator === "string" && typeof value === "string" && !isNamedOperand(column)) {
+  if (cast.operator === "string" && isString(value) && !isNamedOperand(column)) {
     if (isBooleanValued(column, context)) {
       return renderedBooleanComparison(column, value, operator);
     }
@@ -393,7 +394,7 @@ function rewriteCastComparison(
     operands: [column, { operator: "struct", operands: [] }],
   };
 
-  if (cast.operator === "string" && typeof value === "string") {
+  if (cast.operator === "string" && isString(value)) {
     if (type === "boolean") {
       return value === "true" || value === "false" ? equality(value === "true") : unmatched;
     }
@@ -409,7 +410,7 @@ function rewriteCastComparison(
     return undefined;
   }
 
-  if (cast.operator === "int" && type === "number" && typeof value === "number") {
+  if (cast.operator === "int" && type === "number" && isNumber(value)) {
     if ((operator === "eq") !== positive) return undefined;
 
     if (!Number.isInteger(value)) return unmatched;
@@ -457,7 +458,7 @@ function renderedBooleanComparison(
  * a boolean column, or a ternary whose arms both are.
  */
 function isBooleanValued(expr: PlanExpressionOperand, context: TranslationContext): boolean {
-  if (isValueOperand(expr)) return typeof expr.value === "boolean";
+  if (isValueOperand(expr)) return isBoolean(expr.value);
 
   if (isNamedOperand(expr)) {
     return scalarType(resolveFieldReference(expr.name, context)) === "boolean";
@@ -535,8 +536,10 @@ function divisionColumn(expr: PlanExpressionOperand): NamedOperand | undefined {
 
     if (node.operator === "lambda") return false;
 
-    if (isColumnDivision(node)) {
-      const numerator = node.operands[0] as NamedOperand;
+    const division = columnDivision(node);
+
+    if (division !== undefined) {
+      const { numerator } = division;
 
       if (column !== undefined && column.name !== numerator.name) return false;
       column = numerator;
@@ -551,15 +554,23 @@ function divisionColumn(expr: PlanExpressionOperand): NamedOperand | undefined {
   return visit(expr) && divided ? column : undefined;
 }
 
-function isColumnDivision(node: OperatorOperand): boolean {
-  if (node.operator !== "div" || node.operands.length !== 2) return false;
-  const [numerator, denominator] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+/** `divisor` is the constant zero, signed, or undefined where the column divides itself. */
+type ColumnDivision = { numerator: NamedOperand; divisor: number | undefined };
 
-  if (!isNamedOperand(numerator)) return false;
+/** `x / x` or `x / 0` over a column: the division whose quotient the column's value decides. */
+function columnDivision(node: OperatorOperand): ColumnDivision | undefined {
+  if (node.operator !== "div" || node.operands.length !== 2) return undefined;
+  const [numerator, denominator] = pair(node.operands);
 
-  if (isNamedOperand(denominator)) return denominator.name === numerator.name;
+  if (!isNamedOperand(numerator)) return undefined;
 
-  return isValueOperand(denominator) && denominator.value === 0;
+  if (isNamedOperand(denominator)) {
+    return denominator.name === numerator.name ? { numerator, divisor: undefined } : undefined;
+  }
+
+  return isValueOperand(denominator) && isNumber(denominator.value) && denominator.value === 0
+    ? { numerator, divisor: denominator.value }
+    : undefined;
 }
 
 /**
@@ -575,12 +586,9 @@ function substituteDivision(
 
   if (!isOperatorOperand(expr)) return expr;
 
-  if (isColumnDivision(expr)) {
-    const denominator = expr.operands[1]!;
-    const d = isNamedOperand(denominator) ? x : ((denominator as { value: number }).value);
+  const division = columnDivision(expr);
 
-    return { value: x / d };
-  }
+  if (division !== undefined) return { value: x / (division.divisor ?? x) };
 
   const operands: PlanExpressionOperand[] = [];
 
@@ -615,14 +623,14 @@ function rewriteConcatenation(
   const { operator } = expr;
 
   if ((operator !== "eq" && operator !== "ne") || expr.operands.length !== 2) return undefined;
-  const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [first, second] = pair(expr.operands);
   const [sum, literal] = isOperatorOperand(first) ? [first, second] : [second, first];
 
   if (
     !isOperatorOperand(sum) ||
     sum.operator !== "add" ||
     !isValueOperand(literal) ||
-    typeof literal.value !== "string"
+    !isString(literal.value)
   ) {
     return undefined;
   }
@@ -659,8 +667,8 @@ function rewriteConcatenation(
 
     const term = terms[index]!;
 
-    if (isValueOperand(term)) {
-      const text = Array.from(term.value as string);
+    if ("value" in term) {
+      const text = Array.from(term.value);
       const matches = text.every((point, i) => codePoints[offset + i] === point);
 
       return !matches || split(index + 1, offset + text.length, pieces);
@@ -699,7 +707,7 @@ function concatenationTerms(
   if (isNamedOperand(expr)) return [expr];
 
   if (isValueOperand(expr)) {
-    return typeof expr.value === "string" ? [{ value: expr.value }] : undefined;
+    return isString(expr.value) ? [{ value: expr.value }] : undefined;
   }
 
   if (!isOperatorOperand(expr) || expr.operator !== "add" || expr.operands.length !== 2) {
@@ -725,7 +733,10 @@ export function formatCelDouble(x: number): string {
 
   if (x === 0) return Object.is(x, -0) ? "-0" : "0";
   const sign = x < 0 ? "-" : "";
-  const [mantissa, exponentText] = Math.abs(x).toExponential().split("e") as [string, string];
+  const exponential = Math.abs(x).toExponential();
+  const exponentAt = exponential.indexOf("e");
+  const mantissa = exponential.slice(0, exponentAt);
+  const exponentText = exponential.slice(exponentAt + 1);
   const digits = mantissa.replace(".", "");
   const exponent = Number(exponentText);
 
@@ -757,7 +768,7 @@ function leafOutcomes(
   if (operator === "matches" && operands.length === 2) {
     const pattern = operands[1]!;
 
-    if (isValueOperand(pattern) && typeof pattern.value === "string" && isInvalidPattern(pattern.value)) {
+    if (isValueOperand(pattern) && isString(pattern.value) && isInvalidPattern(pattern.value)) {
       return { error: true };
     }
   }
@@ -767,7 +778,7 @@ function leafOutcomes(
   if (LIST_OPERATORS.has(operator)) return { error: true };
 
   if (COMPARISON_OPERATORS.has(operator) && operands.length === 2) {
-    const [left, right] = operands as [PlanExpressionOperand, PlanExpressionOperand];
+    const [left, right] = pair(operands);
     // NaN equals nothing and orders against nothing — not even a string, on the current PDP.
     const nan = [left, right].find((o) => isValueOperand(o) && Number.isNaN(o.value));
 
@@ -846,7 +857,7 @@ function leafOutcomes(
   }
 
   if (operator === "in" && operands.length === 2) {
-    const [member, collection] = operands as [PlanExpressionOperand, PlanExpressionOperand];
+    const [member, collection] = pair(operands);
     // A literal member against a mapped list whose elements can never equal it.
     const memberType = literalType(member);
     const list = collectionElementType(collection, context);
@@ -869,7 +880,7 @@ function leafOutcomes(
   }
 
   if (operator === "hasIntersection" && operands.length === 2) {
-    const [left, right] = operands as [PlanExpressionOperand, PlanExpressionOperand];
+    const [left, right] = pair(operands);
 
     for (const [list, literal] of [
       [left, right],
@@ -987,7 +998,7 @@ function definite(
   return {
     [value ? "true" : "false"]: true,
     error: unknowable || missing.length > 0,
-    ...(unknowable ? {} : { missing }),
+    missing: unknowable ? undefined : missing,
   };
 }
 
@@ -1029,7 +1040,7 @@ function rewriteLiteralLists(
   const { operator, operands } = expr;
 
   if (operands.length !== 2) return expr;
-  const [first, second] = operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [first, second] = pair(operands);
 
   if (operator === "in") {
     const field = operandType(first, context);
@@ -1083,7 +1094,7 @@ function valueType(value: Value): CelType | undefined {
 
   if (Array.isArray(value)) return "list";
 
-  switch (typeof value) {
+  switch (typeofValue(value)) {
     case "string":
       return "string";
     case "number":
