@@ -1,0 +1,76 @@
+{
+  "allowed": [
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b5",
+    "h1",
+    "h4",
+    "h6",
+    "i1",
+    "i4",
+    "i6",
+    "j2",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/modulo/size-of-string",
+  "intent": "Integer modulo over the length of a string attribute (size(aString) % 3 == 1).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      }
+                    ],
+                    "operator": "size"
+                  }
+                },
+                {
+                  "value": 3
+                }
+              ],
+              "operator": "mod"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/modulo/size-of-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aString) % 3 == 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "size() is a CEL int, so % needs no int(); rows of length 1, 4 and 7 are allowed. Rendering % as / allows lengths 3 to 5 instead."
+}

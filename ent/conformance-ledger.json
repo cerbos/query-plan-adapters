@@ -8,6 +8,10 @@
       "reason": "int() cannot be lowered to a SQL CAST, which reads a numeric prefix where CEL requires the whole string and rounds where CEL truncates, so the int + double sum over it (a CEL no-such-overload error) is never reached.",
       "status": "unsupported"
     },
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero."
+    },
     "arithmetic/add/negated-int-beside-double-field": {
       "reason": "Same int() refusal as arithmetic/add/int-beside-double-field, under negation.",
       "status": "unsupported"
@@ -44,9 +48,21 @@
       "reason": "Same int() refusal as arithmetic/divide/int-truncates, under negation.",
       "status": "unsupported"
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "A division by 0.0 is held as a conditional value, its NaN and infinity arms, which a list element cannot carry."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "reason": "The divisor resolves to a conditional IEEE value; division requires a plain SQL expression and cannot bind the symbolic branches.",
       "status": "unsupported"
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "A division by 0.0 is held as a conditional value, its NaN and infinity arms, which a list element cannot carry."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "A map literal translates only with constant values."
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "reason": "The int() cast that gives % an integer operand has no SQL lowering: SQL CAST on PostgreSQL and MySQL rounds where CEL truncates toward zero.",
@@ -63,6 +79,10 @@
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "reason": "The self-division's NaN arm must be added to a column, and SQL has no literal for NaN to carry through the arithmetic.",
       "status": "unsupported"
+    },
+    "arithmetic/multiply/negated-int-of-double-overflows": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero."
     },
     "cast/double/malformed-string": {
       "reason": "double() cannot be lowered to a SQL CAST, which on every ent dialect accepts spellings CEL rejects as malformed.",
@@ -132,6 +152,10 @@
       "reason": "timestamp() cannot lower an arbitrary string column: malformed strings must remain CEL evaluation errors under negation; only a typed timestamp column or valid literal is supported.",
       "status": "unsupported"
     },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "A list literal compares only against an operand with a declared scalar ValueType, which it never equals; SQL has no list operand to compare an undeclared column with."
+    },
     "collection/except/as-lambda-body": {
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
@@ -155,6 +179,10 @@
     "collection/exists/two-variable-map-key-and-value": {
       "reason": "The two-variable exists() over a map binds each key, and the map is no table: the mapper declares only obj.inner as a column, and SQL has no form for the set of a row's keys. Every two-variable lambda is refused.",
       "status": "unsupported"
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "A list or map literal has no SQL representation as a plain value."
     },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
@@ -236,6 +264,14 @@
       "reason": "Native timestamp storage discards the original RFC 3339 spelling, so instant equality cannot reproduce CEL string equality without timestamp() wrappers.",
       "status": "unsupported"
     },
+    "type-mismatch/add/negated-boolean-plus-number": {
+      "status": "unsupported",
+      "reason": "`+` over a boolean or bare timestamp operand is a CEL no-overload error."
+    },
+    "type-mismatch/add/negated-string-plus-number": {
+      "status": "unsupported",
+      "reason": "`+` between a string and a non-string operand is a CEL no-overload error."
+    },
     "type-mismatch/has-intersection/negated-against-map-value": {
       "status": "unsupported",
       "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
@@ -244,9 +280,33 @@
       "status": "unsupported",
       "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
     },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "hasIntersection between two stored collections requires a set-valued join that SQL cannot express as a row filter; one side must be a literal list."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
+      "status": "unsupported",
+      "reason": "hasIntersection requires a list value."
+    },
     "type-mismatch/matches/list-literal-pattern": {
       "status": "unsupported",
       "reason": "matches() is translated only with a constant string pattern; a list pattern is a CEL no-overload error."
+    },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "`*` over a string, boolean or bare timestamp operand is a CEL no-overload error."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "Attribute \"request.resource.attr.aNumberList\" maps to a collection and cannot be used as a scalar value."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "`-` over a string, boolean or bare timestamp operand is a CEL no-overload error."
+    },
+    "type-mismatch/subtract/string-minus-number": {
+      "status": "unsupported",
+      "reason": "`-` over a string, boolean or bare timestamp operand is a CEL no-overload error."
     }
   }
 }

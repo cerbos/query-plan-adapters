@@ -20,9 +20,21 @@
       "status": "unsupported",
       "reason": "The translator divides an int() result only by an operand it knows is an int; a ternary's numeric type is not carried by the plan, so the division is refused."
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "`in` with a list or map needle holding a column is not translated."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "reason": "The inner divisor is a column that may be zero; SQL cannot preserve the IEEE signed-zero infinity needed to evaluate the nested division.",
       "status": "unsupported"
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "`!=` with a list or map literal: only eq and ne against constants are translated."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "A map literal is translated only with string keys and constant values, got \"a\" (String) => a ternary."
     },
     "cast/double/malformed-string": {
       "reason": "SQL CAST reads a string's leading digits where CEL double() rejects the whole string; double() over a string column is refused.",
@@ -52,6 +64,10 @@
       "reason": "The mapper supplies a string column; the adapter only compares instants through native temporal columns, without portable error-preserving parsing of malformed strings.",
       "status": "unsupported"
     },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "`==` with a list or map literal: only eq and ne against constants are translated."
+    },
     "collection/except/as-lambda-body": {
       "status": "unsupported",
       "reason": "except() is translated only over a list of constants, not over a relation's map() projection."
@@ -71,6 +87,10 @@
     "collection/exists/two-variable-map-key-and-value": {
       "reason": "A two-variable exists() over a map binds each key beside its value. obj is not a stored map but columns of the resource row, and SQL cannot enumerate a row's columns as keys, so the second variable has nothing to bind to. Over a relation with order_field the position binds; over a map it is refused.",
       "status": "unsupported"
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "size() requires a string operand, got a ternary."
     },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
@@ -103,6 +123,10 @@
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as membership/in/map-attribute-keys, under negation."
+    },
+    "null/in/ternary-with-error-branch-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "A ternary over a CEL type error (a string function or size() over a number or a boolean) cannot keep the error once its branches are folded into a CASE."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",
@@ -175,6 +199,14 @@
     "type-mismatch/starts-with/list-literal-needle": {
       "status": "unsupported",
       "reason": "startsWith with a list needle is a CEL no-overload error; the adapter requires a string operand and refuses."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "string() cannot take a collection operand (a relation)."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "`-` over a temporal column is not translated: CEL reads it as an RFC-3339 string, or as a timestamp that takes only a duration."
     }
   }
 }

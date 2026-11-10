@@ -544,22 +544,9 @@ RSpec.describe Cerbos::ActiveRecord do
 
   # CEL division by zero gives NaN or Infinity, not an error. Turning it into NULL is wrong
   # for `!=`: `NaN != 1.0` is TRUE in CEL but `NULL != 1.0` is UNKNOWN in SQL.
-  # The NaN of `x / x`, the `-0.0` divisor and the refused column divisor are the corpus's
+  # The NaN of `x / x`, the signed-zero divisors and the refused column divisor are the corpus's
   # `arithmetic/divide/*` cases.
   describe "division by a row-dependent denominator" do
-    # Corpus gap (#668). The corpus divides by `-0.0` (`arithmetic/divide/negative-zero-divisor`)
-    # but not by `+0.0`.
-    it "resolves an Infinity from a constant zero denominator" do
-      # 2/0 is +Infinity, and -3/0 is -Infinity.
-      relation = described_class.query_plan_to_relation(
-        plan: conditional(expression("gt",
-          expression("div", variable("n"), value(0.0)), value(0.0))),
-        model: EdgeDocument,
-        attributes: {"n" => field("n")}
-      )
-      expect(relation.order(:id).pluck(:title)).to eq(%w[two])
-    end
-
     # NaN is carried through arithmetic; an Infinity beside a column is not, since the column may
     # hold the opposite Infinity.
     it "raises for an Infinity carried into arithmetic beside a column" do
@@ -817,77 +804,6 @@ RSpec.describe Cerbos::ActiveRecord do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
-  describe "a CEL error compared with null" do
-    let(:size_of_number) { expression("size", variable("request.resource.attr.aNumber")) }
-
-    # Corpus gap. `size(R.attr.aNumber)` is an error on every row, and so is any strict operator
-    # over it. The null in the list would otherwise be tested with IS NULL, TRUE for the error.
-    it "denies every row for a membership over the error in a list holding null" do
-      plan = conditional(expression("in", size_of_number, value([1, nil])))
-
-      expect(translate(plan)).to be_empty
-      expect(translate(conditional(expression("not", plan["condition"])))).to be_empty
-    end
-
-    # Corpus gap. CEL never holds a computed value as null, so a NULL one is an error, however it
-    # got there: `error || false` is the error, and so is an `exists` whose every body errors.
-    # Read as a null value, IS NULL would allow the row.
-    it "denies a computed error compared with null after a connective or a quantifier" do
-      contains_on_number = expression("contains", variable("request.resource.attr.aNumber"), value("1"))
-      exists_error = expression("exists", variable("request.resource.attr.tags"),
-        expression("lambda", contains_on_number, variable("t")))
-      disjunction = expression("or", contains_on_number, variable("request.resource.attr.aBool"))
-
-      expect(translate(conditional(expression("in", disjunction, value([true, nil])))).where(a_bool: false))
-        .to be_empty
-      expect(translate(conditional(expression("in", exists_error, value([true, nil]))))).to be_empty
-    end
-
-    # Corpus gap. The same hole without a type error: `null > 1` is an error too, and j2, the one
-    # row with a NULL a_number, has a_bool true, so `error && true` is the error.
-    it "denies a NULL column's error compared with null after a connective" do
-      conjunction = expression("and",
-        expression("gt", variable("request.resource.attr.aNumber"), value(1)),
-        variable("request.resource.attr.aBool"))
-
-      expect(translate(conditional(expression("in", conjunction, value([false, nil])))).where(a_number: nil))
-        .to be_empty
-    end
-
-    # Corpus gap. A CASE over the error arm is NULL wherever the condition picks that arm, which
-    # an enclosing IS NULL would read as TRUE, so the shape is refused.
-    it "refuses a ternary with the error as an arm" do
-      ternary = expression("if", variable("request.resource.attr.aBool"), size_of_number, value(1))
-
-      expect { translate(conditional(expression("in", ternary, value([2, nil])))) }
-        .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
-    end
-  end
-
-  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
-  describe "arithmetic over a string or a boolean" do
-    # Corpus gap. Attributes are dyn, so each of these type-checks, and CEL has no overload for
-    # any of them: every row is an error. SQL concatenates the string and the number, or reads the
-    # boolean and the string as numbers on SQLite and MySQL.
-    {
-      "a string plus a number" => ["add", "aString", "aNumber", "one5"],
-      "a boolean plus a number" => ["add", "aBool", "aNumber", 6],
-      "a string times zero" => ["mult", "aString", 0, 0],
-      "a string minus a number" => ["sub", "aString", "aNumber", -5]
-    }.each do |shape, (operator, left, right, result)|
-      it "denies every row for #{shape}" do
-        operand = ->(name) { name.is_a?(String) ? variable("request.resource.attr.#{name}") : value(name) }
-        equality = expression("eq", expression(operator, operand.call(left), operand.call(right)), value(result))
-
-        expect(translate(conditional(equality))).to be_empty
-        expect(translate(conditional(expression("not", equality)))).to be_empty
-      end
-    end
-  end
-
-  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
   # gap tracked by #675; delete it when its corpus action lands.
   describe "matches() against RE2's own parse" do
     def matches(pattern) = expression("matches", variable("request.resource.attr.aString"), value(pattern))
@@ -899,42 +815,6 @@ RSpec.describe Cerbos::ActiveRecord do
         expect(translate(conditional(matches("^[ax]+$"))).where(id: row.id)).to be_empty
       ensure
         row.destroy!
-      end
-    end
-  end
-
-  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
-  describe "an operand of no type the operator takes" do
-    let(:may_divide_by_zero) { expression("div", variable("request.resource.attr.aNumber"), value(0.0)) }
-
-    # Corpus gap. A division by zero is held as branches; it is no constant to fold in Ruby.
-    it "refuses a value that may be NaN or Infinity inside a list or map literal" do
-      map = expression("struct", expression("set-field", value("a"), may_divide_by_zero))
-      list = expression("list", may_divide_by_zero)
-      [expression("ne", map, expression("struct", expression("set-field", value("a"), value(1.0)))),
-        expression("ne", list, value([1.0])),
-        expression("not", expression("in", list, value([[1.0]])))].each do |condition|
-        expect { translate(conditional(condition)) }.to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
-      end
-    end
-
-    # Corpus gap. Each would hand a list or a held collection to SQL, which cannot quote it.
-    it "refuses a list, a filtered list or a raw timestamp where SQL needs a scalar" do
-      with_timestamp = ATTRS.merge("request.resource.attr.createdAt" => field("created_at"))
-      filtered = ->(bound) {
-        expression("filter", value([1, 2]),
-          expression("lambda", expression("gt", variable("t"), value(bound)), variable("t")))
-      }
-      [
-        expression("eq", expression("size",
-          expression("if", variable("request.resource.attr.aBool"), filtered.call(0), filtered.call(1))), value(1)),
-        expression("eq", expression("add", value([1]), expression("list", variable("request.resource.attr.aNumber"))), value([1, 5])),
-        expression("eq", expression("string", value([1])), value("[1]")),
-        expression("eq", expression("sub", variable("request.resource.attr.createdAt"), value(5)), value(2020))
-      ].each do |condition|
-        expect { translate(conditional(condition), attributes: with_timestamp) }
-          .to raise_error(Cerbos::ActiveRecord::UnsupportedOperatorError)
       end
     end
   end

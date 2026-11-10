@@ -3,6 +3,20 @@
 area: 'type-mismatch'
 description: 'Operands of different CEL types, which CEL answers with an error (deny).'
 cases:
+- id: 'type-mismatch/add/negated-boolean-plus-number'
+  tier: adversarial
+  intent: 'A boolean attribute plus a number attribute, negated, OR''d with aNumber == 2 (!(aBool + aNumber == 6.0) || aNumber == 2).'
+  trap: 'CEL has no bool + double overload, so every row errors and only a3 and a8 are allowed; a store that reads the boolean as 0 or 1 makes the negation true for most rows.'
+  condition:
+    match:
+      expr: '!(R.attr.aBool + R.attr.aNumber == 6.0) || R.attr.aNumber == 2'
+- id: 'type-mismatch/add/negated-string-plus-number'
+  tier: adversarial
+  intent: 'A string attribute plus a number attribute, negated, OR''d with aNumber == 2 (!(aString + aNumber == "one5") || aNumber == 2).'
+  trap: 'CEL has no string + double overload, so every row errors and only a3 and a8 are allowed; concatenating in the store makes the negation true for every row but a1.'
+  condition:
+    match:
+      expr: '!(R.attr.aString + R.attr.aNumber == "one5") || R.attr.aNumber == 2'
 - id: 'type-mismatch/contains/list-literal-needle'
   tier: adversarial
   intent: 'contains() on a string attribute with a list literal as the needle, beside a discriminating disjunct.'
@@ -243,6 +257,20 @@ cases:
   condition:
     match:
       expr: '!hasIntersection(R.attr.tagNames, dyn("public")) || R.attr.aNumber == 5'
+- id: 'type-mismatch/has-intersection/negated-resource-list-against-map'
+  tier: adversarial
+  intent: 'A negated hasIntersection of the tags relation with a map, OR''d with aNumber == 5.'
+  trap: 'hasIntersection takes two lists, so the map is a no-overload error under both polarities and only a1 is allowed; reading the map''s keys as a list, or as no match, makes the negation true for most rows.'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.tags, dyn({"a": 1})) || R.attr.aNumber == 5'
+- id: 'type-mismatch/has-intersection/negated-resource-list-against-scalar'
+  tier: adversarial
+  intent: 'A negated hasIntersection of the tags relation with a scalar, OR''d with aNumber == 5.'
+  trap: 'hasIntersection takes two lists, so the scalar is a no-overload error under both polarities and only a1 is allowed; treating the scalar as a one-element list, or as no match, makes the negation true for most rows.'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.tags, dyn("public")) || R.attr.aNumber == 5'
 - id: 'type-mismatch/has-intersection/negated-scalar-field-against-literal-list'
   tier: adversarial
   intent: '!hasIntersection(aString, ["one"]) OR aNumber == 5: hasIntersection over a string attribute, under negation.'
@@ -460,6 +488,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches(dyn(["one"])) || R.attr.aNumber == 5'
+- id: 'type-mismatch/multiply/string-times-zero'
+  tier: adversarial
+  intent: 'A string attribute times 0.0, OR''d with aNumber == 2 (aString * 0.0 == 0.0 || aNumber == 2).'
+  trap: 'CEL has no string * double overload, so only a3 and a8 are allowed; a store that reads a string as a number makes every product 0 and allows every row.'
+  condition:
+    match:
+      expr: 'R.attr.aString * 0.0 == 0.0 || R.attr.aNumber == 2'
 - id: 'type-mismatch/not-equals/list-literal-against-string-field-value-first'
   tier: adversarial
   intent: 'A list literal not equal to a string attribute, list first (["one", "same"] != R.attr.aString).'
@@ -535,3 +570,24 @@ cases:
   degenerate:
     oracle: empty
     reason: 'A string function over a non-string operand is a CEL type error that denies every seed. A store coercing the number to text would return rows.'
+- id: 'type-mismatch/string/number-list-attribute'
+  tier: adversarial
+  intent: 'string() of a number-list attribute, OR''d with aNumber == 2 (string(aNumberList) == "[2]" || aNumber == 2).'
+  trap: 'CEL has no string() overload for a list, so only a3 and a8 are allowed; casting the stored list to text in the store matches a1''s [2] and over-grants it.'
+  condition:
+    match:
+      expr: 'string(R.attr.aNumberList) == "[2]" || R.attr.aNumber == 2'
+- id: 'type-mismatch/subtract/negated-string-minus-number'
+  tier: adversarial
+  intent: 'A string attribute minus a number, negated, OR''d with aNumber == 2 (!(createdAt - 5.0 == 2020.0) || aNumber == 2).'
+  trap: 'CEL has no string - double overload, so every row errors and only a3 and a8 are allowed; a store that reads the timestamp text as its leading number makes the negation true for most rows.'
+  condition:
+    match:
+      expr: '!(R.attr.createdAt - 5.0 == 2020.0) || R.attr.aNumber == 2'
+- id: 'type-mismatch/subtract/string-minus-number'
+  tier: adversarial
+  intent: 'A string attribute minus a number attribute, OR''d with aNumber == 2 (aString - aNumber == -5.0 || aNumber == 2).'
+  trap: 'CEL has no string - double overload, so only a3 and a8 are allowed; a store that reads "one" as 0 computes -5 for a1 and over-grants it.'
+  condition:
+    match:
+      expr: 'R.attr.aString - R.attr.aNumber == -5.0 || R.attr.aNumber == 2'

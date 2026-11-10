@@ -44,13 +44,27 @@ module Cerbos
       end
 
       # The filter with every top-level condition wrapped in +Mongoid::RawValue+.
-      def raw(filter)
+      # Mongoid evolves a condition once for each `$and`/`$or`/`$nor` around it, unwrapping one
+      # RawValue each time, and drops a repeated clause only where it can compare them unwrapped,
+      # so repeats are dropped here.
+      def raw(filter, depth = 0)
         filter.to_h do |key, value|
           if LOGICAL.include?(key)
-            [key, value.map { |clause| raw(clause) }]
+            [key, value.map { |clause| distinct(clause) }.uniq.map { |clause| raw(clause, depth + 1) }]
           else
-            [key, ::Mongoid::RawValue(value)]
+            [key, [depth, 1].max.times.reduce(value) { |wrapped, _| ::Mongoid::RawValue(wrapped) }]
           end
+        end
+      end
+
+      def distinct(node)
+        case node
+        when Hash
+          node.to_h do |key, value|
+            [key, LOGICAL.include?(key) ? value.map { |clause| distinct(clause) }.uniq : distinct(value)]
+          end
+        when Array then node.map { |child| distinct(child) }
+        else node
         end
       end
     end

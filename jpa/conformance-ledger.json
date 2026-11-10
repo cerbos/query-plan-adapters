@@ -4,6 +4,10 @@
     "null-list": "The harness stores aNumberList as NumberListElementEntity rows, a one-to-many association, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
   },
   "cases": {
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "int() inside arithmetic is lowered only over an Integer, Long or Double column: 'request.resource.attr.aString' is String."
+    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "A column divisor that may hold a signed zero: CEL divides a non-zero dividend by -0.0 into -Infinity and by 0.0 into +Infinity, and SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
@@ -20,9 +24,25 @@
       "status": "unsupported",
       "reason": "Arithmetic operands are typed from int(), size(), attributes and literals; a ternary inside an arithmetic comparison is not, so the int division by it is refused."
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "`in` is lowered only with a mapped attribute as its needle; a computed list needle has no SQL value to test against the list."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The divisor aDouble / aNumber is zero with the sign of aDouble's zero, and CEL's quotient is an infinity of that sign; SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds), so a comparison the two infinities decide differently is refused."
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "A list built from a computed element has no SQL value to compare with a literal."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "A map built from a computed element has no SQL value to compare with a literal."
+    },
+    "arithmetic/modulo/size-of-string": {
+      "status": "unsupported",
+      "reason": "size() inside arithmetic has no lowering here: % is translated only over int() of a numeric column."
     },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
@@ -60,6 +80,14 @@
       "status": "unsupported",
       "reason": "createdBy is stored as a String; timestamp comparisons require an absolute-instant Java column type, rather than lexicographic string ordering or database-specific parsing."
     },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "A list built from a computed element has no SQL value to compare with a literal."
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "Unsupported size() expression: size() argument must be a collection attribute or filter(...), got EXPRESSION if()."
+    },
     "collection/has-intersection/two-resource-lists": {
       "status": "unsupported",
       "reason": "hasIntersection is translated only against a literal list, not between a stored collection and a map() projection."
@@ -91,6 +119,30 @@
     "logic/and/non-boolean-operand-in-value-negated": {
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."
+    },
+    "null/in/error-or-boolean-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (or()) has no SQL value to test against the list."
+    },
+    "null/in/exists-over-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (exists()) has no SQL value to test against the list."
+    },
+    "null/in/missing-attribute-conjunction-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (and()) has no SQL value to test against the list."
+    },
+    "null/in/negated-size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (size()) has no SQL value to test against the list."
+    },
+    "null/in/size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (size()) has no SQL value to test against the list."
+    },
+    "null/in/ternary-with-error-branch-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (size()) has no SQL value to test against the list."
     },
     "regex/matches/case-insensitive-non-ascii": {
       "status": "unsupported",
@@ -140,9 +192,33 @@
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"
     },
+    "type-mismatch/add/negated-boolean-plus-number": {
+      "status": "unsupported",
+      "reason": "Arithmetic over a Boolean attribute is a CEL no-overload error, which SQL would coerce."
+    },
+    "type-mismatch/add/negated-string-plus-number": {
+      "status": "unsupported",
+      "reason": "String concatenation under eq requires every operand to be a string constant or a String column: 'request.resource.attr.aNumber' is Integer (operands EXPRESSION add() and VALUE (STRING_VALUE))."
+    },
     "type-mismatch/in/string-field-in-string-field": {
       "status": "unsupported",
       "reason": "`in` with an attribute haystack needs a Relation mapping; aOptionalString is a scalar column, over which CEL raises a no-overload error."
+    },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "Arithmetic over a String attribute is a CEL no-overload error, which SQL would coerce."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "string() of aNumberList needs a scalar column, and the list is mapped as a relation."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "Arithmetic over an Instant attribute is a CEL no-overload error, which SQL would coerce."
+    },
+    "type-mismatch/subtract/string-minus-number": {
+      "status": "unsupported",
+      "reason": "Arithmetic over a String attribute is a CEL no-overload error, which SQL would coerce."
     }
   }
 }

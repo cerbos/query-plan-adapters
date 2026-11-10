@@ -416,6 +416,7 @@ INTEGER_ZERO_DIVISORS = {
     "comparison/greater-or-equal/infinity-from-ternary",
     "comparison/less-or-equal/infinity-from-ternary",
     "comparison/less-than/infinity-on-both-sides",
+    "arithmetic/divide/positive-zero-divisor",
 }
 
 

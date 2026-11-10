@@ -247,6 +247,20 @@ cases:
     pdp:
     - 0.56.0
     reason: 'Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() call sends j1''s obj without inner, so check() denies j1. From 0.57.0 the plan carries the has().'
+- id: 'null/in/error-or-boolean-in-list-with-null'
+  tier: adversarial
+  intent: 'A disjunction whose first member is a type error, tested against a list holding null ((aNumber.contains("1") || aBool) in [true, null]).'
+  trap: 'error || true is true and error || false is the error, so only aBool-true rows are allowed; reading the error as a null value makes IS NULL allow the aBool-false rows.'
+  condition:
+    match:
+      expr: '(R.attr.aNumber.contains("1") || R.attr.aBool) in [true, null]'
+- id: 'null/in/exists-over-error-in-list-with-null'
+  tier: adversarial
+  intent: 'An exists() whose every body is a type error, tested against a list holding null, OR''d with aNumber == 5.'
+  trap: 'exists over no tags is false and over any tag is the error, so only a1 is allowed; reading the error as a null value makes IS NULL allow every row with a tag.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists(t, R.attr.aNumber.contains("1")) in [true, null] || R.attr.aNumber == 5'
 - id: 'null/in/literal-list-of-only-null'
   tier: adversarial
   intent: 'Membership in a list whose only element is null (owner in [null]).'
@@ -261,6 +275,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.owner in ["x", "one_two", null]'
+- id: 'null/in/missing-attribute-conjunction-in-list-with-null'
+  tier: adversarial
+  intent: 'A conjunction over a comparison of a possibly missing attribute, tested against a list holding null ((aNumber > 1 && aBool) in [false, null]).'
+  trap: 'j2 has no aNumber and aBool true, so its conjunction is the error and it is denied, as is j3; reading the UNKNOWN as a null value makes IS NULL allow j2 and j3.'
+  condition:
+    match:
+      expr: '(R.attr.aNumber > 1 && R.attr.aBool) in [false, null]'
 - id: 'null/in/missing-attribute-in-multi-element-list'
   tier: adversarial
   intent: 'Membership of a missing-when-null attribute in a multi-element literal list containing an underscore.'
@@ -324,6 +345,13 @@ cases:
   condition:
     match:
       expr: '!(null in R.attr.tagNames)'
+- id: 'null/in/negated-size-error-in-list-with-null'
+  tier: adversarial
+  intent: 'The negated membership of a size() type error in a list holding null, OR''d with aNumber == 5 (!(size(aNumber) in [1, null]) || aNumber == 5).'
+  trap: 'size() of a number is an error on every row under both polarities, so only a1 is allowed; testing the null element with IS NULL makes the negation true for most rows.'
+  condition:
+    match:
+      expr: '!(size(R.attr.aNumber) in [1, null]) || R.attr.aNumber == 5'
 - id: 'null/in/null-literal-in-number-list'
   tier: adversarial
   intent: 'null in aNumberList: true only where a list holds a null element (a6 [null, 2]).'
@@ -338,6 +366,20 @@ cases:
   condition:
     match:
       expr: null in R.attr.tagNames
+- id: 'null/in/size-error-in-list-with-null'
+  tier: adversarial
+  intent: 'The membership of a size() type error in a list holding null, OR''d with aNumber == 5 (size(aNumber) in [1, null] || aNumber == 5).'
+  trap: 'size() of a number is an error on every row, so only a1 is allowed; testing the null element with IS NULL reads the error as null and allows every row.'
+  condition:
+    match:
+      expr: 'size(R.attr.aNumber) in [1, null] || R.attr.aNumber == 5'
+- id: 'null/in/ternary-with-error-branch-in-list-with-null'
+  tier: adversarial
+  intent: 'A ternary choosing a size() type error or 1, tested against a list holding null, OR''d with aNumber == 5.'
+  trap: 'The error branch is taken wherever aBool is true and denies, and 1 is not in [2, null], so only a1 is allowed; a CASE that yields NULL for the error arm makes IS NULL allow every aBool-true row.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? size(R.attr.aNumber) : 1) in [2, null] || R.attr.aNumber == 5'
 - id: 'null/not-equals/explicit-null-against-literal'
   tier: adversarial
   intent: 'Explicit-null owner compared != a non-null string literal.'

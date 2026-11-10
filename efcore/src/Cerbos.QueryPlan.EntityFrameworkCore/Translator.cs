@@ -73,6 +73,18 @@ internal sealed class Translator
             Arity(2);
             return Over(Arg(0), Arg(1), f);
         }
+        // size() is a CEL int, which % requires.
+        Term SizeAsInt(int i)
+        {
+            var term = Arg(i);
+            if (ops[i].Expression?.Operator != "size") return term;
+            return term switch
+            {
+                ScalarTerm { Kind: ScalarKind.Double } s => s with { Value = Expression.Convert(s.Value, typeof(long?)), Kind = ScalarKind.Int },
+                ConstTerm { Value: double d } when Cel.IsIntLiteral(d, out var n) => new ConstTerm(n),
+                _ => term,
+            };
+        }
 
         switch (e.Operator)
         {
@@ -104,7 +116,10 @@ internal sealed class Translator
             case "has":
                 Arity(1);
                 return Has(ops[0], scope);
-            case "add" or "sub" or "mult" or "div" or "mod":
+            case "mod":
+                Arity(2);
+                return Over(SizeAsInt(0), SizeAsInt(1), (a, b) => Arithmetic(e.Operator, a, b));
+            case "add" or "sub" or "mult" or "div":
                 return Binary((a, b) => Arithmetic(e.Operator, a, b));
             case "exists" or "all" or "exists_one" or "filter" or "map":
                 return Macro(e.Operator, ops, scope);

@@ -1,6 +1,18 @@
 {
   "adapter": "langchain-chromadb",
   "cases": {
+    "arithmetic/add/absorbed-by-large-double-equals": {
+      "status": "unsupported",
+      "reason": "add meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
+    "arithmetic/add/absorbed-by-large-double-not-equals": {
+      "status": "unsupported",
+      "reason": "add meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
+    "arithmetic/add/constant-plus-field-value-first": {
+      "status": "unsupported",
+      "reason": "add meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
     "arithmetic/add/field-plus-constant": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
@@ -45,6 +57,10 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the divisor reads metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and IEEE division by zero gives the infinity of that sign."
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "div meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
     "arithmetic/divide/negative-zero-divisor": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
@@ -53,6 +69,10 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the divisor reads metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and IEEE division by zero gives the infinity of that sign."
     },
+    "arithmetic/divide/positive-zero-divisor": {
+      "status": "unsupported",
+      "reason": "div meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
     "arithmetic/divide/self-division-greater-than": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the divisor reads metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and IEEE division by zero gives the infinity of that sign."
@@ -60,6 +80,14 @@
     "arithmetic/divide/self-division-not-equals": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the divisor reads metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and IEEE division by zero gives the infinity of that sign."
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "div meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "div meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
     },
     "arithmetic/multiply/inexact-fraction-equals": {
       "status": "unsupported",
@@ -72,6 +100,18 @@
     "arithmetic/multiply/negative-multiplier": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
+    },
+    "arithmetic/multiply/nested-sum": {
+      "status": "unsupported",
+      "reason": "add meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
+    "arithmetic/subtract/chained": {
+      "status": "unsupported",
+      "reason": "sub meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
+    "arithmetic/subtract/constant-minus-field": {
+      "status": "unsupported",
+      "reason": "sub meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
     },
     "arithmetic/subtract/field-minus-constant": {
       "status": "unsupported",
@@ -216,6 +256,18 @@
     "type-mismatch/less-than/string-field-against-arithmetic": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
+    },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "mult meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "string() over a number read from metadata: the chromadb client stores metadata through JSON, which writes -0.0 as 0, so a stored zero's sign is lost, and string() renders -0.0 as \"-0\"."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "sub meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
     }
   }
 }

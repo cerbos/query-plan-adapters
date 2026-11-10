@@ -360,6 +360,14 @@ final class ArithmeticTranslator {
 
     private Predicate numericComparisonWithoutZeroGuard(
             String op, List<Operand> operands, Scope scope) {
+        for (int i = 0; i < 2; i++) {
+            if (operands.get(1 - i).getNodeCase() == Operand.NodeCase.VARIABLE
+                    && resolveNumericOperand(operands.get(i), scope)
+                            instanceof NumericOperand.Constant c
+                    && Double.isNaN(c.value())) {
+                return comparisons.constantComparison(op, Double.NaN, 0.0);
+            }
+        }
         NumericOperand left = resolveNumericOperand(operands.get(0), scope);
         NumericOperand right = resolveNumericOperand(operands.get(1), scope);
         if (left instanceof NumericOperand.Constant lc
@@ -466,9 +474,21 @@ final class ArithmeticTranslator {
     NumericOperand resolveNumericOperand(Operand operand, Scope scope) {
         switch (operand.getNodeCase()) {
             case VARIABLE -> {
+                Expression<?> raw = scope.path(operand.getVariable());
+                Class<?> javaType = raw.getJavaType();
+                if (javaType != null && !Number.class.isAssignableFrom(javaType)
+                        && !javaType.isPrimitive()) {
+                    throw Refusals.unsupported(
+                            "Arithmetic over a " + javaType.getSimpleName() + " attribute is a"
+                                    + " CEL no-overload error, which SQL would coerce");
+                }
+                if (javaType == boolean.class) {
+                    throw Refusals.unsupported(
+                            "Arithmetic over a boolean attribute is a CEL no-overload error,"
+                                    + " which SQL would coerce");
+                }
                 @SuppressWarnings("unchecked")
-                Expression<? extends Number> path =
-                        (Expression<? extends Number>) scope.path(operand.getVariable());
+                Expression<? extends Number> path = (Expression<? extends Number>) raw;
                 return new NumericOperand.Sql(toIeeeDouble(path));
             }
             case VALUE -> {

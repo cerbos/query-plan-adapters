@@ -44,7 +44,6 @@ final class MembershipTranslator {
         this.objects = objects;
     }
 
-    // The planner can emit a null scalar (`null in R.attr.items`), and List.of rejects null.
     private static List<?> asList(Object val) {
         return (val instanceof List<?> l) ? l : Collections.singletonList(val);
     }

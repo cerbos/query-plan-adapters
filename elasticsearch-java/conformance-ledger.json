@@ -1,6 +1,18 @@
 {
   "adapter": "elasticsearch-java",
   "cases": {
+    "arithmetic/add/absorbed-by-large-double-equals": {
+      "status": "unsupported",
+      "reason": "Unexpected add expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing add over a field needs a script."
+    },
+    "arithmetic/add/absorbed-by-large-double-not-equals": {
+      "status": "unsupported",
+      "reason": "Unexpected add expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing add over a field needs a script."
+    },
+    "arithmetic/add/constant-plus-field-value-first": {
+      "status": "unsupported",
+      "reason": "Unexpected add expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing add over a field needs a script."
+    },
     "arithmetic/add/exact-fraction-equals": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts"
@@ -20,6 +32,10 @@
     "arithmetic/add/int-beside-double-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts, and int() over the field is a computed operand too; CEL's missing int + double overload is never reached."
+    },
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "Unexpected add expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing add over a field needs a script."
     },
     "arithmetic/add/negated-int-beside-double-field": {
       "status": "unsupported",
@@ -85,6 +101,10 @@
       "status": "unsupported",
       "reason": "Same scriptless-division limitation as arithmetic/divide/self-division-greater-than under a negated equality"
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "Unexpected list expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing list over a field needs a script."
+    },
     "arithmetic/divide/negative-zero-divisor": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field division without scripts, whatever the denominator"
@@ -92,6 +112,10 @@
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "Unexpected div expression in leaf operand"
+    },
+    "arithmetic/divide/positive-zero-divisor": {
+      "status": "unsupported",
+      "reason": "Unexpected div expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing div over a field needs a script."
     },
     "arithmetic/divide/self-division-greater-than": {
       "status": "unsupported",
@@ -101,9 +125,17 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate division by a document field without scripts, whatever the enclosing comparison"
     },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "Unexpected list expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing list over a field needs a script."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "Unexpected struct expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing struct over a field needs a script."
+    },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
-      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright \u2014 mod is not in the leaf resolver at all, and here the divisor is itself computed from a document field"
+      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all, and here the divisor is itself computed from a document field"
     },
     "arithmetic/modulo/negated-double-operand": {
       "status": "unsupported",
@@ -111,7 +143,11 @@
     },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
-      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright \u2014 mod is not in the leaf resolver at all"
+      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all"
+    },
+    "arithmetic/modulo/size-of-string": {
+      "status": "unsupported",
+      "reason": "Unexpected mod expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing mod over a field needs a script."
     },
     "arithmetic/multiply/inexact-fraction-equals": {
       "status": "unsupported",
@@ -121,9 +157,25 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts; the division, multiplication and addition are all computed leaf operands"
     },
+    "arithmetic/multiply/negated-int-of-double-overflows": {
+      "status": "unsupported",
+      "reason": "Unexpected mult expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing mult over a field needs a script."
+    },
     "arithmetic/multiply/negative-multiplier": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "arithmetic/multiply/nested-sum": {
+      "status": "unsupported",
+      "reason": "Unexpected mult expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing mult over a field needs a script."
+    },
+    "arithmetic/subtract/chained": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
+    },
+    "arithmetic/subtract/constant-minus-field": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
     },
     "arithmetic/subtract/field-minus-constant": {
       "status": "unsupported",
@@ -229,6 +281,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL string conversion."
     },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "Unexpected list expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing list over a field needs a script."
+    },
     "collection/all/conjunctive-body": {
       "status": "unsupported",
       "reason": "A positive all() cannot distinguish a missing nested collection from an empty one in Elasticsearch."
@@ -267,7 +323,7 @@
     },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead \u2014 e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
     "collection/except/equals-empty-list": {
       "status": "unsupported",
@@ -275,7 +331,7 @@
     },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead \u2014 e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
     "collection/except/negated-as-whole-condition": {
       "status": "unsupported",
@@ -283,7 +339,7 @@
     },
     "collection/except/size-of-difference": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead \u2014 e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
     "collection/exists-one/disjunctive-body": {
       "status": "unsupported",
@@ -384,6 +440,10 @@
     "collection/filter/negated-literal-in-filtered-list": {
       "status": "unsupported",
       "reason": "filter() over the flat tagNames array evaluates its predicate per element, and errors on a null element, which Elasticsearch does not index; a flat keyword array has no per-element query scope, so the filtered list is a computed operand the Query DSL cannot build without scripts"
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "Unsupported size() expression."
     },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
@@ -607,7 +667,7 @@
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",
-      "reason": "The one hierarchy shape the term-level lowering cannot reach. Every other hierarchy/* case compares a field's whole stored path against an adapter-controlled constant, which prefix/terms/term express; here the descendant path is CONSTRUCTED by list() from a constant segment and the primary key, so matching it would mean concatenating a stored field value into a path first. The Query DSL has no computed operand to do that with \u2014 the same missing evaluation step that refuses arithmetic and casts here"
+      "reason": "The one hierarchy shape the term-level lowering cannot reach. Every other hierarchy/* case compares a field's whole stored path against an adapter-controlled constant, which prefix/terms/term express; here the descendant path is CONSTRUCTED by list() from a constant segment and the primary key, so matching it would mean concatenating a stored field value into a path first. The Query DSL has no computed operand to do that with — the same missing evaluation step that refuses arithmetic and casts here"
     },
     "hierarchy/overlaps/path-built-from-list-value-first": {
       "status": "unsupported",
@@ -683,7 +743,7 @@
     },
     "null/equals/field-to-field-both-explicit-null": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL compares a field against a literal only, so the field-to-field operand is rejected before either side's null convention is reached \u2014 the same limitation as field-to-field"
+      "reason": "Elasticsearch Query DSL compares a field against a literal only, so the field-to-field operand is rejected before either side's null convention is reached — the same limitation as field-to-field"
     },
     "null/equals/negated-explicit-null-against-literal": {
       "status": "unsupported",
@@ -750,6 +810,14 @@
       ],
       "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
     },
+    "null/in/error-or-boolean-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "Unexpected or expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing or over a field needs a script."
+    },
+    "null/in/exists-over-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "Unexpected exists expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing exists over a field needs a script."
+    },
     "null/in/literal-list-of-only-null": {
       "status": "unsupported",
       "reason": "The planner folds this to positive equality with null, which Elasticsearch cannot distinguish from a missing attribute without an indexed null-value sentinel"
@@ -757,6 +825,10 @@
     "null/in/literal-list-with-null-element": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index explicit null scalar values, so positive membership containing null cannot distinguish an explicit null attribute (true) from a missing attribute (CEL error)"
+    },
+    "null/in/missing-attribute-conjunction-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "Unexpected and expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing and over a field needs a script."
     },
     "null/in/missing-attribute-in-resource-list": {
       "status": "unsupported",
@@ -778,6 +850,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch nested fields do not retain explicit null array elements, so negated null membership cannot be represented faithfully"
     },
+    "null/in/negated-size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "size comparison requires a finite numeric value."
+    },
     "null/in/null-literal-in-number-list": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index a JSON null, so a null element of the flat aNumberList array leaves no term behind and a6's [null, 2] cannot be told from [2]. The same missing null-value mapping as null/in/null-literal-in-resource-list, reached through a number list instead of the nested tag names"
@@ -785,6 +861,14 @@
     "null/in/null-literal-in-resource-list": {
       "status": "unsupported",
       "reason": "Elasticsearch nested fields do not retain explicit null array elements, so null membership cannot be represented faithfully"
+    },
+    "null/in/size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "size comparison requires a finite numeric value."
+    },
+    "null/in/ternary-with-error-branch-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "size comparison requires a finite numeric value."
     },
     "null/not-equals/explicit-null-against-literal": {
       "status": "unsupported",
@@ -800,7 +884,7 @@
     },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead \u2014 e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
@@ -828,7 +912,7 @@
     },
     "regex/matches/case-fold-kelvin-and-long-s": {
       "status": "unsupported",
-      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^ks \u2014 Lucene regexp has no inline flags, and its case_insensitive option does not follow RE2's Unicode simple-folding orbits"
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^ks — Lucene regexp has no inline flags, and its case_insensitive option does not follow RE2's Unicode simple-folding orbits"
     },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
@@ -852,7 +936,7 @@
     },
     "regex/matches/dot-plus-excludes-empty-and-newline": {
       "status": "unsupported",
-      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .+ \u2014 Lucene's . matches a newline where RE2's does not"
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .+ — Lucene's . matches a newline where RE2's does not"
     },
     "regex/matches/empty-alternative": {
       "status": "unsupported",
@@ -884,7 +968,7 @@
     },
     "regex/matches/negated-invalid-patterns-from-principal": {
       "status": "unsupported",
-      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 3: (a)\\1 \u2014 the invalid patterns are refused rather than handed to Lucene, and the disjunction with them"
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 3: (a)\\1 — the invalid patterns are refused rather than handed to Lucene, and the disjunction with them"
     },
     "regex/matches/negated-malformed-patterns-from-principal": {
       "status": "unsupported",
@@ -936,7 +1020,7 @@
     },
     "regex/matches/unbounded-count": {
       "status": "unsupported",
-      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .{8,} \u2014 RE2's `.` excludes a newline and Lucene's does not, so an unescaped `.` is refused"
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .{8,} — RE2's `.` excludes a newline and Lucene's does not, so an unescaped `.` is refused"
     },
     "regex/matches/whitespace-class": {
       "status": "unsupported",
@@ -1187,7 +1271,7 @@
     },
     "string/contains/negated-field-to-field": {
       "status": "unsupported",
-      "reason": "The needle is a second document field. The Query DSL compares a field against a value, never against another field, so a column-valued LIKE needs a script \u2014 the same refusal as the positive string/contains/field-to-field, reached before the negation"
+      "reason": "The needle is a second document field. The Query DSL compares a field against a value, never against another field, so a column-valued LIKE needs a script — the same refusal as the positive string/contains/field-to-field, reached before the negation"
     },
     "string/ends-with/field-to-field": {
       "status": "unsupported",
@@ -1224,6 +1308,14 @@
     "timestamp/less-than/relative-window": {
       "status": "unsupported",
       "reason": "The runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"
+    },
+    "type-mismatch/add/negated-boolean-plus-number": {
+      "status": "unsupported",
+      "reason": "Unexpected add expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing add over a field needs a script."
+    },
+    "type-mismatch/add/negated-string-plus-number": {
+      "status": "unsupported",
+      "reason": "Unexpected add expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing add over a field needs a script."
     },
     "type-mismatch/contains/list-literal-needle": {
       "status": "unsupported",
@@ -1277,6 +1369,14 @@
       "status": "unsupported",
       "reason": "A negated hasIntersection cannot distinguish a missing collection from an empty one in Elasticsearch."
     },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "Negated hasIntersection cannot distinguish a missing collection from an empty collection in Elasticsearch."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
+      "status": "unsupported",
+      "reason": "Negated hasIntersection cannot distinguish a missing collection from an empty collection in Elasticsearch."
+    },
     "type-mismatch/has-intersection/negated-scalar-field-against-literal-list": {
       "status": "unsupported",
       "reason": "A negated hasIntersection cannot distinguish a missing collection from an empty one in Elasticsearch."
@@ -1329,6 +1429,10 @@
       "status": "unsupported",
       "reason": "matches against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
     },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "Unexpected mult expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing mult over a field needs a script."
+    },
     "type-mismatch/not-equals/list-literal-against-string-field-value-first": {
       "status": "unsupported",
       "reason": "ne against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
@@ -1348,6 +1452,18 @@
     "type-mismatch/starts-with/number-field-needle": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "Unexpected string expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing string over a field needs a script."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
+    },
+    "type-mismatch/subtract/string-minus-number": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
     }
   }
 }

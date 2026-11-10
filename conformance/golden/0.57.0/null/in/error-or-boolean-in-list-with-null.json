@@ -1,0 +1,104 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "null/in/error-or-boolean-in-list-with-null",
+  "intent": "A disjunction whose first member is a type error, tested against a list holding null ((aNumber.contains(\"1\") || aBool) in [true, null]).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": "1"
+                      }
+                    ],
+                    "operator": "contains"
+                  }
+                },
+                {
+                  "variable": "request.resource.attr.aBool"
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "value": [
+              true,
+              null
+            ]
+          }
+        ],
+        "operator": "in"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/in/error-or-boolean-in-list-with-null",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aNumber.contains(\"1\") || R.attr.aBool) in [true, null]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "error || true is true and error || false is the error, so only aBool-true rows are allowed; reading the error as a null value makes IS NULL allow the aBool-false rows."
+}

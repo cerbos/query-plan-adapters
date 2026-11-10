@@ -615,10 +615,11 @@ module Cerbos
       # A constant all the way down: a scalar, a null, or a list or map of those.
       def deep_constant?(value)
         case value
-        when nil then true
+        when nil, true, false, Numeric then true
+        when ::String then !SqlSupport.sql_node?(value)
         when Array then value.all? { |element| deep_constant?(element) }
         when Hash then value.values.all? { |element| deep_constant?(element) }
-        else constant?(value)
+        else false
         end
       end
 

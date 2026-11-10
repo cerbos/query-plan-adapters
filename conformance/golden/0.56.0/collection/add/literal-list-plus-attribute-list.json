@@ -1,0 +1,60 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/add/literal-list-plus-attribute-list",
+  "intent": "A literal list concatenated with a one-element list of an attribute ([1] + [aNumber] == [1, 5]).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": 1
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                }
+              ],
+              "operator": "list"
+            }
+          },
+          {
+            "value": [
+              1,
+              5
+            ]
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/add/literal-list-plus-attribute-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "[1] + [R.attr.aNumber] == [1, 5]"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The concatenation is [1, aNumber], so only a1 is allowed; handing a list to the store as a scalar, or comparing elementwise out of order, moves rows."
+}

@@ -1,0 +1,78 @@
+{
+  "allowed": [
+    "a5",
+    "b3"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/add/absorbed-by-large-double-not-equals",
+  "intent": "The not-equals mirror of the absorbed sum, limited to negative doubles (aDouble + 1.0 != -9.5e18 && aDouble < -1.0).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aDouble"
+                      },
+                      {
+                        "value": 1
+                      }
+                    ],
+                    "operator": "add"
+                  }
+                },
+                {
+                  "value": -9500000000000000000
+                }
+              ],
+              "operator": "ne"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                },
+                {
+                  "value": -1
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/absorbed-by-large-double-not-equals",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aDouble + 1.0 != -9.5e18 && R.attr.aDouble < -1.0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The sum rounds back to -9.5e18 for g1, so only a5 and b3 are allowed; exact-decimal store arithmetic or an integer solve makes g1's sum differ and over-grants it."
+}

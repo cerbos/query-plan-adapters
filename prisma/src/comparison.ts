@@ -760,6 +760,18 @@ function handleArithmeticComparison(
   // arithmetic was written on the RIGHT of the comparison, direction was already mirrored.
   let effectiveOperator = arithIsLeft ? operator : mirrorOperator(operator);
 
+  const declared = fieldRef.valueType;
+  const declaredString = declared === "string";
+  if (
+    (typeof constant === "string" && declared !== undefined && !declaredString) ||
+    (typeof constant === "number" &&
+      (declaredString || declared === "boolean" || declared === "dateTime"))
+  ) {
+    throw new UnsupportedQueryPlanError(
+      `${arithOp} over a ${declared} field and a ${typeof constant} is a CEL no-overload error`
+    );
+  }
+
   // String concatenation solving (eq/ne only).
   if (arithOp === "add" && typeof constant === "string") {
     if (effectiveOperator !== "eq" && effectiveOperator !== "ne") {

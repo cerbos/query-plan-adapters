@@ -1,6 +1,10 @@
 {
   "adapter": "drizzle",
   "cases": {
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics \u2014 it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
+    },
     "arithmetic/add/ternary-selecting-double-beside-int": {
       "status": "unsupported",
       "reason": "Arithmetic over a ternary whose arms are int() and a double field: CEL raises its int-beside-double no-overload error only on the rows that select the double arm, and a SQL expression has one numeric type on every row, so the adapter refuses it."
@@ -21,13 +25,33 @@
       "status": "unsupported",
       "reason": "Int division by a ternary over int literals: the adapter lowers CEL's truncating int division only for int() of an integer column divided by a non-zero whole constant, and refuses any other divisor."
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "Nested division cannot be lowered safely: SQL may evaluate an inner zero divisor before the outer non-finite comparison guards."
     },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "A list built from a computed element has no SQL value to compare with a list literal."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "A map literal can only be compared with a string, number or boolean attribute."
+    },
+    "arithmetic/modulo/size-of-string": {
+      "status": "unsupported",
+      "reason": "Cannot translate '%': CEL's modulo is defined only over integers, so the adapter lowers it only for int() of an integer column by a non-zero whole constant or by int() of an integer column plus or minus a whole constant. A double constant is a no-overload error in CEL, and a zero constant divisor raises on PostgreSQL."
+    },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
       "reason": "Cannot translate arithmetic over a division whose denominator may be zero when the surrounding expression adds a column: CEL carries NaN through `* 0.0 + aDouble`, but SQL has no NaN or Infinity to carry it through (SQLite answers a zero division NULL, PostgreSQL raises), so the non-finite arms can only be folded against constants."
+    },
+    "arithmetic/multiply/negated-int-of-double-overflows": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics \u2014 it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -65,6 +89,10 @@
       "status": "unsupported",
       "reason": "'timestamp' field 'request.resource.attr.createdBy' requires a mapping with valueType: \"timestamp\"."
     },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "A list built from a computed element has no SQL value to compare with a list literal."
+    },
     "collection/except/as-lambda-body": {
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
@@ -88,6 +116,10 @@
     "collection/exists/two-variable-map-key-and-value": {
       "status": "unsupported",
       "reason": "A two-variable comprehension binds an element's position in the list, or a map's key, as well as its value. The adapter evaluates a macro as a correlated subquery whose one variable is the element row (a JSON array element, or a related row), and neither a JSON array element's index nor an attribute name of the row is a column it reads, so a two-variable macro is refused."
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "'size' operator requires a field reference or filter expression."
     },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
@@ -128,6 +160,30 @@
     "null/has-intersection/literal-list-with-null-element-in-lambda-body": {
       "status": "unsupported",
       "reason": "hasIntersection over a map() whose collection lies behind another relation (subCategories under categories) is not translated."
+    },
+    "null/in/error-or-boolean-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
+    },
+    "null/in/exists-over-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
+    },
+    "null/in/missing-attribute-conjunction-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
+    },
+    "null/in/negated-size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
+    },
+    "null/in/size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
+    },
+    "null/in/ternary-with-error-branch-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",
@@ -185,6 +241,14 @@
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead."
     },
+    "type-mismatch/add/negated-boolean-plus-number": {
+      "status": "unsupported",
+      "reason": "Cannot translate 'add': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce."
+    },
+    "type-mismatch/add/negated-string-plus-number": {
+      "status": "unsupported",
+      "reason": "Cannot translate 'add': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce."
+    },
     "type-mismatch/contains/list-literal-needle": {
       "status": "unsupported",
       "reason": "contains with a list needle is a CEL no-overload error; the adapter requires a string operand and refuses."
@@ -197,6 +261,14 @@
       "status": "unsupported",
       "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
     },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "'hasIntersection' requires a literal list as one of its operands."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
+      "status": "unsupported",
+      "reason": "'hasIntersection' requires a literal list as one of its operands."
+    },
     "type-mismatch/in/string-field-in-string-field": {
       "status": "unsupported",
       "reason": "Membership of one column in another needs the haystack mapped as a scalar collection; aOptionalString is a scalar column, over which CEL raises a no-overload error."
@@ -205,9 +277,25 @@
       "status": "unsupported",
       "reason": "matches() is translated only with a constant string pattern; a list pattern is a CEL no-overload error."
     },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "Cannot translate 'mult': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce."
+    },
     "type-mismatch/starts-with/list-literal-needle": {
       "status": "unsupported",
       "reason": "startsWith with a list needle is a CEL no-overload error; the adapter requires a string operand and refuses."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "Cannot translate string(): only string() over a string or boolean column, or string() over a number column, a boolean expression, an int() or a size() compared for equality with a string constant, is lowered \u2014 each without a CAST. A CAST would render the number in the store's own format rather than CEL's (SQLite spells 2.0 as '2.0' where CEL spells it '2'), and no cast target is shared by every store: TEXT is a syntax error on MySQL, whose CHAR is character(1) on PostgreSQL."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "Cannot translate 'sub': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce."
+    },
+    "type-mismatch/subtract/string-minus-number": {
+      "status": "unsupported",
+      "reason": "Cannot translate 'sub': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce."
     }
   }
 }

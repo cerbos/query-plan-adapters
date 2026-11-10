@@ -1,0 +1,91 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/has-intersection/negated-resource-list-against-map",
+  "intent": "A negated hasIntersection of the tags relation with a map, OR'd with aNumber == 5.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "value": "a"
+                                  },
+                                  {
+                                    "value": 1
+                                  }
+                                ],
+                                "operator": "set-field"
+                              }
+                            }
+                          ],
+                          "operator": "struct"
+                        }
+                      }
+                    ],
+                    "operator": "hasIntersection"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/has-intersection/negated-resource-list-against-map",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!hasIntersection(R.attr.tags, dyn({\"a\": 1})) || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "hasIntersection takes two lists, so the map is a no-overload error under both polarities and only a1 is allowed; reading the map's keys as a list, or as no match, makes the negation true for most rows."
+}

@@ -596,3 +596,17 @@ cases:
   condition:
     match:
       expr: '!("public" in R.attr.tags.map(t, t.name))'
+- id: 'collection/filter/size-of-ternary-over-filtered-literals'
+  tier: adversarial
+  intent: 'size() of a ternary choosing between two filtered literal lists (size(aBool ? [1, 2].filter(t, t > 0) : [1, 2].filter(t, t > 1)) == 1).'
+  trap: 'The false branch keeps one element, so only aBool-false rows are allowed; handing either list to the store as a scalar, or sizing the unfiltered list, moves every row.'
+  condition:
+    match:
+      expr: 'size(R.attr.aBool ? [1, 2].filter(t, t > 0) : [1, 2].filter(t, t > 1)) == 1'
+- id: 'collection/add/literal-list-plus-attribute-list'
+  tier: adversarial
+  intent: 'A literal list concatenated with a one-element list of an attribute ([1] + [aNumber] == [1, 5]).'
+  trap: 'The concatenation is [1, aNumber], so only a1 is allowed; handing a list to the store as a scalar, or comparing elementwise out of order, moves rows.'
+  condition:
+    match:
+      expr: '[1] + [R.attr.aNumber] == [1, 5]'

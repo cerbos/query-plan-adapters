@@ -367,6 +367,13 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 		return negate(omittedNullComparison(cmpOp, x), negated), nil
 	}
 
+	if operator == "in" && neverNull(left) {
+		var emptied bool
+		if right, emptied = withoutNullMembers(right); emptied {
+			return b.inNoMembers(left, m, negated)
+		}
+	}
+
 	lv, err := b.value(left, m)
 	if err != nil {
 		return nil, err
@@ -394,6 +401,54 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 	}
 
 	return negate(out, negated), nil
+}
+
+// inNoMembers lowers a never-null needle tested against a list of only nulls: FALSE where the
+// needle evaluates, UNKNOWN where it errors.
+func (b *builder) inNoMembers(left *node, m Mapper, negated bool) (Expr, error) {
+	lv, err := b.value(left, m)
+	if err != nil {
+		return nil, err
+	}
+	x, err := asExpr(lv)
+	if err != nil {
+		return nil, err
+	}
+	return negate(Case{Whens: []When{{Cond: IsNull{X: x, Negate: true}, Then: BoolConst{V: false}}}}, negated), nil
+}
+
+// nullFreeOperators yield a CEL value that is never null: an error, which SQL holds as NULL,
+// must not reach an IS NULL test.
+var nullFreeOperators = map[string]bool{
+	"add": true, "sub": true, "mult": true, "div": true, "mod": true, "size": true,
+	"int": true, "double": true, "string": true, "not": true, "and": true, "or": true,
+	"eq": true, "ne": true, "lt": true, "le": true, "gt": true, "ge": true, "in": true,
+	"contains": true, "startsWith": true, "endsWith": true, "matches": true,
+	"exists": true, "exists_one": true, "all": true, "hasIntersection": true,
+}
+
+// neverNull reports whether n always evaluates to a non-null value or an error.
+func neverNull(n *node) bool {
+	switch {
+	case n.isValue():
+		return n.value != nil
+	case n.isVariable():
+		return false
+	case n.operator == "if" && len(n.operands) == ternaryOperands:
+		return neverNull(n.operands[1]) && neverNull(n.operands[2])
+	}
+	return nullFreeOperators[n.operator]
+}
+
+// withoutNullMembers drops the null members of a literal list, which a never-null needle cannot
+// equal, and reports whether none are left.
+func withoutNullMembers(n *node) (*node, bool) {
+	members, ok := n.value.([]any)
+	if !n.isValue() || !ok || !slices.Contains(members, nil) {
+		return n, false
+	}
+	kept := slices.DeleteFunc(slices.Clone(members), func(v any) bool { return v == nil })
+	return &node{kind: nodeValue, value: kept}, len(kept) == 0
 }
 
 // membershipOverRelation lowers `<value> in R.attr.<collection>` where the collection is stored in
@@ -1262,11 +1317,15 @@ func (b *builder) arithmetic(n *node, m Mapper) (value, error) {
 		return nil, err
 	}
 
+	op := arithmeticOps[n.operator]
+
+	if op != OpAdd && (nonNumericOperand(lv) || nonNumericOperand(rv)) {
+		return nil, fmt.Errorf("'%s' over a string, boolean or bare timestamp operand is a CEL no-overload error", n.operator)
+	}
+
 	if n.operator == "div" {
 		return floatDiv(lv, rv)
 	}
-
-	op := arithmeticOps[n.operator]
 
 	if out, ok, err := temporalArith(op, lv, rv); ok {
 		// An attribute read bare is the RFC 3339 string CEL holds, and string has no `+` or `-`
@@ -1318,6 +1377,19 @@ func numericArith(op ArithOp, lv, rv value) (value, error) {
 		)
 	}
 
+	if op == OpMod {
+		var err error
+		if lv, err = integralOperand(lv); err != nil {
+			return nil, err
+		}
+		if rv, err = integralOperand(rv); err != nil {
+			return nil, err
+		}
+		if rv == int64(0) {
+			return nil, errors.New("modulus by zero is a CEL error")
+		}
+	}
+
 	lExpr, err := asExpr(lv)
 	if err != nil {
 		return nil, err
@@ -1327,6 +1399,18 @@ func numericArith(op ArithOp, lv, rv value) (value, error) {
 		return nil, err
 	}
 	return Arith{Op: op, L: lExpr, R: rExpr}, nil
+}
+
+// integralOperand binds a constant operand of `%` as an integer, which CEL's % requires.
+func integralOperand(v value) (value, error) {
+	f, ok := asFloat(v)
+	if !ok {
+		return v, nil
+	}
+	if f != math.Trunc(f) || math.Abs(f) > 1<<53 {
+		return nil, fmt.Errorf("modulus requires an integer operand, got %v", f)
+	}
+	return int64(f), nil
 }
 
 // isAttribute reports whether an operand is an attribute read straight from storage — a column or a
@@ -1381,6 +1465,29 @@ func isStringOperand(v value) bool {
 	return ok && c.Type == ValueString
 }
 
+// nonNumericOperand reports whether an operand is known to be a string, a boolean or a bare
+// timestamp attribute, none of which CEL's arithmetic accepts.
+func nonNumericOperand(v value) bool {
+	switch t := v.(type) {
+	case string, bool:
+		return true
+	case Column:
+		return t.Type == ValueString || t.Type == ValueBool || t.Type == ValueTimestamp
+	}
+	return false
+}
+
+// nonStringOperand reports whether an operand is known not to be a string.
+func nonStringOperand(v value) bool {
+	switch t := v.(type) {
+	case float64, int64, bool:
+		return true
+	case Column:
+		return t.Type == ValueNumber || t.Type == ValueBool || t.Type == ValueTimestamp
+	}
+	return false
+}
+
 // isUntypedColumn reports whether an operand is a bare column the caller declared no type for.
 // Two of them on one `+` is the only shape whose overload cannot be resolved.
 func isUntypedColumn(v value) bool {
@@ -1414,6 +1521,9 @@ func addValue(lv, rv value) (value, error) {
 	}
 
 	if isStringOperand(lv) || isStringOperand(rv) {
+		if nonStringOperand(lv) || nonStringOperand(rv) {
+			return nil, errors.New("`+` between a string and a non-string operand is a CEL no-overload error")
+		}
 		l, err := asExpr(lv)
 		if err != nil {
 			return nil, err
@@ -1423,6 +1533,10 @@ func addValue(lv, rv value) (value, error) {
 			return nil, err
 		}
 		return Concat{L: l, R: r}, nil
+	}
+
+	if nonNumericOperand(lv) || nonNumericOperand(rv) {
+		return nil, errors.New("`+` over a boolean or bare timestamp operand is a CEL no-overload error")
 	}
 
 	if isUntypedColumn(lv) && isUntypedColumn(rv) {

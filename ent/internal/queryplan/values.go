@@ -131,8 +131,9 @@ func escapeLikeColumn(needle Expr) Expr {
 // contract rather than something the translator can fix.
 func stringMatch(receiver, needle value, prefix, suffix bool) (Expr, error) {
 	if knownNonString(receiver) || knownNonString(needle) {
-		// A string operator over a declared non-string is a CEL no-overload error: UNKNOWN.
-		return Lit{V: nil}, nil
+		// A string operator over a declared non-string is a CEL no-overload error: UNKNOWN, typed
+		// boolean so PostgreSQL can bind whatever it is compared with.
+		return Case{Whens: []When{{Cond: BoolConst{V: false}, Then: BoolConst{V: true}}}}, nil
 	}
 	recvStr, recvIsStr := receiver.(string)
 	needleStr, needleIsStr := needle.(string)

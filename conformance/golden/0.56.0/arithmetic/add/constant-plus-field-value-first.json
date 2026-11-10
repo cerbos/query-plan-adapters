@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "b1"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/add/constant-plus-field-value-first",
+  "intent": "Equality with the constant first and the constant first in the sum (10.0 == 3.0 + aNumber).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": 10
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": 3
+                },
+                {
+                  "variable": "request.resource.attr.aNumber"
+                }
+              ],
+              "operator": "add"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/constant-plus-field-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "10.0 == 3.0 + R.attr.aNumber"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "Only b1 (aNumber 7) is allowed; solving with the operands swapped or the sign flipped selects 13 or -7."
+}
