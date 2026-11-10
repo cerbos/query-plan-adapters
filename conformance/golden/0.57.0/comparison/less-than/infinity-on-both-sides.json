@@ -1,0 +1,147 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b3",
+    "b5",
+    "c1",
+    "d1",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/less-than/infinity-on-both-sides",
+  "intent": "Ternary < ternary, ordering -Infinity against +Infinity and back.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": -1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": 1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBool"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": 1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": -1
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "div"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/less-than/infinity-on-both-sides",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "((R.attr.aBool ? -1.0/0.0 : 1.0/0.0) < (R.attr.aBool ? 1.0/0.0 : -1.0/0.0)) && now() == now()"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Infinities order against each other: -Inf < +Inf is true and +Inf < -Inf false; equating every non-finite value gets both arms wrong."
+}

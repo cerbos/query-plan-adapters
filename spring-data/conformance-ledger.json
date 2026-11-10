@@ -76,6 +76,10 @@
       "status": "unsupported",
       "reason": "Same refusal as comparison/less-than/astral-string-against-high-bmp, under negation: a UTF-16 code unit ordering puts the surrogate pair before U+FFFD, so the literal is refused."
     },
+    "conditional/ternary/string-match-receiver": {
+      "status": "unsupported",
+      "reason": "A ternary is distributed into its branches only as an operand of ==, !=, <, <=, > or >=; as the receiver of contains() it is refused."
+    },
     "logic/and/non-boolean-operand-in-value-negated": {
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."

@@ -59,6 +59,34 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber >= 1.5'
+- id: 'comparison/greater-or-equal/infinity-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding +Infinity or -Infinity compared >= 0.5.'
+  trap: 'Infinities order normally, so only the +Infinity arm passes; treating every non-finite value like NaN under-grants it.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0/0.0 : -1.0/0.0) >= 0.5) && now() == now()'
+- id: 'comparison/greater-or-equal/nan-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding 1.0 or NaN compared >= 0.5.'
+  trap: 'CEL orders nothing against NaN; a total order that ranks NaN above every number makes the NaN arm true.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) >= 0.5) && now() == now()'
+- id: 'comparison/greater-or-equal/nan-from-ternary-on-both-sides'
+  tier: adversarial
+  intent: 'Ternary >= ternary, where the right side yields NaN in its false arm.'
+  trap: 'Nothing mirrors, so ge(0.5, NaN) must be false; a total order that ranks NaN below every number makes it true.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) >= (R.attr.aBool ? 0.5 : 0.0/0.0)) && now() == now()'
+- id: 'comparison/greater-or-equal/negative-zero-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding -0.0 or -1.0 compared >= 0.0.'
+  trap: 'IEEE holds -0.0 equal to 0.0, so the -0.0 arm passes; Double.compare ranks -0.0 below 0.0 and under-grants it.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? -1.0 * 0.0 : -1.0) >= 0.0) && now() == now()'
 - id: 'comparison/greater-or-equal/value-first'
   tier: adversarial
   intent: 'Literal on the left of >= against a numeric attribute (2 >= aNumber).'
@@ -94,6 +122,13 @@ cases:
   condition:
     match:
       expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5) && now() == now()'
+- id: 'comparison/greater-than/nan-from-ternary-on-both-sides'
+  tier: adversarial
+  intent: 'Ternary > ternary, where the right side yields NaN in its false arm.'
+  trap: 'Nothing mirrors, so gt(0.5, NaN) must be false; a total order that ranks NaN below every number makes it true.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) > (R.attr.aBool ? 0.5 : 0.0/0.0)) && now() == now()'
 - id: 'comparison/greater-than/string-code-point-order'
   tier: adversarial
   intent: 'A plain string attribute ordered greater-than a literal (aString > "a").'
@@ -108,6 +143,20 @@ cases:
   condition:
     match:
       expr: R.attr.aNumber <= 2
+- id: 'comparison/less-or-equal/infinity-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding +Infinity or -Infinity compared <= 0.5.'
+  trap: 'Infinities order normally, so only the -Infinity arm passes; treating every non-finite value like NaN under-grants it.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0/0.0 : -1.0/0.0) <= 0.5) && now() == now()'
+- id: 'comparison/less-or-equal/nan-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding 0.0 or NaN compared <= 0.5.'
+  trap: 'CEL orders nothing against NaN; a total order that ranks NaN below every number, or a NOT(NaN > 0.5) rewrite, makes the NaN arm true.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 0.0 : 0.0/0.0) <= 0.5) && now() == now()'
 - id: 'comparison/less-or-equal/nan-from-ternary-on-both-sides'
   tier: adversarial
   intent: 'Ternary <= ternary, where the right side yields NaN in its false arm.'
@@ -164,6 +213,27 @@ cases:
   degenerate:
     oracle: empty
     reason: 'No seed lies below -1e19 (g1, at -9.5e18, is the closest). A translator that narrows the literal to the int64 minimum would return g1; the greater-than mirror carries the discriminating oracle.'
+- id: 'comparison/less-than/infinity-on-both-sides'
+  tier: adversarial
+  intent: 'Ternary < ternary, ordering -Infinity against +Infinity and back.'
+  trap: 'Infinities order against each other: -Inf < +Inf is true and +Inf < -Inf false; equating every non-finite value gets both arms wrong.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? -1.0/0.0 : 1.0/0.0) < (R.attr.aBool ? 1.0/0.0 : -1.0/0.0)) && now() == now()'
+- id: 'comparison/less-than/nan-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding 0.0 or NaN compared < 0.5.'
+  trap: 'CEL orders nothing against NaN; a total order that ranks NaN below every number, or a NOT(NaN >= 0.5) rewrite, makes the NaN arm true.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 0.0 : 0.0/0.0) < 0.5) && now() == now()'
+- id: 'comparison/less-than/nan-from-ternary-on-both-sides'
+  tier: adversarial
+  intent: 'Ternary < ternary, where the right side yields NaN in its false arm.'
+  trap: 'Nothing mirrors, so lt(0.5, NaN) must be false; a total order that ranks NaN above every number makes it true.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) < (R.attr.aBool ? 2.0 : 0.0/0.0)) && now() == now()'
 - id: 'comparison/less-than/nan-from-ternary-value-first'
   tier: adversarial
   intent: The literal 0.5 on the left compared < a ternary yielding 1.0 or NaN.
@@ -199,6 +269,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aDouble < 0.0'
+- id: 'comparison/less-than/negative-zero-from-ternary'
+  tier: adversarial
+  intent: 'A ternary yielding -0.0 or -1.0 compared < 0.0.'
+  trap: 'IEEE holds -0.0 equal to 0.0, so only the -1.0 arm passes; Double.compare ranks -0.0 below 0.0 and over-grants the aBool=true rows.'
+  condition:
+    match:
+      expr: '((R.attr.aBool ? -1.0 * 0.0 : -1.0) < 0.0) && now() == now()'
 - id: 'comparison/less-than/value-first'
   tier: adversarial
   intent: Ordering with the literal on the left (1 < aNumber).
@@ -206,13 +283,6 @@ cases:
   condition:
     match:
       expr: 1 < R.attr.aNumber
-- id: 'comparison/not-equals/value-first'
-  tier: adversarial
-  intent: 'String literal on the left of != against a string attribute ("one" != aString).'
-  trap: 'A field-first assumption mistakes the literal for a column; != must also exclude rows where the attribute is missing, which CEL denies.'
-  condition:
-    match:
-      expr: '"one" != R.attr.aString'
 - id: 'comparison/not-equals/negative-zero-against-zero'
   tier: adversarial
   intent: 'aDouble != 0.0, where i5 holds the double -0.0.'
@@ -220,6 +290,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aDouble != 0.0'
+- id: 'comparison/not-equals/value-first'
+  tier: adversarial
+  intent: 'String literal on the left of != against a string attribute ("one" != aString).'
+  trap: 'A field-first assumption mistakes the literal for a column; != must also exclude rows where the attribute is missing, which CEL denies.'
+  condition:
+    match:
+      expr: '"one" != R.attr.aString'
 - id: 'comparison/not-equals/whole-list-literal'
   tier: adversarial
   intent: 'Whole-list inequality between a list attribute and a one-element list literal (tagNames != ["public"]).'
