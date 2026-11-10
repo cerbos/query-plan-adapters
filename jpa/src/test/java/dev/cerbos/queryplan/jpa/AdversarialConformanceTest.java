@@ -224,12 +224,10 @@ class AdversarialConformanceTest {
             case "h2":
                 return Persistence.createEntityManagerFactory("adversarial-pu");
             case "postgres": {
-                // Byte-order collation by default. CEL orders strings by code point; the image's
-                // default en_US.utf8 orders linguistically, so "One" > "a" is true there (#489).
-                // Override adapter.test.postgres.initdbArgs (--lc-collate=en_US.utf8) to
-                // reproduce the over-grant.
-                String initdbArgs = System.getProperty(
-                        "adapter.test.postgres.initdbArgs", "--lc-collate=C");
+                // ICU's linguistic en-US order, as a managed service's default, so the corpus
+                // proves the adapter orders strings by code point itself (#489).
+                String initdbArgs = System.getProperty("adapter.test.postgres.initdbArgs",
+                        "--locale-provider=icu --icu-locale=en-US");
                 PostgreSQLContainer pg = new PostgreSQLContainer(DatabaseTestImages.POSTGRES)
                         .withEnv("POSTGRES_INITDB_ARGS", initdbArgs);
                 pg.start();
@@ -238,10 +236,10 @@ class AdversarialConformanceTest {
                         "adversarial-pu", jdbcOverrides(pg, "org.hibernate.dialect.PostgreSQLDialect"));
             }
             case "mysql": {
-                // Byte-exact collation by default. MySQL's default utf8mb4_0900_ai_ci makes `=`
-                // case-insensitive, and utf8mb4_0900_as_cs ignores a soft hyphen (#474).
+                // MySQL's default utf8mb4_0900_ai_ci, which folds case and accents, so the corpus
+                // proves the adapter compares strings byte for byte itself (#474).
                 String collation = System.getProperty(
-                        "adapter.test.mysql.collation", "utf8mb4_0900_bin");
+                        "adapter.test.mysql.collation", "utf8mb4_0900_ai_ci");
                 MySQLContainer my = new MySQLContainer(DatabaseTestImages.MYSQL)
                         .withCommand("--character-set-server=utf8mb4",
                                 "--collation-server=" + collation);

@@ -41,8 +41,8 @@ import java.util.TreeSet;
  * and expansions past {@value #MAX_STRINGS} strings.
  *
  * <p>The column must be a String; any other type is a CEL no-overload error, so UNKNOWN. A NULL
- * column is UNKNOWN too. Like every string predicate here, the result assumes a byte-exact
- * collation.
+ * column is UNKNOWN too. Like every string predicate here, the column is read under
+ * {@link ExactStrings}.
  */
 final class RegexTranslator {
 
@@ -76,7 +76,7 @@ final class RegexTranslator {
             return tri.unknown();
         }
         @SuppressWarnings("unchecked")
-        Expression<String> column = (Expression<String>) path;
+        Expression<String> column = ExactStrings.exact(cb, (Expression<String>) path);
         List<Node> alternatives = regex instanceof Node.Alt alt ? alt.options() : List.of(regex);
         List<Predicate> any = new ArrayList<>();
         for (Node alternative : alternatives) {

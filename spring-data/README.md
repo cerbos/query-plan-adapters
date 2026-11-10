@@ -57,8 +57,8 @@ Requirements:
 - Developed against Spring Data JPA 3.5 / Hibernate 6.6; CI also runs every suite under Spring Data
   JPA 4 / Hibernate 7 (the Spring Boot 4 pair) — see [Development](#development).
 - `dev.cerbos:cerbos-jpa`, which the adapter's POM brings at the same version.
-- String columns the mapping references need a byte-exact collation — see
-  [Database collation requirements](../jpa/README.md#database-collation-requirements).
+- On SQL Server and MariaDB, string columns the mapping references need a byte-exact collation —
+  see [Database collation requirements](../jpa/README.md#database-collation-requirements).
 
 ## Quick start
 

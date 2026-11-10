@@ -108,7 +108,7 @@ final class LeafTranslator {
         if (rightExplicit) {
             present.add(cb.isNotNull(right));
         }
-        present.add(cb.equal(left, right));
+        present.add(cb.equal(ExactStrings.exact(cb, left), ExactStrings.exact(cb, right)));
         Predicate equality = cb.and(present.toArray(new Predicate[0]));
         if (leftExplicit && rightExplicit) {
             equality = cb.or(cb.and(cb.isNull(left), cb.isNull(right)), equality);
@@ -129,7 +129,8 @@ final class LeafTranslator {
             if (!String.class.equals(path.getJavaType()) || !(value instanceof String needle)) {
                 return tri.unknown();
             }
-            return cb.like(path.as(String.class), match.pattern(PlanValues.escapeLike(needle)), '\\');
+            return cb.like(ExactStrings.exact(cb, path.as(String.class)),
+                    match.pattern(PlanValues.escapeLike(needle)), '\\');
         }
         if (ComparisonTranslator.COMPARISON_OPS.contains(op) && value != null
                 && !compatibleTypes(path.getJavaType(), value.getClass())) {
@@ -141,7 +142,8 @@ final class LeafTranslator {
         }
         // A fractional constant is a Double: compare as double, because Hibernate will not
         // coerce 1.5 onto an Integer path and `intColumn >= 1.5` is legal CEL.
-        Expression raw = (value instanceof Double) ? path.as(Double.class) : path;
+        Expression raw = ExactStrings.forOperator(cb, op,
+                (value instanceof Double) ? path.as(Double.class) : (Expression) path);
         return switch (op) {
             case "eq" -> cb.equal(raw, value);
             case "ne" -> cb.notEqual(raw, value);

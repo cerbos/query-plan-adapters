@@ -118,9 +118,9 @@ final class HierarchyTranslator {
         List<Predicate> conditions = new ArrayList<>();
         // The field is an ancestor of the constant, equal to it, or a descendant of it.
         if (!strictPrefixes.isEmpty()) {
-            conditions.add(field.path().in(strictPrefixes));
+            conditions.add(ExactStrings.exact(cb, field.path()).in(strictPrefixes));
         }
-        conditions.add(cb.equal(field.path(), otherRaw));
+        conditions.add(cb.equal(ExactStrings.exact(cb, field.path()), otherRaw));
         conditions.add(startsWithLiteral(field.path(), otherRaw + delimiter));
 
         return cb.or(conditions.toArray(Predicate[]::new));
@@ -147,9 +147,9 @@ final class HierarchyTranslator {
                 return tri.baseUnlessUnknown(cb.disjunction(), () -> cb.isNull(a.path()));
             }
             if (prefixes.size() == 1) {
-                return cb.equal(a.path(), prefixes.get(0));
+                return cb.equal(ExactStrings.exact(cb, a.path()), prefixes.get(0));
             }
-            return a.path().in(prefixes);
+            return ExactStrings.exact(cb, a.path()).in(prefixes);
         }
         if (ancestor instanceof Hierarchy.Constant a && descendant instanceof Hierarchy.Constant d) {
             if (d.segments().size() > a.segments().size()
@@ -208,16 +208,18 @@ final class HierarchyTranslator {
         }
         if (strict && !fieldFirst) {
             // The column descends from the constant: strictly longer, with it as a prefix.
-            return cb.like(path.as(String.class), PlanValues.escapeLike(constant) + "_%", '\\');
+            return cb.like(ExactStrings.exact(cb, path.as(String.class)),
+                    PlanValues.escapeLike(constant) + "_%", '\\');
         }
         Predicate ancestorOrEqual = prefixes.isEmpty()
                 ? tri.baseUnlessUnknown(cb.disjunction(), () -> cb.isNull(path))
-                : path.in(prefixes);
+                : ExactStrings.exact(cb, path).in(prefixes);
         if (strict) {
             return ancestorOrEqual;
         }
         return cb.or(ancestorOrEqual,
-                cb.like(path.as(String.class), PlanValues.escapeLike(constant) + "%", '\\'));
+                cb.like(ExactStrings.exact(cb, path.as(String.class)),
+                        PlanValues.escapeLike(constant) + "%", '\\'));
     }
 
     private static boolean isPerCharacter(Hierarchy h) {
@@ -334,9 +336,9 @@ final class HierarchyTranslator {
                     return null;
                 }
             } else if (s instanceof Seg.FieldSeg sf && l instanceof Seg.Const lc) {
-                conditions.add(cb.equal(sf.path(), lc.value()));
+                conditions.add(cb.equal(ExactStrings.exact(cb, sf.path()), lc.value()));
             } else if (s instanceof Seg.Const sc && l instanceof Seg.FieldSeg lf) {
-                conditions.add(cb.equal(lf.path(), sc.value()));
+                conditions.add(cb.equal(ExactStrings.exact(cb, lf.path()), sc.value()));
             } else {
                 throw Refusals.unsupported(
                         "Cannot compare two field references in a hierarchy overlap");
@@ -349,7 +351,8 @@ final class HierarchyTranslator {
         if (!String.class.equals(path.getJavaType())) {
             return tri.unknown();
         }
-        return cb.like(path.as(String.class), PlanValues.escapeLike(prefix) + "%", '\\');
+        return cb.like(ExactStrings.exact(cb, path.as(String.class)),
+                PlanValues.escapeLike(prefix) + "%", '\\');
     }
 
     private static boolean containsFieldSegment(List<Seg> segs) {
