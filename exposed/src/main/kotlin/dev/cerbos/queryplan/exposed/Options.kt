@@ -20,7 +20,7 @@ public class Options private constructor(
      * would hand definite equality to every column a caller never thought about
      * (docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
      *
-     * One consequence is deliberate and worth knowing. Under the default, an UNDECLARED attribute
+     * One consequence is deliberate and worth knowing. Under EXPLICIT, an UNDECLARED attribute
      * compared against a null literal renders `IS NULL` — the pre-walk scan takes the caller at
      * their word that NULLs are sent explicitly — while `!= "x"` over the same attribute keeps the
      * undeclared rendering and excludes its NULL rows. So one attribute can be read under both
@@ -70,6 +70,6 @@ public class Options private constructor(
         /** Options over [mapping] with every other setting at its default. */
         @JvmStatic
         public fun of(mapping: AttributeResolver): Options =
-            Options(mapping, NullAttributeRepresentation.EXPLICIT, DEFAULT_MAX_MACRO_DEPTH)
+            Options(mapping, NullAttributeRepresentation.OMITTED, DEFAULT_MAX_MACRO_DEPTH)
     }
 }

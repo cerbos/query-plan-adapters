@@ -12,7 +12,7 @@ package dev.cerbos.queryplan.exposed
 public enum class NullAttributeRepresentation {
     /**
      * A NULL column is sent as an explicit `null` attribute. `IS NULL` then selects exactly the
-     * rows `check()` allows. The default.
+     * rows `check()` allows.
      */
     EXPLICIT,
 

@@ -121,7 +121,7 @@ class MappingDslTest {
         // classifies each action against ONE mapping per adapter, and the corpus declares `owner`
         // EXPLICIT, so nothing in `conformance/` reaches this combination.
         //
-        // A DECISION, recorded rather than fixed. Under the default call-level EXPLICIT, an
+        // A DECISION, recorded rather than fixed. Under the call-level EXPLICIT, an
         // attribute that declares nothing gets:
         //
         //  - `== null` rendered as a definite `IS NULL`, because the pre-walk NullOperandScan takes
@@ -137,7 +137,7 @@ class MappingDslTest {
         // thought about, which is exactly what ADR 0004 exists to prevent. Declaring the attribute
         // makes both halves definite.
         val mapping = cerbosMapping { "request.resource.attr.aOptionalString" to Docs.owner }
-        val options = Options.of(mapping)
+        val options = Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)
 
         val isNull = render(options, "eq", Operand.newBuilder().setValue(NULL_VALUE).build())
         assertTrue(isNull.contains("IS NULL"), isNull)

@@ -119,7 +119,7 @@ class ScalarLeafTest {
             // `aOptionalString` is the very column `owner` aliases, declaring nothing. A NULL there
             // sends no attribute, CEL raises a missing-attribute error, and check() denies — which
             // is what UNKNOWN reproduces. Declaring nothing must therefore NOT inherit the
-            // call-level EXPLICIT default, or this returns r2, r4 and r7 as well.
+            // call-level EXPLICIT, or this returns r2, r4 and r7 as well.
             assertSelects("null/not-equals/missing-attribute-against-literal", "r1", "r3", "r5", "f1", "c1")
 
         @Test

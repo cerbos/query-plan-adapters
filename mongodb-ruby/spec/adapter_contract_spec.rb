@@ -18,8 +18,10 @@ RSpec.describe "adapter contract" do
 
   def expr(operator, *operands) = {"expression" => {"operator" => operator, "operands" => operands}}
 
-  def filter(condition, mapper = {}, **options)
-    Cerbos::MongoDB.query_plan_to_filter(plan: plan(condition), mapper: mapper, **options).filter
+  def filter(condition, mapper = {}, null_attribute_representation: :explicit, **options)
+    Cerbos::MongoDB.query_plan_to_filter(
+      plan: plan(condition), mapper: mapper, null_attribute_representation: null_attribute_representation, **options
+    ).filter
   end
 
   # Whether +target+ occurs anywhere in +node+ as a whole value: a key's value, an array
@@ -40,7 +42,8 @@ RSpec.describe "adapter contract" do
       allowed = Cerbos::MongoDB.query_plan_to_filter(plan: {"kind" => "KIND_ALWAYS_ALLOWED"})
       denied = Cerbos::MongoDB.query_plan_to_filter(plan: {"kind" => "KIND_ALWAYS_DENIED"})
       conditional = Cerbos::MongoDB.query_plan_to_filter(
-        plan: plan(var("request.resource.attr.aBool")), mapper: {"request.resource.attr.aBool" => {field: "aBool"}}
+        plan: plan(var("request.resource.attr.aBool")), mapper: {"request.resource.attr.aBool" => {field: "aBool"}},
+        null_attribute_representation: :explicit
       )
 
       expect([allowed.kind, allowed.always_allowed?, allowed.filter]).to eq(["KIND_ALWAYS_ALLOWED", true, {}])
@@ -96,19 +99,19 @@ RSpec.describe "adapter contract" do
     let(:mapper) { {"request.resource.attr.aString" => {field: "aString"}} }
 
     it "reads a PlanResources response with the plan under `filter`, and one without" do
-      expect(Cerbos::MongoDB.query_plan_to_filter(plan: {"filter" => plan(condition)}, mapper: mapper).filter).to eq(expected)
-      expect(Cerbos::MongoDB.query_plan_to_filter(plan: plan(condition), mapper: mapper).filter).to eq(expected)
+      expect(Cerbos::MongoDB.query_plan_to_filter(plan: {"filter" => plan(condition)}, mapper: mapper, null_attribute_representation: :explicit).filter).to eq(expected)
+      expect(Cerbos::MongoDB.query_plan_to_filter(plan: plan(condition), mapper: mapper, null_attribute_representation: :explicit).filter).to eq(expected)
     end
 
     it "reads symbol keys and the SDK's output objects" do
       symbolic = {kind: :KIND_CONDITIONAL, condition: {expression: {operator: "eq", operands: [{variable: "request.resource.attr.aString"}, {value: "x"}]}}}
-      expect(Cerbos::MongoDB.query_plan_to_filter(plan: symbolic, mapper: mapper).filter).to eq(expected)
+      expect(Cerbos::MongoDB.query_plan_to_filter(plan: symbolic, mapper: mapper, null_attribute_representation: :explicit).filter).to eq(expected)
 
       sdk_plan = Struct.new(:kind, :condition).new(
         :KIND_CONDITIONAL,
         Struct.new(:operator, :operands).new("eq", [Struct.new(:name).new("request.resource.attr.aString"), Struct.new(:value).new("x")])
       )
-      expect(Cerbos::MongoDB.query_plan_to_filter(plan: sdk_plan, mapper: mapper).filter).to eq(expected)
+      expect(Cerbos::MongoDB.query_plan_to_filter(plan: sdk_plan, mapper: mapper, null_attribute_representation: :explicit).filter).to eq(expected)
     end
 
     it "refuses a plan it cannot read" do
@@ -248,6 +251,11 @@ RSpec.describe "adapter contract" do
         .to raise_error(Cerbos::MongoDB::UnsupportedError, /a null literal in a collection or struct constructor/)
     end
 
+    it "defaults to :omitted" do
+      expect { Cerbos::MongoDB.query_plan_to_filter(plan: plan(null_eq), mapper: mapper) }
+        .to raise_error(Cerbos::MongoDB::UnsupportedError, /missing-attribute error/)
+    end
+
     it "refuses a representation it does not know" do
       expect { filter(null_eq, null_attribute_representation: "omitted") }
         .to raise_error(ArgumentError, /must be :explicit or :omitted/)
@@ -271,8 +279,10 @@ RSpec.describe "adapter contract" do
   # as if it declared `nullable: true` (#493). A caller-supplied argument no corpus case can vary:
   # the harness runs one mapping, under :explicit.
   describe "omitted: an undeclared entry is nullable" do
-    def corpus_filter(id, mapper = CorpusMapper::MAPPER, **options)
-      Cerbos::MongoDB.query_plan_to_filter(plan: ConformanceCorpus.golden(id).fetch("plan"), mapper: mapper, **options).filter
+    def corpus_filter(id, mapper = CorpusMapper::MAPPER, null_attribute_representation: :explicit)
+      Cerbos::MongoDB.query_plan_to_filter(
+        plan: ConformanceCorpus.golden(id).fetch("plan"), mapper: mapper, null_attribute_representation: null_attribute_representation
+      ).filter
     end
 
     def omitted(id, mapper = CorpusMapper::MAPPER) = corpus_filter(id, mapper, null_attribute_representation: :omitted)

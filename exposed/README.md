@@ -168,7 +168,7 @@ and refine it with the `with…` methods, each of which returns a new instance:
 
 ```kotlin
 val options = Options.of(mapping)
-    .withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
+    .withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)
     .withMaxMacroDepth(8)
 ```
 
@@ -375,13 +375,14 @@ and has to be told which one you use.
 | `{"x": null}` — explicit null | allow | selects it — aligned |
 | `{}` — attribute omitted | **deny** (CEL missing-attribute error) | selects it — **over-grants** |
 
-`NullAttributeRepresentation` defaults to `EXPLICIT`. If your application omits attributes for NULL
-columns, pass `OMITTED` and the adapter rejects every null comparison operand against an attribute
-that declares no convention of its own, instead of emitting a filter that returns rows the PDP
-denies (declaring `OMITTED` per attribute does better; see below):
+`NullAttributeRepresentation` defaults to `OMITTED`, the convention that fails closed when the guess
+is wrong: the adapter rejects every null comparison operand against an attribute that declares no
+convention of its own, instead of emitting a filter that returns rows the PDP denies (declaring
+`OMITTED` per attribute does better; see below). If you send NULL columns as explicit nulls, pass
+`EXPLICIT`, and `x == null` renders as `IS NULL`:
 
 ```kotlin
-Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
+Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)
 ```
 
 The rejection is deliberately wider than the shapes that actually over-grant, because a leaf cannot
@@ -416,8 +417,8 @@ in CEL, which denies exactly as UNKNOWN does.
 undeclared column renders exactly as it always has, **as if it were `NOT NULL`**, and the call-level
 `nullAttributeRepresentation` then decides one thing only: whether a null *operand* in the plan is
 refused. It never turns the definite rendering on, anywhere in the walk — not in a leaf comparison,
-not in the membership subquery. The asymmetry is deliberate — the call-level
-default is `EXPLICIT`, so inheriting it would hand definite equality to every undeclared column and
+not in the membership subquery. The asymmetry is deliberate — a call-level
+`EXPLICIT` would then hand definite equality to every undeclared column and
 return NULL rows the PDP denies for an attribute the caller in fact omits. The cost is that `!=`
 against a constant under-grants those rows until you declare the convention on that column, which
 fails closed. See [#308](https://github.com/cerbos/query-plan-adapters/issues/308) and

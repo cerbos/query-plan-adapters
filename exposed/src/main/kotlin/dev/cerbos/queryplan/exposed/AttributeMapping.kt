@@ -39,9 +39,9 @@ public sealed interface AttributeMapping {
          * - `null`: the column renders the way an undeclared column always has, as if NOT NULL, and
          *   [Options.nullAttributeRepresentation] decides only whether a null OPERAND is refused.
          *
-         * `null` does NOT mean "inherit the call-level option" for rendering, and must not: the
-         * call-level default is EXPLICIT, so inheriting it would hand definite equality to every
-         * undeclared column and return NULL rows the PDP denies for an attribute the caller omits.
+         * `null` does NOT mean "inherit the call-level option" for rendering, and must not: a
+         * call-level EXPLICIT would then hand definite equality to every undeclared column and
+         * return NULL rows the PDP denies for an attribute the caller omits.
          * The fix is opt-in per column (docs/adr/0004).
          */
         public val nullAttributeRepresentation: NullAttributeRepresentation?,

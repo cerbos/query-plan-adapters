@@ -118,7 +118,7 @@ class ColumnTypeGuardTest {
         // holds one instant string and a null. `createdAt` is already a temporal column in the
         // corpus's own mapping, so this is a shape a corpus action could reach today; a null inside
         // a principal list is legal data the corpus itself carries (`in-null-elem-mixed`), and the
-        // DEFAULT null convention admits it — the pre-walk scan only refuses a null-carrying list
+        // EXPLICIT null convention admits it — the pre-walk scan only refuses a null-carrying list
         // under OMITTED.
         //
         // THE OVER-GRANT, in the one column kind the corpus already maps. While a mismatched
@@ -480,7 +480,7 @@ class ColumnTypeGuardTest {
         fun translate(condition: Operand): Op<Boolean> = translateWith(MAPPING, condition)
 
         fun translateWith(mapping: AttributeMappings, condition: Operand): Op<Boolean> = OfflineRenderer.translate {
-            ExposedQueryPlanAdapter.toFilter(ReviewPlans.conditional(condition), Options.of(mapping)).toOp()
+            ExposedQueryPlanAdapter.toFilter(ReviewPlans.conditional(condition), Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)).toOp()
         }
 
         fun render(op: Op<Boolean>): String = OfflineRenderer.renderOn(OfflineRenderer.H2, op).sql

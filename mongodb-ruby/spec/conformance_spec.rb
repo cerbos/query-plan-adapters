@@ -30,7 +30,7 @@ RSpec.describe "conformance" do
 
   MAPPER = CorpusMapper::MAPPER
 
-  def translate(plan) = Cerbos::MongoDB.query_plan_to_filter(plan: plan, mapper: MAPPER)
+  def translate(plan) = Cerbos::MongoDB.query_plan_to_filter(plan: plan, mapper: MAPPER, null_attribute_representation: :explicit)
 
   # ALWAYS_DENIED still runs its match-nothing filter: the query is the thing under test.
   LEGS = {

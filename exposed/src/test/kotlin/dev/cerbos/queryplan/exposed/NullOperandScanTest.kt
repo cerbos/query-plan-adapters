@@ -33,7 +33,7 @@ class NullOperandScanTest {
 
     @Test
     fun `the over-grant that refusal prevents is real, not hypothetical`() =
-        // Under the default the same plan emits `IS NULL` and returns three rows. `check()` denies
+        // Under EXPLICIT the same plan emits `IS NULL` and returns three rows. `check()` denies
         // every one of them, because a NULL column sends no attribute at all. That is the
         // divergence the option exists to close, and pinning it is what stops the test above from
         // passing for some unrelated reason.

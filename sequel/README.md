@@ -176,8 +176,11 @@ You must tell the adapter which one your application uses.
 
 | `null_attribute_representation:` | What your application sends for a NULL column | `R.attr.x == null` |
 | --- | --- | --- |
-| `:explicit` (the default) | An attribute whose value is null | Cerbos gives true, and `IS NULL` agrees |
-| `:omitted` | No attribute at all | CEL raises a missing-attribute error, and Cerbos denies the row |
+| `:explicit` | An attribute whose value is null | Cerbos gives true, and `IS NULL` agrees |
+| `:omitted` (the default) | No attribute at all | CEL raises a missing-attribute error, and Cerbos denies the row |
+
+`:omitted` is the default because it fails closed when the guess is wrong. If you send NULL
+columns as explicit nulls, pass `null_attribute_representation: :explicit`.
 
 Under `:omitted` a NULL column is a missing attribute, which CEL answers with an error, and a
 present column is never null. So `==` and `!=` between a field attribute and `null` are rendered

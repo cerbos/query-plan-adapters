@@ -244,7 +244,7 @@ class AdversarialConformanceTest {
         // -- the query ----------------------------------------------------------------------------
 
         private fun ids(golden: JsonNode): List<String> =
-            idsSelectedBy(ExposedQueryPlanAdapter.toFilter(Corpus.plan(golden), Options.of(MAPPING)))
+            idsSelectedBy(ExposedQueryPlanAdapter.toFilter(Corpus.plan(golden), Options.of(MAPPING).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)))
 
         /**
          * The ids a caller's query returns under [filter], each kind handled the way a caller is

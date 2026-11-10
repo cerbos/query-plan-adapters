@@ -211,7 +211,7 @@ internal class MembershipTranslator(private val translation: Translation) {
         }
         // THE declared owner of that question, with no fallback of its own. Reading
         // `field.nullAttributeRepresentation ?: options.nullAttributeRepresentation` here handed
-        // the call-level default — EXPLICIT — to an attribute that declares nothing, so one
+        // a call-level EXPLICIT to an attribute that declares nothing, so one
         // mapping got the definite reading for `in` and the omitted one for `eq`
         // (docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
         val explicitNulls = translation.leaf.isExplicitNull(member)

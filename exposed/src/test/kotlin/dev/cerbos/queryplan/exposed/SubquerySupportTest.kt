@@ -283,7 +283,7 @@ class SubquerySupportTest {
 
         /** Translate a corpus wire fixture, and fail loudly rather than returning a bare predicate. */
         fun translate(action: String, mapping: AttributeResolver = MAPPING): Op<Boolean> =
-            ExposedQueryPlanAdapter.toFilter(wireFixture(action), Options.of(mapping)).toOp()
+            ExposedQueryPlanAdapter.toFilter(wireFixture(action), Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)).toOp()
 
         /** The emitted SQL with its constants inlined, so an assertion can read the shape. */
         fun render(op: Op<Boolean>): String = transaction(database) { op.toString() }

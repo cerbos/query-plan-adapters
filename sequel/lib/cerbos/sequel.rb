@@ -52,10 +52,10 @@ module Cerbos
     #   for a shape that your database can translate correctly but portable SQL cannot. A JSON
     #   containment operator and a full-text index are two examples.
     # @param null_attribute_representation [Symbol] how the caller sends a NULL column to
-    #   Cerbos, for each attribute that declares nothing of its own. With +:explicit+, the
-    #   default, a NULL column sends an attribute whose value is null, and thus
+    #   Cerbos, for each attribute that declares nothing of its own. With +:explicit+, a NULL
+    #   column sends an attribute whose value is null, and thus
     #   <tt>R.attr.x == null</tt> is true for that row and +IS NULL+ agrees with the PDP. With
-    #   +:omitted+, a NULL column sends no attribute at all. CEL then raises a
+    #   +:omitted+, the default, a NULL column sends no attribute at all. CEL then raises a
     #   missing-attribute error and the PDP denies the row, but +IS NULL+ would give that row.
     #   Thus under +:omitted+, +==+ and +!=+ between a field and null are UNKNOWN for a NULL
     #   column, and the adapter refuses every other null constant in the plan
@@ -70,7 +70,7 @@ module Cerbos
     # @raise [Error] if the adapter cannot translate the plan correctly
     def self.query_plan_to_dataset(
       plan:, model:, attributes:,
-      operator_overrides: {}, null_attribute_representation: :explicit
+      operator_overrides: {}, null_attribute_representation: :omitted
     )
       Translator.new(
         model: model,
