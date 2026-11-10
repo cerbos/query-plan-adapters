@@ -26,7 +26,7 @@ class ScopeResolutionTest {
     fun `a dotted reference matches the longest mapped prefix, not the first one that fits`() {
         // `request.resource.attr.mainCategory.subCategories` is mapped nowhere as a whole; the
         // prefix `…mainCategory` is, and `subCategories` is walked through its nested fields.
-        val scope = RootScope(Translation(Options.of(MAPPING)))
+        val scope = RootScope(Translation(Options.of(MAPPING).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)))
         val resolved = scope.resolve("request.resource.attr.mainCategory.subCategories")
         assertTrue(resolved is Resolution.Collection, resolved.toString())
         val hops = (resolved as Resolution.Collection).hops
@@ -39,7 +39,7 @@ class ScopeResolutionTest {
 
     @Test
     fun `resolution is idempotent, so a variable asked for twice numbers its aliases once`() {
-        val scope = RootScope(Translation(Options.of(MAPPING)))
+        val scope = RootScope(Translation(Options.of(MAPPING).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)))
         assertSame(
             scope.resolve("request.resource.attr.tags"),
             scope.resolve("request.resource.attr.tags"),
@@ -86,7 +86,7 @@ class ScopeResolutionTest {
     fun `an unmapped variable is refused rather than resolved by stripping a prefix`() {
         // An adapter that resolved by stripping `request.resource.attr.` would silently accept a
         // name nothing maps, and the failure would look like an empty result rather than a bug.
-        val scope = RootScope(Translation(Options.of(MAPPING)))
+        val scope = RootScope(Translation(Options.of(MAPPING).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)))
         val error = runCatching { scope.resolve("request.resource.attr.nothingMapsThis") }.exceptionOrNull()
         assertEquals(UnmappedAttributeException::class.java, error?.javaClass)
         assertEquals("Unknown attribute: request.resource.attr.nothingMapsThis", error?.message)
@@ -94,7 +94,7 @@ class ScopeResolutionTest {
 
     @Test
     fun `a relation asked for as a scalar is refused`() {
-        val scope = RootScope(Translation(Options.of(MAPPING)))
+        val scope = RootScope(Translation(Options.of(MAPPING).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)))
         val error = runCatching { scope.scalar("request.resource.attr.tags") }.exceptionOrNull()
         assertEquals(UnmappedAttributeException::class.java, error?.javaClass)
         assertEquals(

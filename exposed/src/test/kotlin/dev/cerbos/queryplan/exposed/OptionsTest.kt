@@ -28,7 +28,7 @@ class OptionsTest {
     fun `the defaults are the conventions the README states`() {
         val options = Options.of(mapping)
         assertSame(mapping, options.mapping)
-        assertEquals(NullAttributeRepresentation.EXPLICIT, options.nullAttributeRepresentation)
+        assertEquals(NullAttributeRepresentation.OMITTED, options.nullAttributeRepresentation)
         assertEquals(Options.DEFAULT_MAX_MACRO_DEPTH, options.maxMacroDepth)
         assertEquals(5, Options.DEFAULT_MAX_MACRO_DEPTH)
     }
@@ -37,12 +37,12 @@ class OptionsTest {
     fun `a wither returns a new instance and leaves the original alone`() {
         val options = Options.of(mapping)
 
-        val omitted = options.withNullAttributeRepresentation(NullAttributeRepresentation.OMITTED)
-        assertNotSame(options, omitted)
-        assertEquals(NullAttributeRepresentation.OMITTED, omitted.nullAttributeRepresentation)
+        val explicit = options.withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)
+        assertNotSame(options, explicit)
+        assertEquals(NullAttributeRepresentation.EXPLICIT, explicit.nullAttributeRepresentation)
         // Immutability is what lets one Options be shared across concurrent requests, so the
         // original must be untouched rather than merely equal to something.
-        assertEquals(NullAttributeRepresentation.EXPLICIT, options.nullAttributeRepresentation)
+        assertEquals(NullAttributeRepresentation.OMITTED, options.nullAttributeRepresentation)
 
         val deeper = options.withMaxMacroDepth(9)
         assertEquals(9, deeper.maxMacroDepth)
@@ -94,7 +94,7 @@ class OptionsTest {
     @Test
     fun `toString names the settings and not the mapping`() {
         val described = Options.of(mapping).withMaxMacroDepth(3).toString()
-        assertTrue(described.contains("nullAttributeRepresentation=EXPLICIT"), described)
+        assertTrue(described.contains("nullAttributeRepresentation=OMITTED"), described)
         assertTrue(described.contains("maxMacroDepth=3"), described)
     }
 }

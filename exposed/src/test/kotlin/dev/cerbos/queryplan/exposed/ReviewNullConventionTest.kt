@@ -44,7 +44,7 @@ class ReviewNullConventionTest {
         //
         // MembershipTranslator instead read
         //     member.field.nullAttributeRepresentation ?: translation.options.nullAttributeRepresentation
-        // whose default is EXPLICIT, so the subquery body gained
+        // which then defaulted to EXPLICIT, so the subquery body gained
         //     (cerbos_1.NAME IS NULL AND REVIEW_DOCS.OWNER IS NULL)
         // and `d1` was returned. It now asks `LeafTranslator.isExplicitNull`, the declared owner of
         // the question, which does not fall back.

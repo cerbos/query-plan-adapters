@@ -138,7 +138,7 @@ internal object Scalars {
     }
 
     /** The ids a wire fixture's translated filter selects, sorted. */
-    fun ids(action: String, options: Options = Options.of(MAPPING)): List<String> = onH2 {
+    fun ids(action: String, options: Options = Options.of(MAPPING).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)): List<String> = onH2 {
         val filter = ExposedQueryPlanAdapter.toFilter(wireFixture(action), options)
         Docs.selectAll().where { filter.toOp() }.map { it[Docs.id] }.sorted()
     }
@@ -149,7 +149,7 @@ internal object Scalars {
     }
 
     /** The translated predicate, for the assertions whose subject is the emitted SQL. */
-    fun op(action: String, options: Options = Options.of(MAPPING)): Op<Boolean> = onH2 {
+    fun op(action: String, options: Options = Options.of(MAPPING).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)): Op<Boolean> = onH2 {
         ExposedQueryPlanAdapter.toFilter(wireFixture(action), options).toOp()
     }
 
