@@ -152,6 +152,15 @@ func (r *renderer) write(e queryplan.Expr) error {
 		if err != nil {
 			return err
 		}
+		if t.Op != queryplan.OpEq && t.Op != queryplan.OpNe && (isText(t.L) || isText(t.R)) {
+			return r.paren(func() error {
+				if err := r.writeCollated(t.L); err != nil {
+					return err
+				}
+				r.str(" ", op, " ")
+				return r.writeCollated(t.R)
+			})
+		}
 		return r.writeBinary(op, t.L, t.R)
 
 	case queryplan.Arith:
@@ -254,6 +263,39 @@ func (r *renderer) writeBinary(symbol string, left, right queryplan.Expr) error 
 		}
 		r.str(" ", symbol, " ")
 		return r.write(right)
+	})
+}
+
+// isText reports whether e is known to be a string. PostgreSQL equality is exact under any
+// deterministic collation, but a linguistic one does not order strings by code point, as CEL does,
+// so an ordering over a string is read under "C".
+func isText(e queryplan.Expr) bool {
+	switch t := e.(type) {
+	case queryplan.Lit:
+		_, ok := t.V.(string)
+		return ok
+	case queryplan.Column:
+		return t.Type == queryplan.ValueString
+	case queryplan.Concat:
+		return true
+	case queryplan.Cast:
+		return t.To == queryplan.CastText
+	case queryplan.Call:
+		return t.Name == queryplan.FuncConcat || t.Name == queryplan.FuncReplace
+	}
+	return false
+}
+
+func (r *renderer) writeCollated(e queryplan.Expr) error {
+	if !isText(e) {
+		return r.write(e)
+	}
+	return r.paren(func() error {
+		if err := r.write(e); err != nil {
+			return err
+		}
+		r.str(` COLLATE "C"`)
+		return nil
 	})
 }
 

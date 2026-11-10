@@ -234,78 +234,74 @@ func openSQLite(t *testing.T) *sql.DB {
 	return db
 }
 
-// The MySQL schema pins the byte-exact NO PAD collation utf8mb4_0900_bin on every string
-// column. The default utf8mb4_0900_ai_ci ignores case and accents, over-granting on
-// `string/equals/case-sensitive` ("One" would match "one"), `string/equals/non-ascii-literal`
-// and hierarchy prefixes (#310). The older utf8mb4_bin ignores trailing spaces ("a" would match
-// "a "). utf8mb4_0900_as_cs is case- and accent-sensitive but still ignores a default-ignorable
-// code point such as U+00AD, so seed h6's "o\u00ADne" would match "one" (#474). CEL
-// distinguishes all four, so the collation is part of the policy contract here (#436).
+// The MySQL schema names no collation, so every string column takes the server default,
+// utf8mb4_0900_ai_ci, which folds case and accents: the corpus proves the adapter compares
+// strings byte for byte itself (#474).
 //
 // DATETIME(6) is microsecond-resolution, the same caveat PostgreSQL's timestamptz carries:
 // the corpus's a5 seed holds microsecond precision and no finer.
 const mysqlDDL = `
 CREATE TABLE adversarial_resource (
-	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
+	id                 varchar(64) PRIMARY KEY,
 	a_bool             boolean,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_string           varchar(255),
 	a_number           bigint,
 	a_double           double,
-	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
-	created_by         varchar(64) COLLATE utf8mb4_0900_bin NOT NULL,
-	scope              varchar(255) COLLATE utf8mb4_0900_bin,
+	a_optional_string  varchar(255),
+	created_by         varchar(64) NOT NULL,
+	scope              varchar(255),
 	created_at         datetime(6),
 	updated_at         datetime(6)
 );
 CREATE TABLE adversarial_tag (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
-	tag_id       varchar(64) COLLATE utf8mb4_0900_bin NOT NULL,
-	name         varchar(255) COLLATE utf8mb4_0900_bin,
+	tag_id       varchar(64) NOT NULL,
+	name         varchar(255),
 	position     int NOT NULL,
-	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
+	resource_id  varchar(64) NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_category (
-	id           varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	name         varchar(255) COLLATE utf8mb4_0900_bin NOT NULL,
-	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
+	id           varchar(64) PRIMARY KEY,
+	name         varchar(255) NOT NULL,
+	resource_id  varchar(64) NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_sub_category (
-	id           varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	name         varchar(255) COLLATE utf8mb4_0900_bin NOT NULL,
-	category_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_category(id)
+	id           varchar(64) PRIMARY KEY,
+	name         varchar(255) NOT NULL,
+	category_id  varchar(64) NOT NULL REFERENCES adversarial_category(id)
 );
 CREATE TABLE adversarial_label (
-	id               varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
-	name             varchar(255) COLLATE utf8mb4_0900_bin,
-	sub_category_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_sub_category(id)
+	id               varchar(64) PRIMARY KEY,
+	name             varchar(255),
+	sub_category_id  varchar(64) NOT NULL REFERENCES adversarial_sub_category(id)
 );
 CREATE TABLE adversarial_parent (
-	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
+	id                 varchar(64) PRIMARY KEY,
 	a_bool             boolean,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_string           varchar(255),
 	a_number           bigint,
-	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
-	resource_id        varchar(64) COLLATE utf8mb4_0900_bin NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+	a_optional_string  varchar(255),
+	resource_id        varchar(64) NOT NULL UNIQUE REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_inner (
-	id                 varchar(64) COLLATE utf8mb4_0900_bin PRIMARY KEY,
+	id                 varchar(64) PRIMARY KEY,
 	a_bool             boolean,
-	a_string           varchar(255) COLLATE utf8mb4_0900_bin,
+	a_string           varchar(255),
 	a_number           bigint,
-	a_optional_string  varchar(255) COLLATE utf8mb4_0900_bin,
-	parent_id          varchar(64) COLLATE utf8mb4_0900_bin NOT NULL UNIQUE REFERENCES adversarial_parent(id)
+	a_optional_string  varchar(255),
+	parent_id          varchar(64) NOT NULL UNIQUE REFERENCES adversarial_parent(id)
 );
 CREATE TABLE adversarial_number_elem (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
 	value        double,
 	position     int NOT NULL,
-	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
+	resource_id  varchar(64) NOT NULL REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_bool_elem (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
 	value        boolean,
 	position     int NOT NULL,
-	resource_id  varchar(64) COLLATE utf8mb4_0900_bin NOT NULL REFERENCES adversarial_resource(id)
+	resource_id  varchar(64) NOT NULL REFERENCES adversarial_resource(id)
 );
 `
 
@@ -342,27 +338,14 @@ func openMySQL(t *testing.T) *sql.DB {
 	return db
 }
 
-// postgresInitdbArgs is how the PostgreSQL leg's database is initialised: --lc-collate=C, a
-// byte-order collation. CEL orders strings by code point, and <, <=, > and >= on a text column
-// follow the column's collation. PostgreSQL collations are deterministic, so = is byte-exact under
-// any of them, but a linguistic one orders case, accents and punctuation below the letter: under
-// glibc's en_US.utf8 'One' > 'a' is TRUE, which over-grants
-// comparison/greater-than/string-code-point-order (cerbos/query-plan-adapters#489). "C" orders by
-// byte, which for UTF-8 is code point order.
-//
-// Stated rather than inherited: the Alpine image reports en_US.utf8 without it, and orders by byte
-// only because musl's strcoll does. The same database on a glibc image, or on a managed service,
-// orders linguistically.
-//
-// ADAPTER_TEST_POSTGRES_INITDB_ARGS overrides it, so the over-grant can be reproduced rather than
-// taken on trust: "--locale-provider=icu --icu-locale=en-US" gives the pinned image ICU's
-// linguistic order, which musl cannot, and fails both string-code-point-order cases. A measurement
-// escape hatch, not a CI leg.
+// postgresInitdbArgs initialises the PostgreSQL leg under ICU's linguistic en-US order, as a
+// managed service's default does, so the corpus proves the adapter orders strings by code point
+// itself (#489). ADAPTER_TEST_POSTGRES_INITDB_ARGS overrides it.
 func postgresInitdbArgs() string {
 	if args, ok := os.LookupEnv("ADAPTER_TEST_POSTGRES_INITDB_ARGS"); ok {
 		return args
 	}
-	return "--lc-collate=C"
+	return "--locale-provider=icu --icu-locale=en-US"
 }
 
 func openPostgres(t *testing.T) *sql.DB {

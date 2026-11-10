@@ -309,7 +309,7 @@ func TestIdentifiersAreQuoted(t *testing.T) {
 
 	for _, tc := range []struct{ dialect, want string }{
 		{dialect: dialect.SQLite, want: "(`resource`.`odd column` = ?)"},
-		{dialect: dialect.MySQL, want: "(`resource`.`odd column` = ?)"},
+		{dialect: dialect.MySQL, want: "(`resource`.`odd column` = CONVERT(? USING utf8mb4) COLLATE utf8mb4_0900_bin)"},
 		{dialect: dialect.Postgres, want: `("resource"."odd column" = $1::text)`},
 	} {
 		t.Run(tc.dialect, func(t *testing.T) {

@@ -222,7 +222,7 @@ aliases such as `postgresql`, is a configuration error, even for a constant plan
 | --- | --- |
 | SQLite | Proved — full corpus, text timestamps compared lexicographically |
 | PostgreSQL | Proved — full corpus, native `boolean` and `timestamptz` columns |
-| MySQL | Proved — full corpus, `DATETIME(6)` columns, byte-exact NO PAD collation (`utf8mb4_0900_bin`) |
+| MySQL | Proved — full corpus, `DATETIME(6)` columns, the server's default `utf8mb4_0900_ai_ci` collation |
 
 The dialect changes more than quoting: MySQL needs `CONCAT` (its `||` is logical OR) and
 `CHAR_LENGTH`; each engine has its own null-safe equality (`IS`, `IS NOT DISTINCT FROM`, `<=>`) and
@@ -231,27 +231,26 @@ connection collation cannot make `string(x) == "set"` match `"Set"`.
 
 ## Collation
 
-CEL string comparison is case-sensitive and byte-exact, and CEL orders strings by code point; `=`,
-`LIKE` and `<`/`<=`/`>`/`>=` follow the database's collation. A looser collation is an
-**over-grant the adapter cannot detect**, so treat collation as part of your policy contract:
+CEL compares strings byte for byte and orders them by code point. The adapter does not trust the
+column's collation for that:
 
+- **MySQL:** every string literal is bound as `CONVERT(? USING utf8mb4) COLLATE utf8mb4_0900_bin`,
+  and every column declared `ValueString` is read under the same collation, so `=`, `in`, `LIKE`
+  and ordering are byte-exact and NO PAD even under the default `utf8mb4_0900_ai_ci`. A comparison
+  between two columns with neither declared `ValueString` still follows the columns' collation, so
+  declare string columns. A comparison under a collation the column's index does not use cannot
+  use that index.
+- **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
+  ordering over a string literal or a `ValueString` column runs under `COLLATE "C"`, since a
+  linguistic collation such as `en_US.UTF-8` sorts `"One"` after `"a"`
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Nondeterministic ICU
+  collations and `citext` are not safe.
 - **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
   point.
-- **PostgreSQL:** use a deterministic collation (the default) for equality, and a byte-order
-  collation, `"C"`, on every column a policy orders. A linguistic collation such as glibc's
-  `en_US.UTF-8` (the usual default on Debian images and managed services) or ICU's `en-US` sorts
-  `"One"` after `"a"`, so `R.attr.name > "a"` over-grants it
-  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). The conformance leg
-  initialises its database with `--lc-collate=C` rather than trusting the Alpine image, whose musl
-  libc orders by byte only by accident;
-  `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" go test -run
-  TestAdversarialConformance ./...` reproduces the over-grant.
-- **MySQL:** use `utf8mb4_0900_bin` (8.0.17+) on every string column policies read. The default
-  `utf8mb4_0900_ai_ci` is case- and accent-insensitive. Even `utf8mb4_0900_as_cs` is not
-  byte-exact: it ignores a soft hyphen (U+00AD), so `"o­ne"` equals `"one"` — an over-grant on
-  `==`/`in` and an under-grant on `!=` ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-  `utf8mb4_0900_bin` orders by code point.
-- A `_CI_` SQL Server collation has the same problem.
+- A `_CI_` SQL Server collation is not handled.
+
+The conformance MySQL leg runs under the server default and the PostgreSQL leg under ICU's
+`en-US`, so the corpus proves this on every run.
 
 ## Identifier quoting
 

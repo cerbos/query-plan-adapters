@@ -248,24 +248,14 @@ mapper := cerbospgx.MapperMap{
 
 ## Collation
 
-CEL string comparison is case-sensitive and byte-exact; `=` and `LIKE` follow the column's
-collation. A case-insensitive collation is an **over-grant the adapter cannot detect**, so treat
-collation as part of your policy contract: use a deterministic collation (the PostgreSQL default)
-on every column policies compare. Nondeterministic ICU collations and `citext` are not safe.
+CEL string comparison is byte-exact, and PostgreSQL equality is exact under any deterministic
+collation (the default). Nondeterministic ICU collations and `citext` are not safe.
 
-**String ordering needs more.** CEL orders strings by code point, and `<`, `<=`, `>` and `>=`
-follow the column's collation. A linguistic collation such as glibc's `en_US.UTF-8` (the usual
-default on Debian images and managed services) or ICU's `en-US` is deterministic, yet sorts
-`"One"` after `"a"`, so `R.attr.name > "a"` over-grants it
-([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Use a byte-order collation,
-`"C"`, on every column a policy orders: create the database with `LC_COLLATE 'C'`, or declare
-`COLLATE "C"` on the column.
-
-The conformance harness initialises its database with `--lc-collate=C` rather than trusting the
-Alpine image, whose musl libc orders by byte only by accident.
-`ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" go test -run
-TestAdversarialConformance ./...` replays the corpus under a linguistic order and fails both
-`comparison/*/string-code-point-order` cases.
+CEL orders strings by code point, which a linguistic collation such as `en_US.UTF-8` (the usual
+default on managed services) does not: it sorts `"One"` after `"a"`
+([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). So every ordering over a
+string literal or a `ValueString` column runs under `COLLATE "C"`, whatever the column's own
+collation. The conformance leg initialises its database under ICU's `en-US` to prove it.
 
 ## Conformance contract
 

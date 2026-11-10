@@ -70,6 +70,13 @@ func bindValue(b *sql.Builder, v any) {
 		}
 	}
 
+	if _, ok := v.(string); ok && b.Dialect() == dialect.MySQL {
+		b.WriteString("CONVERT(")
+		b.Arg(v)
+		b.WriteString(" USING utf8mb4) COLLATE " + mysqlExactCollation)
+		return
+	}
+
 	b.Arg(v)
 
 	// PostgreSQL infers an untyped `$n` from the context it appears in, and in an expression such
@@ -133,6 +140,16 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 		op, err := symbol(cmpSymbols, "comparison", t.Op)
 		if err != nil {
 			return err
+		}
+		if b.Dialect() == dialect.Postgres && t.Op != queryplan.OpEq && t.Op != queryplan.OpNe &&
+			(isText(t.L) || isText(t.R)) {
+			return wrap(b, func(b *sql.Builder) error {
+				if err := writeCollated(b, t.L, `"C"`); err != nil {
+					return err
+				}
+				b.WriteString(" ").WriteString(op).WriteString(" ")
+				return writeCollated(b, t.R, `"C"`)
+			})
 		}
 		return writeBinary(b, op, t.L, t.R)
 
@@ -236,11 +253,55 @@ func wrap(b *sql.Builder, f func(*sql.Builder) error) error {
 	return err
 }
 
+// mysqlExactCollation is byte-exact and NO PAD, as CEL's string comparison is. MySQL's default,
+// utf8mb4_0900_ai_ci, folds case and accents, so every string literal and declared string column
+// is compared under it; an explicit COLLATE on either operand decides the comparison.
+const mysqlExactCollation = "utf8mb4_0900_bin"
+
 func writeColumn(b *sql.Builder, c queryplan.Column) {
+	collate := c.Type == queryplan.ValueString && b.Dialect() == dialect.MySQL
+	if collate {
+		b.WriteString("(")
+	}
 	if c.Qualifier != "" {
 		b.Ident(c.Qualifier).WriteByte('.')
 	}
 	b.Ident(c.Name)
+	if collate {
+		b.WriteString(" COLLATE " + mysqlExactCollation + ")")
+	}
+}
+
+// isText reports whether e is known to be a string, so a PostgreSQL ordering over it can be
+// read under "C": a linguistic collation does not order strings by code point, as CEL does.
+func isText(e queryplan.Expr) bool {
+	switch t := e.(type) {
+	case queryplan.Lit:
+		_, ok := t.V.(string)
+		return ok
+	case queryplan.Column:
+		return t.Type == queryplan.ValueString
+	case queryplan.Concat:
+		return true
+	case queryplan.Cast:
+		return t.To == queryplan.CastText
+	case queryplan.Call:
+		return t.Name == queryplan.FuncConcat || t.Name == queryplan.FuncReplace
+	}
+	return false
+}
+
+func writeCollated(b *sql.Builder, e queryplan.Expr, collation string) error {
+	if !isText(e) {
+		return write(b, e)
+	}
+	return wrap(b, func(b *sql.Builder) error {
+		if err := write(b, e); err != nil {
+			return err
+		}
+		b.WriteString(" COLLATE ").WriteString(collation)
+		return nil
+	})
 }
 
 func writeBinary(b *sql.Builder, symbol string, l, r queryplan.Expr) error {
