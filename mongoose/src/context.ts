@@ -1,9 +1,10 @@
 import { FinalUnsupportedQueryPlanError, UnsupportedQueryPlanError } from "./errors";
-import type { Mapper, NullAttributeRepresentation } from "./index";
+import type { NullAttributeRepresentation } from "./index";
+import type { ScopedMapper } from "./mapper";
 
 /** What every translation step can see: the caller's choices, and whether it is inside a lambda. */
 export type TranslateContext = {
-  readonly mapper: Mapper;
+  readonly mapper: ScopedMapper;
   readonly nullRepresentation: NullAttributeRepresentation;
   readonly scope:
     | { readonly kind: "root" }

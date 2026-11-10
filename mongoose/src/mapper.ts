@@ -1,31 +1,37 @@
 import type { Mapper, MapperConfig } from "./index";
 
-/** The caller's entry for exactly `reference`, whichever of the two mapper forms it supplied. */
-export const lookupConfig = (
-  mapper: Mapper,
-  reference: string,
-): MapperConfig | undefined =>
-  typeof mapper === "function" ? mapper(reference) : mapper[reference];
+/**
+ * The caller's mapper as one translation scope reads it. `queryPlanToMongoose` builds the root
+ * scope, and each macro body gets its own.
+ */
+export type ScopedMapper = {
+  /** The entry for exactly `reference`. */
+  readonly lookup: (reference: string) => MapperConfig | undefined;
+  /** Whether an entry that does not declare `nullable` is nullable (the call's convention). */
+  readonly nullableDefault: boolean;
+  /** The macro variables whose elements this scope reads. */
+  readonly bound: readonly string[];
+};
 
 /** `a.b` → the `b` entry in the `fields` of the relation `a` is mapped to, if any. */
 const relationFieldConfig = (
   reference: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): MapperConfig | undefined => {
   const parts = reference.split(".");
   const lastPart = parts.pop();
   if (parts.length === 0 || !lastPart) {
     return undefined;
   }
-  return lookupConfig(mapper, parts.join("."))?.relation?.fields?.[lastPart];
+  return mapper.lookup(parts.join("."))?.relation?.fields?.[lastPart];
 };
 
 /** The mapper entry for a reference: its own, or the one its parent relation declares for it. */
 export const resolveMapperConfig = (
   reference: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): MapperConfig | undefined =>
-  lookupConfig(mapper, reference) || relationFieldConfig(reference, mapper);
+  mapper.lookup(reference) || relationFieldConfig(reference, mapper);
 
 /**
  * The scalar type a reference's stored value is declared with — for a relation mapped to one
@@ -35,7 +41,7 @@ export const resolveMapperConfig = (
  */
 export const declaredScalarType = (
   reference: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): "number" | "string" | "boolean" | undefined => {
   const config = resolveMapperConfig(reference, mapper);
   const relation = config?.relation;
@@ -82,34 +88,43 @@ const nullableByDefault = (config: MapperConfig): MapperConfig => {
  * from or null in. Refusing null operands alone left `R.attr.x != "a"` returning those documents
  * on every field that did not declare `nullable` (cerbos/query-plan-adapters#493).
  */
-export const withOmittedNullDefault = (mapper: Mapper): Mapper => {
+export const withOmittedNullDefault =
+  (lookup: ScopedMapper["lookup"]): ScopedMapper["lookup"] =>
+  (reference) => {
+    const config = lookup(reference);
+    return config && nullableByDefault(config);
+  };
+
+/** The root scope: the caller's mapper, in either of its two forms, under the call's convention. */
+export const rootMapper = (mapper: Mapper, nullableDefault: boolean): ScopedMapper => {
   if (typeof mapper === "function") {
-    return (key) => {
-      const config = mapper(key);
-      return config && nullableByDefault(config);
+    return {
+      lookup: nullableDefault ? withOmittedNullDefault(mapper) : mapper,
+      nullableDefault,
+      bound: [],
     };
   }
-  return Object.fromEntries(
-    Object.entries(mapper).map(([key, config]) => [
-      key,
-      nullableByDefault(config),
-    ]),
-  );
+  const entries = nullableDefault
+    ? Object.fromEntries(
+        Object.entries(mapper).map(([key, config]) => [key, nullableByDefault(config)]),
+      )
+    : mapper;
+  return { lookup: (reference) => entries[reference], nullableDefault, bound: [] };
 };
 
 export const isNullableReference = (
   reference: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): boolean => resolveMapperConfig(reference, mapper)?.nullable === true;
 
 export const applyValueParser = (
   reference: string,
   value: unknown,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): unknown => {
   // Unlike resolveMapperConfig, a reference's own entry does not shadow its relation's parser.
   const parser =
-    lookupConfig(mapper, reference)?.valueParser ||
+    mapper.lookup(reference)?.valueParser ||
     relationFieldConfig(reference, mapper)?.valueParser;
   return parser ? parser(value) : value;
 };
@@ -135,9 +150,9 @@ const relationReference = (
 /** The document path a plan variable maps to, or undefined when the mapper has no entry for it. */
 const lookupFieldReference = (
   reference: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): ResolvedFieldReference | undefined => {
-  const config = lookupConfig(mapper, reference);
+  const config = mapper.lookup(reference);
   if (config?.relation) {
     return relationReference(config.relation, config.relation.field);
   }
@@ -148,7 +163,7 @@ const lookupFieldReference = (
   const parts = reference.split(".");
   const lastPart = parts.pop();
   if (parts.length > 0 && lastPart) {
-    const parentRelation = lookupConfig(mapper, parts.join("."))?.relation;
+    const parentRelation = mapper.lookup(parts.join("."))?.relation;
     if (parentRelation) {
       return relationReference(
         parentRelation,
@@ -164,7 +179,7 @@ const lookupFieldReference = (
 /** Resolves a plan variable to a document path, through the relation it belongs to if any. */
 export const resolveFieldReference = (
   reference: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): ResolvedFieldReference => {
   const resolved = lookupFieldReference(reference, mapper);
   if (!resolved) {
@@ -180,7 +195,7 @@ export const resolveFieldReference = (
  */
 export const relationOfReference = (
   reference: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): ResolvedFieldReference["relation"] =>
   lookupFieldReference(reference, mapper)?.relation;
 
@@ -210,19 +225,19 @@ export const unmappedReferenceError = (reference: string): Error =>
 export const createScopedMapper = (
   collectionPath: string,
   variableName: string,
-  fullMapper: Mapper,
-): Mapper =>
-  withMapperState(scopedLookup(collectionPath, variableName, fullMapper), nullableDefaultOf(fullMapper), boundOf(fullMapper));
+  fullMapper: ScopedMapper,
+): ScopedMapper => ({
+  ...fullMapper,
+  lookup: scopedLookup(collectionPath, variableName, fullMapper),
+});
 
 const scopedLookup =
-  (collectionPath: string, variableName: string, fullMapper: Mapper): Mapper =>
+  (collectionPath: string, variableName: string, fullMapper: ScopedMapper): ScopedMapper["lookup"] =>
   (key: string) => {
     if (key !== variableName && !key.startsWith(`${variableName}.`)) {
-      return typeof fullMapper === "function"
-        ? fullMapper(key)
-        : fullMapper[key] || { field: key };
+      return fullMapper.lookup(key);
     }
-    const relation = lookupConfig(fullMapper, collectionPath)?.relation;
+    const relation = fullMapper.lookup(collectionPath)?.relation;
     if (key === variableName) {
       const field = relation?.field;
       if (!field) return { field: key };
@@ -235,29 +250,5 @@ const scopedLookup =
 /** The declared stored type of a reference: its own entry's, or its relation's field's. */
 export const valueTypeOf = (
   reference: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): MapperConfig["valueType"] => resolveMapperConfig(reference, mapper)?.valueType;
-
-const NULLABLE_DEFAULT = new WeakMap<object, boolean>();
-const BOUND = new WeakMap<object, readonly string[]>();
-
-/**
- * A mapper that answers as `mapper` does, remembering the call's nullable default (for the
- * element fields a macro body reads, which no entry declares) and the macro variables whose
- * elements it reads.
- */
-export const withMapperState = (
-  mapper: Mapper,
-  nullableDefault: boolean,
-  bound: readonly string[] = [],
-): Mapper => {
-  const wrapped: Mapper = (key: string) => lookupConfig(mapper, key)!;
-  NULLABLE_DEFAULT.set(wrapped, nullableDefault);
-  BOUND.set(wrapped, bound);
-  return wrapped;
-};
-
-export const nullableDefaultOf = (mapper: Mapper): boolean =>
-  NULLABLE_DEFAULT.get(mapper) ?? false;
-
-export const boundOf = (mapper: Mapper): readonly string[] => BOUND.get(mapper) ?? [];

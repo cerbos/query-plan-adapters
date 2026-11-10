@@ -29,14 +29,14 @@ import { truth } from "./logic";
 import { translateHas } from "./presence";
 import { buildHierarchyFilter } from "./hierarchy";
 import type { HierarchyOperator } from "./hierarchy";
-import type { Mapper, MapperConfig, MongooseFilter } from "./index";
+import type { MapperConfig, MongooseFilter } from "./index";
+import type { ScopedMapper } from "./mapper";
 import { LAMBDA_BINDING_OPERATORS, foldLiteralCollection } from "./lambda";
 import {
   applyValueParser,
   createScopedMapper,
   declaredScalarType,
   isNullableReference,
-  nullableDefaultOf,
   relationOfReference,
   resolveFieldReference,
   resolveMapperConfig,
@@ -85,7 +85,7 @@ const SELECTABLE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
  */
 const selectMapMembers = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): PlanExpressionOperand => {
   if (!isExpression(operand)) {
     return operand;
@@ -148,7 +148,7 @@ const foldConstructor = (
 const foldSubMillisecondComparison = (
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): PlanExpressionOperand | undefined => {
   if (!Object.hasOwn(MIRRORED_COMPARISON, operator) || operands.length !== 2) return undefined;
   const floorOf = (operand: PlanExpressionOperand | undefined) => {
@@ -721,7 +721,7 @@ const mapLiteralLookupMembership = (
   operator: string,
   left: PlanExpressionOperand,
   right: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): PlanExpression | undefined => {
   if (operator !== "eq" && operator !== "ne") {
     return undefined;
@@ -1321,7 +1321,7 @@ function translateStringPredicate(
   // Mongo matches $regex with PCRE2, where `$` also matches immediately
   // before a final newline, so "tail\n" would satisfy endsWith("tail")
   // while CEL says false. `\z` is the absolute end of subject — the same
-  // rewrite normalizeRe2PatternForMongo applies to a trailing `$`.
+  // rewrite lowerRe2PatternForMongo applies to a trailing `$`.
   // `^` needs no counterpart: without PCRE2_MULTILINE it already matches
   // only at the start of the subject.
   const regexStr =
@@ -1429,7 +1429,7 @@ const translateHasIntersection = (
 const canEqualDeclaredType = (
   reference: string,
   constant: unknown,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): boolean => {
   const declared = declaredScalarType(reference, mapper);
   return (
@@ -1445,7 +1445,7 @@ const canEqualDeclaredType = (
 const canOrderAgainstDeclaredType = (
   reference: string,
   constant: unknown,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): boolean => {
   if (
     typeof constant !== "number" &&
@@ -1462,7 +1462,7 @@ const canOrderAgainstDeclaredType = (
 const withoutUnequalConstants = (
   reference: string,
   constants: unknown[],
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): unknown[] =>
   constants.filter((constant) =>
     canEqualDeclaredType(reference, constant, mapper),
@@ -1477,10 +1477,10 @@ const scopedMapperFor = (
   collection: string,
   variable: string,
   ctx: TranslateContext,
-): Mapper => {
+): ScopedMapper => {
   const scoped = createScopedMapper(collection, variable, ctx.mapper);
   return ctx.nullRepresentation === "omitted"
-    ? withOmittedNullDefault(scoped)
+    ? { lookup: withOmittedNullDefault(scoped.lookup), nullableDefault: false, bound: [] }
     : scoped;
 };
 
@@ -1800,9 +1800,11 @@ const translateLambda = (
   return buildFilter(conditionOperand, {
     ...ctx,
     // Strip the variable prefix from field references.
-    mapper: (key: string) => ({
-      field: key.replace(`${variableOperand.name}.`, ""),
-    }),
+    mapper: {
+      lookup: (key) => ({ field: key.replace(`${variableOperand.name}.`, "") }),
+      nullableDefault: false,
+      bound: [],
+    },
     // A standalone lambda preserves whether its caller entered a collection.
     scope:
       ctx.scope.kind === "root"
@@ -1870,7 +1872,7 @@ const isComparableScalar = (value: unknown): boolean =>
  */
 const listExpression = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): [unknown, MongooseFilter | undefined] => {
   if (isVariable(operand)) {
     const resolved = resolveFieldReference(operand.name, mapper);
@@ -1936,10 +1938,10 @@ const listExpression = (
 const projectedList = (
   relation: NonNullable<MapperConfig["relation"]>,
   field: string,
-  mapper: Mapper,
+  mapper: ScopedMapper,
 ): [unknown, MongooseFilter] => {
   const config = relation.fields?.[field];
-  const nullable = config?.nullable ?? nullableDefaultOf(mapper);
+  const nullable = config?.nullable ?? mapper.nullableDefault;
   if (nullable) {
     throw new UnsupportedQueryPlanError(
       "Whole-list comparison over a nullable element field: a null element is a missing attribute, which CEL raises on",

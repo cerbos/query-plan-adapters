@@ -486,14 +486,3 @@ export const lowerRe2PatternForMongo = (pattern: string): Re2Lowering => {
     throw error;
   }
 };
-
-/** The lowering as a pattern, refusing one CEL itself rejects. */
-export const normalizeRe2PatternForMongo = (pattern: string): string => {
-  const lowered = lowerRe2PatternForMongo(pattern);
-  if ("invalid" in lowered) {
-    throw new UnsupportedQueryPlanError(
-      `matches pattern is not a valid RE2 pattern (${lowered.invalid})`,
-    );
-  }
-  return lowered.pattern;
-};
