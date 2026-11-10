@@ -418,7 +418,7 @@ class AdversarialConformanceTest {
     // -- KIND 3: a policy can reach these, and the corpus does not carry them yet --------------
 
     /**
-     * <strong>Corpus gap.</strong> #668: the corpus counts the {@code mainCategory} chain with
+     * <strong>Corpus gap.</strong> #509: the corpus counts the {@code mainCategory} chain with
      * two spellings. These are the other thresholds and polarities, and rows without a
      * {@code mainCategory} must stay out of every one (#316). Seeds with one have one or two
      * subCategories, and the rest are CEL missing-path errors, so each of these is empty.

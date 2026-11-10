@@ -1130,7 +1130,7 @@ RSpec.describe Cerbos::Sequel do
     end
   end
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
+  # gap tracked by #509; delete it when its corpus action lands.
   describe "a CEL error compared with null" do
     let(:size_of_number) { expression("size", variable("request.resource.attr.aNumber")) }
 
@@ -1179,7 +1179,7 @@ RSpec.describe Cerbos::Sequel do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
+  # gap tracked by #509; delete it when its corpus action lands.
   describe "arithmetic over a string or a boolean" do
     # Corpus gap. Attributes are dyn, so each of these type-checks, and CEL has no overload for
     # any of them: every row is an error. SQL concatenates the string and the number, or reads the
@@ -1201,7 +1201,7 @@ RSpec.describe Cerbos::Sequel do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
+  # gap tracked by #509; delete it when its corpus action lands.
   describe "an operand of no type the operator takes" do
     let(:tags) { variable("request.resource.attr.tags") }
 
@@ -1234,7 +1234,7 @@ RSpec.describe Cerbos::Sequel do
   end
 
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
+  # gap tracked by #509; delete it when its corpus action lands.
   describe "a list or map literal" do
     # Corpus gap. `x in map` tests the keys. The planner folds a literal map to `==`, but a map
     # can still arrive as a value, and answering FALSE would grant its negation.

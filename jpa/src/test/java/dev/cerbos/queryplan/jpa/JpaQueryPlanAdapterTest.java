@@ -49,7 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Unit tests that hand-build plans and run the resulting filter against in-memory H2. No
  * Docker. Each test sits under one of the three banners from CODING_STANDARDS.md, "What a
  * translator unit test may pin": a branch CEL cannot reach, a caller-supplied argument the corpus
- * cannot vary, or a corpus gap (tracked by #668, deleted when the corpus action lands).
+ * cannot vary, or a corpus gap (tracked by #509, deleted when the corpus action lands).
  */
 class JpaQueryPlanAdapterTest {
 
@@ -1314,7 +1314,7 @@ class JpaQueryPlanAdapterTest {
     // ============================================================================================
     // KIND 3 — a policy can reach these, and the corpus does not carry them yet
     //
-    // Each test is a corpus gap tracked by #668. Delete it when its corpus action lands.
+    // Each test is a corpus gap tracked by #509. Delete it when its corpus action lands.
     // ============================================================================================
 
     // size(collection) <op> N translates to a correlated COUNT subquery.
@@ -1329,7 +1329,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: The corpus counts a collection against 1 alone
+         * <strong>Corpus gap.</strong> #509: The corpus counts a collection against 1 alone
          * ({@code size/greater-than/collection-above-one}, {@code size/equals/filtered-collection}); an arbitrary threshold under every
          * operator, over an element collection and an entity relation, is not carried.
          */
@@ -1359,7 +1359,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/less-than/value-first} mirrors the emptiness check alone; a
+         * <strong>Corpus gap.</strong> #509: {@code size/less-than/value-first} mirrors the emptiness check alone; a
          * value-first arbitrary threshold is not carried.
          */
         @Test
@@ -1397,14 +1397,14 @@ class JpaQueryPlanAdapterTest {
                     nval(threshold));
         }
 
-        /** <strong>Corpus gap.</strong> #668: fractional {@code ==} over a collection. */
+        /** <strong>Corpus gap.</strong> #509: fractional {@code ==} over a collection. */
         @Test
         void eqFractionalIsAlwaysFalse() {
             // A count is never 2.5; truncating the threshold to 2 would match.
             withResource(seeded(), () -> assertEquals(0, runCount(sizeCmp("eq", 2.5))));
         }
 
-        /** <strong>Corpus gap.</strong> #668: fractional {@code !=} over a collection. */
+        /** <strong>Corpus gap.</strong> #509: fractional {@code !=} over a collection. */
         @Test
         void neFractionalIsAlwaysTrue() {
             // Always true; truncating to ne 2 would exclude the seeded row.
@@ -1412,7 +1412,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/not-equals/negated-fractional-threshold-on-missing-attribute} and {@code size/equals/negated-fractional-threshold-on-missing-attribute}
+         * <strong>Corpus gap.</strong> #509: {@code size/not-equals/negated-fractional-threshold-on-missing-attribute} and {@code size/equals/negated-fractional-threshold-on-missing-attribute}
          * carry the negated string-length forms; the positive polarity is not carried.
          */
         @Test
@@ -1440,7 +1440,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: fractional equality over a chain, reachable through
+     * <strong>Corpus gap.</strong> #509: fractional equality over a chain, reachable through
      * {@code dyn()} (see {@link FractionalSizeEquality}) and not carried yet. A count is never fractional, but a row with no parent is still a CEL
      * error that denies under both polarities, so the collapsed result must stay UNKNOWN for it,
      * including under {@code not}.
@@ -1500,7 +1500,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/greater-or-equal/fractional-threshold} and {@code size/greater-or-equal/fractional-threshold-on-relation}
+         * <strong>Corpus gap.</strong> #509: {@code size/greater-or-equal/fractional-threshold} and {@code size/greater-or-equal/fractional-threshold-on-relation}
          * carry the inclusive {@code >=}; the strict {@code >} rounding is not carried.
          */
         @Test
@@ -1512,7 +1512,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/less-or-equal/fractional-threshold-on-relation} carries the inclusive
+         * <strong>Corpus gap.</strong> #509: {@code size/less-or-equal/fractional-threshold-on-relation} carries the inclusive
          * {@code <=}; the strict {@code <} rounding is not carried.
          */
         @Test
@@ -1524,7 +1524,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: A fractional threshold below 1 folds into the
+         * <strong>Corpus gap.</strong> #509: A fractional threshold below 1 folds into the
          * emptiness shortcuts, which no corpus action reaches.
          */
         @Test
@@ -1573,7 +1573,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/greater-than/huge-threshold} carries {@code >} at 2^32 alone;
+         * <strong>Corpus gap.</strong> #509: {@code size/greater-than/huge-threshold} carries {@code >} at 2^32 alone;
          * {@code ge}, {@code eq} and the 2^31 boundary are not carried.
          */
         @Test
@@ -1590,7 +1590,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/less-than/huge-threshold} carries {@code <} at 2^32 and
+         * <strong>Corpus gap.</strong> #509: {@code size/less-than/huge-threshold} carries {@code <} at 2^32 and
          * {@code size/less-than/negated-huge-threshold-on-missing-attribute} its negation over the nullable aOptionalString; {@code le} and
          * the 2^31 boundary are not carried.
          */
@@ -1604,7 +1604,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code ne} above int range is not carried.
+         * <strong>Corpus gap.</strong> #509: {@code ne} above int range is not carried.
          */
         @Test
         void neAboveIntMaxIncludesEmptyStringAndExcludesNull() {
@@ -1614,7 +1614,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: Thresholds below int range are not carried.
+         * <strong>Corpus gap.</strong> #509: Thresholds below int range are not carried.
          */
         @Test
         void belowIntMinThresholdsFoldMirrored() {
@@ -1631,7 +1631,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: A fractional threshold outside int range is not
+         * <strong>Corpus gap.</strong> #509: A fractional threshold outside int range is not
          * carried.
          */
         @Test
@@ -1644,7 +1644,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: The exact {@code Integer.MAX_VALUE} boundary is not
+         * <strong>Corpus gap.</strong> #509: The exact {@code Integer.MAX_VALUE} boundary is not
          * carried.
          */
         @Test
@@ -1660,7 +1660,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code collection/exists-one/several-matches} carries a single-equality body; a
+     * <strong>Corpus gap.</strong> #509: {@code collection/exists-one/several-matches} carries a single-equality body; a
      * disjunctive body is not carried.
      */
     @Test
@@ -1677,7 +1677,7 @@ class JpaQueryPlanAdapterTest {
     // databases reject.
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code hasIntersection(x, [])} against a scalar column is
+     * <strong>Corpus gap.</strong> #509: {@code hasIntersection(x, [])} against a scalar column is
      * not carried. It is not known whether the planner folds it as it folds {@code membership/in/empty-list}.
      */
     @Test
@@ -1687,7 +1687,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: The same empty constant list, over a relation.
+     * <strong>Corpus gap.</strong> #509: The same empty constant list, over a relation.
      */
     @Test
     void hasIntersectionRelationEmptyListCompiles() {
@@ -1696,7 +1696,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: The same empty constant list, over a {@code map()}
+     * <strong>Corpus gap.</strong> #509: The same empty constant list, over a {@code map()}
      * projection.
      */
     @Test
@@ -1722,7 +1722,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: the corpus carries {@code aString == [...]} field
+         * <strong>Corpus gap.</strong> #509: the corpus carries {@code aString == [...]} field
          * first ({@code type-mismatch/equals/string-field-against-list-literal}); the value-first
          * order and {@code !=} are not carried.
          */
@@ -1737,7 +1737,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code comparison/equals/whole-list-literal} carries this shape with a one-element
+         * <strong>Corpus gap.</strong> #509: {@code comparison/equals/whole-list-literal} carries this shape with a one-element
          * list; a multi-element list is not carried.
          */
         @Test
@@ -1750,7 +1750,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code identifier/equals/concatenation-value-first} solves a PREFIX concatenation back to
+     * <strong>Corpus gap.</strong> #509: {@code identifier/equals/concatenation-value-first} solves a PREFIX concatenation back to
      * a key equality; the suffix form is not carried.
      */
     @Test
@@ -1763,7 +1763,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code arithmetic/add/inexact-fraction-equals} and its siblings go through SQL
+     * <strong>Corpus gap.</strong> #509: {@code arithmetic/add/inexact-fraction-equals} and its siblings go through SQL
      * arithmetic; the exact whole-number solve in Java is not carried. With int literals the policy
      * is a CEL no-overload error at check time, since attribute values are doubles.
      */
@@ -1783,7 +1783,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: A constant beyond 2^53 is not carried.
+     * <strong>Corpus gap.</strong> #509: A constant beyond 2^53 is not carried.
      */
     @Test
     void addSolveOversizedLongRoutesToSqlArithmetic() {
@@ -1802,7 +1802,7 @@ class JpaQueryPlanAdapterTest {
     class CelPrimitives {
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/greater-than/string-length} and {@code size/greater-than/string-non-empty} carry
+         * <strong>Corpus gap.</strong> #509: {@code size/greater-than/string-length} and {@code size/greater-than/string-non-empty} carry
          * {@code >}; equality and the value-first mirror over a string length are not carried.
          */
         @Test
@@ -1831,7 +1831,7 @@ class JpaQueryPlanAdapterTest {
     class MinorOperators {
 
         /**
-         * <strong>Corpus gap.</strong> #668: The corpus orders a column against a constant
+         * <strong>Corpus gap.</strong> #509: The corpus orders a column against a constant
          * ({@code relation/less-than/one-hop} and siblings) and compares two columns for equality
          * ({@code comparison/equals/field-to-field}); a two-column ORDERING is not carried.
          */
@@ -1859,7 +1859,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code matches()} between two columns is not carried;
+         * <strong>Corpus gap.</strong> #509: {@code matches()} between two columns is not carried;
          * {@code regex/matches/anchored-prefix} refuses the constant form.
          */
         @Test
@@ -1879,7 +1879,7 @@ class JpaQueryPlanAdapterTest {
     class CollectionMacroComposition {
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code all} with a conjunctive body is not carried.
+         * <strong>Corpus gap.</strong> #509: {@code all} with a conjunctive body is not carried.
          */
         @Test
         void allWithNestedAnd() {
@@ -1892,7 +1892,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/equals/filtered-collection} carries {@code == 1}; the
+         * <strong>Corpus gap.</strong> #509: {@code size/equals/filtered-collection} carries {@code == 1}; the
          * other operators and the value-first mirror are not carried.
          */
         @Test
@@ -1970,7 +1970,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code null in R.attr.x} over a scalar column is not
+         * <strong>Corpus gap.</strong> #509: {@code null in R.attr.x} over a scalar column is not
          * carried; the corpus's null needles are over relations ({@code null/in/null-literal-in-resource-list}).
          */
         @Test
@@ -1996,7 +1996,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: The corpus's hierarchy constants are two segments or
+         * <strong>Corpus gap.</strong> #509: The corpus's hierarchy constants are two segments or
          * more; a single-segment ancestor, which has no strict ancestors at all, is not carried.
          */
         @Test
@@ -2010,7 +2010,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: A single-segment descendant prefix, under which the
+         * <strong>Corpus gap.</strong> #509: A single-segment descendant prefix, under which the
          * sibling branch is a genuine descendant, is not carried.
          */
         @Test
@@ -2024,7 +2024,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code overlaps} between two column hierarchies is not
+         * <strong>Corpus gap.</strong> #509: {@code overlaps} between two column hierarchies is not
          * carried.
          */
         @Test
@@ -2044,7 +2044,7 @@ class JpaQueryPlanAdapterTest {
     class OperandOrderSemantics {
 
         /**
-         * <strong>Corpus gap.</strong> #668: The corpus carries {@code comparison/less-or-equal/value-first}, {@code comparison/greater-or-equal/value-first},
+         * <strong>Corpus gap.</strong> #509: The corpus carries {@code comparison/less-or-equal/value-first}, {@code comparison/greater-or-equal/value-first},
          * {@code comparison/less-than/value-first} and {@code comparison/not-equals/value-first}; value-first {@code gt} is not carried.
          */
         @Test
@@ -2055,7 +2055,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code size/less-than/value-first} spells {@code 0 < size(...)}; the
+         * <strong>Corpus gap.</strong> #509: {@code size/less-than/value-first} spells {@code 0 < size(...)}; the
          * {@code 1 > size(...)} mirror, which lowers to NOT EXISTS, is not carried.
          */
         @Test
@@ -2068,7 +2068,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: The deprecated {@code has_intersection} spelling the
+         * <strong>Corpus gap.</strong> #509: The deprecated {@code has_intersection} spelling the
          * PDP still accepts is not carried.
          */
         @Test
@@ -2087,7 +2087,7 @@ class JpaQueryPlanAdapterTest {
     class TernaryIfExpressions {
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code conditional/ternary/boolean-branches} has two comparison branches; a
+         * <strong>Corpus gap.</strong> #509: {@code conditional/ternary/boolean-branches} has two comparison branches; a
          * constant boolean branch is not carried.
          */
         @Test
@@ -2120,7 +2120,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code conditional/ternary/negated} carries the negation; the
+         * <strong>Corpus gap.</strong> #509: {@code conditional/ternary/negated} carries the negation; the
          * ternary comparison under {@code and}, {@code or} and a double negation is not carried.
          */
         @Test
@@ -2164,7 +2164,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code eq}/{@code ne} against a ternary with a string
+         * <strong>Corpus gap.</strong> #509: {@code eq}/{@code ne} against a ternary with a string
          * branch is not carried; the corpus compares its ternaries by ordering.
          */
         @Test
@@ -2204,7 +2204,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code comparison/greater-than/infinity-from-ternary} reaches the constant-vs-constant
+         * <strong>Corpus gap.</strong> #509: {@code comparison/greater-than/infinity-from-ternary} reaches the constant-vs-constant
          * fold through a ternary; the other fold cases are not carried. They are spelled here as
          * direct constant comparisons, which the planner itself would fold; only the ternary form
          * could reach the adapter.
@@ -2246,7 +2246,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code conditional/ternary/negated-missing-attribute-condition} negates a ternary
+         * <strong>Corpus gap.</strong> #509: {@code conditional/ternary/negated-missing-attribute-condition} negates a ternary
          * COMPARISON; the negated bare ternary with a NULL condition column is not carried.
          */
         @Test
@@ -2269,7 +2269,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: A ternary as the receiver of a string match is not
+         * <strong>Corpus gap.</strong> #509: A ternary as the receiver of a string match is not
          * carried.
          */
         @Test
@@ -2295,7 +2295,7 @@ class JpaQueryPlanAdapterTest {
     class MultiHopRelationChains {
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code relation/size/non-empty-to-one-chain} carries the emptiness shortcut
+         * <strong>Corpus gap.</strong> #509: {@code relation/size/non-empty-to-one-chain} carries the emptiness shortcut
          * over the chain; an arbitrary count of flattened elements is not carried.
          */
         @Test
@@ -2325,7 +2325,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: Concatenating a null principal attribute is not carried;
+     * <strong>Corpus gap.</strong> #509: Concatenating a null principal attribute is not carried;
      * the corpus principal has no null attribute.
      */
     @Test
@@ -2354,7 +2354,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code hasIntersection} between two attributes is not
+     * <strong>Corpus gap.</strong> #509: {@code hasIntersection} between two attributes is not
      * carried.
      */
     @Test
@@ -2370,7 +2370,7 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code size()} over a {@code map()} projection is not
+     * <strong>Corpus gap.</strong> #509: {@code size()} over a {@code map()} projection is not
      * carried. The string-literal case is folded by the planner; it is here because it hits the
      * same error.
      */
@@ -2393,7 +2393,7 @@ class JpaQueryPlanAdapterTest {
     class BracketLikeEscaping {
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code string/starts-with/bracket-in-needle} and {@code hierarchy/descendent-of/bracket-in-path} carry
+         * <strong>Corpus gap.</strong> #509: {@code string/starts-with/bracket-in-needle} and {@code hierarchy/descendent-of/bracket-in-path} carry
          * the shape, but no CI leg runs SQL Server, where {@code [} starts a character class even
          * with an ESCAPE clause. On the other databases the escape changes nothing, so it is
          * checked on the pattern.
@@ -2419,7 +2419,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code string/contains/value-first} and its siblings run over a corpus
+         * <strong>Corpus gap.</strong> #509: {@code string/contains/value-first} and its siblings run over a corpus
          * whose aString is never NULL, so the NULL-needle denial has no discriminating seed there.
          */
         @Test
@@ -2439,7 +2439,7 @@ class JpaQueryPlanAdapterTest {
     class InVariableVariable {
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code in} whose second attribute is a scalar is not
+         * <strong>Corpus gap.</strong> #509: {@code in} whose second attribute is a scalar is not
          * carried; {@code membership/in/field-in-resource-list} maps a relation.
          */
         @Test
@@ -2470,7 +2470,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code arithmetic/subtract/field-minus-constant} carries one subtraction;
+         * <strong>Corpus gap.</strong> #509: {@code arithmetic/subtract/field-minus-constant} carries one subtraction;
          * constant-minus-column under an ordering is not carried.
          */
         @Test
@@ -2487,7 +2487,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: Arithmetic nested inside arithmetic is not carried;
+         * <strong>Corpus gap.</strong> #509: Arithmetic nested inside arithmetic is not carried;
          * {@code arithmetic/add/on-both-sides} puts one operation on each side.
          */
         @Test
@@ -2530,7 +2530,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code comparison/greater-than/nan-from-ternary} reaches {@code gt} with NaN on
+         * <strong>Corpus gap.</strong> #509: {@code comparison/greater-than/nan-from-ternary} reaches {@code gt} with NaN on
          * the left through a ternary; {@code ge}, {@code lt} and {@code le} are not carried. The
          * direct constant form here would be folded by the planner; only a ternary could send it.
          */
@@ -2546,7 +2546,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code comparison/less-or-equal/nan-from-ternary-on-both-sides} carries {@code le} with NaN on the
+         * <strong>Corpus gap.</strong> #509: {@code comparison/less-or-equal/nan-from-ternary-on-both-sides} carries {@code le} with NaN on the
          * right; the other three operators are not carried.
          */
         @Test
@@ -2562,7 +2562,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code comparison/greater-than/infinity-from-ternary} carries {@code gt} against an
+         * <strong>Corpus gap.</strong> #509: {@code comparison/greater-than/infinity-from-ternary} carries {@code gt} against an
          * infinity; the remaining operators and the infinity-versus-infinity ordering are not
          * carried.
          */
@@ -2583,7 +2583,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: A negative zero constant is not carried.
+         * <strong>Corpus gap.</strong> #509: A negative zero constant is not carried.
          */
         @Test
         void negativeZeroOrderingFollowsIeee() {
@@ -2607,7 +2607,7 @@ class JpaQueryPlanAdapterTest {
     class TimestampComparisons {
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code timestamp/less-than/relative-window}, {@code timestamp/equals/literal-instant}, {@code timestamp/equals/literal-instant-non-utc-offset}
+         * <strong>Corpus gap.</strong> #509: {@code timestamp/less-than/relative-window}, {@code timestamp/equals/literal-instant}, {@code timestamp/equals/literal-instant-non-utc-offset}
          * and {@code timestamp/not-equals/literal-instant} carry {@code lt}, {@code eq} and {@code ne}; {@code le}, {@code gt} and
          * {@code ge} are not carried.
          */
@@ -2625,7 +2625,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: {@code timestamp/greater-than/relative-window-value-first} carries value-first {@code gt} alone.
+         * <strong>Corpus gap.</strong> #509: {@code timestamp/greater-than/relative-window-value-first} carries value-first {@code gt} alone.
          */
         @Test
         void allSixOperatorsValueFirstAreMirroredNotInverted() {
@@ -2641,7 +2641,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: The corpus's timestamp constants are whole seconds; a
+         * <strong>Corpus gap.</strong> #509: The corpus's timestamp constants are whole seconds; a
          * sub-second threshold inside seed a5's microseconds is not carried.
          */
         @Test
@@ -2657,7 +2657,7 @@ class JpaQueryPlanAdapterTest {
         }
 
         /**
-         * <strong>Corpus gap.</strong> #668: A ternary over two timestamp constants is not carried.
+         * <strong>Corpus gap.</strong> #509: A ternary over two timestamp constants is not carried.
          */
         @Test
         void constantVsConstantFoldsViaTernarySubstitution() {
