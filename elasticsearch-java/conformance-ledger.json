@@ -1229,6 +1229,14 @@
       "status": "unsupported",
       "reason": "timeSince() is measured from the PDP's request time, which the plan does not carry; an Elasticsearch now is the store's clock at millisecond precision, and computing timeSince over a field needs a script"
     },
+    "timestamp/less-or-equal/sub-second-literal-at-stored-fraction": {
+      "status": "unsupported",
+      "reason": "A sub-millisecond timestamp literal needs a date_nanos field; an ordinary Elasticsearch date field keeps milliseconds, so the adapter refuses it"
+    },
+    "timestamp/less-or-equal/sub-second-literal-before-stored-fraction": {
+      "status": "unsupported",
+      "reason": "A sub-millisecond timestamp literal needs a date_nanos field; an ordinary Elasticsearch date field keeps milliseconds, so the adapter refuses it"
+    },
     "timestamp/less-than/relative-window": {
       "status": "unsupported",
       "reason": "The runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"

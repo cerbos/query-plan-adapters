@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a4"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/equals/literal-instant-value-first",
+  "intent": "timestamp(\"2024-06-01T00:00:00Z\") == timestamp(createdAt), the constant instant on the left.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2024-06-01T00:00:00Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/equals/literal-instant-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(\"2024-06-01T00:00:00Z\") == timestamp(R.attr.createdAt)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Only a4 is equal. A translation that expects the attribute on the left and refuses or misreads a constant there loses it."
+}

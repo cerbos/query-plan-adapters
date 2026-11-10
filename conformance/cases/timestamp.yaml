@@ -87,3 +87,73 @@ cases:
   condition:
     match:
       expr: 'timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00Z")'
+- id: 'timestamp/greater-than/literal-instant'
+  tier: adversarial
+  intent: 'timestamp(createdAt) > a literal at a4''s instant (2024-06-01T00:00:00Z).'
+  trap: 'a4 is equal and denied, the later rows allowed. Rendering > as >= over-grants a4; a3 has no createdAt and must deny.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) > timestamp("2024-06-01T00:00:00Z")'
+- id: 'timestamp/less-than/literal-instant-value-first'
+  tier: adversarial
+  intent: 'timestamp("2024-06-01T00:00:00Z") < timestamp(createdAt), the constant instant on the left.'
+  trap: 'Only the rows after a4 are allowed. Reading the operands positionally selects the earlier rows instead (a1, a5, a7, b3, h4), and inverting rather than mirroring the operator admits a4.'
+  condition:
+    match:
+      expr: 'timestamp("2024-06-01T00:00:00Z") < timestamp(R.attr.createdAt)'
+- id: 'timestamp/less-or-equal/literal-instant-value-first'
+  tier: adversarial
+  intent: 'timestamp("2024-06-01T00:00:00Z") <= timestamp(createdAt), the constant instant on the left.'
+  trap: 'a4 and the later rows are allowed. Reading the operands positionally selects a4 and the earlier rows, and mirroring <= to < drops a4.'
+  condition:
+    match:
+      expr: 'timestamp("2024-06-01T00:00:00Z") <= timestamp(R.attr.createdAt)'
+- id: 'timestamp/greater-or-equal/literal-instant-value-first'
+  tier: adversarial
+  intent: 'timestamp("2024-06-01T00:00:00Z") >= timestamp(createdAt), the constant instant on the left.'
+  trap: 'a4 and the earlier rows (a1, a5, a7, b3, h4) are allowed. Reading the operands positionally selects a4 and the later rows instead.'
+  condition:
+    match:
+      expr: 'timestamp("2024-06-01T00:00:00Z") >= timestamp(R.attr.createdAt)'
+- id: 'timestamp/equals/literal-instant-value-first'
+  tier: adversarial
+  intent: 'timestamp("2024-06-01T00:00:00Z") == timestamp(createdAt), the constant instant on the left.'
+  trap: 'Only a4 is equal. A translation that expects the attribute on the left and refuses or misreads a constant there loses it.'
+  condition:
+    match:
+      expr: 'timestamp("2024-06-01T00:00:00Z") == timestamp(R.attr.createdAt)'
+- id: 'timestamp/not-equals/literal-instant-value-first'
+  tier: adversarial
+  intent: 'timestamp("2024-06-01T00:00:00Z") != timestamp(createdAt), the constant instant on the left.'
+  trap: 'Every row except a4 and a3 is allowed: a3 has no createdAt, so CEL errors and denies it. A negation that admits NULL over-grants a3.'
+  condition:
+    match:
+      expr: 'timestamp("2024-06-01T00:00:00Z") != timestamp(R.attr.createdAt)'
+- id: 'timestamp/less-or-equal/sub-second-literal-before-stored-fraction'
+  tier: adversarial
+  intent: 'timestamp(createdAt) <= a literal one microsecond past a1 (2020-03-15T10:30:00.000001Z), inside a5''s second.'
+  trap: 'a1 is allowed and a5 (…00.123456Z) denied. A literal whose fraction is dropped and then filled to the end of its second at an upper bound, as an Elasticsearch date bound does, over-grants a5.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.000001Z")'
+- id: 'timestamp/less-or-equal/sub-second-literal-at-stored-fraction'
+  tier: adversarial
+  intent: 'timestamp(createdAt) <= a literal at a5''s exact microsecond (2020-03-15T10:30:00.123456Z).'
+  trap: 'a1 and a5 are allowed. A literal truncated to the second or the millisecond falls before a5 and drops it.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.123456Z")'
+- id: 'timestamp/equals/ternary-over-literal-instants'
+  tier: adversarial
+  intent: 'A ternary choosing between two timestamp literals, compared with the first ((aBool ? timestamp("2024-01-01T02:00:00+02:00") : timestamp("2030-01-01T00:00:00Z")) == timestamp("2024-01-01T00:00:00Z")).'
+  trap: 'The first branch is the same instant with an offset, so exactly the aBool-true rows are allowed, and j3 (no aBool) denies. Comparing the branch spellings as strings denies every row; dropping the ternary allows every row or none.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? timestamp("2024-01-01T02:00:00+02:00") : timestamp("2030-01-01T00:00:00Z")) == timestamp("2024-01-01T00:00:00Z")'
+- id: 'timestamp/greater-than/ternary-over-literal-instants'
+  tier: adversarial
+  intent: 'A ternary choosing between two timestamp literals, ordered against a third ((aBool ? timestamp("2024-01-01T00:00:00Z") : timestamp("2030-01-01T00:00:00Z")) > timestamp("2025-01-01T00:00:00Z")).'
+  trap: 'Only the aBool-false rows are allowed, and j3 (no aBool) denies. Swapping the branches selects the aBool-true rows instead.'
+  condition:
+    match:
+      expr: '(R.attr.aBool ? timestamp("2024-01-01T00:00:00Z") : timestamp("2030-01-01T00:00:00Z")) > timestamp("2025-01-01T00:00:00Z")'
