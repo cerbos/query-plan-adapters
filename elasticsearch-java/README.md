@@ -6,45 +6,26 @@ into an [Elasticsearch](https://www.elastic.co/elasticsearch) Query DSL clause, 
 
 ## Install
 
-The adapter is not published to Maven Central. Copy the package into your project:
+The adapter is **not published to Maven Central yet**. Build it and install it into your local
+Maven repository, from a checkout of this repository:
 
-1. Copy the whole directory [`src/main/java/dev/cerbos/queryplan/elasticsearch/`](src/main/java/dev/cerbos/queryplan/elasticsearch/)
-   (16 files; the adapter needs all of them) and adjust each file's `package` declaration.
-2. Add the dependencies below.
+```bash
+cd elasticsearch-java
+./gradlew publishToMavenLocal   # needs JDK 17+
+```
+
+Then depend on it, with `mavenLocal()` among your Gradle repositories:
 
 ```kotlin
-// Gradle
 dependencies {
-    implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
-    implementation("com.google.protobuf:protobuf-java:4.35.1")
+    implementation("dev.cerbos:cerbos-elasticsearch:0.1.0")
+    implementation("dev.cerbos:cerbos-sdk-java:0.20.1") // to call the PDP
 }
 ```
 
-```xml
-<!-- Maven -->
-<dependency>
-    <groupId>dev.cerbos</groupId>
-    <artifactId>cerbos-sdk-java</artifactId>
-    <version>0.20.1</version>
-</dependency>
-<dependency>
-    <groupId>com.google.protobuf</groupId>
-    <artifactId>protobuf-java</artifactId>
-    <version>4.35.1</version>
-</dependency>
-```
-
-The public surface is five files: `ElasticsearchQueryPlanAdapter` (the entry point, with its
-`Options`, `Result` and `ScalarType` types), `OperatorFunction`, and the three exceptions
-`UnsupportedPlanShapeException`, `UnmappedAttributeException` and `MalformedPlanException`. The
-other files are package-private collaborators (`PlanWalker`, `Scope`, `Polarity`,
-`LeafTranslator`, `CollectionTranslator`, `HierarchyTranslator`, `SizeTranslator`,
-`RegexTranslator`, `Queries`, `PlanValues`, `Refusals`).
-
-The build configures `publishToMavenLocal` only so [`example/`](example/) can resolve
-`dev.cerbos:cerbos-elasticsearch` as a real Maven coordinate
-([ADR 0002](../docs/adr/0002-examples-install-the-packed-artifact.md)). That is not a release: no
-POM metadata or signing for Maven Central is configured.
+The public surface is `ElasticsearchQueryPlanAdapter` (with its `Options`, `Result` and
+`ScalarType` types), `OperatorFunction`, and the exceptions `UnsupportedPlanShapeException`,
+`UnmappedAttributeException` and `MalformedPlanException`.
 
 ### Requirements
 
