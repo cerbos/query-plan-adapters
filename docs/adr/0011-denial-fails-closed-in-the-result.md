@@ -133,6 +133,8 @@ breaks them with a message saying what to declare.
   post-filtered result fields; pgx's `Where` and ent's `Predicate` on the unconditional kinds; and
   the null default in every adapter with a call-level option (prisma, drizzle, mongoose, convex,
   sqlalchemy, activerecord, spring-data, ent, pgx).
+- Adapters added after this decision default to `omitted` from their first release: jpa, efcore,
+  exposed, sequel and mongodb-ruby.
 - A caller that already switches on `kind` and `path` sees no behaviour change from decisions 1
   and 2, only a type change where it read a field the union no longer declares.
 - A caller relying on `explicit` without declaring it gets a refusal on a null comparison. On
