@@ -369,6 +369,41 @@ cases:
   condition:
     match:
       expr: '!hierarchy(R.attr.parent.aString).overlaps(hierarchy("one"))'
+- id: 'relation/size/fractional-not-equals-to-one-chain'
+  tier: adversarial
+  intent: 'size(mainCategory.subCategories) != dyn(1.5).'
+  trap: 'A count is never 1.5, so folding the comparison to TRUE returns every parentless row, which CEL denies as a missing path.'
+  condition:
+    match:
+      expr: 'size(R.attr.mainCategory.subCategories) != dyn(1.5)'
+- id: 'relation/size/less-than-two-to-one-chain'
+  tier: adversarial
+  intent: 'size(mainCategory.subCategories) < 2.'
+  trap: 'An unguarded chain counts 0 for parentless rows and returns them; CEL denies the missing path, so only a1/a6/a8/c1 pass.'
+  condition:
+    match:
+      expr: 'size(R.attr.mainCategory.subCategories) < 2'
+- id: 'relation/size/negated-at-least-two-to-one-chain'
+  tier: adversarial
+  intent: '!(size(mainCategory.subCategories) >= 2).'
+  trap: 'NOT over an unguarded count returns parentless rows; the guard must survive the negation (#316).'
+  condition:
+    match:
+      expr: '!(size(R.attr.mainCategory.subCategories) >= 2)'
+- id: 'relation/size/negated-filtered-fractional-equals-to-one-chain'
+  tier: adversarial
+  intent: '!(size(mainCategory.subCategories.filter(s, s.name == "finance")) == dyn(1.5)).'
+  trap: 'The filtered count is never 1.5; NOT over a folded FALSE returns parentless rows, which CEL denies as a missing path.'
+  condition:
+    match:
+      expr: '!(size(R.attr.mainCategory.subCategories.filter(s, s.name == "finance")) == dyn(1.5))'
+- id: 'relation/size/negated-fractional-equals-to-one-chain'
+  tier: adversarial
+  intent: '!(size(mainCategory.subCategories) == dyn(1.5)).'
+  trap: 'Folding the equality to FALSE lets NOT turn it TRUE for parentless rows, which CEL denies as a missing path.'
+  condition:
+    match:
+      expr: '!(size(R.attr.mainCategory.subCategories) == dyn(1.5))'
 - id: 'relation/size/negated-non-empty-to-one-chain'
   tier: adversarial
   intent: '!(size(mainCategory.subCategories) > 0), which the planner emits verbatim rather than as == 0.'
@@ -400,6 +435,13 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.mainCategory.subCategories) >= 0'
+- id: 'relation/size/not-equals-one-to-one-chain'
+  tier: adversarial
+  intent: 'size(mainCategory.subCategories) != 1, which only i9 (two subCategories) meets.'
+  trap: 'An unguarded chain counts 0 for parentless rows, and 0 != 1 returns them all.'
+  condition:
+    match:
+      expr: 'size(R.attr.mainCategory.subCategories) != 1'
 - id: 'relation/size/string-length-one-hop'
   tier: adversarial
   intent: 'size(parent.aString) <= 3: the length of a string reached through the to-one parent.'

@@ -172,6 +172,10 @@
       "status": "unsupported",
       "reason": "Same to-one parent read as a map as membership/in/map-attribute-keys, under negation."
     },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() of a map() projection reaches the count as a projected association, which has no count: each element is read through the lambda body, and a body that errors on one element (b6's unnamed tag) makes the whole count an error. Only a named collection or a filter() is counted, so the projection is refused."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "SQL temporal columns preserve instants but discard the RFC-3339 spelling compared by bare CEL attributes; timestamp wrappers are required."

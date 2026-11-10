@@ -84,6 +84,10 @@
       "status": "unsupported",
       "reason": "JPA Criteria has no RE2 predicate, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; the unbounded run `.{8,}` is lowered only as `.*` or `.+` between finite parts, so it is refused (register an OperatorFunction for matches to use a database regex)."
     },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() takes a collection attribute or a filter(); a map() projection is refused, since its body is evaluated per element and one erroring element (b6's unnamed tag) makes the count an error."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"

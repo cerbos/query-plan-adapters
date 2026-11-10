@@ -1,0 +1,64 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a8",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/size/negated-at-least-two-to-one-chain",
+  "intent": "!(size(mainCategory.subCategories) >= 2).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.mainCategory.subCategories"
+                      }
+                    ],
+                    "operator": "size"
+                  }
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "ge"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/size/negated-at-least-two-to-one-chain",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(size(R.attr.mainCategory.subCategories) >= 2)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "NOT over an unguarded count returns parentless rows; the guard must survive the negation (#316)."
+}
