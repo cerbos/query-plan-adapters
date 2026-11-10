@@ -776,8 +776,7 @@ func TestRelatedScalarTypeDeclaration(t *testing.T) {
 			t.Parallel()
 			cond := expr(operator, variable("request.resource.attr.count"), val(t, "x"))
 			query, _ := translateWith(t, mapper, cond)
-			require.Contains(t, query, "NULL")
-			require.NotContains(t, query, "LIKE")
+			require.Equal(t, "(CASE WHEN (1 = 0) THEN (1 = 1) END)", query, "a string operator over a declared number is a typed UNKNOWN")
 		})
 	}
 	cond := expr("ne", variable("request.resource.attr.count"), val(t, "x"))
