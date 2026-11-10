@@ -7,6 +7,7 @@ import {
 const adapter = new PrismaBetterSqlite3({
   url: "./prisma/dev-adversarial.db",
 });
+
 const prisma = new PrismaClient({ adapter });
 
 export { prisma, Prisma };

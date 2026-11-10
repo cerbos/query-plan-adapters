@@ -16,16 +16,21 @@ export const MAX_CEL_TIMESTAMP = new Date(MAX_CEL_TIMESTAMP_MILLISECONDS);
 /** Whether a CEL timestamp literal is an RFC 3339 instant a BSON Date can hold exactly. */
 export const isRfc3339Timestamp = (value: string): boolean => {
   const match = RFC3339_TIMESTAMP_PATTERN.exec(value);
+
   if (!match) {
     return false;
   }
+
   const [year, month, day] = [match[1], match[2], match[3]].map(Number);
+
   if (year === undefined || month === undefined || day === undefined) {
     return false;
   }
+
   const calendarDate = new Date(0);
   calendarDate.setUTCHours(0, 0, 0, 0);
   calendarDate.setUTCFullYear(year, month - 1, day);
+
   if (
     calendarDate.getUTCFullYear() !== year ||
     calendarDate.getUTCMonth() !== month - 1 ||
@@ -35,6 +40,7 @@ export const isRfc3339Timestamp = (value: string): boolean => {
   }
 
   const instant = new Date(value).getTime();
+
   return (
     !Number.isNaN(instant) &&
     instant >= MIN_CEL_TIMESTAMP_MILLISECONDS &&
@@ -56,21 +62,29 @@ export const subMillisecondTimestampBounds = (
   value: string,
 ): { floor: Date; ceil: Date } | undefined => {
   const match = RFC3339_NANOSECOND_TIMESTAMP_PATTERN.exec(value);
+
   if (!match) {
     return undefined;
   }
+
   const [, head, fraction = "", offset] = match;
+
   if (fraction.length <= 3 || /^\d{3}0*$/.test(fraction)) {
     return undefined;
   }
+
   const milliseconds = `${head}.${fraction.slice(0, 3)}${offset}`;
+
   if (!isRfc3339Timestamp(milliseconds)) {
     return undefined;
   }
+
   const floor = new Date(milliseconds);
   const ceil = new Date(floor.getTime() + 1);
+
   if (ceil.getTime() > MAX_CEL_TIMESTAMP_MILLISECONDS) {
     return undefined;
   }
+
   return { floor, ceil };
 };

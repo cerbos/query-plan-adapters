@@ -1,12 +1,12 @@
 import {
   PlanResourcesResponse,
   PlanExpressionOperand,
-  PlanExpression,
   PlanKind,
 } from "@cerbos/core";
 import type {
   Expression,
   FilterBuilder,
+  GenericDocument,
   GenericTableInfo,
 } from "convex/server";
 
@@ -80,7 +80,7 @@ export interface QueryPlanToConvexArgs {
   nullAttributeRepresentation?: NullAttributeRepresentation;
 }
 
-type PostFilter = (doc: Record<string, unknown>) => boolean;
+type PostFilter = (doc: GenericDocument) => boolean;
 
 // `filter` is only ever the whole condition, so applying it alone is correct wherever it appears.
 // The pushable half of a split condition is a `prefilter`: it narrows the candidates and decides
@@ -137,6 +137,7 @@ const buildFilters = (
   ) {
     const pushable: PlanExpressionOperand[] = [];
     const nonPushable: PlanExpressionOperand[] = [];
+
     for (const op of expression.operands) {
       (canPushToDb(op, mapper) ? pushable : nonPushable).push(op);
     }
@@ -163,7 +164,7 @@ const conjunction = (
 ): PlanExpressionOperand =>
   operands.length === 1
     ? operands[0]!
-    : ({ operator: "and", operands } as PlanExpression);
+    : { operator: "and", operands };
 
 const convexFilter =
   (expression: PlanExpressionOperand, mapper: Mapper): ConvexFilter =>
@@ -194,9 +195,11 @@ export function queryPlanToConvex({
       const { condition } = queryPlan;
       const omitted = nullAttributeRepresentation === "omitted";
       assertNoListValuedCondition(condition);
+
       if (omitted) {
         assertNoNullComparisonOperands(condition);
       }
+
       validateStructure(condition);
       assertEveryReferenceMapped(condition, mapper);
 
@@ -205,6 +208,7 @@ export function queryPlanToConvex({
         omitted ? withOmittedNullDefault(mapper) : mapper,
         omitted,
       );
+
       if (result.path !== "db" && !allowPostFilter) {
         throw new Error(
           "The query plan contains conditions that cannot be evaluated by Convex's " +
@@ -213,8 +217,10 @@ export function queryPlanToConvex({
             "{ allowPostFilter: true } to opt in to this behavior.",
         );
       }
+
       return result;
     }
+
     default:
       throw new UnsupportedQueryPlanError("Invalid query plan.");
   }

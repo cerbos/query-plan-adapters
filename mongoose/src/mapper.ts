@@ -1,4 +1,6 @@
 import type { Mapper, MapperConfig } from "./index";
+import { isFunction } from "./narrowing";
+import type { MongoValue } from "./expression";
 
 /**
  * The caller's mapper as one translation scope reads it. `queryPlanToMongoose` builds the root
@@ -20,9 +22,11 @@ const relationFieldConfig = (
 ): MapperConfig | undefined => {
   const parts = reference.split(".");
   const lastPart = parts.pop();
+
   if (parts.length === 0 || !lastPart) {
     return undefined;
   }
+
   return mapper.lookup(parts.join("."))?.relation?.fields?.[lastPart];
 };
 
@@ -45,37 +49,36 @@ export const declaredScalarType = (
 ): "number" | "string" | "boolean" | undefined => {
   const config = resolveMapperConfig(reference, mapper);
   const relation = config?.relation;
+
   const typed = relation
     ? relation.field
       ? relation.fields?.[relation.field]
       : undefined
     : config;
+
   if (!typed || typed.valueParser || config?.valueParser) {
     return undefined;
   }
+
   return typed.valueType === "dateTime" ? undefined : typed.valueType;
 };
 
 /** `config` with `nullable: true` wherever it, or a relation field beneath it, declares nothing. */
 const nullableByDefault = (config: MapperConfig): MapperConfig => {
   const fields = config.relation?.fields;
-  return {
-    ...config,
-    nullable: config.nullable ?? true,
-    ...(config.relation && fields
-      ? {
-          relation: {
-            ...config.relation,
-            fields: Object.fromEntries(
-              Object.entries(fields).map(([key, field]) => [
-                key,
-                nullableByDefault(field),
-              ]),
-            ),
-          },
-        }
-      : {}),
-  };
+
+  const defaulted: MapperConfig = { ...config, nullable: config.nullable ?? true };
+
+  if (config.relation && fields) {
+    defaulted.relation = {
+      ...config.relation,
+      fields: Object.fromEntries(
+        Object.entries(fields).map(([key, field]) => [key, nullableByDefault(field)]),
+      ),
+    };
+  }
+
+  return defaulted;
 };
 
 /**
@@ -92,23 +95,26 @@ export const withOmittedNullDefault =
   (lookup: ScopedMapper["lookup"]): ScopedMapper["lookup"] =>
   (reference) => {
     const config = lookup(reference);
+
     return config && nullableByDefault(config);
   };
 
 /** The root scope: the caller's mapper, in either of its two forms, under the call's convention. */
 export const rootMapper = (mapper: Mapper, nullableDefault: boolean): ScopedMapper => {
-  if (typeof mapper === "function") {
+  if (isFunction(mapper)) {
     return {
       lookup: nullableDefault ? withOmittedNullDefault(mapper) : mapper,
       nullableDefault,
       bound: [],
     };
   }
+
   const entries = nullableDefault
     ? Object.fromEntries(
         Object.entries(mapper).map(([key, config]) => [key, nullableByDefault(config)]),
       )
     : mapper;
+
   return { lookup: (reference) => entries[reference], nullableDefault, bound: [] };
 };
 
@@ -119,13 +125,14 @@ export const isNullableReference = (
 
 export const applyValueParser = (
   reference: string,
-  value: unknown,
+  value: MongoValue,
   mapper: ScopedMapper,
-): unknown => {
+): MongoValue => {
   // Unlike resolveMapperConfig, a reference's own entry does not shadow its relation's parser.
   const parser =
     mapper.lookup(reference)?.valueParser ||
     relationFieldConfig(reference, mapper)?.valueParser;
+
   return parser ? parser(value) : value;
 };
 
@@ -153,17 +160,21 @@ const lookupFieldReference = (
   mapper: ScopedMapper,
 ): ResolvedFieldReference | undefined => {
   const config = mapper.lookup(reference);
+
   if (config?.relation) {
     return relationReference(config.relation, config.relation.field);
   }
+
   if (config?.field) {
     return { path: [config.field] };
   }
 
   const parts = reference.split(".");
   const lastPart = parts.pop();
+
   if (parts.length > 0 && lastPart) {
     const parentRelation = mapper.lookup(parts.join("."))?.relation;
+
     if (parentRelation) {
       return relationReference(
         parentRelation,
@@ -182,9 +193,11 @@ export const resolveFieldReference = (
   mapper: ScopedMapper,
 ): ResolvedFieldReference => {
   const resolved = lookupFieldReference(reference, mapper);
+
   if (!resolved) {
     throw unmappedReferenceError(reference);
   }
+
   return resolved;
 };
 
@@ -237,13 +250,19 @@ const scopedLookup =
     if (key !== variableName && !key.startsWith(`${variableName}.`)) {
       return fullMapper.lookup(key);
     }
+
     const relation = fullMapper.lookup(collectionPath)?.relation;
+
     if (key === variableName) {
       const field = relation?.field;
+
       if (!field) return { field: key };
+
       return relation.fields?.[field] ?? { field };
     }
+
     const elementField = key.slice(variableName.length + 1);
+
     return relation?.fields?.[elementField] || { field: elementField };
   };
 

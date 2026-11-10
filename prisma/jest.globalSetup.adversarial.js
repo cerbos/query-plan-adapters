@@ -25,6 +25,7 @@ const { execFileSync } = require("node:child_process");
 // image reference in the repository carries both halves.
 const POSTGRES_IMAGE =
   "postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b";
+
 const MYSQL_IMAGE =
   "mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69";
 
@@ -99,6 +100,7 @@ async function applyMysqlCollation(url) {
   // Spelled out rather than handed the URL: the connector's own parser accepts only a
   // `mariadb://` scheme, and testcontainers hands back a `mysql://` one.
   const { hostname, port, username, password, pathname } = new URL(url);
+
   const connection = await mariadb.createConnection({
     host: hostname,
     port: Number(port),
@@ -106,10 +108,12 @@ async function applyMysqlCollation(url) {
     password: decodeURIComponent(password),
     database: decodeURIComponent(pathname.replace(/^\//, "")),
   });
+
   try {
     const tables = await connection.query(
       "select TABLE_NAME as name from information_schema.TABLES where TABLE_SCHEMA = database()"
     );
+
     // An empty list would leave every conversion unexecuted and the whole leg running on Prisma's
     // case-insensitive default while reporting nothing.
     if (tables.length === 0) {
@@ -117,12 +121,15 @@ async function applyMysqlCollation(url) {
         "prisma db push created no tables: the MySQL collation conversion would guard nothing"
       );
     }
+
     await connection.query("SET FOREIGN_KEY_CHECKS = 0");
+
     for (const { name } of tables) {
       await connection.query(
         `ALTER TABLE \`${name}\` CONVERT TO CHARACTER SET utf8mb4 COLLATE ${MYSQL_COLLATION}`
       );
     }
+
     await connection.query("SET FOREIGN_KEY_CHECKS = 1");
   } finally {
     await connection.end();
@@ -137,6 +144,7 @@ const CONTAINER_STORES = {
   postgres: {
     async start() {
       const { PostgreSqlContainer } = require("@testcontainers/postgresql");
+
       return new PostgreSqlContainer(POSTGRES_IMAGE)
         .withEnvironment({ POSTGRES_INITDB_ARGS })
         .start();
@@ -149,6 +157,7 @@ const CONTAINER_STORES = {
   mysql: {
     async start() {
       const { MySqlContainer } = require("@testcontainers/mysql");
+
       // Stock server settings: see MYSQL_COLLATION above for why configuring the server here
       // would prove nothing.
       return new MySqlContainer(MYSQL_IMAGE).start();
@@ -179,6 +188,7 @@ const MAJORS = {
 module.exports = async function globalSetup() {
   const storeName = process.env.ADAPTER_TEST_DB ?? "sqlite";
   const store = CONTAINER_STORES[storeName];
+
   if (!store) {
     return;
   }
@@ -190,6 +200,7 @@ module.exports = async function globalSetup() {
 
   const prismaVersion = process.env.PRISMA_VERSION || "7";
   const major = MAJORS[prismaVersion];
+
   if (!major) {
     throw new Error(
       `Unknown PRISMA_VERSION "${prismaVersion}": expected one of ${Object.keys(MAJORS).join(", ")}`

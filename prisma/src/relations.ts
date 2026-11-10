@@ -34,15 +34,19 @@ export function relationFilter(
   inner: PrismaFilter
 ): PrismaFilter {
   const declared = relation.subqueryFilter;
+
   if (declared === undefined) {
     return { [relation.name]: { [operator]: inner } };
   }
+
   const isEmpty = Object.keys(inner).length === 0;
+
   if (operator === "every") {
     return isEmpty
       ? { [relation.name]: { every: inner } }
       : { [relation.name]: { none: { AND: [declared, { NOT: inner }] } } };
   }
+
   return {
     [relation.name]: {
       [operator]: isEmpty ? declared : { AND: [declared, inner] },
@@ -59,9 +63,11 @@ export function wrapInRelations(
   filter: PrismaFilter
 ): PrismaFilter {
   let current = filter;
+
   for (const relation of [...(relations ?? [])].reverse()) {
     current = relationFilter(relation, relationOperator(relation), current);
   }
+
   return current;
 }
 
@@ -94,6 +100,7 @@ export function buildLeadingHopsExistFilter(
   if (restRelations.length === 0) {
     return undefined;
   }
+
   // The last entry is the collection being iterated; everything before it is a hop.
   return buildHopsExistFilter([head, ...restRelations.slice(0, -1)]);
 }
@@ -130,12 +137,16 @@ function buildExpressionHopsExistFilter(
       if (seen.has(expr.name)) {
         return;
       }
+
       seen.add(expr.name);
       const { relations } = resolveFieldReference(expr.name, context);
+
       if (!relations || relations.length === 0) {
         return;
       }
+
       const last = relations[relations.length - 1]!;
+
       // Every to-ONE relation on the path is a hop that must EXIST — including a TRAILING one,
       // which is the case a chain of to-many relations never produces. `parent.aBool` resolves
       // to a single to-one relation, and `NOT { parent: { is: { aBool: true } } }` is TRUE for
@@ -145,14 +156,18 @@ function buildExpressionHopsExistFilter(
       const hopFilter = buildHopsExistFilter(
         last.type === "one" ? relations : relations.slice(0, -1)
       );
+
       if (hopFilter !== undefined) {
         hops.push(hopFilter);
       }
+
       return;
     }
+
     if (!isOperatorOperand(expr) || expr.operator === "lambda") {
       return;
     }
+
     expr.operands.forEach(visit);
   };
 
@@ -161,6 +176,7 @@ function buildExpressionHopsExistFilter(
   if (hops.length === 0) {
     return undefined;
   }
+
   return hops.length === 1 ? hops[0]! : { AND: hops };
 }
 
@@ -179,6 +195,7 @@ export function negateFilter(filter: PrismaFilter): PrismaFilter {
         "every row, where the negated condition matches none"
     );
   }
+
   return { NOT: filter };
 }
 
@@ -193,6 +210,7 @@ export function negateRequiringHops(
 ): PrismaFilter {
   const hops = buildExpressionHopsExistFilter(operand, context);
   const negated = negateFilter(filter);
+
   return hops === undefined ? negated : { AND: [hops, negated] };
 }
 

@@ -13,6 +13,7 @@ import type { TranslationContext } from "./mapping";
 import { assertDefined } from "./plan";
 import { resolveOperand } from "./translate";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isString } from "./narrowing";
 
 // Upper bound on the IN-list produced when enumerating a constant receiver's substrings.
 const MAX_ENUMERATED_NEEDLES = 1000;
@@ -23,6 +24,7 @@ const MAX_ENUMERATED_NEEDLES = 1000;
  */
 function candidateNeedles(operator: string, haystack: string): Set<string> {
   const candidates = new Set<string>([""]);
+
   if (operator === "startsWith") {
     for (let i = 1; i <= haystack.length; i++) {
       candidates.add(haystack.slice(0, i));
@@ -38,6 +40,7 @@ function candidateNeedles(operator: string, haystack: string): Set<string> {
       }
     }
   }
+
   return candidates;
 }
 
@@ -56,16 +59,19 @@ export function handleStringOperator(
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError(`${operator} requires exactly two operands`);
   }
+
   const receiver = resolveOperand(
     assertDefined(operands[0], `${operator} requires a receiver operand`),
     context
   );
+
   const needle = resolveOperand(
     assertDefined(operands[1], `${operator} requires a needle operand`),
     context
   );
 
   if (isResolvedFieldReference(receiver)) assertStringField(receiver, operator);
+
   if (isResolvedFieldReference(needle)) assertStringField(needle, operator);
   // A null element of a projected list is a value, and a string function over it is an error.
   recordErroringNullElement(context, operands[0]!, receiver);
@@ -74,9 +80,11 @@ export function handleStringOperator(
   // Column receiver, constant needle: Prisma's LIKE-based filter.
   if (isResolvedFieldReference(receiver) && isResolvedValue(needle)) {
     const { value } = needle;
-    if (typeof value !== "string") {
+
+    if (!isString(value)) {
       throw new UnsupportedQueryPlanError(`${operator} operator requires string value`);
     }
+
     // A prefix is matched by the range of strings it bounds, so startsWith needs no LIKE escaping
     // (see buildPrefixFilter). Prisma emits LIKE without an ESCAPE clause and does not escape
     // wildcard characters, so a contains or endsWith needle containing % or _ would match as a
@@ -92,6 +100,7 @@ export function handleStringOperator(
     if (operator === "startsWith") {
       return buildPrefixFilter(receiver, value);
     }
+
     if (/[%_\\]/.test(value)) {
       throw new UnsupportedQueryPlanError(
         `Cannot translate ${operator} with a needle containing LIKE metacharacters (%, _ or \\): ` +
@@ -99,6 +108,7 @@ export function handleStringOperator(
           "escape character on PostgreSQL and MySQL"
       );
     }
+
     return buildFieldFilter(receiver, operator, value);
   }
 
@@ -106,16 +116,19 @@ export function handleStringOperator(
   // candidate needle the constant admits into an exact IN filter. No LIKE, so no escaping
   // hazards; a NULL needle column stays excluded (CEL missing-attribute deny).
   if (isResolvedValue(receiver) && isResolvedFieldReference(needle)) {
-    if (typeof receiver.value !== "string") {
+    if (!isString(receiver.value)) {
       throw new UnsupportedQueryPlanError(`${operator} operator requires a string receiver`);
     }
+
     const candidates = candidateNeedles(operator, receiver.value);
+
     if (candidates.size > MAX_ENUMERATED_NEEDLES) {
       throw new UnsupportedQueryPlanError(
         `Cannot translate ${operator} with a constant receiver of this length: ` +
           `enumerating its ${candidates.size} candidate needles exceeds the ${MAX_ENUMERATED_NEEDLES}-entry limit`
       );
     }
+
     return buildFieldFilter(needle, "in", [...candidates]);
   }
 

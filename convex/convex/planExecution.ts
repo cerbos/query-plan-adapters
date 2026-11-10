@@ -3,6 +3,8 @@ import type {
   PlanResourcesResponse,
 } from "@cerbos/core";
 
+import type { Value as ConvexValue } from "convex/values";
+
 import { PlanKind } from "../src/index";
 import type { QueryPlanToConvexResult } from "../src/index";
 
@@ -10,16 +12,24 @@ import type { QueryPlanToConvexResult } from "../src/index";
 // crosses the Convex boundary as `v.any()`, and reports which half of the adapter's output
 // actually answered the query.
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+interface ConvexRecord {
+  [key: string]: ConvexValue;
+}
+
+const isRecord = (value: unknown): value is ConvexRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isPlanOperand = (value: unknown): value is PlanExpressionOperand => {
   if (!isRecord(value)) return false;
+
   if (typeof value["operator"] === "string") {
     const operands = value["operands"];
+
     return Array.isArray(operands) && operands.every(isPlanOperand);
   }
+
   if (typeof value["name"] === "string") return true;
+
   return Object.prototype.hasOwnProperty.call(value, "value");
 };
 
@@ -28,9 +38,11 @@ export const isPlanResourcesResponse = (
 ): value is PlanResourcesResponse => {
   if (!isRecord(value)) return false;
   const kind = value["kind"];
+
   if (kind === PlanKind.ALWAYS_ALLOWED || kind === PlanKind.ALWAYS_DENIED) {
     return true;
   }
+
   return kind === PlanKind.CONDITIONAL && isPlanOperand(value["condition"]);
 };
 
@@ -47,5 +59,6 @@ export const executionPathOf = (
   translated: QueryPlanToConvexResult,
 ): ExecutionPath => {
   if (translated.kind !== PlanKind.CONDITIONAL) return "unconditional";
+
   return translated.path;
 };

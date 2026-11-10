@@ -1,3 +1,4 @@
+import { isBigint, isBoolean, isNumber, isString, lookup } from "./narrowing";
 // CEL's value semantics, as the post-filter needs them. Every function here is total: a value CEL
 // would raise on comes back as `EVALUATION_ERROR`, which the evaluator propagates the way CEL
 // propagates an error — through `&&`/`||` absorption, and to a deny at the root.
@@ -13,13 +14,32 @@ export const EVALUATION_ERROR = Symbol("Cerbos evaluation error");
 
 export type EvaluationError = typeof EVALUATION_ERROR;
 
-export const isEvaluationError = (value: unknown): value is EvaluationError =>
+/** A value as the post-filter evaluates it: metadata, a literal, or what an operator returns. */
+export type CelValue =
+  | string
+  | number
+  | bigint
+  | boolean
+  | null
+  | undefined
+  | EvaluationError
+  | CelTimestamp
+  | CelDuration
+  | CelHierarchy
+  | CelValue[]
+  | CelMap;
+
+export interface CelMap {
+  [key: string]: CelValue;
+}
+
+export const isEvaluationError = (value: CelValue): value is EvaluationError =>
   value === EVALUATION_ERROR;
 
-export const asBoolean = (value: unknown): boolean | EvaluationError =>
-  typeof value === "boolean" ? value : EVALUATION_ERROR;
+export const asBoolean = (value: CelValue): boolean | EvaluationError =>
+  isBoolean(value) ? value : EVALUATION_ERROR;
 
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
+export const isRecord = (value: CelValue): value is CelMap =>
   typeof value === "object" &&
   value !== null &&
   !Array.isArray(value) &&
@@ -28,8 +48,9 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
   !(value instanceof CelHierarchy);
 
 /** Reads a dotted path; an absent key at any level is CEL's missing-attribute error. */
-export const getNestedValue = (obj: unknown, path: string): unknown => {
-  let current: unknown = obj;
+export const getNestedValue = (obj: CelValue, path: string): CelValue => {
+  let current: CelValue = obj;
+
   for (const part of path.split(".")) {
     if (
       !isRecord(current) ||
@@ -37,8 +58,10 @@ export const getNestedValue = (obj: unknown, path: string): unknown => {
     ) {
       return EVALUATION_ERROR;
     }
+
     current = current[part];
   }
+
   return current;
 };
 
@@ -53,11 +76,11 @@ export class CelDuration {
 }
 
 /** A number, or an int beyond the safe range: `int()` returns a bigint only there. */
-const isNumeric = (value: unknown): value is number | bigint =>
+const isNumeric = (value: CelValue): value is number | bigint =>
   typeof value === "number" || typeof value === "bigint";
 
 /** CEL's heterogeneous equality: numbers compare by value across int and double, anything else by type. */
-export const valuesEqual = (left: unknown, right: unknown): boolean => {
+export const valuesEqual = (left: CelValue, right: CelValue): boolean => {
   if (isNumeric(left) && isNumeric(right)) {
     // JavaScript compares a bigint with a number exactly, so 2^53 + 1 never equals 2^53.
     return (
@@ -66,6 +89,7 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       !(left < right || left > right)
     );
   }
+
   if (left instanceof CelTimestamp || right instanceof CelTimestamp) {
     return (
       left instanceof CelTimestamp &&
@@ -73,6 +97,7 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       left.nanos === right.nanos
     );
   }
+
   if (left instanceof CelDuration || right instanceof CelDuration) {
     return (
       left instanceof CelDuration &&
@@ -80,19 +105,24 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       left.nanos === right.nanos
     );
   }
+
   if (left instanceof CelHierarchy && right instanceof CelHierarchy) {
-    return valuesEqual(left.segments, right.segments);
+    return valuesEqual([...left.segments], [...right.segments]);
   }
+
   if (Object.is(left, right)) return true;
+
   if (Array.isArray(left) && Array.isArray(right)) {
     return (
       left.length === right.length &&
       left.every((value, index) => valuesEqual(value, right[index]))
     );
   }
+
   if (isRecord(left) && isRecord(right)) {
     const leftKeys = Object.keys(left).sort();
     const rightKeys = Object.keys(right).sort();
+
     return (
       leftKeys.length === rightKeys.length &&
       leftKeys.every(
@@ -101,6 +131,7 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       )
     );
   }
+
   return false;
 };
 
@@ -108,48 +139,52 @@ export type ComparisonOperator = "eq" | "ne" | "lt" | "le" | "gt" | "ge";
 
 export const compareValues = (
   operator: ComparisonOperator,
-  left: unknown,
-  right: unknown,
+  left: CelValue,
+  right: CelValue,
 ): boolean | EvaluationError => {
   if (isEvaluationError(left) || isEvaluationError(right)) {
     return EVALUATION_ERROR;
   }
+
   if (operator === "eq" || operator === "ne") {
     // A hierarchy compares only with a hierarchy: anything else is no-such-overload in Cerbos.
     if ((left instanceof CelHierarchy) !== (right instanceof CelHierarchy)) {
       return EVALUATION_ERROR;
     }
+
     const equal = valuesEqual(left, right);
+
     return operator === "eq" ? equal : !equal;
   }
-  let a: unknown = left;
-  let b: unknown = right;
-  if (typeof left === "string" && typeof right === "string") {
+
+  let x: number | bigint;
+  let y: number | bigint;
+
+  if (isString(left) && isString(right)) {
     // cel-go orders strings by their UTF-8 bytes, which is code point order. JavaScript's `<`
     // compares UTF-16 code units, which puts an astral character (a surrogate pair, 0xD800…)
     // before U+E000–U+FFFF.
-    a = compareCodePoints(left, right);
-    b = 0;
-  } else if (typeof left === "boolean" && typeof right === "boolean") {
+    x = compareCodePoints(left, right);
+    y = 0;
+  } else if (isBoolean(left) && isBoolean(right)) {
     // CEL orders bools: false < true.
-    a = Number(left);
-    b = Number(right);
+    x = Number(left);
+    y = Number(right);
   } else if (
     (left instanceof CelTimestamp && right instanceof CelTimestamp) ||
     (left instanceof CelDuration && right instanceof CelDuration)
   ) {
-    a = left.nanos;
-    b = right.nanos;
+    x = left.nanos;
+    y = right.nanos;
   } else if (Number.isNaN(left) || Number.isNaN(right)) {
     return false;
-  } else if (
-    !(isNumeric(left) && isNumeric(right)) &&
-    (typeof left !== "string" || typeof right !== "string")
-  ) {
+  } else if (isNumeric(left) && isNumeric(right)) {
+    x = left;
+    y = right;
+  } else {
     return EVALUATION_ERROR;
   }
-  const x = a as number | bigint | string;
-  const y = b as number | bigint | string;
+
   switch (operator) {
     case "lt":
       return x < y;
@@ -166,13 +201,16 @@ export const compareValues = (
 const compareCodePoints = (a: string, b: string): number => {
   let i = 0;
   let j = 0;
+
   while (i < a.length && j < b.length) {
     const x = a.codePointAt(i)!;
     const y = b.codePointAt(j)!;
+
     if (x !== y) return x < y ? -1 : 1;
     i += x > 0xffff ? 2 : 1;
     j += y > 0xffff ? 2 : 1;
   }
+
   return Number(i < a.length) - Number(j < b.length);
 };
 
@@ -188,14 +226,17 @@ const INT64_MAX = 2n ** 63n - 1n;
 const celInt = (value: bigint): number | bigint | EvaluationError => {
   if (value < INT64_MIN || value > INT64_MAX) return EVALUATION_ERROR;
   const asNumber = Number(value);
+
   return Number.isSafeInteger(asNumber) ? asNumber : value;
 };
 
-const toBigInt = (value: unknown): bigint | undefined => {
-  if (typeof value === "bigint") return value;
-  if (typeof value === "number" && Number.isInteger(value)) {
+const toBigInt = (value: CelValue): bigint | undefined => {
+  if (isBigint(value)) return value;
+
+  if (isNumber(value) && Number.isInteger(value)) {
     return BigInt(value);
   }
+
   return undefined;
 };
 
@@ -205,12 +246,14 @@ const toBigInt = (value: unknown): bigint | undefined => {
  */
 export const intArithmetic = (
   operator: "add" | "sub" | "mult" | "div" | "mod",
-  left: unknown,
-  right: unknown,
+  left: CelValue,
+  right: CelValue,
 ): number | bigint | EvaluationError => {
   const a = toBigInt(left);
   const b = toBigInt(right);
+
   if (a === undefined || b === undefined) return EVALUATION_ERROR;
+
   switch (operator) {
     case "add":
       return celInt(a + b);
@@ -241,23 +284,28 @@ export class CelHierarchy {
  * default) as Go's `strings.Split` splits it, or a list whose elements are all strings.
  */
 export const toHierarchy = (
-  path: unknown,
-  delimiter?: unknown,
+  path: CelValue,
+  delimiter?: CelValue,
 ): CelHierarchy | EvaluationError => {
   if (delimiter !== undefined) {
-    if (typeof path !== "string" || typeof delimiter !== "string") {
+    if (!isString(path) || !isString(delimiter)) {
       return EVALUATION_ERROR;
     }
+
     // Go splits on an empty separator between UTF-8 sequences, so by code point, not code unit.
     return new CelHierarchy(
       delimiter === "" ? Array.from(path) : path.split(delimiter),
     );
   }
+
   if (path instanceof CelHierarchy) return path;
-  if (typeof path === "string") return new CelHierarchy(path.split("."));
-  if (Array.isArray(path) && path.every((s) => typeof s === "string")) {
-    return new CelHierarchy(path as string[]);
+
+  if (isString(path)) return new CelHierarchy(path.split("."));
+
+  if (Array.isArray(path) && path.every(isString)) {
+    return new CelHierarchy(path);
   }
+
   return EVALUATION_ERROR;
 };
 
@@ -303,6 +351,7 @@ const daysInMonth = (year: number, month: number): number => {
     30,
     31,
   ];
+
   return days[month - 1] ?? 0;
 };
 
@@ -310,6 +359,7 @@ export const parseRfc3339Timestamp = (
   value: string,
 ): CelTimestamp | EvaluationError => {
   const match = RFC3339_TIMESTAMP.exec(value);
+
   if (!match) return EVALUATION_ERROR;
 
   const [
@@ -326,6 +376,7 @@ export const parseRfc3339Timestamp = (
     offsetHourPart,
     offsetMinutePart,
   ] = match;
+
   if (
     !yearPart ||
     !monthPart ||
@@ -344,6 +395,7 @@ export const parseRfc3339Timestamp = (
   const hour = Number(hourPart);
   const minute = Number(minutePart);
   const second = Number(secondPart);
+
   if (
     year < 1 ||
     year > 9999 ||
@@ -359,12 +411,15 @@ export const parseRfc3339Timestamp = (
   }
 
   let offsetMinutes = 0;
+
   if (zonePart !== "Z") {
     if (!offsetSign || !offsetHourPart || !offsetMinutePart) {
       return EVALUATION_ERROR;
     }
+
     const offsetHour = Number(offsetHourPart);
     const offsetMinute = Number(offsetMinutePart);
+
     if (offsetHour > 23 || offsetMinute > 59) return EVALUATION_ERROR;
     offsetMinutes =
       (offsetHour * 60 + offsetMinute) * (offsetSign === "+" ? 1 : -1);
@@ -374,10 +429,12 @@ export const parseRfc3339Timestamp = (
   instant.setUTCFullYear(year, month - 1, day);
   instant.setUTCHours(hour, minute, second, 0);
   const epochMillis = instant.getTime() - offsetMinutes * 60_000;
+
   if (!Number.isFinite(epochMillis)) return EVALUATION_ERROR;
 
   const fractionNanos = BigInt((fractionPart ?? "").padEnd(9, "0") || "0");
   const timestampNanos = BigInt(epochMillis) * 1_000_000n + fractionNanos;
+
   return timestampNanos < MIN_TIMESTAMP_NANOS ||
     timestampNanos > MAX_TIMESTAMP_NANOS
     ? EVALUATION_ERROR
@@ -391,7 +448,7 @@ const DURATION_MIN = -(2n ** 63n);
 const UINT_LIMIT = 2n ** 63n;
 
 /** Go's `time.ParseDuration` unit table, the micro sign and the Greek mu both included. */
-const DURATION_UNITS: Readonly<Record<string, bigint>> = {
+const DURATION_UNITS = {
   ns: 1n,
   us: 1_000n,
   "µs": 1_000n,
@@ -400,7 +457,7 @@ const DURATION_UNITS: Readonly<Record<string, bigint>> = {
   s: 1_000_000_000n,
   m: 60_000_000_000n,
   h: 3_600_000_000_000n,
-};
+} satisfies Readonly<Record<string, bigint>>;
 
 const isDigit = (c: string | undefined): boolean =>
   c !== undefined && c >= "0" && c <= "9";
@@ -413,72 +470,99 @@ const isDigit = (c: string | undefined): boolean =>
 export const parseGoDuration = (input: string): CelDuration | EvaluationError => {
   let s = input;
   let negative = false;
+
   if (s[0] === "-" || s[0] === "+") {
     negative = s[0] === "-";
     s = s.slice(1);
   }
+
   if (s === "0") return new CelDuration(0n);
+
   if (s === "") return EVALUATION_ERROR;
   let total = 0n;
+
   while (s !== "") {
     if (!(s[0] === "." || isDigit(s[0]))) return EVALUATION_ERROR;
     // The integer part (Go's leadingInt).
     let v = 0n;
     let i = 0;
+
     for (; isDigit(s[i]); i++) {
       if (v > UINT_LIMIT / 10n) return EVALUATION_ERROR;
       v = v * 10n + BigInt(s.charCodeAt(i) - 48);
+
       if (v > UINT_LIMIT) return EVALUATION_ERROR;
     }
+
     const pre = i > 0;
     s = s.slice(i);
     // The fraction (Go's leadingFraction): digits past int64 precision are dropped, not an error.
     let f = 0n;
     let scale = 1;
     let post = false;
+
     if (s[0] === ".") {
       s = s.slice(1);
       let overflow = false;
       let j = 0;
+
       for (; isDigit(s[j]); j++) {
         if (overflow) continue;
+
         if (f > DURATION_MAX / 10n) {
           overflow = true;
           continue;
         }
+
         const next = f * 10n + BigInt(s.charCodeAt(j) - 48);
+
         if (next > UINT_LIMIT) {
           overflow = true;
           continue;
         }
+
         f = next;
         scale *= 10;
       }
+
       post = j > 0;
       s = s.slice(j);
     }
+
     if (!pre && !post) return EVALUATION_ERROR;
     let u = 0;
+
     while (u < s.length && s[u] !== "." && !isDigit(s[u])) u++;
+
     if (u === 0) return EVALUATION_ERROR;
+
     const unit = Object.prototype.hasOwnProperty.call(
       DURATION_UNITS,
       s.slice(0, u),
     )
-      ? DURATION_UNITS[s.slice(0, u)]!
+      ? lookup(DURATION_UNITS, s.slice(0, u))!
       : undefined;
+
     s = s.slice(u);
+
     if (unit === undefined) return EVALUATION_ERROR;
+
     if (v > UINT_LIMIT / unit) return EVALUATION_ERROR;
     v *= unit;
+
     if (f > 0n) {
       v += BigInt(Math.trunc(Number(f) * (Number(unit) / scale)));
+
       if (v > UINT_LIMIT) return EVALUATION_ERROR;
     }
+
     total += v;
+
     if (total > UINT_LIMIT) return EVALUATION_ERROR;
   }
+
   if (negative) return new CelDuration(-total);
+
   return total > DURATION_MAX ? EVALUATION_ERROR : new CelDuration(total);
 };
 
@@ -493,10 +577,11 @@ const checkedDuration = (nanos: bigint): CelDuration | EvaluationError =>
  */
 export const timeSince = (
   now: CelTimestamp,
-  value: unknown,
+  value: CelValue,
 ): CelDuration | EvaluationError => {
   if (!(value instanceof CelTimestamp)) return EVALUATION_ERROR;
   const nanos = now.nanos - value.nanos;
+
   return new CelDuration(
     nanos > DURATION_MAX
       ? DURATION_MAX
@@ -513,13 +598,15 @@ export const timeSince = (
  */
 export const temporalArithmetic = (
   operator: "add" | "sub",
-  left: unknown,
-  right: unknown,
+  left: CelValue,
+  right: CelValue,
 ): CelTimestamp | CelDuration | EvaluationError => {
   const sign = operator === "add" ? 1n : -1n;
+
   if (left instanceof CelTimestamp && right instanceof CelDuration) {
     return new CelTimestamp(left.nanos + sign * right.nanos);
   }
+
   if (
     operator === "add" &&
     left instanceof CelDuration &&
@@ -527,9 +614,11 @@ export const temporalArithmetic = (
   ) {
     return new CelTimestamp(left.nanos + right.nanos);
   }
+
   if (left instanceof CelDuration && right instanceof CelDuration) {
     return checkedDuration(left.nanos + sign * right.nanos);
   }
+
   if (
     operator === "sub" &&
     left instanceof CelTimestamp &&
@@ -537,6 +626,7 @@ export const temporalArithmetic = (
   ) {
     return checkedDuration(left.nanos - right.nanos);
   }
+
   return EVALUATION_ERROR;
 };
 
@@ -554,25 +644,35 @@ const CEL_INT_STRING = /^[+-]?\d+$/;
  */
 const formatGoDouble = (value: number): string => {
   if (Number.isNaN(value)) return "NaN";
+
   if (!Number.isFinite(value)) return value > 0 ? "+Inf" : "-Inf";
   // JavaScript renders a negative zero as "0" where CEL renders "-0".
   const sign = value < 0 || Object.is(value, -0) ? "-" : "";
+
   if (value === 0) return `${sign}0`;
+
   const [mantissa = "", exponentPart = ""] = Math.abs(value)
     .toExponential()
     .split("e");
+
   const digits = mantissa.replace(".", "");
   const exponent = Number(exponentPart);
+
   if (exponent < -4 || exponent >= 6) {
     const fraction = digits.length > 1 ? `.${digits.slice(1)}` : "";
     const magnitude = String(Math.abs(exponent)).padStart(2, "0");
+
     return `${sign}${digits[0]}${fraction}e${exponent < 0 ? "-" : "+"}${magnitude}`;
   }
+
   const pointAt = exponent + 1;
+
   if (pointAt <= 0) return `${sign}0.${"0".repeat(-pointAt)}${digits}`;
+
   if (pointAt >= digits.length) {
     return `${sign}${digits}${"0".repeat(pointAt - digits.length)}`;
   }
+
   return `${sign}${digits.slice(0, pointAt)}.${digits.slice(pointAt)}`;
 };
 
@@ -581,41 +681,53 @@ const formatGoDouble = (value: number): string => {
  * int-typed expression, and the two render identically for an integral value ("3"), so the
  * double rendering is exact for both; a bigint is only ever an int.
  */
-export const convertToString = (value: unknown): string | EvaluationError => {
-  if (typeof value === "string") return value;
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "bigint") return value.toString();
-  if (typeof value === "number") return formatGoDouble(value);
+export const convertToString = (value: CelValue): string | EvaluationError => {
+  if (isString(value)) return value;
+
+  if (isBoolean(value)) return value ? "true" : "false";
+
+  if (isBigint(value)) return value.toString();
+
+  if (isNumber(value)) return formatGoDouble(value);
+
   return EVALUATION_ERROR;
 };
 
-export const convertToDouble = (value: unknown): number | EvaluationError => {
-  if (typeof value === "number") {
+export const convertToDouble = (value: CelValue): number | EvaluationError => {
+  if (isNumber(value)) {
     return Number.isFinite(value) ? value : EVALUATION_ERROR;
   }
-  if (typeof value === "bigint") return Number(value);
-  if (typeof value !== "string" || !CEL_DOUBLE_STRING.test(value)) {
+
+  if (isBigint(value)) return Number(value);
+
+  if (!isString(value) || !CEL_DOUBLE_STRING.test(value)) {
     return EVALUATION_ERROR;
   }
+
   const converted = Number(value);
+
   return Number.isFinite(converted) ? converted : EVALUATION_ERROR;
 };
 
 export const convertToInt = (
-  value: unknown,
+  value: CelValue,
 ): number | bigint | EvaluationError => {
-  if (typeof value === "bigint") return celInt(value);
-  if (typeof value === "number") {
+  if (isBigint(value)) return celInt(value);
+
+  if (isNumber(value)) {
     // cel-go refuses a double at or beyond either int64 bound, -2^63 included.
     if (!Number.isFinite(value) || value <= -(2 ** 63) || value >= 2 ** 63) {
       return EVALUATION_ERROR;
     }
+
     return celInt(BigInt(Math.trunc(value)));
   }
+
   // Go's strconv.ParseInt: an optional sign, then decimal digits and nothing else. BigInt() alone
   // would also accept surrounding whitespace, which ParseInt rejects.
-  if (typeof value !== "string" || !CEL_INT_STRING.test(value)) {
+  if (!isString(value) || !CEL_INT_STRING.test(value)) {
     return EVALUATION_ERROR;
   }
+
   return celInt(BigInt(value));
 };

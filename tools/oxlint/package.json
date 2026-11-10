@@ -1,0 +1,13 @@
+{
+  "name": "query-plan-adapters-oxlint",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "cd ../.. && oxlint -c tools/oxlint/oxlint.config.ts --deny-warnings convex drizzle langchain-chromadb mongoose prisma",
+    "lint:fix": "cd ../.. && oxlint -c tools/oxlint/oxlint.config.ts --fix convex drizzle langchain-chromadb mongoose prisma"
+  },
+  "devDependencies": {
+    "@oxlint/plugins": "1.93.0",
+    "oxlint": "1.93.0"
+  }
+}

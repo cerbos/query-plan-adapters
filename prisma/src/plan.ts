@@ -3,6 +3,7 @@
 
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
+import { lookup } from "./narrowing";
 
 export interface NamedOperand {
   name: string;
@@ -44,6 +45,7 @@ export function assertDefined<T>(value: T | undefined, message: string): T {
   if (value === undefined) {
     throw new UnsupportedQueryPlanError(message);
   }
+
   return value;
 }
 
@@ -67,14 +69,14 @@ export function assertLogicalOperands(
 }
 
 /** The Prisma scalar filter each Cerbos comparison operator lowers to. */
-export const CERBOS_TO_PRISMA_OPERATOR: Record<string, string> = {
+export const CERBOS_TO_PRISMA_OPERATOR = {
   eq: "equals",
   ne: "not",
   lt: "lt",
   le: "lte",
   gt: "gt",
   ge: "gte",
-};
+} satisfies Record<string, string>;
 
 /** The Cerbos comparison operators: exactly the keys of CERBOS_TO_PRISMA_OPERATOR. */
 export const COMPARISON_OPERATORS: ReadonlySet<string> = new Set(
@@ -82,17 +84,19 @@ export const COMPARISON_OPERATORS: ReadonlySet<string> = new Set(
 );
 
 // Directional operators mirror when their operands swap sides; symmetric operators are unchanged.
-const MIRRORED_OPERATOR: Record<string, string> = {
+const MIRRORED_OPERATOR = {
   lt: "gt",
   gt: "lt",
   le: "ge",
   ge: "le",
-};
+} satisfies Record<string, string>;
 
 /** The operator that holds when the two operands of `operator` swap sides. */
 export function mirrorOperator(operator: string): string {
-  return MIRRORED_OPERATOR[operator] ?? operator;
+  return lookup(MIRRORED_OPERATOR, operator) ?? operator;
 }
+
+type BinaryComparison = { operator: string; operands: PlanExpressionOperand[] };
 
 /**
  * Normalize a binary comparison to field-side-first. The planner preserves policy source
@@ -104,8 +108,9 @@ export function mirrorOperator(operator: string): string {
 export function normalizeBinaryOperands(
   operator: string,
   operands: PlanExpressionOperand[]
-): { operator: string; operands: PlanExpressionOperand[] } {
+): BinaryComparison {
   const [first, second] = operands;
+
   if (
     operands.length === 2 &&
     first !== undefined &&
@@ -115,5 +120,6 @@ export function normalizeBinaryOperands(
   ) {
     return { operator: mirrorOperator(operator), operands: [second, first] };
   }
+
   return { operator, operands };
 }

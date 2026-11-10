@@ -10,21 +10,28 @@
  */
 export const formatCelDouble = (value: number): string => {
   if (Number.isNaN(value)) return "NaN";
+
   if (value === Infinity) return "+Inf";
+
   if (value === -Infinity) return "-Inf";
   const sign = value < 0 || Object.is(value, -0) ? "-" : "";
   const [mantissa, exponentText] = Math.abs(value).toExponential().split("e");
   const digits = mantissa!.replace(".", "");
   const exponent = Number(exponentText);
+
   if (exponent < -4 || exponent >= 6) {
     const fraction = digits.length > 1 ? `.${digits.slice(1)}` : "";
     const magnitude = String(Math.abs(exponent)).padStart(2, "0");
+
     return `${sign}${digits[0]}${fraction}e${exponent < 0 ? "-" : "+"}${magnitude}`;
   }
+
   if (exponent < 0) {
     return `${sign}0.${"0".repeat(-exponent - 1)}${digits}`;
   }
+
   const integerDigits = exponent + 1;
+
   return digits.length <= integerDigits
     ? `${sign}${digits.padEnd(integerDigits, "0")}`
     : `${sign}${digits.slice(0, integerDigits)}.${digits.slice(integerDigits)}`;
@@ -37,5 +44,6 @@ export const formatCelDouble = (value: number): string => {
  */
 export const parseCelDoubleString = (text: string): number | undefined => {
   const value = Number(text);
+
   return text.trim() !== "" && formatCelDouble(value) === text ? value : undefined;
 };

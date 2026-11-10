@@ -48,7 +48,7 @@ interface Seeds {
   documents: SeedDocument[];
 }
 
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
+// SAFETY: demo/seeds.json is a repository-controlled corpus file, checked structurally by
 // demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
 const seeds = JSON.parse(
   readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
@@ -73,6 +73,7 @@ const APPLICATION_FILTER = {
  * exactly that reason.
  */
 const cerbosHost = process.env["CERBOS_HOST"];
+
 if (!cerbosHost) {
   throw new Error(
     "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh convex"
@@ -91,6 +92,7 @@ if (!cerbosHost) {
  * started the backend, and writing it here would be a second copy of a number that must not drift.
  */
 const convexUrl = process.env["CONVEX_URL"];
+
 if (!convexUrl) {
   throw new Error(
     "CONVEX_URL is not set — run this example through demo/scripts/run-example.sh convex"
@@ -144,7 +146,9 @@ const pageDocuments = makeFunctionReference<
 
 function principal(id: string): { id: string; roles: string[] } {
   const found = seeds.principals.find((p) => p.id === id);
+
   if (!found) throw new Error(`demo/seeds.json declares no principal '${id}'`);
+
   return found;
 }
 
@@ -167,6 +171,8 @@ async function plan(principalId: string, action: string): Promise<QueryPlan> {
     resource: { kind: RESOURCE_KIND },
     action,
   });
+
+  // SAFETY: a JSON round trip keeps the plan's fields and drops only its class prototypes.
   return JSON.parse(JSON.stringify(queryPlan)) as QueryPlan;
 }
 
@@ -185,16 +191,18 @@ const PLAN_KINDS: PlanKind[] = [
  */
 function asPlanKind(reported: string): PlanKind {
   const kind = PLAN_KINDS.find((candidate) => candidate === reported);
+
   if (!kind) throw new Error(`unknown plan kind '${reported}'`);
+
   return kind;
 }
 
-interface ShapeResult {
+interface UsageResult {
   kind: PlanKind;
   ids: string[];
 }
 
-interface PaginatedShapeResult extends ShapeResult {
+interface PaginatedUsageResult extends UsageResult {
   pageSize: number;
   pageSizes: number[];
 }
@@ -212,12 +220,14 @@ async function listed(
   principalId: string,
   action: string,
   applicationFilter?: typeof APPLICATION_FILTER
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const queryPlan = await plan(principalId, action);
-  const result = await convex.query(listDocuments, {
-    queryPlan,
-    ...(applicationFilter ? { applicationFilter } : {}),
-  });
+
+  const result = await convex.query(
+    listDocuments,
+    applicationFilter ? { queryPlan, applicationFilter } : { queryPlan },
+  );
+
   return { kind: asPlanKind(result.kind), ids: result.ids };
 }
 
@@ -232,7 +242,7 @@ async function paginated(
   principalId: string,
   action: string,
   pageSize: number
-): Promise<PaginatedShapeResult> {
+): Promise<PaginatedUsageResult> {
   const queryPlan = await plan(principalId, action);
 
   const pageSizes: number[] = [];
@@ -254,10 +264,12 @@ async function paginated(
       queryPlan,
       paginationOpts: { numItems: pageSize, cursor },
     });
+
     if (result.ids.length > 0) {
       pageSizes.push(result.ids.length);
       ids.push(...result.ids);
     }
+
     if (result.isDone) {
       return {
         kind: asPlanKind(result.kind),
@@ -266,6 +278,7 @@ async function paginated(
         ids: ids.sort(),
       };
     }
+
     cursor = result.cursor;
   }
 
@@ -279,7 +292,7 @@ async function main(): Promise<void> {
   await convex.mutation(seedDocuments, { documents: seeds.documents });
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
+  const usages = {
     filtered: {
       "alice/view": await listed("alice", "view"),
       "bob/view": await listed("bob", "view"),
@@ -307,7 +320,7 @@ async function main(): Promise<void> {
   };
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "convex", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "convex", shapes: usages }, null, 2)}\n`
   );
 }
 

@@ -24,21 +24,27 @@ export const validateStructure = (
   parentOperator?: string,
 ): void => {
   if (isValue(expression) || isVariable(expression)) return;
+
   if (!isExpression(expression)) {
     throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
   }
+
   const operator = operatorFor(expression.operator);
+
   if (!operator) {
     throw new UnsupportedQueryPlanError(
       `Unsupported operator: ${expression.operator}`,
     );
   }
+
   if (expression.operator === "set-field" && parentOperator !== "struct") {
     throw new UnsupportedQueryPlanError(
       "set-field is only meaningful as a map literal's entry",
     );
   }
+
   operator.validate?.(expression);
+
   for (const op of expression.operands) {
     validateStructure(op, expression.operator);
   }
@@ -60,12 +66,14 @@ export const assertNoListValuedCondition = (
   expression: PlanExpressionOperand,
 ): void => {
   if (!isExpression(expression)) return;
+
   if (expression.operator === "filter" || expression.operator === "map") {
     throw new UnsupportedQueryPlanError(
       `${expression.operator}() returns a list, not a boolean, so it cannot be a condition ` +
         "on its own; only size() over its result has a boolean meaning",
     );
   }
+
   if (
     expression.operator === "and" ||
     expression.operator === "or" ||
@@ -142,6 +150,7 @@ export const assertEveryReferenceMapped = (
 ): void => {
   if (isVariable(expression)) {
     const root = expression.name.split(".")[0]!;
+
     if (bound.has(root) || isMappedReference(expression.name, mapper)) return;
     throw new Error(
       `No mapper entry for ${expression.name}: an unmapped reference is not used verbatim as ` +
@@ -150,7 +159,9 @@ export const assertEveryReferenceMapped = (
         "the plan path as-is.",
     );
   }
+
   if (!isExpression(expression)) return;
+
   if (expression.operator === "lambda") {
     const { body, variables } = lambdaComponents(expression);
     assertEveryReferenceMapped(
@@ -158,13 +169,16 @@ export const assertEveryReferenceMapped = (
       mapper,
       new Set([...bound, ...variables.map((variable) => variable.name)]),
     );
+
     return;
   }
+
   // `get-field`'s second operand is the field name, not a reference.
   const operands =
     expression.operator === "get-field"
       ? expression.operands.slice(0, 1)
       : expression.operands;
+
   for (const operand of operands) {
     assertEveryReferenceMapped(operand, mapper, bound);
   }

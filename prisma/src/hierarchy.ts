@@ -23,7 +23,9 @@ import { resolveOperand } from "./translate";
 import { UnsupportedQueryPlanError } from "./errors";
 
 type ConstantSegment = { type: "constant"; value: string };
+
 type FieldSegment = { type: "field"; fieldRef: ResolvedFieldReference };
+
 type HierarchySegment = ConstantSegment | FieldSegment;
 
 type ConstantHierarchy = {
@@ -52,20 +54,25 @@ function resolveHierarchy(
 
   if (operands.length === 2) {
     const strOperand = assertDefined(operands[0], "hierarchy requires operands");
+
     const delimOperand = assertDefined(
       operands[1],
       "hierarchy requires a delimiter"
     );
+
     if (!isValueOperand(delimOperand)) {
       throw new UnsupportedQueryPlanError("hierarchy delimiter must be a value");
     }
+
     const delimiter = String(delimOperand.value);
+
     if (isValueOperand(strOperand)) {
       return {
         type: "constant",
         segments: splitPath(String(strOperand.value), delimiter),
       };
     }
+
     if (isNamedOperand(strOperand)) {
       return {
         type: "field",
@@ -73,6 +80,7 @@ function resolveHierarchy(
         delimiter,
       };
     }
+
     throw new UnsupportedQueryPlanError("hierarchy(string, delimiter) requires a value or field operand");
   }
 
@@ -94,11 +102,14 @@ function resolveHierarchy(
     if (isOperatorOperand(inner) && inner.operator === "list") {
       const segments = inner.operands.map((op): HierarchySegment => {
         const resolved = resolveOperand(op, context);
+
         if (isResolvedValue(resolved)) {
           return { type: "constant", value: String(resolved.value) };
         }
+
         return { type: "field", fieldRef: resolved };
       });
+
       return { type: "segmented", segments };
     }
 
@@ -133,10 +144,12 @@ function toSegments(resolved: ResolvedHierarchy): HierarchySegment[] {
 function normalizeHierarchy(h: ResolvedHierarchy): ResolvedHierarchy {
   if (h.type !== "segmented") return h;
   const constants: string[] = [];
+
   for (const segment of h.segments) {
     if (segment.type !== "constant") return h;
     constants.push(segment.value);
   }
+
   return { type: "constant", segments: constants };
 }
 
@@ -166,7 +179,9 @@ function checkPrefixConditions(
   }
 
   if (conditions.length === 0) return {};
+
   if (conditions.length === 1) return conditions[0]!;
+
   return { AND: conditions };
 }
 
@@ -195,22 +210,27 @@ export function handleOverlapsOperator(
   const fields = [...leftSegs, ...rightSegs]
     .filter((segment): segment is FieldSegment => segment.type === "field")
     .filter((segment) => segment.fieldRef.nullable !== false);
+
   const pairs = fields.map(({ fieldRef }) => ({
     equal: buildFieldFilter(fieldRef, "equals", ""),
     unequal: buildFieldFilter(fieldRef, "not", ""),
   }));
+
   const presence = pairs.map(({ equal, unequal }) => ({
     OR: [equal, unequal],
   }));
+
   const unknown = pairs.map(({ equal, unequal }) => ({
     AND: [equal, unequal],
   }));
 
   if (validConditions.length === 0) {
     if (unknown.length > 0) return { OR: unknown };
+
     const field = [...leftSegs, ...rightSegs].find(
       (segment): segment is FieldSegment => segment.type === "field",
     );
+
     if (field) return buildImpossibleFilter(field.fieldRef);
     throw new UnsupportedQueryPlanError("Cannot determine overlap: no field references found");
   }
@@ -225,6 +245,7 @@ export function handleOverlapsOperator(
   // FALSE for a present field and UNKNOWN for NULL, restoring errors even if the
   // prefix comparison is FALSE (FALSE AND NULL alone would lose that error).
   const condition = validConditions[0]!;
+
   return presence.length === 0
     ? condition
     : {
@@ -241,8 +262,13 @@ function handleFieldOverlaps(
   }
 
   // The caller routes here only when at least one side is a field hierarchy.
-  const field = (left.type === "field" ? left : right) as FieldHierarchy;
-  const other = left.type === "field" ? right : left;
+  const field = left.type === "field" ? left : right.type === "field" ? right : undefined;
+
+  if (field === undefined) {
+    throw new UnsupportedQueryPlanError("overlaps: neither side is a field-reference hierarchy");
+  }
+
+  const other = field === left ? right : left;
 
   if (other.type !== "constant") {
     throw new UnsupportedQueryPlanError("overlaps: segmented hierarchies with field hierarchies are not supported");
@@ -253,9 +279,11 @@ function handleFieldOverlaps(
   const strictPrefixes = getStrictPrefixes(other.segments, delimiter);
 
   const conditions: PrismaFilter[] = [];
+
   if (strictPrefixes.length > 0) {
     conditions.push(buildFieldFilter(field.fieldRef, "in", strictPrefixes));
   }
+
   conditions.push(buildFieldFilter(field.fieldRef, "equals", otherRaw));
   conditions.push(buildPrefixFilter(field.fieldRef, otherRaw + delimiter));
 
@@ -270,6 +298,7 @@ function extractHierarchyOperands(
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError(`${operatorName} requires exactly two operands`);
   }
+
   const leftOp = assertDefined(operands[0], `${operatorName} requires a left operand`);
   const rightOp = assertDefined(operands[1], `${operatorName} requires a right operand`);
 
@@ -291,14 +320,17 @@ function getStrictPrefixes(segments: string[], delimiter: string): string[] {
     // Per code point, the empty path is itself a (zero-segment) strict prefix.
     return segments.map((_, length) => segments.slice(0, length).join(""));
   }
+
   if (segments.length <= 1) return [];
   const prefixes: string[] = [];
   let current = segments[0]!;
   prefixes.push(current);
+
   for (let i = 1; i < segments.length - 1; i++) {
     current = current + delimiter + segments[i]!;
     prefixes.push(current);
   }
+
   return prefixes;
 }
 
@@ -314,8 +346,10 @@ export function handleAncestorDescendantOperator(
   // descendentOf(A, B) = B is strict prefix of A
   const ancestor = direction === "ancestor" ? left : right;
   const descendant = direction === "ancestor" ? right : left;
+
   if (ancestor.type === "field")
     assertStringField(ancestor.fieldRef, operatorName);
+
   if (descendant.type === "field")
     assertStringField(descendant.fieldRef, operatorName);
 
@@ -324,6 +358,7 @@ export function handleAncestorDescendantOperator(
       // Per code point, a descendant is the ancestor followed by at least one more character.
       return buildPrefixFilter(descendant.fieldRef, ancestor.segments.join(""), true);
     }
+
     return buildPrefixFilter(
       descendant.fieldRef,
       ancestor.segments.join(descendant.delimiter) + descendant.delimiter
@@ -333,8 +368,10 @@ export function handleAncestorDescendantOperator(
   if (ancestor.type === "field" && descendant.type === "constant") {
     const delimiter = ancestor.delimiter;
     const prefixes = getStrictPrefixes(descendant.segments, delimiter);
+
     if (prefixes.length === 0) {
       if (ancestor.fieldRef.nullable === false) return buildImpossibleFilter(ancestor.fieldRef);
+
       return {
         AND: [
           buildFieldFilter(ancestor.fieldRef, "equals", ""),
@@ -342,21 +379,25 @@ export function handleAncestorDescendantOperator(
         ],
       };
     }
+
     if (prefixes.length === 1) {
       return buildFieldFilter(ancestor.fieldRef, "equals", prefixes[0]!);
     }
+
     return buildFieldFilter(ancestor.fieldRef, "in", prefixes);
   }
 
   if (ancestor.type === "constant" && descendant.type === "constant") {
     const ancestorSegs = ancestor.segments;
     const descendantSegs = descendant.segments;
+
     if (
       descendantSegs.length > ancestorSegs.length &&
       ancestorSegs.every((seg, i) => seg === descendantSegs[i])
     ) {
       return {};
     }
+
     throw new UnsupportedQueryPlanError(`${operatorName}: constants do not satisfy ${direction} relationship`);
   }
 

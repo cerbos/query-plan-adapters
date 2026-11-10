@@ -4,11 +4,15 @@ import { UnsupportedQueryPlanError } from "./errors";
 import type { TranslateContext } from "./context";
 import { translateCondition } from "./filter";
 import { rootMapper } from "./mapper";
+import { isMongoDocument } from "./expression";
+import type { MongoValue, MongooseFilter } from "./expression";
+import { isBoolean, isObject } from "./narrowing";
 
 export { PlanKind };
+
 export { UnsupportedQueryPlanError };
 
-export type MongooseFilter = Record<string, any>;
+export type { MongoValue, MongooseFilter } from "./expression";
 
 export type MapperConfig = {
   field?: string;
@@ -108,16 +112,22 @@ export function queryPlanToMongoose({
     nullRepresentation: nullAttributeRepresentation,
     scope: { kind: "root" },
   };
+
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
-    case PlanKind.CONDITIONAL:
-      return {
-        kind: PlanKind.CONDITIONAL,
-        filters: shieldExpressions(translateCondition(queryPlan.condition, ctx)) as MongooseFilter,
-      };
+    case PlanKind.CONDITIONAL: {
+      const filters = shieldExpressions(translateCondition(queryPlan.condition, ctx));
+
+      if (!isMongoDocument(filters)) {
+        throw new UnsupportedQueryPlanError("The condition did not translate to a filter document");
+      }
+
+      return { kind: PlanKind.CONDITIONAL, filters };
+    }
+
     default:
       throw new UnsupportedQueryPlanError(`Invalid query plan.`);
   }
@@ -130,15 +140,17 @@ export function queryPlanToMongoose({
  * beside `$multiply` is rejected, and a comparison between two expressions loses the schema and
  * throws. It does not descend into `$let`, so the expression reaches MongoDB as it was built.
  */
-const shieldExpressions = (filter: unknown): unknown => {
+const shieldExpressions = (filter: MongoValue): MongoValue => {
   if (Array.isArray(filter)) return filter.map(shieldExpressions);
-  if (typeof filter !== "object" || filter === null || Object.getPrototypeOf(filter) !== Object.prototype) {
+
+  if (!isObject(filter) || Object.getPrototypeOf(filter) !== Object.prototype) {
     return filter;
   }
+
   return Object.fromEntries(
     Object.entries(filter).map(([key, value]) => [
       key,
-      key === "$expr" && typeof value !== "boolean"
+      key === "$expr" && !isBoolean(value)
         ? { $let: { vars: {}, in: value } }
         : shieldExpressions(value),
     ]),

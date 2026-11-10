@@ -11,10 +11,11 @@ import { rewriteFunctionCalls } from "./functions";
 import { expandLiteralCollections } from "./literals";
 import { settleTypeMismatches } from "./types";
 import { UnsupportedQueryPlanError } from "./errors";
+import type { PrismaFilter } from "./value";
 
 export { PlanKind, UnsupportedQueryPlanError };
 
-export type PrismaFilter = Record<string, any>;
+export type { PrismaFilter, PrismaValue } from "./value";
 
 export type MapperConfig = {
   field?: string;
@@ -167,6 +168,7 @@ export function queryPlanToPrisma({
     nullRepresentation: nullAttributeRepresentation,
     scopes: [],
   };
+
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
@@ -180,11 +182,13 @@ export function queryPlanToPrisma({
         ),
         context
       );
+
       // After settling: a struct literal compared with a column of another type is decided by
       // the types alone (`aString == {"a": null}` is false, or an error on a missing column), so
       // its null member never reaches a filter and must not refuse the plan.
       assertStructuralNulls(settled, context);
       const condition = constantFoldExpression(settled);
+
       if (isValueOperand(condition)) {
         // The planner folds a condition that is constant on its own, but not one the mapped
         // column types decide (`R.attr.aNumber == "5"` is false for every row): that surfaces
@@ -192,16 +196,20 @@ export function queryPlanToPrisma({
         if (condition.value === true) {
           return { kind: PlanKind.CONDITIONAL, filters: {} };
         }
+
         if (condition.value === false) {
           return { kind: PlanKind.ALWAYS_DENIED };
         }
+
         rejectConstantFalse();
       }
+
       return {
         kind: PlanKind.CONDITIONAL,
         filters: buildPrismaFilterFromCerbosExpression(condition, context),
       };
     }
+
     default:
       throw new UnsupportedQueryPlanError(`Invalid query plan.`);
   }

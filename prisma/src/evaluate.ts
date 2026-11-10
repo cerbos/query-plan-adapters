@@ -2,6 +2,7 @@
 
 import type { Value } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isNumber, isObject, isString } from "./narrowing";
 
 export const ARITHMETIC_OPERATORS = new Set(["add", "sub", "mult", "div"]);
 
@@ -15,6 +16,7 @@ export function evaluateConstantComparison(
       if (!Array.isArray(right)) {
         throw new UnsupportedQueryPlanError("in constant comparison requires a list");
       }
+
       return right.some((element) => areValuesEqual(left, element));
     case "eq":
       return areValuesEqual(left, right);
@@ -25,23 +27,26 @@ export function evaluateConstantComparison(
     case "gt":
     case "ge": {
       if (
-        typeof left === "number" &&
-        typeof right === "number" &&
+        isNumber(left) &&
+        isNumber(right) &&
         (Number.isNaN(left) || Number.isNaN(right))
       ) {
         return false;
       }
+
       if (
         !(
-          (typeof left === "number" && typeof right === "number") ||
-          (typeof left === "string" && typeof right === "string")
+          (isNumber(left) && isNumber(right)) ||
+          (isString(left) && isString(right))
         )
       ) {
         throw new UnsupportedQueryPlanError(
           `${operator} constant comparison requires two numbers or two strings`
         );
       }
+
       const order = compareConstantValues(left, right);
+
       switch (operator) {
         case "lt":
           return order < 0;
@@ -63,27 +68,33 @@ function compareConstantValues(
   left: number | string,
   right: number | string
 ): number {
-  if (typeof left === "number" && typeof right === "number") {
+  if (isNumber(left) && isNumber(right)) {
     return left === right ? 0 : left < right ? -1 : 1;
   }
-  if (typeof left !== "string" || typeof right !== "string") {
+
+  if (!isString(left) || !isString(right)) {
     throw new UnsupportedQueryPlanError("Cannot order constant values of different types");
   }
 
   const leftCodePoints = Array.from(left, (character) =>
     character.codePointAt(0)
   );
+
   const rightCodePoints = Array.from(right, (character) =>
     character.codePointAt(0)
   );
+
   const sharedLength = Math.min(leftCodePoints.length, rightCodePoints.length);
+
   for (let index = 0; index < sharedLength; index++) {
     const leftCodePoint = leftCodePoints[index]!;
     const rightCodePoint = rightCodePoints[index]!;
+
     if (leftCodePoint !== rightCodePoint) {
       return leftCodePoint < rightCodePoint ? -1 : 1;
     }
   }
+
   return leftCodePoints.length === rightCodePoints.length
     ? 0
     : leftCodePoints.length < rightCodePoints.length
@@ -104,12 +115,14 @@ function areValuesEqual(left: Value, right: Value): boolean {
     return false;
   }
 
-  if (typeof left === "object" && left !== null) {
-    if (typeof right !== "object" || right === null) {
+  if (isObject(left)) {
+    if (!isObject(right)) {
       return false;
     }
+
     const leftKeys = Object.keys(left);
     const rightKeys = Object.keys(right);
+
     return (
       leftKeys.length === rightKeys.length &&
       leftKeys.every(
@@ -129,16 +142,19 @@ export function foldArithmetic(
   if (operator === "add" && Array.isArray(left) && Array.isArray(right)) {
     return [...left, ...right];
   }
+
   if (
     operator === "add" &&
-    typeof left === "string" &&
-    typeof right === "string"
+    isString(left) &&
+    isString(right)
   ) {
     return left + right;
   }
-  if (typeof left !== "number" || typeof right !== "number") {
+
+  if (!isNumber(left) || !isNumber(right)) {
     throw new UnsupportedQueryPlanError(`${operator} operator requires string or number operands`);
   }
+
   switch (operator) {
     case "add":
       return left + right;

@@ -1,4 +1,4 @@
-import type { PlanExpression, PlanExpressionOperand, Value } from "@cerbos/core";
+import type { PlanExpression, PlanExpressionOperand, PlanExpressionValue, Value } from "@cerbos/core";
 
 import { FinalUnsupportedQueryPlanError, UnsupportedQueryPlanError } from "./errors";
 import {
@@ -9,6 +9,7 @@ import {
   buildEvaluationGuards,
   celScalarType,
   compare,
+  isComparison,
   isListTyped,
   temporalMismatch,
 } from "./aggregation";
@@ -21,7 +22,7 @@ import type { TranslateContext } from "./context";
 import {
   buildFieldFilter,
   buildGuardedFieldFilter,
-  buildListShapeGuard,
+  buildListTypeGuard,
   withEvaluationGuards,
   withNullableGuards,
 } from "./guards";
@@ -62,8 +63,11 @@ const toOneMacroRefusal = (operator: string): UnsupportedQueryPlanError =>
     `${operator}() over a to-one relation ranges over the related object's keys in CEL, and ` +
       "a MongoDB filter has no form that iterates a subdocument's field names",
   );
+
 import { escapeRegexValue, lowerRe2PatternForMongo } from "./regex";
 import { subMillisecondTimestampBounds } from "./timestamp";
+import { isBoolean, isNumber, isObject, isString, lookup, pair, typeofValue } from "./narrowing";
+import type { MongoValue } from "./expression";
 
 /** Translates a CONDITIONAL plan's condition into a Mongoose filter. */
 export const translateCondition = (
@@ -71,6 +75,7 @@ export const translateCondition = (
   ctx: TranslateContext,
 ): MongooseFilter => {
   rejectNullConstructor(condition, ctx);
+
   return buildFilter(selectMapMembers(condition, ctx.mapper), ctx);
 };
 
@@ -90,12 +95,16 @@ const selectMapMembers = (
   if (!isExpression(operand)) {
     return operand;
   }
+
   const operands = operand.operands.map((child) => selectMapMembers(child, mapper));
+
   const folded =
     foldConstructor(operand.operator, operands) ??
     foldSubMillisecondComparison(operand.operator, operands, mapper);
+
   if (folded) return folded;
   const [collection, key] = operands;
+
   if (
     operand.operator === "index" &&
     operands.length === 2 &&
@@ -103,7 +112,7 @@ const selectMapMembers = (
     key !== undefined &&
     isVariable(collection) &&
     isValue(key) &&
-    typeof key.value === "string" &&
+    isString(key.value) &&
     SELECTABLE_KEY.test(key.value) &&
     // A to-many relation is a list to CEL, where a string index is an error, not a member.
     relationOfReference(collection.name, mapper)?.type !== "many" &&
@@ -111,6 +120,7 @@ const selectMapMembers = (
   ) {
     return { name: `${collection.name}.${key.value}` };
   }
+
   return { operator: operand.operator, operands };
 };
 
@@ -126,17 +136,23 @@ const foldConstructor = (
   if (operator === "list") {
     return operands.every(isValue) ? { value: operands.map((child) => child.value) } : undefined;
   }
+
   if (operator !== "struct") return undefined;
   const entries: [string, Value][] = [];
+
   for (const field of operands) {
     if (!isExpression(field) || field.operator !== "set-field" || field.operands.length !== 2) {
       return undefined;
     }
-    const [key, value] = field.operands as [PlanExpressionOperand, PlanExpressionOperand];
-    if (!isValue(key) || typeof key.value !== "string" || !isValue(value)) return undefined;
+
+    const [key, value] = pair(field.operands);
+
+    if (!isValue(key) || !isString(key.value) || !isValue(value)) return undefined;
     entries.push([key.value, value.value]);
   }
+
   if (new Set(entries.map(([key]) => key)).size !== entries.length) return undefined;
+
   return { value: Object.fromEntries(entries) };
 };
 
@@ -151,25 +167,35 @@ const foldSubMillisecondComparison = (
   mapper: ScopedMapper,
 ): PlanExpressionOperand | undefined => {
   if (!Object.hasOwn(MIRRORED_COMPARISON, operator) || operands.length !== 2) return undefined;
+
   const floorOf = (operand: PlanExpressionOperand | undefined) => {
     const literal = operand !== undefined && isExpression(operand) && operand.operator === "timestamp" ? operand.operands[0] : undefined;
-    return literal !== undefined && isValue(literal) && typeof literal.value === "string"
+
+    return literal !== undefined && isValue(literal) && isString(literal.value)
       ? subMillisecondTimestampBounds(literal.value)?.floor
       : undefined;
   };
+
   const literalAt = floorOf(operands[0]) ? 0 : floorOf(operands[1]) ? 1 : undefined;
+
   if (literalAt === undefined) return undefined;
   const other = operands[1 - literalAt]!;
+
   if (celScalarType(other, mapper) !== "timestamp" || floorOf(other)) return undefined;
+
   if (isExpression(other) && other.operator === "timestamp" && isValue(other.operands[0]!)) return undefined;
+
   const floor: PlanExpressionOperand = {
     operator: "timestamp",
     operands: [{ value: floorOf(operands[literalAt])!.toISOString() }],
   };
+
   const atMost: PlanExpressionOperand = { operator: "le", operands: [other, floor] };
   const above: PlanExpressionOperand = { operator: "gt", operands: [other, floor] };
-  const op = operator as ComparisonOperator;
-  switch (literalAt === 1 ? op : MIRRORED_COMPARISON[op]) {
+
+  if (!isComparison(operator)) return undefined;
+
+  switch (literalAt === 1 ? operator : MIRRORED_COMPARISON[operator]) {
     case "lt":
     case "le":
       return atMost;
@@ -200,6 +226,7 @@ function rejectNullConstructor(
     const nested =
       inConstructor ||
       ["list", "struct", "set-field"].includes(operand.operator);
+
     operand.operands.forEach((child) =>
       rejectNullConstructor(child, ctx, nested),
     );
@@ -215,7 +242,7 @@ type FilterOperator = (
  * Every operator that can appear in boolean position. Adding one is adding an entry here; an
  * operator that can also appear inside `$expr` needs an entry in aggregation.ts as well.
  */
-const FILTER_OPERATORS: Record<string, FilterOperator> = {
+const FILTER_OPERATORS = {
   and: ({ operands }, ctx) => ({
     $and: operands.map((op) => buildFilter(op, ctx)),
   }),
@@ -243,9 +270,11 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
   // all, which is the element-wise all() the adapter already translates.
   isSubset: ({ operands }, ctx) => {
     const [subset, superset] = operands;
+
     if (operands.length !== 2 || subset === undefined || superset === undefined) {
       throw new UnsupportedQueryPlanError("isSubset requires exactly two operands");
     }
+
     return buildFilter(everyElementIn("all", subset, superset, false), ctx);
   },
   exists_one: () => {
@@ -269,12 +298,13 @@ const FILTER_OPERATORS: Record<string, FilterOperator> = {
         "if aggregation expressions inside collection predicates are unsupported",
       );
     }
+
     return { $expr: { $eq: [truth(expression, ctx.mapper), true] } };
   },
   ancestorOf: hierarchy("ancestorOf"),
   descendentOf: hierarchy("descendentOf"),
   overlaps: hierarchy("overlaps"),
-};
+} satisfies Record<string, FilterOperator>;
 
 /** Builds Mongoose conditions from a Cerbos expression in boolean position. */
 const buildFilter = (
@@ -292,6 +322,7 @@ const buildFilterDirect = (
   if (isVariable(expression)) {
     return translateBareVariable(expression.name, ctx);
   }
+
   if (!isExpression(expression)) {
     throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
   }
@@ -304,6 +335,7 @@ const buildFilterDirect = (
   // needs the same treatment, and none of their relation-mapping requirements
   // can be satisfied by a literal.
   const [collectionOperand, lambdaOperand] = operands;
+
   if (
     LAMBDA_BINDING_OPERATORS.has(operator) &&
     operands.length === 2 &&
@@ -318,6 +350,7 @@ const buildFilterDirect = (
       (body) => buildFilter(body, ctx),
     );
   }
+
   if (
     (operator === "exists" || operator === "all") &&
     operands.length === 2 &&
@@ -332,7 +365,8 @@ const buildFilterDirect = (
   if (!Object.hasOwn(FILTER_OPERATORS, operator)) {
     throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
-  return FILTER_OPERATORS[operator]!(expression, ctx);
+
+  return lookup(FILTER_OPERATORS, operator)!(expression, ctx);
 };
 
 /** The operators whose refusal at the root the three-valued evaluation may answer instead. */
@@ -364,6 +398,7 @@ const withLogicFallback = (
     ) {
       throw refusal;
     }
+
     try {
       return { $expr: { $eq: [truth(condition, ctx.mapper), polarity] } };
     } catch (error) {
@@ -383,6 +418,7 @@ function listInBooleanPosition(expression: PlanExpression, ctx: TranslateContext
   if (ctx.scope.kind === "collection") {
     throw new UnsupportedQueryPlanError(`${expression.operator}() returns a list, not a boolean`);
   }
+
   return { $expr: { $eq: [truth(expression, ctx.mapper), true] } };
 }
 
@@ -390,17 +426,19 @@ function listInBooleanPosition(expression: PlanExpression, ctx: TranslateContext
 const emitLeafComparison = (
   ctx: TranslateContext,
   fieldName: string,
-  comparison: unknown,
+  comparison: MongoValue,
   guards: { nullable: boolean; requireExists: boolean },
 ): MongooseFilter => {
   assertCollectionScopedReference(fieldName, ctx);
   const { path, relation } = resolveFieldReference(fieldName, ctx.mapper);
+
   const filter = buildGuardedFieldFilter(
     relation?.type === "many" ? path.slice(1) : path,
     comparison,
     guards.nullable,
     guards.requireExists,
   );
+
   return relation?.type === "many"
     ? { [relation.name]: { $elemMatch: filter } }
     : filter;
@@ -413,15 +451,17 @@ const emitLeafComparison = (
 const emitValueComparison = (
   ctx: TranslateContext,
   fieldName: string,
-  comparison: unknown,
-  constant: unknown,
+  comparison: MongoValue,
+  constant: MongoValue,
   nullOperandContext: string,
 ): MongooseFilter => {
   const nullable = isNullableReference(fieldName, ctx.mapper);
   const requireExists = carriesNullOperand(constant);
+
   if (requireExists) {
     assertNullOperandTranslatable(ctx, nullOperandContext);
   }
+
   return emitLeafComparison(ctx, fieldName, comparison, {
     nullable,
     requireExists,
@@ -434,6 +474,7 @@ const translateBareVariable = (
 ): MongooseFilter => {
   assertCollectionScopedReference(name, ctx);
   const { path, relation } = resolveFieldReference(name, ctx.mapper);
+
   // A to-MANY relation in boolean position is a collection, and a collection has no truth
   // value. A to-ONE relation is a different thing wearing the same field: it flattens to a
   // single dotted scalar path (`parent.aBool`), so it reads exactly like a plain column here.
@@ -442,6 +483,7 @@ const translateBareVariable = (
   if (relation && relation.type !== "one") {
     throw new UnsupportedQueryPlanError("Bare collection variables are unsupported");
   }
+
   return buildGuardedFieldFilter(
     path,
     { $eq: true },
@@ -460,10 +502,13 @@ const alwaysReads = (operand: PlanExpressionOperand, name: string): boolean => {
   if (isVariable(operand)) {
     return operand.name === name;
   }
+
   if (!isExpression(operand)) {
     return false;
   }
+
   const [first, ...rest] = operand.operands;
+
   switch (operand.operator) {
     case "and":
     case "or":
@@ -477,6 +522,7 @@ const alwaysReads = (operand: PlanExpressionOperand, name: string): boolean => {
       if (LAMBDA_BINDING_OPERATORS.has(operand.operator)) {
         return first !== undefined && alwaysReads(first, name);
       }
+
       return operand.operands.some((child) => alwaysReads(child, name));
   }
 };
@@ -488,9 +534,11 @@ const nullableGuardIsExact = (
   const nullable = collectVariableNames(operand).filter((name) =>
     isNullableReference(name, ctx.mapper),
   );
+
   if (nullable.length === 0) {
     return true;
   }
+
   return (
     ctx.scope.kind === "root" &&
     nullable.every((name) => alwaysReads(operand, name)) &&
@@ -509,6 +557,7 @@ const translateNot = (
     0,
     "not operator requires at least one operand",
   );
+
   // De Morgan, pushed down to the leaves. CEL's `&&`/`||` let a decided operand absorb an
   // error in the other, so `!(!aBool && parent.x == "one")` is TRUE on a parentless document
   // whose aBool is true. Guarding the whole negation for every parent it dots through denies
@@ -517,36 +566,44 @@ const translateNot = (
   // combination of true, false and error.
   if (isExpression(operand) && (operand.operator === "and" || operand.operator === "or")) {
     const dual = operand.operator === "and" ? "$or" : "$and";
+
     return {
       [dual]: operand.operands.map((child) => translateNot([child], ctx)),
     };
   }
+
   // `!!x` is `x`, errors included, and eliminating the pair keeps a leaf that answers an error
   // as `false` from being flipped twice by nested `$nor`s.
   if (isExpression(operand) && operand.operator === "has") {
     return translateHas(operand.operands, ctx, true);
   }
+
   if (isExpression(operand) && operand.operator === "not") {
     return buildFilter(
       getOperandAt(operand.operands, 0, "not operator requires at least one operand"),
       ctx,
     );
   }
+
   if (isExpression(operand)) {
     const negated = negatedRewrite(operand, ctx);
+
     if (negated !== undefined) {
       return negated;
     }
   }
+
   // An ordering between a field and a constant negates to its complement, so it keeps the
   // positive leaf's semantics: MongoDB's `$lt` compares only values of the constant's own BSON
   // type, and a constant CEL cannot order against the field answers `false` either way. A `$nor`
   // over the ordering would instead be TRUE for a null, or a value of another type, where CEL
   // raises an error and denies (cerbos/query-plan-adapters#516).
   const complement = complementedOrdering(operand);
+
   if (complement) {
     return buildFilter(complement, ctx);
   }
+
   if (
     (isExpression(operand) &&
       ["exists", "exists_one", "all"].includes(operand.operator)) ||
@@ -558,6 +615,7 @@ const translateNot = (
       );
     });
   }
+
   return withLogicFallback(operand, ctx, false, () => negateGenerally(operand, ctx));
 };
 
@@ -574,16 +632,20 @@ const negateGenerally = (operand: PlanExpressionOperand, ctx: TranslateContext):
       "A negated expression inside a collection predicate needs $expr guards, which MongoDB accepts only at the top level",
     );
   }
+
   let negated: MongooseFilter = { $nor: [buildFilter(operand, { ...ctx, withinNegation: true })] };
+
   // A bare field in boolean position raises in CEL unless it holds a boolean, so its type is
   // required outside the $nor, which would otherwise match every other value.
   if (isVariable(operand)) {
     const { path } = resolveFieldReference(operand.name, ctx.mapper);
     negated = { $and: [buildFieldFilter(path, { $type: "bool" }), negated] };
   }
+
   const guarded = withEvaluationGuards(negated, [operand], ctx.mapper);
-  const listShape = buildListShapeGuard(operand, ctx.mapper, ctx.scope.kind === "root");
-  return listShape ? { $and: [listShape, guarded] } : guarded;
+  const listGuard = buildListTypeGuard(operand, ctx.mapper, ctx.scope.kind === "root");
+
+  return listGuard ? { $and: [listGuard, guarded] } : guarded;
 };
 
 /**
@@ -596,9 +658,11 @@ const negatedRewrite = (
   ctx: TranslateContext,
 ): MongooseFilter | undefined => {
   const [left, right] = operand.operands;
+
   if (operand.operands.length !== 2 || left === undefined || right === undefined) {
     return undefined;
   }
+
   if (
     operand.operator === "in" &&
     isValue(left) &&
@@ -607,30 +671,39 @@ const negatedRewrite = (
   ) {
     return translateMapIntersection(right, { value: [left.value] }, ctx, true);
   }
+
   // `!hasIntersection(coll.map(e, e.field), [..])`, either operand order: a `$nor` over the
   // positive filter would flip its no-null-projection guard too, and match the documents whose
   // map() raises (an element without the field), which CEL denies under either polarity.
   if (operand.operator === "hasIntersection") {
     const [map, values] =
       isExpression(right) && right.operator === "map" ? [right, left] : [left, right];
+
     if (isExpression(map) && map.operator === "map") {
       return translateMapIntersection(map, values, ctx, true);
     }
+
     return undefined;
   }
+
   if (operand.operator === "isSubset") {
     return buildFilter(everyElementIn("exists", left, right, true), ctx);
   }
+
   if (matchesInvalidPattern(operand)) {
     return buildFilter(operand, ctx);
   }
+
   if (operand.operator === "eq" || operand.operator === "ne") {
     const flipped = operand.operator === "eq" ? "ne" : "eq";
+
     const rewritten =
       emptyListComparison(flipped, left, right) ??
       mapLiteralLookupMembership(flipped, left, right, ctx.mapper);
+
     return rewritten === undefined ? undefined : buildFilter(rewritten, ctx);
   }
+
   return undefined;
 };
 
@@ -652,6 +725,7 @@ const everyElementIn = (
     operator: "in",
     operands: [{ name: ELEMENT_VARIABLE }, other],
   };
+
   return {
     operator: quantifierOperator,
     operands: [
@@ -681,9 +755,12 @@ const emptyListComparison = (
   if (operator !== "eq" && operator !== "ne") {
     return undefined;
   }
+
   const isEmptyList = (operand: PlanExpressionOperand): boolean =>
     isValue(operand) && Array.isArray(operand.value) && operand.value.length === 0;
+
   const setOperation = isEmptyList(right) ? left : isEmptyList(left) ? right : undefined;
+
   if (
     setOperation === undefined ||
     !isExpression(setOperation) ||
@@ -691,24 +768,27 @@ const emptyListComparison = (
   ) {
     return undefined;
   }
-  const [first, second] = setOperation.operands as [
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-  ];
+
+  const [first, second] = pair(setOperation.operands);
+
   const empty = operator === "eq";
+
   if (setOperation.operator === "except") {
     return empty
       ? everyElementIn("all", first, second, false)
       : everyElementIn("exists", first, second, true);
   }
+
   if (setOperation.operator === "intersect") {
     // Range over the list the document holds; membership in the constant one is a plain `$in`.
     const [collection, other] =
       isVariable(second) && !isVariable(first) ? [second, first] : [first, second];
+
     return empty
       ? everyElementIn("all", collection, other, true)
       : everyElementIn("exists", collection, other, false);
   }
+
   return undefined;
 };
 
@@ -726,7 +806,9 @@ const mapLiteralLookupMembership = (
   if (operator !== "eq" && operator !== "ne") {
     return undefined;
   }
+
   const [lookup, constant] = isValue(right) ? [left, right] : [right, left];
+
   if (
     !isValue(constant) ||
     !isScalarConstant(constant.value) ||
@@ -736,18 +818,23 @@ const mapLiteralLookupMembership = (
   ) {
     return undefined;
   }
-  const [map, key] = lookup.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
+  const [map, key] = pair(lookup.operands);
+
   if (!isExpression(map) || map.operator !== "struct" || !isVariable(key)) {
     return undefined;
   }
+
   if (relationOfReference(key.name, mapper)?.type === "many") {
     throw new UnsupportedQueryPlanError(
       "A list cannot be a map key in CEL, so indexing a map constant by a collection is an " +
         "error, where membership would match its elements",
     );
   }
+
   const entries = map.operands.map((entry) => {
     const [entryKey, entryValue] = isExpression(entry) ? entry.operands : [];
+
     if (
       !isExpression(entry) ||
       entry.operator !== "set-field" ||
@@ -761,14 +848,18 @@ const mapLiteralLookupMembership = (
     ) {
       return undefined;
     }
+
     return [entryKey.value, entryValue.value] as const;
   });
+
   if (entries.some((entry) => entry === undefined)) {
     return undefined;
   }
+
   const keys = entries
     .filter((entry) => (entry![1] === constant.value) === (operator === "eq"))
     .map((entry) => entry![0]);
+
   return { operator: "in", operands: [key, { value: keys }] };
 };
 
@@ -783,20 +874,21 @@ const MIRRORED_COMPARISON: Record<ComparisonOperator, ComparisonOperator> = {
 };
 
 /** `!(a < b)` is `a >= b` whenever CEL can order `a` and `b` at all. */
-const COMPLEMENTED_ORDERING: Partial<Record<string, ComparisonOperator>> = {
+const COMPLEMENTED_ORDERING = {
   lt: "ge",
   le: "gt",
   gt: "le",
   ge: "lt",
-};
+} satisfies Partial<Record<string, ComparisonOperator>>;
 
 /** The complement of an ordering between one field and one constant; undefined for anything else. */
 const complementedOrdering = (
   operand: PlanExpressionOperand,
 ): PlanExpression | undefined => {
   if (!isExpression(operand)) return undefined;
-  const complement = COMPLEMENTED_ORDERING[operand.operator];
+  const complement = lookup(COMPLEMENTED_ORDERING, operand.operator);
   const [left, right] = operand.operands;
+
   if (
     complement === undefined ||
     operand.operands.length !== 2 ||
@@ -806,6 +898,7 @@ const complementedOrdering = (
   ) {
     return undefined;
   }
+
   return { operator: complement, operands: operand.operands };
 };
 
@@ -819,26 +912,31 @@ const translateComparison = (
   ctx: TranslateContext,
 ): MongooseFilter => {
   const { mapper } = ctx;
+
   const leftOperand = getOperandAt(
     operands,
     0,
     `${operator} operator requires a left operand`,
   );
+
   const rightOperand = getOperandAt(
     operands,
     1,
     `${operator} operator requires a right operand`,
   );
+
   const bothOperands = [leftOperand, rightOperand];
 
   const rewritten =
     emptyListComparison(operator, leftOperand, rightOperand) ??
     mapLiteralLookupMembership(operator, leftOperand, rightOperand, mapper);
+
   if (rewritten !== undefined) {
     return buildFilter(rewritten, ctx);
   }
 
   const comparisonExpression: PlanExpression = { operator, operands: bothOperands };
+
   // A timestamp or duration against a value of another type: no ordering overload, so an error on
   // every document; `==` is false. The guard the aggregation lowering declares for an ordering
   // keeps every document out, outside any $nor a negation wraps this in.
@@ -848,9 +946,12 @@ const translateComparison = (
         "A comparison between CEL types inside a collection predicate needs $expr",
       );
     }
+
     const decided = !ORDERINGS.has(operator) && operator === "ne";
+
     return withEvaluationGuards({ $expr: decided }, [comparisonExpression], mapper);
   }
+
   // A null constant asks only whether the field is stored, which a Date still says.
   if (
     bothOperands.some(
@@ -864,27 +965,34 @@ const translateComparison = (
       "Bare temporal field comparison cannot preserve CEL string equality: stored Dates discard the original lexical spelling; compare timestamp(...) values instead",
     );
   }
+
   const composite = bothOperands.find(
-    (operand) => isValue(operand) && typeof operand.value === "object" && operand.value !== null,
+    (operand): operand is PlanExpressionValue => isValue(operand) && isObject(operand.value),
   );
+
   const other = composite && bothOperands.find((operand) => operand !== composite);
+
   if (composite && other && (operator === "eq" || operator === "ne") && !isValue(other)) {
-    return translateCompositeEquality(operator, other, (composite as { value: unknown }).value, ctx);
+    return translateCompositeEquality(operator, other, composite.value, ctx);
   }
+
   if (composite && other && isExpression(other)) {
     throw new UnsupportedQueryPlanError(
       "An ordering against a list or map constant inside an expression is unsupported",
     );
   }
+
   const roundedLiteral = roundSubMillisecondTimestampLiteral(
     operator,
     leftOperand,
     rightOperand,
     ctx,
   );
+
   if (roundedLiteral !== undefined) {
     return roundedLiteral;
   }
+
   // If either operand is a (non-relational) expression, emit a `$expr`
   // with aggregation-pipeline operators. This covers arithmetic, type
   // conversion, ternary, `index`, `size`, `matches` etc. on either side
@@ -899,6 +1007,7 @@ const translateComparison = (
         `${operator} aggregation expressions inside collection predicates are unsupported`,
       );
     }
+
     // The comparison itself is guarded too: an ordering between two types CEL cannot order is an
     // error, which the guard keeps out under either polarity.
     const expr = compare(
@@ -906,20 +1015,24 @@ const translateComparison = (
       buildAggregationExpression(leftOperand, mapper),
       buildAggregationExpression(rightOperand, mapper),
     );
+
     return withEvaluationGuards({ $expr: expr }, [comparisonExpression], mapper);
   }
 
   const variableOperand = bothOperands.find(isVariable);
   const valueOperand = bothOperands.find(isValue);
+
   if (!variableOperand || !valueOperand) {
     throw new UnsupportedQueryPlanError(
       `${operator} requires a field/value pair or aggregation operands`,
     );
   }
+
   assertCollectionScopedReference(variableOperand.name, ctx);
 
   const effectiveOperator =
     variableOperand === leftOperand ? operator : MIRRORED_COMPARISON[operator];
+
   // CEL has no ordering between types, so `aNumber < "5"` is an error that denies, where
   // Mongoose would cast `"5"` to the declared Number and compare. A negation reaches here as the
   // complemented ordering (`translateNot`), so this `false` holds under both polarities.
@@ -935,6 +1048,7 @@ const translateComparison = (
       { nullable: false, requireExists: false },
     );
   }
+
   // A constant of a different scalar type than the declared field never equals it.
   if (
     (effectiveOperator === "eq" || effectiveOperator === "ne") &&
@@ -947,6 +1061,7 @@ const translateComparison = (
         mapper,
       );
     }
+
     // MongoDB refuses `$expr` inside `$elemMatch` ("$expr can only be applied to the top-level
     // document"), so an element predicate states the answer as a leaf on the element's own
     // field: nothing is in an empty list, and `!=` holds wherever the field is present (and,
@@ -963,6 +1078,7 @@ const translateComparison = (
       },
     );
   }
+
   return emitValueComparison(
     ctx,
     variableOperand.name,
@@ -994,37 +1110,49 @@ const roundSubMillisecondTimestampLiteral = (
 ): MongooseFilter | undefined => {
   const bounds = (operand: PlanExpressionOperand) => {
     const literal = isExpression(operand) && operand.operator === "timestamp" ? operand.operands[0] : undefined;
-    return literal !== undefined && isValue(literal) && typeof literal.value === "string"
+
+    return literal !== undefined && isValue(literal) && isString(literal.value)
       ? subMillisecondTimestampBounds(literal.value)
       : undefined;
   };
+
   const [literalOperand, other, literalOnLeft] = bounds(leftOperand)
     ? [leftOperand, rightOperand, true]
     : [rightOperand, leftOperand, false];
+
   const literal = bounds(literalOperand);
+
   if (literal === undefined || bounds(other) !== undefined) {
     return undefined;
   }
+
   const otherType = celScalarType(other, ctx.mapper);
+
   if (otherType === undefined || otherType === "mixed") {
     return undefined;
   }
+
   // As `other OP literal`.
   const effective = literalOnLeft ? MIRRORED_COMPARISON[operator] : operator;
+
   if (effective === "eq" || effective === "ne") {
     if (otherType !== "timestamp") {
       return undefined;
     }
+
     return effective === "eq"
       ? { $expr: false }
       : withEvaluationGuards({ $expr: true }, [other], ctx.mapper);
   }
+
   // An ordering against another type is an error CEL raises whichever bound stands in.
   const bound = effective === "lt" || effective === "ge" ? literal.ceil : literal.floor;
+
   const rounded: PlanExpressionOperand = {
     operator: "timestamp",
     operands: [{ value: bound.toISOString() }],
   };
+
   return buildFilter(
     { operator, operands: literalOnLeft ? [rounded, other] : [other, rounded] },
     ctx,
@@ -1042,6 +1170,7 @@ const translateIn = (
     if (!Array.isArray(rightOperand.value)) {
       throw new UnsupportedQueryPlanError("in with a field on the left requires an array value");
     }
+
     return emitValueComparison(
       ctx,
       leftOperand.name,
@@ -1062,6 +1191,7 @@ const translateIn = (
       "List-element membership is not supported: a scalar relation mapping cannot compare a list value with one element",
     );
   }
+
   // `needle in coll.map(e, e.field)` is `hasIntersection(coll.map(e, e.field), [needle])`.
   if (
     isValue(leftOperand) &&
@@ -1075,6 +1205,7 @@ const translateIn = (
       false,
     );
   }
+
   if (
     isValue(leftOperand) &&
     isExpression(rightOperand) &&
@@ -1085,6 +1216,7 @@ const translateIn = (
       ctx,
     );
   }
+
   if (isValue(leftOperand) && isVariable(rightOperand)) {
     if (relationOfReference(rightOperand.name, ctx.mapper)?.type === "one") {
       throw new UnsupportedQueryPlanError(
@@ -1093,6 +1225,7 @@ const translateIn = (
           "field names",
       );
     }
+
     if (
       !canEqualDeclaredType(rightOperand.name, leftOperand.value, ctx.mapper)
     ) {
@@ -1105,11 +1238,13 @@ const translateIn = (
         { nullable: false, requireExists: false },
       );
     }
+
     const needle = applyValueParser(
       rightOperand.name,
       leftOperand.value,
       ctx.mapper,
     );
+
     const uncast = emitUncastListMembership(
       ctx,
       rightOperand.name,
@@ -1117,9 +1252,11 @@ const translateIn = (
       carriesNullOperand(leftOperand.value),
       "a null needle in a mapped-collection `in`",
     );
+
     if (uncast) {
       return uncast;
     }
+
     return emitValueComparison(
       ctx,
       rightOperand.name,
@@ -1134,8 +1271,8 @@ const translateIn = (
   );
 };
 
-const isScalarConstant = (value: unknown): boolean =>
-  value === null || ["string", "number", "boolean"].includes(typeof value);
+const isScalarConstant = (value: MongoValue): boolean =>
+  value === null || isString(value) || isNumber(value) || isBoolean(value);
 
 /**
  * `needle in (cond ? [..] : [..])` with constant branches: the membership is decided per branch
@@ -1143,10 +1280,11 @@ const isScalarConstant = (value: unknown): boolean =>
  * This is how the planner spells `"role" in runtime.effectiveDerivedRoles`.
  */
 const membershipInConditionalList = (
-  needle: unknown,
+  needle: MongoValue,
   conditional: PlanExpression,
 ): PlanExpressionOperand => {
   const [condition, thenOperand, elseOperand] = conditional.operands;
+
   if (
     conditional.operands.length !== 3 ||
     condition === undefined ||
@@ -1155,6 +1293,7 @@ const membershipInConditionalList = (
   ) {
     throw new UnsupportedQueryPlanError("if operator requires three operands");
   }
+
   const contains = (branch: PlanExpressionOperand): boolean => {
     if (
       !isValue(branch) ||
@@ -1167,11 +1306,14 @@ const membershipInConditionalList = (
           "scalar constants and the needle is a scalar constant",
       );
     }
+
     return branch.value.some((element) => element === needle);
   };
+
   const inThen = contains(thenOperand);
   const inElse = contains(elseOperand);
   const negatedCondition = { operator: "not", operands: [condition] };
+
   if (inThen === inElse) {
     // Either branch gives the same answer, but CEL still evaluates the condition, whose error
     // denies: `c || !c` holds exactly where `c` evaluates, `c && !c` nowhere.
@@ -1180,6 +1322,7 @@ const membershipInConditionalList = (
       operands: [condition, negatedCondition],
     };
   }
+
   return inThen ? condition : negatedCondition;
 };
 
@@ -1209,25 +1352,31 @@ const membershipInConditionalList = (
 const emitUncastListMembership = (
   ctx: TranslateContext,
   fieldName: string,
-  needles: unknown[],
+  needles: MongoValue[],
   carriesNull: boolean,
   nullOperandContext: string,
 ): MongooseFilter | undefined => {
   if (ctx.scope.kind !== "root" || needles.length === 0) {
     return undefined;
   }
+
   const { path, relation } = resolveFieldReference(fieldName, ctx.mapper);
+
   if (relation) {
     return undefined;
   }
+
   if (carriesNull) {
     assertNullOperandTranslatable(ctx, nullOperandContext);
   }
+
   const field = `$${path.join(".")}`;
+
   // A fresh array operand per needle: Mongoose's caster rewrites `$cond` in place.
   const memberships = needles.map((needle) => ({
     $in: [{ $literal: needle }, { $cond: [{ $isArray: field }, field, []] }],
   }));
+
   return withNullableGuards(
     {
       $expr: memberships.length === 1 ? memberships[0] : { $or: memberships },
@@ -1246,20 +1395,23 @@ const translateMatches = (
     0,
     "matches operator requires a field operand",
   );
+
   const patternOperand = getOperandAt(
     operands,
     1,
     "matches operator requires a regex pattern value",
   );
+
   if (
     !isVariable(fieldOperand) ||
     !isValue(patternOperand) ||
-    typeof patternOperand.value !== "string"
+    !isString(patternOperand.value)
   ) {
     throw new UnsupportedQueryPlanError("matches operator requires a string regex pattern");
   }
 
   const lowered = lowerRe2PatternForMongo(patternOperand.value);
+
   return emitLeafComparison(
     ctx,
     fieldOperand.name,
@@ -1273,11 +1425,12 @@ const translateMatches = (
 /** `matches()` over a constant pattern Go's regexp rejects: an error to CEL, false either way. */
 const matchesInvalidPattern = (operand: PlanExpression): boolean => {
   const pattern = operand.operands[1];
+
   return (
     operand.operator === "matches" &&
     pattern !== undefined &&
     isValue(pattern) &&
-    typeof pattern.value === "string" &&
+    isString(pattern.value) &&
     "invalid" in lowerRe2PatternForMongo(pattern.value)
   );
 };
@@ -1289,20 +1442,23 @@ function translateStringPredicate(
 ): MongooseFilter {
   const { operator, operands } = expression;
   const { mapper } = ctx;
+
   const leftOperand = getOperandAt(
     operands,
     0,
     `${operator} operator requires a receiver`,
   );
+
   const rightOperand = getOperandAt(
     operands,
     1,
     `${operator} operator requires a needle`,
   );
+
   if (
     !isVariable(leftOperand) ||
     !isValue(rightOperand) ||
-    typeof rightOperand.value !== "string" ||
+    !isString(rightOperand.value) ||
     !isStringOrUntyped(resolveMapperConfig(leftOperand.name, mapper)?.valueType)
   ) {
     if (ctx.scope.kind === "collection") {
@@ -1310,6 +1466,7 @@ function translateStringPredicate(
         `${operator} aggregation expressions inside collection predicates are unsupported`,
       );
     }
+
     return withEvaluationGuards(
       { $expr: buildAggregationExpressionFromExpression(expression, mapper) },
       [expression],
@@ -1318,6 +1475,7 @@ function translateStringPredicate(
   }
 
   const escapedValue = escapeRegexValue(rightOperand.value);
+
   // Mongo matches $regex with PCRE2, where `$` also matches immediately
   // before a final newline, so "tail\n" would satisfy endsWith("tail")
   // while CEL says false. `\z` is the absolute end of subject — the same
@@ -1358,6 +1516,7 @@ const translateHasIntersection = (
   ) {
     assertNullOperandTranslatable(ctx, "a null element in hasIntersection");
   }
+
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError("hasIntersection requires exactly two operands");
   }
@@ -1367,11 +1526,13 @@ const translateHasIntersection = (
     0,
     "hasIntersection requires a field operand",
   );
+
   const secondOperand = getOperandAt(
     operands,
     1,
     "hasIntersection requires a value operand",
   );
+
   // hasIntersection is commutative and the planner preserves source order, so the constant
   // list arrives FIRST when the policy spells it first. The operands are not
   // interchangeable in the emitted query — one becomes the field path, the other the `$in`
@@ -1387,14 +1548,17 @@ const translateHasIntersection = (
   if (!isVariable(leftOperand) || !isValue(rightOperand)) {
     throw new UnsupportedQueryPlanError("Invalid operands for hasIntersection");
   }
+
   if (!Array.isArray(rightOperand.value)) {
     throw new UnsupportedQueryPlanError("hasIntersection requires an array value");
   }
+
   const values = withoutUnequalConstants(
     leftOperand.name,
     rightOperand.value,
     ctx.mapper,
   );
+
   const uncast = emitUncastListMembership(
     ctx,
     leftOperand.name,
@@ -1402,9 +1566,11 @@ const translateHasIntersection = (
     carriesNullOperand(values),
     "a null element in hasIntersection",
   );
+
   if (uncast) {
     return uncast;
   }
+
   return emitLeafComparison(
     ctx,
     leftOperand.name,
@@ -1428,12 +1594,13 @@ const translateHasIntersection = (
  */
 const canEqualDeclaredType = (
   reference: string,
-  constant: unknown,
+  constant: MongoValue,
   mapper: ScopedMapper,
 ): boolean => {
   const declared = declaredScalarType(reference, mapper);
+
   return (
-    declared === undefined || constant === null || typeof constant === declared
+    declared === undefined || constant === null || typeofValue(constant) === declared
   );
 };
 
@@ -1444,26 +1611,28 @@ const canEqualDeclaredType = (
  */
 const canOrderAgainstDeclaredType = (
   reference: string,
-  constant: unknown,
+  constant: MongoValue,
   mapper: ScopedMapper,
 ): boolean => {
   if (
-    typeof constant !== "number" &&
-    typeof constant !== "string" &&
-    typeof constant !== "boolean"
+    !isNumber(constant) &&
+    !isString(constant) &&
+    !isBoolean(constant)
   ) {
     return false;
   }
+
   const declared = declaredScalarType(reference, mapper);
-  return declared === undefined || typeof constant === declared;
+
+  return declared === undefined || typeofValue(constant) === declared;
 };
 
 /** A constant list without the elements `reference`'s declared type can never equal. */
 const withoutUnequalConstants = (
   reference: string,
-  constants: unknown[],
+  constants: MongoValue[],
   mapper: ScopedMapper,
-): unknown[] =>
+): MongoValue[] =>
   constants.filter((constant) =>
     canEqualDeclaredType(reference, constant, mapper),
   );
@@ -1479,6 +1648,7 @@ const scopedMapperFor = (
   ctx: TranslateContext,
 ): ScopedMapper => {
   const scoped = createScopedMapper(collection, variable, ctx.mapper);
+
   return ctx.nullRepresentation === "omitted"
     ? { lookup: withOmittedNullDefault(scoped.lookup), nullableDefault: false, bound: [] }
     : scoped;
@@ -1491,49 +1661,61 @@ const translateMapIntersection = (
   negated: boolean,
 ): MongooseFilter => {
   const { mapper } = ctx;
+
   const collectionOperand = getOperandAt(
     map.operands,
     0,
     "Expected a variable in map expression",
   );
+
   const lambdaOperand = getOperandAt(
     map.operands,
     1,
     "Expected a lambda in map expression",
   );
+
   if (!isVariable(collectionOperand)) {
     throw new UnsupportedQueryPlanError("Expected a variable in map expression");
   }
+
   if (!isExpression(lambdaOperand)) {
     throw new UnsupportedQueryPlanError("Expected a lambda in map expression");
   }
+
   if (lambdaOperand.operator !== "lambda") {
     throw new UnsupportedQueryPlanError("Second operand of map must be a lambda expression");
   }
+
   const projectionOperand = getOperandAt(
     lambdaOperand.operands,
     0,
     "Map lambda requires a projection operand",
   );
+
   const variableOperand = getOperandAt(
     lambdaOperand.operands,
     1,
     "Map lambda requires a variable operand",
   );
+
   if (!isVariable(variableOperand)) {
     throw new UnsupportedQueryPlanError("Invalid map expression structure");
   }
+
   if (!isValue(valuesOperand) || !Array.isArray(valuesOperand.value)) {
     throw new UnsupportedQueryPlanError("hasIntersection requires an array value");
   }
 
   const { relation } = resolveFieldReference(collectionOperand.name, mapper);
+
   if (!relation) {
     throw new Error("map operator requires a relation mapping");
   }
+
   if (relation.type !== "many") {
     throw toOneMacroRefusal("map");
   }
+
   if (!isVariable(projectionOperand)) {
     throw new UnsupportedQueryPlanError("Map projection must be a variable reference");
   }
@@ -1543,16 +1725,19 @@ const translateMapIntersection = (
     variableOperand.name,
     ctx,
   );
+
   const elementPath = resolveFieldReference(
     projectionOperand.name,
     scopedMapper,
   ).path;
+
   // The `$in` below sits inside `$elemMatch`, where Mongoose casts to the element field's type.
   const values = withoutUnequalConstants(
     projectionOperand.name,
     valuesOperand.value,
     scopedMapper,
   );
+
   const elementMatch = {
     $elemMatch: buildGuardedFieldFilter(
       elementPath,
@@ -1561,6 +1746,7 @@ const translateMapIntersection = (
       values.includes(null),
     ),
   };
+
   // A nullable projection is a missing attribute on any element that stores null, which makes
   // the whole CEL `map` raise under either polarity: no element may be null.
   const noMissingProjection = isNullableReference(
@@ -1575,6 +1761,7 @@ const translateMapIntersection = (
         },
       ]
     : [];
+
   if (negated) {
     // No element matches, over a collection that is there: an absent or null list is an error
     // to CEL, which a bare `$not` would match. A relation reached through a parent that can be
@@ -1585,6 +1772,7 @@ const translateMapIntersection = (
           "require the collection to exist",
       );
     }
+
     return {
       $and: [
         { [relation.name]: { $type: "array" } },
@@ -1593,7 +1781,9 @@ const translateMapIntersection = (
       ],
     };
   }
+
   const matchingElement = { [relation.name]: elementMatch };
+
   return noMissingProjection.length === 0
     ? matchingElement
     : { $and: [...noMissingProjection, matchingElement] };
@@ -1608,22 +1798,27 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
     if (operands.length !== 2) {
       throw new UnsupportedQueryPlanError(`${operator} requires exactly two operands`);
     }
+
     const collectionOperand = getOperandAt(
       operands,
       0,
       `${operator} operator requires a collection operand`,
     );
+
     const lambdaOperand = getOperandAt(
       operands,
       1,
       `${operator} operator requires a lambda operand`,
     );
+
     if (!isVariable(collectionOperand) || !isExpression(lambdaOperand)) {
       throw new UnsupportedQueryPlanError("Invalid operands for collection operation");
     }
+
     if (lambdaOperand.operator !== "lambda") {
       throw new UnsupportedQueryPlanError("Second operand must be a lambda expression");
     }
+
     if (lambdaOperand.operands.length !== 2) {
       throw new UnsupportedQueryPlanError(
         `two-variable ${operator}() binds each element's list index or map key, and ` +
@@ -1631,16 +1826,19 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
           "has no form that iterates a subdocument's field names",
       );
     }
+
     const conditionOperand = getOperandAt(
       lambdaOperand.operands,
       0,
       "Lambda operand requires a condition",
     );
+
     const variableOperand = getOperandAt(
       lambdaOperand.operands,
       1,
       "Lambda operand requires a variable",
     );
+
     if (!isVariable(variableOperand)) {
       throw new UnsupportedQueryPlanError("Lambda variable must have a name");
     }
@@ -1649,9 +1847,11 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
       collectionOperand.name,
       ctx.mapper,
     );
+
     if (!relation) {
       throw new Error(`${operator} operator requires a relation mapping`);
     }
+
     if (relation.type !== "many") {
       throw toOneMacroRefusal(operator);
     }
@@ -1663,6 +1863,7 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
         ? { [relation.name]: { $in: [] } }
         : { [relation.name]: { $type: "array", $size: 0 } };
     }
+
     if (isValue(conditionOperand) && conditionOperand.value === true && operator === "all") {
       return { [relation.name]: { $type: "array" } };
     }
@@ -1680,6 +1881,7 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
     if (operator === "exists") {
       return { [relation.name]: { $elemMatch: elementCondition } };
     }
+
     // "No element fails the condition", on a field that must be an array.
     return {
       [relation.name]: {
@@ -1707,6 +1909,7 @@ const foldConstructedList = (
       `${operator}() over a constructed list inside a collection predicate is unsupported`,
     );
   }
+
   if (
     !isExpression(lambda) ||
     lambda.operator !== "lambda" ||
@@ -1716,26 +1919,30 @@ const foldConstructedList = (
       `${operator}() over a constructed list requires a single-variable lambda`,
     );
   }
-  const [body, variable] = lambda.operands as [
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-  ];
+
+  const [body, variable] = pair(lambda.operands);
+
   if (!isVariable(variable)) {
     throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
+
   const elements = list.operands;
+
   if (!elements.every((element) => isVariable(element) || isValue(element))) {
     throw new UnsupportedQueryPlanError(
       `${operator}() over a constructed list is translated only when every element is an ` +
         "attribute or a constant",
     );
   }
+
   if (elements.length === 0) {
     return { $expr: operator === "all" };
   }
+
   const bodies = elements.map((element) =>
     buildFilter(substituteElement(body, variable.name, element), ctx),
   );
+
   return withEvaluationGuards(
     operator === "exists" ? { $or: bodies } : { $and: bodies },
     elements,
@@ -1757,22 +1964,28 @@ const substituteElement = (
     if (operand.name === name) {
       return element;
     }
+
     if (operand.name.startsWith(`${name}.`)) {
       throw new UnsupportedQueryPlanError(
         `Cannot read ${operand.name}: the elements of a constructed list are translated as scalars`,
       );
     }
+
     return operand;
   }
+
   if (!isExpression(operand)) {
     return operand;
   }
+
   if (operand.operator === "lambda") {
     const bound = operand.operands.slice(1);
+
     if (bound.some((child) => isVariable(child) && child.name === name)) {
       return operand;
     }
   }
+
   return {
     operator: operand.operator,
     operands: operand.operands.map((child) => substituteElement(child, name, element)),
@@ -1788,11 +2001,13 @@ const translateLambda = (
     0,
     "lambda operator requires a condition operand",
   );
+
   const variableOperand = getOperandAt(
     operands,
     1,
     "lambda operator requires a variable operand",
   );
+
   if (!isVariable(variableOperand)) {
     throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
@@ -1830,39 +2045,45 @@ function hierarchy(operator: HierarchyOperator): FilterOperator {
 const translateCompositeEquality = (
   operator: "eq" | "ne",
   other: PlanExpressionOperand,
-  constant: unknown,
+  constant: MongoValue,
   ctx: TranslateContext,
 ): MongooseFilter => {
   const { mapper } = ctx;
+
   if (ctx.scope.kind === "collection") {
     throw new UnsupportedQueryPlanError(
       "Whole-value comparison inside a collection predicate needs $expr, which MongoDB accepts only at the top level",
     );
   }
+
   if (isVariable(other)) {
     const config = resolveMapperConfig(other.name, mapper);
+
     if (config?.valueType && !config.valueParser) {
       return withNullableGuards({ $expr: { $eq: [operator === "ne", true] } }, [other], mapper);
     }
   }
+
   if (!Array.isArray(constant) || !constant.every(isComparableScalar)) {
     throw new UnsupportedQueryPlanError(
       "Whole-value comparison with a map, or with a list holding a list, a map or NaN, is " +
         "unsupported: MongoDB compares embedded documents in stored field order and NaN equal to NaN",
     );
   }
+
   const [list, guard] = listExpression(other, mapper);
   const compared = { $expr: { [COMPARISON_OPERATORS[operator]]: [list, { $literal: constant }] } };
   const filter = withEvaluationGuards(compared, [other], mapper);
+
   return guard ? { $and: [guard, filter] } : filter;
 };
 
 /** A scalar CEL and MongoDB's `$eq` agree on: a string, a boolean, null, or a number other than NaN. */
-const isComparableScalar = (value: unknown): boolean =>
+const isComparableScalar = (value: MongoValue): boolean =>
   value === null ||
-  typeof value === "string" ||
-  typeof value === "boolean" ||
-  (typeof value === "number" && !Number.isNaN(value));
+  isString(value) ||
+  isBoolean(value) ||
+  (isNumber(value) && !Number.isNaN(value));
 
 /**
  * The list `operand` stands for, as an aggregation expression, and the filter requiring it to be
@@ -1873,18 +2094,22 @@ const isComparableScalar = (value: unknown): boolean =>
 const listExpression = (
   operand: PlanExpressionOperand,
   mapper: ScopedMapper,
-): [unknown, MongooseFilter | undefined] => {
+): [MongoValue, MongooseFilter | undefined] => {
   if (isVariable(operand)) {
     const resolved = resolveFieldReference(operand.name, mapper);
+
     if (!resolved.relation) return [`$${resolved.path.join(".")}`, undefined];
     const relation = resolveMapperConfig(operand.name, mapper)?.relation;
+
     if (!(relation?.type === "many" && relation.field && relation.requiresParent === undefined)) {
       throw new UnsupportedQueryPlanError(
         "Whole-list comparison needs a plain field or a to-many relation's projected field",
       );
     }
+
     return projectedList(relation, relation.field, mapper);
   }
+
   // A list the plan computes (a concatenation, intersect(), except(), a ternary between lists):
   // its value, null where CEL raises, which the caller's evaluation guards keep out.
   if (
@@ -1894,14 +2119,17 @@ const listExpression = (
   ) {
     return [buildAggregationExpression(operand, mapper), undefined];
   }
+
   if (!(isExpression(operand) && operand.operator === "map" && operand.operands.length === 2)) {
     throw new UnsupportedQueryPlanError(
       "Whole-list comparison needs a field, a relation projection or a map() over a relation",
     );
   }
-  const [collection, lambda] = operand.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
+  const [collection, lambda] = pair(operand.operands);
   const projectionOperand = isExpression(lambda) ? lambda.operands[0] : undefined;
   const elementOperand = isExpression(lambda) ? lambda.operands[1] : undefined;
+
   if (
     !isVariable(collection) ||
     !isExpression(lambda) ||
@@ -1915,23 +2143,29 @@ const listExpression = (
       "map() in a whole-list comparison must project one field of each element",
     );
   }
+
   const relation = resolveMapperConfig(collection.name, mapper)?.relation;
+
   if (!(relation?.type === "many" && relation.requiresParent === undefined)) {
     throw new UnsupportedQueryPlanError("map() in a whole-list comparison needs a to-many relation");
   }
+
   const projection = projectionOperand.name;
   const element = elementOperand.name;
+
   const field =
     projection === element
       ? relation.field
       : projection.startsWith(`${element}.`)
         ? projection.slice(element.length + 1)
         : undefined;
+
   if (field === undefined) {
     throw new UnsupportedQueryPlanError(
       "map() in a whole-list comparison must project one field of each element",
     );
   }
+
   return projectedList(relation, field, mapper);
 };
 
@@ -1939,15 +2173,18 @@ const projectedList = (
   relation: NonNullable<MapperConfig["relation"]>,
   field: string,
   mapper: ScopedMapper,
-): [unknown, MongooseFilter] => {
+): [MongoValue, MongooseFilter] => {
   const config = relation.fields?.[field];
   const nullable = config?.nullable ?? mapper.nullableDefault;
+
   if (nullable) {
     throw new UnsupportedQueryPlanError(
       "Whole-list comparison over a nullable element field: a null element is a missing attribute, which CEL raises on",
     );
   }
+
   const path = config?.field ?? field;
+
   return [
     { $map: { input: `$${relation.name}`, in: `$$this.${path}` } },
     { [relation.name]: { $type: "array" } },

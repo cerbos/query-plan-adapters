@@ -7,6 +7,7 @@ import {
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
+  Value,
 } from "@cerbos/core";
 import type { Where } from "chromadb";
 
@@ -26,6 +27,11 @@ import {
   requiredMetadataKeys,
 } from "./corpus";
 import type { Golden } from "./corpus";
+import { isBoolean, isNumber, isObject, isString } from "./narrowing";
+
+/** `response` with `field` replaced by a value its type rules out: a plan the SDK never decodes. */
+const overwritten = (response: PlanResourcesResponse, field: string, value: Value): PlanResourcesResponse =>
+  Object.defineProperty({ ...response }, field, { value, enumerable: true });
 
 /**
  * Offline unit tests: the refusal type, the rules every emitted filter obeys, what a caller can
@@ -57,12 +63,13 @@ function postFilterOf(
 }
 
 /** Whatever `run` throws or rejects with, or `undefined` if it returns. */
-async function thrownBy(run: () => unknown): Promise<unknown> {
+async function thrownBy(run: () => void): Promise<Error | string | undefined> {
   try {
     await run();
   } catch (error) {
-    return error;
+    return error instanceof Error ? error : String(error);
   }
+
   return undefined;
 }
 
@@ -80,12 +87,14 @@ async function translatedUnder(
     readGoldens(CURRENT).map(async ({ id }): Promise<Translated[]> => {
       try {
         const options = fieldNameMapper ? { fieldNameMapper } : {};
+
         return [{ id, ...(await translate(id, options)) }];
       } catch {
         return [];
       }
     }),
   );
+
   return outcomes.flat();
 }
 
@@ -104,7 +113,7 @@ const PRESENT_EVERYWHERE: Record<string, FieldNameMapperConfig> =
   Object.fromEntries(
     Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => [
       reference,
-      typeof entry === "string"
+      isString(entry)
         ? { field: entry, required: true }
         : { ...entry, required: true },
     ]),
@@ -129,12 +138,10 @@ describe("the refusal type", () => {
     const raised = await thrownBy(() =>
       translate("regex/matches/lookahead-from-principal"),
     );
+
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
     expect(raised).toBeInstanceOf(Error);
-    expect((raised as UnsupportedOperatorError).name).toBe(
-      "UnsupportedOperatorError",
-    );
-    expect((raised as UnsupportedOperatorError).operator).toBe("matches");
+    expect(raised).toMatchObject({ name: "UnsupportedOperatorError", operator: "matches" });
   });
 
   // A collection macro reports itself, never `lambda`, which names nothing a caller wrote.
@@ -144,9 +151,11 @@ describe("the refusal type", () => {
         thrownBy(() => translate(golden.id)),
       ),
     );
+
     const operators = raised.flatMap((error) =>
       error instanceof UnsupportedOperatorError ? [error.operator] : [],
     );
+
     expect(operators.length).toBeGreaterThan(0);
     expect(operators).not.toContain("lambda");
   });
@@ -171,18 +180,22 @@ function literalsOf(where: Where | undefined, path = "filters"): Comparison[] {
   if (where === undefined) {
     return [];
   }
+
   return Object.entries(where).flatMap(([key, value]): Comparison[] => {
     if (key.startsWith("$")) {
       if (!Array.isArray(value)) {
         throw Error(`${path}.${key} is a logical operator over a non-array`);
       }
+
       return value.flatMap((child, index) =>
-        literalsOf(child as Where, `${path}.${key}[${index}]`),
+        literalsOf(child, `${path}.${key}[${index}]`),
       );
     }
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+
+    if (!isObject(value) || Array.isArray(value)) {
       throw Error(`${path}.${key} is not a Chroma comparison object`);
     }
+
     return Object.entries(value).map(([operator, operand]) => ({
       field: key,
       operator,
@@ -198,6 +211,7 @@ function literalsOf(where: Where | undefined, path = "filters"): Comparison[] {
  */
 describe("what an emitted filter may contain", () => {
   type ActionComparison = Comparison & { action: string };
+
   let ALL_COMPARISONS: ActionComparison[] = [];
   let COMPARISONS_IF_PRESENT: ActionComparison[] = [];
 
@@ -221,6 +235,7 @@ describe("what an emitted filter may contain", () => {
    */
   test("an inequality is emitted only over a field declared required", () => {
     const required = new Set(requiredMetadataKeys());
+
     const unsafe = ALL_COMPARISONS.filter(
       ({ field, operator }) =>
         ["$ne", "$nin", "$not_contains"].includes(operator) && !required.has(field),
@@ -243,19 +258,22 @@ describe("what an emitted filter may contain", () => {
       Object.fromEntries(
         Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => [
           reference,
-          typeof entry === "string"
+          isString(entry)
             ? { field: entry, required: false }
             : { ...entry, required: false },
         ]),
       );
 
     const ids = CONDITIONAL_IF_PRESENT.map(({ id }) => id);
+
     const raised = await Promise.all(
       ids.map((id) =>
         thrownBy(() => translate(id, { fieldNameMapper: optionalEverywhere })),
       ),
     );
+
     const nowRefused = ids.filter((_id, index) => raised[index]);
+
     const emitsInequality = [
       ...new Set(
         COMPARISONS_IF_PRESENT.filter(({ operator }) =>
@@ -276,24 +294,29 @@ describe("what an emitted filter may contain", () => {
   test("clearing the type declarations refuses inequalities, and nothing else changes", async () => {
     const untyped: Record<string, FieldNameMapperConfig> = Object.fromEntries(
       Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => {
-        if (typeof entry === "string") return [reference, { field: entry }];
+        if (isString(entry)) return [reference, { field: entry }];
         const { valueType, numericType: _n, ...rest } = entry;
+
         return [reference, valueType === "json" ? { ...rest, valueType } : rest];
       }),
     );
+
     const translated = new Set(TRANSLATED.map(({ id }) => id));
 
     const goldens = readGoldens(CURRENT);
+
     const outcomes = await Promise.all(
       goldens.map(({ id }) =>
         thrownBy(() => translate(id, { fieldNameMapper: untyped })),
       ),
     );
+
     const changed = goldens.flatMap(({ id }, index) => {
       const raised = outcomes[index];
+
       return translated.has(id) === (raised === undefined)
         ? []
-        : [{ id, operator: (raised as UnsupportedOperatorError)?.operator }];
+        : [{ id, operator: raised instanceof UnsupportedOperatorError ? raised.operator : undefined }];
     });
 
     expect(changed.length).toBeGreaterThan(0);
@@ -312,11 +335,13 @@ describe("what an emitted filter may contain", () => {
   test("clearing listElements refuses exactly the actions that emit $contains", async () => {
     const withoutLists: Record<string, FieldNameMapperConfig> = Object.fromEntries(
       Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => {
-        if (typeof entry === "string") return [reference, { field: entry }];
+        if (isString(entry)) return [reference, { field: entry }];
         const { listElements: _l, ...rest } = entry;
+
         return [reference, rest];
       }),
     );
+
     const readsList = CONDITIONAL.filter(({ filters }) =>
       literalsOf(filters).some(({ operator }) =>
         ["$contains", "$not_contains"].includes(operator),
@@ -324,13 +349,16 @@ describe("what an emitted filter may contain", () => {
     ).map(({ id }) => id);
 
     const ids = TRANSLATED.map(({ id }) => id);
+
     const raised = await Promise.all(
       ids.map((id) => thrownBy(() => translate(id, { fieldNameMapper: withoutLists }))),
     );
+
     const nowRefused = ids.filter((_id, index) => raised[index]);
 
     expect(nowRefused).toEqual(readsList);
     expect(readsList.length).toBeGreaterThan(0);
+
     for (const error of raised.filter(Boolean)) {
       expect(error).toBeInstanceOf(UnsupportedOperatorError);
     }
@@ -345,7 +373,7 @@ describe("what an emitted filter may contain", () => {
     const fractional = ALL_COMPARISONS.filter(
       ({ operator, value }) =>
         ["$lt", "$lte", "$gt", "$gte"].includes(operator) &&
-        typeof value === "number" &&
+        isNumber(value) &&
         !Number.isInteger(value),
     ).map(({ action, field }) => `${action}: ${field}`);
 
@@ -426,6 +454,7 @@ describe("mapper forms", () => {
    */
   test("numericType float admits the fractional threshold the integer declaration refuses", async () => {
     const action = "comparison/greater-or-equal/fractional-threshold";
+
     const asFloat = {
       ...FIELD_NAME_MAPPER,
       "request.resource.attr.aNumber": {
@@ -489,6 +518,7 @@ describe("allowPostFilter", () => {
     OUTCOMES = await Promise.all(
       readGoldens(CURRENT).map(async (golden) => {
         const queryPlan = await planOf(golden);
+
         return {
           golden,
           omitted: await attempt(() =>
@@ -511,13 +541,14 @@ describe("allowPostFilter", () => {
     POST_FILTERED = OUTCOMES.filter(({ on }) => postFilterOf(on.result));
   });
 
-  const describeError = (error: unknown): string =>
-    error instanceof UnsupportedOperatorError
-      ? `UnsupportedOperatorError(${error.operator}): ${error.message}`
-      : String(error);
+  const describeError = (cause: unknown): string =>
+    cause instanceof UnsupportedOperatorError
+      ? `UnsupportedOperatorError(${cause.operator}): ${cause.message}`
+      : String(cause);
 
   test("left off, every plan that needs a post-filter still throws UnsupportedOperatorError", () => {
     expect(POST_FILTERED.length).toBeGreaterThan(0);
+
     for (const { omitted, off } of POST_FILTERED) {
       expect(omitted.error).toBeInstanceOf(UnsupportedOperatorError);
       expect(off.error).toBeInstanceOf(UnsupportedOperatorError);
@@ -535,6 +566,7 @@ describe("allowPostFilter", () => {
   test("turned on, a plan Chroma can express whole is answered by filters alone, as without it", () => {
     const translated = OUTCOMES.filter(({ omitted }) => omitted.result);
     expect(translated.length).toBeGreaterThan(0);
+
     for (const { omitted, on } of translated) {
       expect(on.result).toEqual(omitted.result);
     }
@@ -547,11 +579,12 @@ describe("allowPostFilter", () => {
     const keys = [
       ...new Set(
         Object.values(FIELD_NAME_MAPPER).map((entry) =>
-          typeof entry === "string" ? entry : entry.field,
+          isString(entry) ? entry : entry.field,
         ),
       ),
     ];
-    const shapes: (Record<string, unknown> | null | undefined)[] = [
+
+    const metadatas: Parameters<PostFilter>[0][] = [
       null,
       undefined,
       {},
@@ -561,9 +594,10 @@ describe("allowPostFilter", () => {
       Object.fromEntries(keys.map((key) => [key, true])),
       Object.fromEntries(keys.map((key) => [key, { sparse: [1] }])),
     ];
+
     for (const { on } of POST_FILTERED) {
-      for (const metadata of shapes) {
-        expect(typeof postFilterOf(on.result)!(metadata)).toBe("boolean");
+      for (const metadata of metadatas) {
+        expect(isBoolean(postFilterOf(on.result)!(metadata))).toBe(true);
       }
     }
   });
@@ -575,6 +609,7 @@ describe("allowPostFilter", () => {
     const postFilter = postFilterOf(
       await allowing("string/starts-with/negated-field-to-field"),
     );
+
     expect(postFilter?.({ aString: "one", aOptionalString: "x" })).toBe(true);
     expect(postFilter?.({ aString: ["one"], aOptionalString: "x" })).toBe(false);
     expect(postFilter?.({ aOptionalString: "x" })).toBe(false);
@@ -595,6 +630,7 @@ describe("allowPostFilter", () => {
     ],
     [
       "a function mapper that returns nothing for it",
+      // SAFETY: returns undefined, which FieldMapper rules out, as an untyped caller's mapper can.
       ((reference: string) =>
         reference === "request.resource.attr.aOptionalString"
           ? undefined
@@ -605,7 +641,7 @@ describe("allowPostFilter", () => {
     expect(postFilterOf(await allowing(id))).toBeDefined();
     const raised = await thrownBy(() => allowing(id, mapper));
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
-    expect((raised as UnsupportedOperatorError).operator).toBe("contains");
+    expect(raised).toMatchObject({ operator: "contains" });
   });
 
   // A stored -0.0 reads back as 0 (the client writes metadata as JSON), so `string()` over a stored
@@ -614,13 +650,15 @@ describe("allowPostFilter", () => {
   test("valueType boolean is what lets string() read a boolean key", async () => {
     const id = "cast/string/from-boolean";
     expect(postFilterOf(await allowing(id))).toBeDefined();
+
     const undeclared = {
       ...FIELD_NAME_MAPPER,
       "request.resource.attr.aBool": "aBool",
     };
+
     const raised = await thrownBy(() => allowing(id, undeclared));
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
-    expect((raised as UnsupportedOperatorError).operator).toBe("string");
+    expect(raised).toMatchObject({ operator: "string" });
   });
 });
 
@@ -649,10 +687,12 @@ describe("type declarations a mapper cannot combine", () => {
       translate("logic/not/bare-boolean-attribute", {
         fieldNameMapper: {
           ...FIELD_NAME_MAPPER,
+          // SAFETY: each entry is malformed on purpose, as an untyped caller's mapping can be.
           "request.resource.attr.aBool": entry as FieldNameMapperConfig,
         },
       }),
     );
+
     expect(raised).toBeInstanceOf(Error);
     expect(raised).not.toBeInstanceOf(UnsupportedOperatorError);
   });
@@ -668,20 +708,19 @@ describe("plans the planner cannot produce", () => {
   // A shape CEL *can* express does not belong here, whatever its plan looks like: it belongs in
   // the corpus, where every adapter is asked about it.
 
-  const plan = (condition: PlanExpressionOperand): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
+  const plan = (condition: PlanExpressionOperand): PlanResourcesResponse => ({
+    kind: PlanKind.CONDITIONAL,
+    condition,
+    cerbosCallId: "",
+    requestId: "",
+    validationErrors: [],
+    metadata: undefined,
+  });
 
   // A malformed plan is the caller's bug, not a policy shape Chroma cannot hold, so it stays a
   // plain `Error`: a caller that routes `UnsupportedOperatorError` to a fallback must not route a
   // half-decoded plan there with it (#228).
-  const expectPlainError = async (run: () => unknown): Promise<void> => {
+  const expectPlainError = async (run: () => void): Promise<void> => {
     const raised = await thrownBy(run);
     expect(raised).toBeInstanceOf(Error);
     expect(raised).not.toBeInstanceOf(UnsupportedOperatorError);
@@ -690,9 +729,14 @@ describe("plans the planner cannot produce", () => {
   test("an unrecognised plan kind", async () => {
     const run = () =>
       queryPlanToChromaDB({
-        queryPlan: { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse,
+        queryPlan: overwritten(
+          { kind: PlanKind.ALWAYS_ALLOWED, cerbosCallId: "", requestId: "", validationErrors: [], metadata: undefined },
+          "kind",
+          "INVALID_KIND",
+        ),
         fieldNameMapper: FIELD_NAME_MAPPER,
       });
+
     expect(run).toThrow("Invalid query plan.");
     await expectPlainError(run);
   });
@@ -709,6 +753,7 @@ describe("plans the planner cannot produce", () => {
         ),
         fieldNameMapper: FIELD_NAME_MAPPER,
       });
+
     expect(run).toThrow("Expected exactly two operands");
     await expectPlainError(run);
   });
@@ -726,12 +771,13 @@ describe("plans the planner cannot produce", () => {
         ),
         fieldNameMapper: FIELD_NAME_MAPPER,
       });
+
     expect(run).toThrow(
       "Value-to-value comparisons are not supported by ChromaDB filters",
     );
     const raised = await thrownBy(run);
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
-    expect((raised as UnsupportedOperatorError).operator).toBe("eq");
+    expect(raised).toMatchObject({ operator: "eq" });
   });
 
   test("a condition that is not an expression at all", async () => {
@@ -740,6 +786,7 @@ describe("plans the planner cannot produce", () => {
         queryPlan: plan(new PlanExpressionValue(true)),
         fieldNameMapper: FIELD_NAME_MAPPER,
       });
+
     expect(run).toThrow("Query plan did not contain an expression for operand");
     await expectPlainError(run);
   });

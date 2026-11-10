@@ -7,6 +7,7 @@ import type { ScopedMapper } from "./mapper";
 import { resolveFieldReference, resolveMapperConfig } from "./mapper";
 import { isExpression, isValue, isVariable } from "./operands";
 import { escapeRegexValue } from "./regex";
+import { isString } from "./narrowing";
 
 export type HierarchyOperator = "ancestorOf" | "descendentOf" | "overlaps";
 
@@ -20,34 +21,43 @@ const parseHierarchyOperand = (
   if (!isExpression(operand) || operand.operator !== "hierarchy") {
     throw new UnsupportedQueryPlanError("Hierarchy operators require hierarchy() operands");
   }
+
   const [valueOperand, separatorOperand] = operand.operands;
+
   if (!valueOperand) {
     throw new UnsupportedQueryPlanError("hierarchy operator requires a path operand");
   }
+
   // An omitted separator is CEL's default; a present one must be a non-empty string constant.
   let separator = ".";
+
   if (separatorOperand) {
     if (
       !isValue(separatorOperand) ||
-      typeof separatorOperand.value !== "string" ||
+      !isString(separatorOperand.value) ||
       !separatorOperand.value
     ) {
       throw new UnsupportedQueryPlanError("hierarchy separator must be a non-empty string");
     }
+
     separator = separatorOperand.value;
   }
+
   if (isVariable(valueOperand)) {
     return { kind: "field", name: valueOperand.name, separator };
   }
-  if (isValue(valueOperand) && typeof valueOperand.value === "string") {
+
+  if (isValue(valueOperand) && isString(valueOperand.value)) {
     return { kind: "value", value: valueOperand.value, separator };
   }
+
   throw new UnsupportedQueryPlanError("hierarchy path must be a field or string value");
 };
 
 /** `"a.b.c"` → `["a", "a.b"]`: every proper ancestor of the path. */
 const hierarchyPrefixes = (value: string, separator: string): string[] => {
   const segments = value.split(separator);
+
   return segments
     .slice(0, -1)
     .map((_, index) => segments.slice(0, index + 1).join(separator));
@@ -60,14 +70,18 @@ export const buildHierarchyFilter = (
   mapper: ScopedMapper,
 ): MongooseFilter => {
   const [leftOperand, rightOperand] = operands;
+
   if (!leftOperand || !rightOperand) {
     throw new UnsupportedQueryPlanError(`${operator} requires two hierarchy operands`);
   }
+
   const left = parseHierarchyOperand(leftOperand);
   const right = parseHierarchyOperand(rightOperand);
+
   for (const operand of [left, right]) {
     if (operand.kind === "field") {
       const type = resolveMapperConfig(operand.name, mapper)?.valueType;
+
       if (type !== undefined && type !== "string") {
         throw new UnsupportedQueryPlanError(
           "hierarchy requires a string field: the declared scalar type cannot be compared with a path prefix",
@@ -75,6 +89,7 @@ export const buildHierarchyFilter = (
       }
     }
   }
+
   if (left.separator !== right.separator) {
     throw new UnsupportedQueryPlanError(
       `${operator} requires one field and one value with the same separator`,
@@ -83,6 +98,7 @@ export const buildHierarchyFilter = (
 
   let field: Extract<HierarchyOperand, { kind: "field" }>;
   let value: Extract<HierarchyOperand, { kind: "value" }>;
+
   if (left.kind === "field" && right.kind === "value") {
     field = left;
     value = right;
@@ -92,17 +108,21 @@ export const buildHierarchyFilter = (
   } else {
     throw new UnsupportedQueryPlanError(`${operator} requires one field and one value`);
   }
+
   const { path, relation } = resolveFieldReference(field.name, mapper);
+
   if (relation?.type === "many") {
     throw new UnsupportedQueryPlanError("Hierarchy fields cannot be collection relations");
   }
 
   const ancestors = hierarchyPrefixes(value.value, value.separator);
+
   const descendentFilter = buildFieldFilter(path, {
     $regex: `^${escapeRegexValue(value.value + value.separator)}`,
   });
 
   let filter: MongooseFilter;
+
   if (operator === "overlaps") {
     filter = {
       $or: [
@@ -115,9 +135,11 @@ export const buildHierarchyFilter = (
     // ancestor of the constant; the other two spellings ask for a descendent.
     const fieldMustBeAncestor =
       (operator === "ancestorOf") === (left.kind === "field");
+
     filter = fieldMustBeAncestor
       ? buildFieldFilter(path, { $in: ancestors })
       : descendentFilter;
   }
+
   return withNullableGuards(filter, operands, mapper);
 };

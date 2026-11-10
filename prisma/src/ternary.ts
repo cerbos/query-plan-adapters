@@ -21,6 +21,7 @@ import {
 } from "./translate";
 import { normalizeRfc3339Milliseconds } from "./timestamp";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isBoolean, isString, lookup } from "./narrowing";
 
 /** What one ternary branch contributes: a known constant, or a filter to be guarded. */
 type TernaryBranchPredicate =
@@ -28,20 +29,22 @@ type TernaryBranchPredicate =
   | { kind: "filter"; filter: PrismaFilter };
 
 // The comparison that holds exactly when `operator` does not, over two definite operands.
-const COMPLEMENT_OPERATOR: Record<string, string> = {
+const COMPLEMENT_OPERATOR = {
   eq: "ne",
   ne: "eq",
   lt: "ge",
   le: "gt",
   gt: "le",
   ge: "lt",
-};
+} satisfies Record<string, string>;
 
-function getTernaryOperands(operands: PlanExpressionOperand[]): {
+type TernaryOperands = {
   condition: PlanExpressionOperand;
   thenBranch: PlanExpressionOperand;
   elseBranch: PlanExpressionOperand;
-} {
+};
+
+function getTernaryOperands(operands: PlanExpressionOperand[]): TernaryOperands {
   if (operands.length !== 3) {
     throw new UnsupportedQueryPlanError(
       `if (ternary) requires exactly 3 operands (condition, then, else), got ${operands.length}`
@@ -70,9 +73,11 @@ function getConstantBooleanCondition(
   if (!isValueOperand(condition)) {
     return undefined;
   }
-  if (typeof condition.value !== "boolean") {
+
+  if (!isBoolean(condition.value)) {
     throw new UnsupportedQueryPlanError("if (ternary) condition must be a boolean expression");
   }
+
   return condition.value;
 }
 
@@ -86,11 +91,13 @@ function buildBooleanBranchFilter(
       filter: buildPrismaFilterFromCerbosExpression(branch, context),
     };
   }
-  if (typeof branch.value !== "boolean") {
+
+  if (!isBoolean(branch.value)) {
     throw new UnsupportedQueryPlanError(
       "if (ternary) branch in boolean position must be a boolean"
     );
   }
+
   return { kind: "constant", value: branch.value };
 }
 
@@ -117,6 +124,7 @@ function buildGuardedTernaryFilter(
     condition,
     context
   );
+
   const conditionFalse = buildNegatedFilter(condition, context);
   const guardedBranches: PrismaFilter[] = [];
 
@@ -146,6 +154,7 @@ function finalizeTernaryBranchPredicate(
   if (predicate.kind === "filter") {
     return predicate.filter;
   }
+
   return predicate.value ? {} : rejectConstantFalse();
 }
 
@@ -155,6 +164,7 @@ export function handleBooleanTernaryOperator(
 ): PrismaFilter {
   const { condition, thenBranch, elseBranch } = getTernaryOperands(operands);
   const constantCondition = getConstantBooleanCondition(condition);
+
   if (constantCondition !== undefined) {
     return finalizeTernaryBranchPredicate(
       buildBooleanBranchFilter(
@@ -178,17 +188,21 @@ function constantOf(
   operand: PlanExpressionOperand | undefined
 ): { value: Value; timestamp: boolean } | undefined {
   if (operand === undefined) return undefined;
+
   if (isValueOperand(operand)) return { value: operand.value, timestamp: false };
+
   if (
     isOperatorOperand(operand) &&
     operand.operator === "timestamp" &&
     operand.operands.length === 1
   ) {
     const literal = operand.operands[0];
-    if (literal !== undefined && isValueOperand(literal) && typeof literal.value === "string") {
+
+    if (literal !== undefined && isValueOperand(literal) && isString(literal.value)) {
       return { value: normalizeRfc3339Milliseconds(literal.value), timestamp: true };
     }
   }
+
   return undefined;
 }
 
@@ -203,6 +217,7 @@ function buildTernaryComparisonBranch(
   const substitutedOperands = operands.map((operand, index) =>
     index === ternaryIndex ? branch : operand
   );
+
   assertDefined(substitutedOperands[0], `${operator} requires a left operand`);
   assertDefined(substitutedOperands[1], `${operator} requires a right operand`);
 
@@ -215,6 +230,7 @@ function buildTernaryComparisonBranch(
   const [normalizedFirst, normalizedSecond] = normalized.operands;
   const first = constantOf(normalizedFirst);
   const second = constantOf(normalizedSecond);
+
   if (
     normalized.operands.length === 2 &&
     first !== undefined &&
@@ -245,7 +261,9 @@ function buildTernaryComparisonBranch(
     context,
     true
   );
+
   if (nested !== null) return { kind: "filter", filter: nested };
+
   if (normalized.operator === "in") {
     return {
       kind: "filter",
@@ -255,13 +273,14 @@ function buildTernaryComparisonBranch(
       ),
     };
   }
+
   // Keep missing-value and relation guards inside the selected branch. Constants
   // are negated above, since !(NaN <= n) is true but NaN > n is false in CEL 0.30.
   return {
     kind: "filter",
     filter: handleRelationalOperator(
       assertDefined(
-        COMPLEMENT_OPERATOR[normalized.operator],
+        lookup(COMPLEMENT_OPERATOR, normalized.operator),
         "Unsupported negated comparison"
       ),
       normalized.operands,
@@ -282,16 +301,18 @@ export function tryHandleTernaryComparison(
   context: TranslationContext,
   negated = false
 ): PrismaFilter | null {
-  if (CERBOS_TO_PRISMA_OPERATOR[operator] === undefined && operator !== "in") {
+  if (lookup(CERBOS_TO_PRISMA_OPERATOR, operator) === undefined && operator !== "in") {
     return null;
   }
 
   const ternaryIndex = operands.findIndex(
     (operand) => isOperatorOperand(operand) && operand.operator === "if"
   );
+
   if (ternaryIndex === -1) {
     return null;
   }
+
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError(
       `${operator} with a ternary requires exactly 2 operands, got ${operands.length}`
@@ -302,6 +323,7 @@ export function tryHandleTernaryComparison(
     operands[ternaryIndex],
     "Ternary comparison operand is missing"
   );
+
   if (!isOperatorOperand(ternary)) {
     throw new UnsupportedQueryPlanError("Ternary comparison operand must be an expression");
   }
@@ -309,6 +331,7 @@ export function tryHandleTernaryComparison(
   const { condition, thenBranch, elseBranch } = getTernaryOperands(
     ternary.operands
   );
+
   const branchFor = (branch: PlanExpressionOperand) =>
     buildTernaryComparisonBranch(
       operator,
@@ -320,6 +343,7 @@ export function tryHandleTernaryComparison(
     );
 
   const constantCondition = getConstantBooleanCondition(condition);
+
   if (constantCondition !== undefined) {
     return finalizeTernaryBranchPredicate(
       branchFor(constantCondition ? thenBranch : elseBranch)

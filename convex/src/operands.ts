@@ -7,16 +7,24 @@ import type {
 
 import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper, MapperConfig } from "./index";
+import { isFunction } from "./narrowing";
 
 // Reading plan nodes and the caller's mapper. Shared by the three passes over a plan: validation,
 // the Convex filter it pushes down, and the in-memory evaluator that answers the rest.
 
 export type ComparisonOperator = "eq" | "ne" | "lt" | "le" | "gt" | "ge";
 
+const COMPARISON_OPERATORS: readonly string[] = ["eq", "ne", "lt", "le", "gt", "ge"];
+
+export const isComparisonOperator = (operator: string): operator is ComparisonOperator =>
+  COMPARISON_OPERATORS.includes(operator);
+
 export const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
   "operator" in e;
+
 export const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
   "value" in e;
+
 export const isVariable = (
   e: PlanExpressionOperand,
 ): e is PlanExpressionVariable => "name" in e;
@@ -27,9 +35,11 @@ export const operandAt = (
   errorMessage: string,
 ): PlanExpressionOperand => {
   const operand = operands[index];
+
   if (!operand) {
     throw new UnsupportedQueryPlanError(errorMessage);
   }
+
   return operand;
 };
 
@@ -37,7 +47,7 @@ const mapperConfig = (
   reference: string,
   mapper: Mapper,
 ): MapperConfig | undefined =>
-  typeof mapper === "function" ? mapper(reference) : mapper[reference];
+  isFunction(mapper) ? mapper(reference) : mapper[reference];
 
 /** Whether the caller's mapper declares `reference` at all — an entry with no `field` included. */
 export const isMappedReference = (reference: string, mapper: Mapper): boolean =>
@@ -68,12 +78,15 @@ export const withOmittedNullDefault = (mapper: Mapper): Mapper => {
     ...config,
     nullable: config.nullable ?? true,
   });
-  if (typeof mapper === "function") {
+
+  if (isFunction(mapper)) {
     return (key) => {
       const config = mapper(key);
+
       return config && nullableByDefault(config);
     };
   }
+
   return Object.fromEntries(
     Object.entries(mapper).map(([key, config]) => [
       key,

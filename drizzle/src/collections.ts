@@ -29,6 +29,7 @@ import {
   wrapWithRelations,
 } from "./relations";
 import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
+import { isObject } from "./narrowing";
 
 /**
  * CEL's collection macros — `exists`, `all`, `exists_one`, `except`, `filter` — over a relation
@@ -68,16 +69,19 @@ const resolveMacroScope = (
   if (!isNameOperand(collectionOperand)) {
     throw new UnsupportedQueryPlanError("Collection operand must be a field reference");
   }
+
   const { variable, expression } = extractLambdaComponents(
     lambdaOperand,
     context,
   );
+
   const scope = createCollectionScope(
     collectionOperand.name,
     variable.name,
     mapper,
     options.openTables,
   );
+
   if (scope.primaryRelation.type === "one") {
     // CEL reads a to-one relation as a map, and a macro over a map ranges over its KEYS — the
     // attribute names — which a subquery over the related row cannot enumerate.
@@ -87,6 +91,7 @@ const resolveMacroScope = (
         "macro ranges over, and SQL has no row of attribute names to iterate",
     );
   }
+
   return {
     ...scope,
     collectionName: collectionOperand.name,
@@ -137,7 +142,9 @@ const buildKnownValueFilteredCount = (
   options: BuildFilterOptions,
 ): SQL => {
   const { variable, expression } = extractLambdaComponents(lambdaOperand, "'filter' lambda operand");
+
   if (elements.length === 0) return sql`0`;
+
   const conditions = elements.map((element) =>
     buildFilterFromExpression(
       substituteLambdaVariable(expression, variable.name, element),
@@ -145,14 +152,17 @@ const buildKnownValueFilteredCount = (
       options,
     ),
   );
+
   const anyUnknown = sql.join(
     conditions.map((condition) => sql`(${condition}) is null`),
     sql` or `,
   );
+
   const count = sql.join(
     conditions.map((condition) => sql`(case when ${condition} then 1 else 0 end)`),
     sql` + `,
   );
+
   return sql`(case when ${anyUnknown} then null else ${count} end)`;
 };
 
@@ -167,6 +177,7 @@ export const unrollKnownValueMaps = (
   if (!isExpressionOperand(operand)) return operand;
   const operands = operand.operands.map(unrollKnownValueMaps);
   const [collection, lambda] = operands;
+
   if (
     operand.operator === "map" &&
     operands.length === 2 &&
@@ -174,6 +185,7 @@ export const unrollKnownValueMaps = (
     lambda !== undefined && isOperatorCall(lambda, "lambda")
   ) {
     const { variable, expression } = extractLambdaComponents(lambda, "'map' lambda operand");
+
     return {
       operator: "list",
       operands: collection.value.map((element) =>
@@ -181,6 +193,7 @@ export const unrollKnownValueMaps = (
       ),
     };
   }
+
   return { operator: operand.operator, operands };
 };
 
@@ -199,20 +212,24 @@ export const buildExceptCount = (
   options: BuildFilterOptions,
 ): SQL => {
   const [collection, removed] = exceptOperand.operands;
+
   if (
     exceptOperand.operands.length !== 2 || collection === undefined || removed === undefined ||
     isOperatorCall(removed, "lambda")
   ) {
     throw new UnsupportedQueryPlanError("'size' of except() requires two list operands");
   }
+
   const nonEmptyLiteral =
     isValueOperand(collection) && Array.isArray(collection.value) && collection.value.length > 0;
+
   if (!isValueOperand(removed) && !nonEmptyLiteral) {
     throw new UnsupportedQueryPlanError(
       "'size' of except() over a collection that may be empty requires a constant list to " +
         "remove: an erroring list still makes except() raise when there is nothing to remove from",
     );
   }
+
   return buildFilteredCount(
     {
       operator: "filter",
@@ -243,13 +260,17 @@ export const buildFilteredCount = (
   if (filterOperand.operands.length !== 2) {
     throw new UnsupportedQueryPlanError("'filter' operator requires exactly two operands");
   }
+
   const [collectionOperand, lambdaOperand] = filterOperand.operands;
+
   if (!collectionOperand || !lambdaOperand) {
     throw new UnsupportedQueryPlanError("'filter' operator requires collection and lambda operands");
   }
+
   if (isValueOperand(collectionOperand) && Array.isArray(collectionOperand.value)) {
     return buildKnownValueFilteredCount(collectionOperand.value, lambdaOperand, mapper, options);
   }
+
   const scope = resolveMacroScope(
     collectionOperand,
     lambdaOperand,
@@ -257,7 +278,9 @@ export const buildFilteredCount = (
     mapper,
     options,
   );
+
   const rowCondition = buildRowCondition(scope, options);
+
   const chainWhere = chainCorrelation(
     scope.primaryRelation,
     scope.leadingRelations,
@@ -265,11 +288,13 @@ export const buildFilteredCount = (
     options,
     scope.alias,
   );
+
   const source = relationSource(
     scope.primaryRelation,
     scope.collectionName,
     scope.alias,
   );
+
   return requireLeadingHops(
     scope.leadingRelations,
     sql`(select case when coalesce(sum(case when (${rowCondition}) is null then 1 else 0 end), 0) > 0 then null else coalesce(sum(case when ${rowCondition} then 1 else 0 end), 0) end from ${source} where ${chainWhere})`,
@@ -286,7 +311,9 @@ const rebindsVariable = (
   if (!isOperatorCall(lambda, "lambda")) {
     return false;
   }
+
   const variable = lambda.operands[1];
+
   return (
     variable !== undefined &&
     isNameOperand(variable) &&
@@ -311,14 +338,15 @@ const substituteLambdaVariable = (
     if (operand.name === variableName) {
       return { value: element };
     }
+
     if (operand.name.startsWith(`${variableName}.`)) {
       let current: Value = element;
+
       for (const segment of operand.name
         .slice(variableName.length + 1)
         .split(".")) {
         if (
-          current === null ||
-          typeof current !== "object" ||
+          !isObject(current) ||
           Array.isArray(current) ||
           !(segment in current)
         ) {
@@ -326,29 +354,37 @@ const substituteLambdaVariable = (
             `Cannot resolve "${operand.name}": collection element has no field "${segment}"`,
           );
         }
+
         const next = current[segment];
+
         if (next === undefined) {
           throw new UnsupportedQueryPlanError(
             `Cannot resolve "${operand.name}": collection element field "${segment}" is undefined`,
           );
         }
+
         current = next;
       }
+
       return { value: current };
     }
+
     return operand;
   }
 
   if (!isExpressionOperand(operand)) {
     return operand;
   }
+
   const substitute = (child: PlanExpressionOperand) =>
     substituteLambdaVariable(child, variableName, element);
+
   if (
     LAMBDA_BINDING_OPERATORS.has(operand.operator) &&
     operand.operands.length === 2
   ) {
     const [nestedCollection, nestedLambda] = operand.operands;
+
     if (
       nestedCollection &&
       nestedLambda &&
@@ -361,6 +397,7 @@ const substituteLambdaVariable = (
       };
     }
   }
+
   return {
     operator: operand.operator,
     operands: operand.operands.map(substitute),
@@ -380,25 +417,32 @@ export const substituteLambdaOperand = (
 ): PlanExpressionOperand => {
   if (isNameOperand(operand)) {
     if (operand.name === variableName) return replacement;
+
     if (operand.name.startsWith(`${variableName}.`)) {
       throw new UnsupportedQueryPlanError(
         `Cannot resolve "${operand.name}": a field read through an element of a list built ` +
           "from expressions is not supported",
       );
     }
+
     return operand;
   }
+
   if (!isExpressionOperand(operand)) {
     return operand;
   }
+
   const substitute = (child: PlanExpressionOperand) =>
     substituteLambdaOperand(child, variableName, replacement);
+
   if (LAMBDA_BINDING_OPERATORS.has(operand.operator) && operand.operands.length === 2) {
     const [nestedCollection, nestedLambda] = operand.operands;
+
     if (nestedCollection && nestedLambda && rebindsVariable(nestedLambda, variableName)) {
       return { operator: operand.operator, operands: [substitute(nestedCollection), nestedLambda] };
     }
   }
+
   return { operator: operand.operator, operands: operand.operands.map(substitute) };
 };
 
@@ -429,11 +473,13 @@ const buildKnownValueCollectionFilter = (
         "Only exists(), all() and exists_one() can be folded into a flat filter.",
     );
   }
+
   if (!Array.isArray(collectionValue)) {
     throw new UnsupportedQueryPlanError(
       `'${operator}' over a literal collection requires a list value`,
     );
   }
+
   const { variable, expression: bodyOperand } = extractLambdaComponents(
     lambdaOperand,
     `'${operator}' lambda operand`,
@@ -450,6 +496,7 @@ const buildKnownValueCollectionFilter = (
   // !exists(body) == all(!body), and !all(body) == exists(!body). This keeps
   // CEL evaluation errors as deny instead of treating UNKNOWN as false.
   const combinesWithOr = operator === "exists" ? !negated : negated;
+
   if (collectionValue.length === 0) {
     return combinesWithOr ? FALSE_CONDITION : TRUE_CONDITION;
   }
@@ -462,12 +509,15 @@ const buildKnownValueCollectionFilter = (
       negated,
     ),
   );
+
   const combined = combinesWithOr ? or(...filters) : and(...filters);
+
   if (!combined) {
     throw new UnsupportedQueryPlanError(
       `Unable to combine folded '${operator}' collection conditions`,
     );
   }
+
   return combined;
 };
 
@@ -487,6 +537,7 @@ const buildKnownValueExistsOne = (
   if (elements.length === 0) {
     return FALSE_CONDITION;
   }
+
   const conditions = elements.map((element) =>
     buildFilterFromExpression(
       substituteLambdaVariable(bodyOperand, variableName, element),
@@ -494,14 +545,17 @@ const buildKnownValueExistsOne = (
       options,
     ),
   );
+
   const anyUnknown = sql.join(
     conditions.map((condition) => sql`(${condition}) is null`),
     sql` or `,
   );
+
   const matches = sql.join(
     conditions.map((condition) => sql`(case when ${condition} then 1 else 0 end)`),
     sql` + `,
   );
+
   return sql`(case when ${anyUnknown} then null when (${matches}) = 1 then true else false end)`;
 };
 
@@ -527,12 +581,15 @@ export const buildCollectionOperatorFilter = (
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
   }
+
   const [collectionOperand, lambdaOperand] = operands;
+
   if (!collectionOperand || !lambdaOperand) {
     throw new UnsupportedQueryPlanError(
       `'${operator}' operator requires collection and lambda operands`,
     );
   }
+
   // A literal value list arrives when the planner could not unroll a macro
   // over a known collection (more than 10 elements) — fold it here instead of
   // requiring a relation mapping that cannot exist for a literal.
@@ -554,6 +611,7 @@ export const buildCollectionOperatorFilter = (
     mapper,
     options,
   );
+
   const { primaryRelation, leadingRelations, collectionName } = scope;
   const rowCondition = buildRowCondition(scope, options);
 
@@ -562,11 +620,14 @@ export const buildCollectionOperatorFilter = (
   // scope's table instead.
   const wrapLeading = (inner: SQL): SQL =>
     wrapWithRelations(leadingRelations, inner, collectionName, options);
+
   const aliases = primaryAlias(scope);
+
   const wrapAll = (inner: SQL): SQL =>
     wrapLeading(
       wrapWithRelations([primaryRelation], inner, collectionName, { aliases }),
     );
+
   // An absent to-one parent must stay UNKNOWN rather than reaching the empty-collection
   // answer, which `all` reads as TRUE and `!exists` inverts into an allow (#309).
   const guardHops = (inner: SQL): SQL =>
@@ -582,6 +643,7 @@ export const buildCollectionOperatorFilter = (
     case "exists": {
       const trueWitness = wrapAll(sql`(${rowCondition}) is true`);
       const unknownWitness = wrapAll(sql`(${rowCondition}) is null`);
+
       return withPolarity(
         guardHops(
           sql`(case when ${trueWitness} then true when ${unknownWitness} then null else false end)`,
@@ -589,11 +651,13 @@ export const buildCollectionOperatorFilter = (
         negated,
       );
     }
+
     case "except":
       return withPolarity(guardHops(wrapAll(not(rowCondition))), negated);
     case "all": {
       const falseWitness = wrapAll(sql`(${rowCondition}) is false`);
       const unknownWitness = wrapAll(sql`(${rowCondition}) is null`);
+
       return withPolarity(
         guardHops(
           sql`(case when ${falseWitness} then false when ${unknownWitness} then null else true end)`,
@@ -601,18 +665,23 @@ export const buildCollectionOperatorFilter = (
         negated,
       );
     }
+
     case "exists_one": {
       const matchCondition =
         and(relationCorrelation(primaryRelation, scope.alias), rowCondition) ??
         FALSE_CONDITION;
+
       const countExpr = sql`(select count(*) from ${relationSource(primaryRelation, collectionName, scope.alias)} where ${matchCondition})`;
+
       const unknownWitness = wrapWithRelations(
         [primaryRelation],
         sql`(${rowCondition}) is null`,
         collectionName,
         { aliases },
       );
+
       const triState = sql`(case when ${unknownWitness} then null when ${countExpr} = 1 then true else false end)`;
+
       return withPolarity(guardHops(wrapLeading(triState)), negated);
     }
   }

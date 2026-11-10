@@ -18,8 +18,10 @@ const CACHE = new Map<string, CompiledRegex | null>();
  */
 export const compileRe2 = (pattern: string): CompiledRegex | null => {
   const cached = CACHE.get(pattern);
+
   if (cached !== undefined) return cached;
   let result: CompiledRegex | null;
+
   try {
     const compiled = RE2JS.compile(pattern);
     result = { test: (input) => compiled.matcher(input).find() };
@@ -27,6 +29,8 @@ export const compileRe2 = (pattern: string): CompiledRegex | null => {
     if (!(error instanceof RE2JSException)) throw error;
     result = null;
   }
+
   if (CACHE.size < 1000) CACHE.set(pattern, result);
+
   return result;
 };
