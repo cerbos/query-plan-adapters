@@ -560,8 +560,8 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 90 / 102 |
-| adversarial | 376 / 452 |
+| extended | 94 / 106 |
+| adversarial | 379 / 477 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):

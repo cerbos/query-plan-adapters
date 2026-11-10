@@ -5,6 +5,14 @@
       "status": "unsupported",
       "reason": "The index operator requires a numeric constant position; a position computed from a ternary over a document field is refused."
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "in supports only field-in-value-list or value-in-mapped-collection shapes."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "Whole-value comparison with a map, or with a list holding a list, a map or NaN, is unsupported: MongoDB compares embedded documents in stored field order and NaN equal to NaN."
+    },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",
       "reason": "The ternary's branches are int literals, which CEL renders in plain decimal (\"1000000\"), but the plan ships an int and a double constant as the same bare number and $toString over a double renders the exponent form (\"1e+06\"), so the adapter refuses string() over an untyped integral constant of 1e6 or more"
@@ -33,6 +41,10 @@
       "status": "unsupported",
       "reason": "Same key membership over a to-one relation as `membership/in/map-attribute-keys`, under negation"
     },
+    "null/in/exists-over-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "in supports only field-in-value-list or value-in-mapped-collection shapes."
+    },
     "regex/matches/case-insensitive-non-ascii": {
       "status": "unsupported",
       "reason": "(?i) is passed to $regex only over ASCII letters: PCRE2 and RE2 fold other letters differently, so a (?i) pattern holding a non-ASCII letter is refused."
@@ -52,6 +64,10 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "A bare comparison of two date_time fields: CEL compares the strings the application sent, and a stored BSON date has discarded the lexical spelling (two spellings of one instant are equal dates and unequal strings). Refused in the filter and in the three-valued evaluation alike; compare timestamp(...) values instead."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "hasIntersection requires an array value."
     }
   }
 }

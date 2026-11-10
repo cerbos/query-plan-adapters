@@ -253,6 +253,28 @@ def _additive(sign: int) -> Callable[[Any, Any], Any]:
     return apply
 
 
+def _overloaded(
+    op_fn: Callable[[Any, Any], Any], concatenates: bool = False
+) -> Callable[[Any, Any], Any]:
+    """Refuse operands CEL's arithmetic has no overload for, which SQL would coerce."""
+
+    def apply(c: Any, v: Any) -> Any:
+        kinds = {scalar_kind(c), scalar_kind(v)}
+        shifts = isinstance(c, timedelta) or isinstance(v, timedelta)
+        if (
+            "bool" in kinds
+            or (not shifts and (_is_temporal_column(c) or _is_temporal_column(v)))
+            or ("string" in kinds and (not concatenates or "number" in kinds))
+        ):
+            raise UnsupportedPlanError(
+                "arithmetic over a string, boolean or bare timestamp operand is a CEL "
+                "no-overload error"
+            )
+        return op_fn(c, v)
+
+    return apply
+
+
 def _unknown() -> Any:
     """SQL UNKNOWN typed as a boolean.
 
@@ -1051,11 +1073,11 @@ OPERATOR_FNS = MappingProxyType(
         "ge": _comparison("ge"),
         "in": _in,
         # Arithmetic returns values, composed inside comparisons.
-        "add": _additive(1),
-        "sub": _additive(-1),
-        "mult": _arithmetic(lambda c, v: c * v),
-        "div": _float_div,
-        "mod": _modulo,
+        "add": _overloaded(_additive(1), concatenates=True),
+        "sub": _overloaded(_additive(-1)),
+        "mult": _overloaded(_arithmetic(lambda c, v: c * v)),
+        "div": _overloaded(_float_div),
+        "mod": _overloaded(_modulo),
         # Receiver-style string matches. Operands arrive receiver first.
         "contains": lambda c, v: _string_match(c, v, prefix=True, suffix=True),
         "startsWith": lambda c, v: _string_match(c, v, prefix=False, suffix=True),

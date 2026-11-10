@@ -1407,42 +1407,6 @@ class JpaQueryPlanAdapterTest {
 
     }
 
-    /**
-     * <strong>Corpus gap.</strong> #668: {@code arithmetic/add/inexact-fraction-equals} and its siblings go through SQL
-     * arithmetic; the exact whole-number solve in Java is not carried. With int literals the policy
-     * is a CEL no-overload error at check time, since attribute values are doubles.
-     */
-    @Test
-    void addSolveNumeric() {
-        // 10 == 3 + aNumber solves to aNumber == 7; exact within ±2^53.
-        Operand cond = exprOp("eq",
-                nval(10),
-                exprOp("add", nval(3), var("request.resource.attr.aNumber")));
-        assertEquals(0, runCount(cond));
-
-        ResourceEntity match = new ResourceEntity("add-long-1");
-        match.setaNumber(7);
-        ResourceEntity miss = new ResourceEntity("add-long-2");
-        miss.setaNumber(8);
-        withResource(match, () -> withResource(miss, () -> assertEquals(1, runCount(cond))));
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> #668: A constant beyond 2^53 is not carried.
-     */
-    @Test
-    void addSolveOversizedLongRoutesToSqlArithmetic() {
-        // Beyond ±2^53 a double is not exact, so this must use SQL double arithmetic instead
-        // of the Java solve.
-        Operand cond = exprOp("eq",
-                exprOp("add", var("request.resource.attr.aNumber"), nval(1)),
-                nval(0x1p54));
-
-        ResourceEntity row = new ResourceEntity("add-big-1");
-        row.setaNumber(5);
-        withResource(row, () -> assertEquals(0, runCount(cond)));
-    }
-
     @Nested
     class CollectionMacroComposition {
 
@@ -1680,58 +1644,6 @@ class JpaQueryPlanAdapterTest {
                             var("request.resource.attr.aString"),
                             var("request.resource.attr.createdBy")),
                     "request.resource.attr.createdBy", "Relation", "scalar Field mapping");
-        }
-
-    }
-
-    // Arithmetic as a comparison operand. Attribute values are CEL doubles, so the adapter
-    // computes in double arithmetic. mod is refused: CEL's % is int-only, so it always fails
-    // on an attribute.
-    @Nested
-    class ArithmeticComparisons {
-
-        private ResourceEntity seeded() {
-            ResourceEntity r = new ResourceEntity("arith-seed-1");
-            r.setaNumber(5);
-            return r;
-        }
-
-        private Operand numVar() {
-            return var("request.resource.attr.aNumber");
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code arithmetic/subtract/field-minus-constant} carries one subtraction;
-         * constant-minus-column under an ordering is not carried.
-         */
-        @Test
-        void subInLtComparison() {
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("lt",
-                        exprOp("sub", numVar(), nval(1)), nval(10))));
-                assertEquals(0, runCount(exprOp("lt",
-                        exprOp("sub", numVar(), nval(1)), nval(2))));
-                // Constant minus column: 10 - 5 <= 5.
-                assertEquals(1, runCount(exprOp("le",
-                        exprOp("sub", nval(10), numVar()), nval(5))));
-            });
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: Arithmetic nested inside arithmetic is not carried;
-         * {@code arithmetic/add/on-both-sides} puts one operation on each side.
-         */
-        @Test
-        void nestedArithmetic() {
-            // (aNumber + 1) * 2 with aNumber = 5 is 12.
-            withResource(seeded(), () -> {
-                assertEquals(1, runCount(exprOp("gt",
-                        exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
-                        nval(11))));
-                assertEquals(0, runCount(exprOp("gt",
-                        exprOp("mult", exprOp("add", numVar(), nval(1)), nval(2)),
-                        nval(12))));
-            });
         }
 
     }

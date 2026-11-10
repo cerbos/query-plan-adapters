@@ -9,6 +9,33 @@ resourcePolicy:
       compose_large: R.attr.aNumber > 10
       compose_teamed: R.attr.aOptionalString in P.attr.fewTeams
   rules:
+    # arithmetic/add/absorbed-by-large-double-equals
+    - actions:
+        - arithmetic/add/absorbed-by-large-double-equals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble + 1.0 == -9.5e18
+    # arithmetic/add/absorbed-by-large-double-not-equals
+    - actions:
+        - arithmetic/add/absorbed-by-large-double-not-equals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble + 1.0 != -9.5e18 && R.attr.aDouble < -1.0
+    # arithmetic/add/constant-plus-field-value-first
+    - actions:
+        - arithmetic/add/constant-plus-field-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 10.0 == 3.0 + R.attr.aNumber
     # arithmetic/add/exact-fraction-equals
     - actions:
         - arithmetic/add/exact-fraction-equals
@@ -72,6 +99,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber + 1 > 2.0
+    # arithmetic/add/int-of-string-plus-constant
+    - actions:
+        - arithmetic/add/int-of-string-plus-constant
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aString) + 1 > 50
     # arithmetic/add/negated-int-beside-double-field
     - actions:
         - arithmetic/add/negated-int-beside-double-field
@@ -216,6 +252,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.aNumber / R.attr.aNumber == 1.0)'
+    # arithmetic/divide/negated-zero-divisor-list-in-list-literal
+    - actions:
+        - arithmetic/divide/negated-zero-divisor-list-in-list-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!([R.attr.aNumber / 0.0] in [[1.0]])'
     # arithmetic/divide/negative-zero-divisor
     - actions:
         - arithmetic/divide/negative-zero-divisor
@@ -234,6 +279,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber / (R.attr.aDouble / R.attr.aNumber) > 0
+    # arithmetic/divide/positive-zero-divisor
+    - actions:
+        - arithmetic/divide/positive-zero-divisor
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber / 0.0 > 0.0
     # arithmetic/divide/self-division-greater-than
     - actions:
         - arithmetic/divide/self-division-greater-than
@@ -252,6 +306,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber / R.attr.aNumber != 1.0
+    # arithmetic/divide/zero-divisor-in-list-literal
+    - actions:
+        - arithmetic/divide/zero-divisor-in-list-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '[R.attr.aNumber / 0.0] != [1.0]'
+    # arithmetic/divide/zero-divisor-in-map-literal
+    - actions:
+        - arithmetic/divide/zero-divisor-in-map-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '{"a": R.attr.aNumber / 0.0} != {"a": 1.0}'
     # arithmetic/modulo/column-divisor-negative-and-zero
     - actions:
         - arithmetic/modulo/column-divisor-negative-and-zero
@@ -279,6 +351,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aNumber) % 2 == 1
+    # arithmetic/modulo/size-of-string
+    - actions:
+        - arithmetic/modulo/size-of-string
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) % 3 == 1
     # arithmetic/multiply/inexact-fraction-equals
     - actions:
         - arithmetic/multiply/inexact-fraction-equals
@@ -297,6 +378,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber / R.attr.aNumber * 0.0 + R.attr.aDouble > 0.2
+    # arithmetic/multiply/negated-int-of-double-overflows
+    - actions:
+        - arithmetic/multiply/negated-int-of-double-overflows
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aDouble) * 2 > 0)'
     # arithmetic/multiply/negative-multiplier
     - actions:
         - arithmetic/multiply/negative-multiplier
@@ -306,6 +396,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber * -2.0 < 3.0
+    # arithmetic/multiply/nested-sum
+    - actions:
+        - arithmetic/multiply/nested-sum
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: (R.attr.aNumber + 1.0) * 2.0 > 11.0
+    # arithmetic/subtract/chained
+    - actions:
+        - arithmetic/subtract/chained
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber - 3.0 - 2.0 > 0.0
+    # arithmetic/subtract/constant-minus-field
+    - actions:
+        - arithmetic/subtract/constant-minus-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 10.0 - R.attr.aNumber <= 5.0
     # arithmetic/subtract/field-minus-constant
     - actions:
         - arithmetic/subtract/field-minus-constant
@@ -1209,6 +1326,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!("public" in R.attr.tags.map(t, t.name))'
+    # collection/filter/size-of-ternary-over-filtered-literals
+    - actions:
+        - collection/filter/size-of-ternary-over-filtered-literals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'size(R.attr.aBool ? [1, 2].filter(t, t > 0) : [1, 2].filter(t, t > 1)) == 1'
+    # collection/add/literal-list-plus-attribute-list
+    - actions:
+        - collection/add/literal-list-plus-attribute-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '[1] + [R.attr.aNumber] == [1, 5]'
     # comparison/equals/field-to-field
     - actions:
         - comparison/equals/field-to-field
@@ -2825,6 +2960,24 @@ resourcePolicy:
       condition:
         match:
           expr: has(R.attr.obj.inner)
+    # null/in/error-or-boolean-in-list-with-null
+    - actions:
+        - null/in/error-or-boolean-in-list-with-null
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: (R.attr.aNumber.contains("1") || R.attr.aBool) in [true, null]
+    # null/in/exists-over-error-in-list-with-null
+    - actions:
+        - null/in/exists-over-error-in-list-with-null
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.exists(t, R.attr.aNumber.contains("1")) in [true, null] || R.attr.aNumber == 5
     # null/in/literal-list-of-only-null
     - actions:
         - null/in/literal-list-of-only-null
@@ -2843,6 +2996,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.owner in ["x", "one_two", null]
+    # null/in/missing-attribute-conjunction-in-list-with-null
+    - actions:
+        - null/in/missing-attribute-conjunction-in-list-with-null
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: (R.attr.aNumber > 1 && R.attr.aBool) in [false, null]
     # null/in/missing-attribute-in-multi-element-list
     - actions:
         - null/in/missing-attribute-in-multi-element-list
@@ -2924,6 +3086,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(null in R.attr.tagNames)'
+    # null/in/negated-size-error-in-list-with-null
+    - actions:
+        - null/in/negated-size-error-in-list-with-null
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(size(R.attr.aNumber) in [1, null]) || R.attr.aNumber == 5'
     # null/in/null-literal-in-number-list
     - actions:
         - null/in/null-literal-in-number-list
@@ -2942,6 +3113,24 @@ resourcePolicy:
       condition:
         match:
           expr: null in R.attr.tagNames
+    # null/in/size-error-in-list-with-null
+    - actions:
+        - null/in/size-error-in-list-with-null
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aNumber) in [1, null] || R.attr.aNumber == 5
+    # null/in/ternary-with-error-branch-in-list-with-null
+    - actions:
+        - null/in/ternary-with-error-branch-in-list-with-null
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? size(R.attr.aNumber) : 1) in [2, null] || R.attr.aNumber == 5'
     # null/not-equals/explicit-null-against-literal
     - actions:
         - null/not-equals/explicit-null-against-literal
@@ -4895,6 +5084,24 @@ resourcePolicy:
       condition:
         match:
           expr: timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00Z")
+    # type-mismatch/add/negated-boolean-plus-number
+    - actions:
+        - type-mismatch/add/negated-boolean-plus-number
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aBool + R.attr.aNumber == 6.0) || R.attr.aNumber == 2'
+    # type-mismatch/add/negated-string-plus-number
+    - actions:
+        - type-mismatch/add/negated-string-plus-number
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString + R.attr.aNumber == "one5") || R.attr.aNumber == 2'
     # type-mismatch/contains/number-field-needle
     - actions:
         - type-mismatch/contains/number-field-needle
@@ -5129,6 +5336,24 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(R.attr.tags.map(t, t.name), ["public", 0])
+    # type-mismatch/has-intersection/negated-resource-list-against-map
+    - actions:
+        - type-mismatch/has-intersection/negated-resource-list-against-map
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.tags, dyn({"a": 1})) || R.attr.aNumber == 5'
+    # type-mismatch/has-intersection/negated-resource-list-against-scalar
+    - actions:
+        - type-mismatch/has-intersection/negated-resource-list-against-scalar
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hasIntersection(R.attr.tags, dyn("public")) || R.attr.aNumber == 5'
     # type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list
     - actions:
         - type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list
@@ -5336,6 +5561,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.createdAt < now() - duration("24h") || R.attr.aNumber == 2
+    # type-mismatch/multiply/string-times-zero
+    - actions:
+        - type-mismatch/multiply/string-times-zero
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString * 0.0 == 0.0 || R.attr.aNumber == 2
     # type-mismatch/not-equals/number-field-against-string-literal
     - actions:
         - type-mismatch/not-equals/number-field-against-string-literal
@@ -5390,3 +5624,30 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber.startsWith("2")
+    # type-mismatch/string/number-list-attribute
+    - actions:
+        - type-mismatch/string/number-list-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(R.attr.aNumberList) == "[2]" || R.attr.aNumber == 2
+    # type-mismatch/subtract/negated-string-minus-number
+    - actions:
+        - type-mismatch/subtract/negated-string-minus-number
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.createdAt - 5.0 == 2020.0) || R.attr.aNumber == 2'
+    # type-mismatch/subtract/string-minus-number
+    - actions:
+        - type-mismatch/subtract/string-minus-number
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString - R.attr.aNumber == -5.0 || R.attr.aNumber == 2

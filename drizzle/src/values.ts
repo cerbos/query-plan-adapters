@@ -556,6 +556,20 @@ const buildConcatenation = (
     : sql`(${left} || ${right})`;
 };
 
+/** The CEL type an attribute or literal operand certainly has, read off its column or value. */
+const operandKind = (
+  operand: PlanExpressionOperand,
+  mapper: Mapper,
+): string | undefined => {
+  if (isValueOperand(operand)) {
+    const type = typeof operand.value;
+    return type === "string" || type === "number" || type === "boolean" ? type : undefined;
+  }
+  if (!isNameOperand(operand)) return undefined;
+  const dataType = columnForOperand(operand, mapper)?.dataType;
+  return dataType === "bigint" ? "number" : dataType;
+};
+
 const buildArithmeticExpression = (
   operator: string,
   operands: PlanExpressionOperand[],
@@ -582,7 +596,18 @@ const buildArithmeticExpression = (
     // semantics; SQLite represents bound NaN as NULL, whose comparisons are never true.
     return sql`${leftOperand.value / rightOperand.value}`;
   }
-  if (operator === "add" && isStringConcatenation(operands, mapper)) {
+  const kinds = [operandKind(leftOperand, mapper), operandKind(rightOperand, mapper)];
+  const concatenates = operator === "add" && isStringConcatenation(operands, mapper);
+  if (
+    kinds.includes("boolean") ||
+    kinds.includes("date") ||
+    (kinds.includes("string") && (!concatenates || kinds.includes("number")))
+  ) {
+    throw new UnsupportedQueryPlanError(
+      `Cannot translate '${operator}': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce`,
+    );
+  }
+  if (concatenates) {
     return buildConcatenation(leftOperand, rightOperand, mapper, options);
   }
   if (operator === "mod") {

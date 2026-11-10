@@ -182,11 +182,13 @@ describe("nullAttributeRepresentation", () => {
       } catch (error) {
         // A positional read of a list compares an element, not an optionally absent field; the
         // index operator has no Prisma filter form under either representation. A null inside a
-        // whole-list literal is an element too, and comparing a list is refused under either. A
-        // null arithmetic operand has no CEL overload, so its fold is refused under either.
+        // whole-list literal is an element too, and comparing a list is refused under either, as
+        // is an `in` over a computed member. A null arithmetic operand has no CEL overload, so its
+        // fold is refused under either.
         const message = String(error);
         return message.includes("missing-attribute error") ||
           message.includes("Unsupported operator: index") ||
+          message.includes("in requires a field member and literal list") ||
           message.includes("Prisma cannot compare list or map elements") ||
           message.includes("operator requires string or number operands")
           ? []

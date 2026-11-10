@@ -70,6 +70,26 @@ from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
 _BOOLEAN_OPERATORS = frozenset({"and", "or", "not"})
 _MEMBERSHIP_OPERATORS = frozenset({"in", "hasIntersection"})
+
+# Operators whose CEL value is never null: an error, which SQL holds as NULL, must not reach an
+# IS NULL test.
+_NULL_FREE_OPERATORS = frozenset(
+    {
+        "add", "sub", "mult", "div", "mod", "size", "int", "double", "string", "not",
+        "and", "or", "eq", "ne", "lt", "le", "gt", "ge", "in", "contains", "startsWith",
+        "endsWith", "matches", "exists", "exists_one", "all", "hasIntersection",
+    }
+)
+
+
+def _never_null(operand: Operand | None) -> bool:
+    if isinstance(operand, Value):
+        return operand.value is not None
+    if not isinstance(operand, Expr):
+        return False
+    if operand.operator == "if" and len(operand.operands) == 3:
+        return _never_null(operand.operands[1]) and _never_null(operand.operands[2])
+    return operand.operator in _NULL_FREE_OPERATORS
 _ORDERING_AND_EQUALITY = frozenset({"eq", "ne", "lt", "le", "gt", "ge"})
 
 _BARE_TEMPORAL_REFUSAL = (
@@ -732,6 +752,13 @@ class Translator:
         if folded is not None:
             return folded
 
+        if operator in ("string", "int", "double") and any(
+            isinstance(o, Variable) and o.name in self._declared_names for o in operands
+        ):
+            raise UnsupportedPlanError(
+                f"{operator}() over a declared collection is a CEL no-overload error"
+            )
+
         if operator == "list":
             raise UnsupportedPlanError(
                 "a list constructed from attributes is lowered only as the range of "
@@ -828,6 +855,17 @@ class Translator:
             structural = self._structural_membership(operands)
             if structural is not None:
                 return structural
+            needle, haystack = operands if len(operands) == 2 else (None, None)
+            if (
+                _never_null(needle)
+                and isinstance(haystack, Value)
+                and isinstance(haystack.value, list)
+                and None in haystack.value
+            ):
+                kept = [member for member in haystack.value if member is not None]
+                if not kept:
+                    return case((self._resolve(needle).isnot(None), false()))
+                operands = (needle, Value(kept))
 
         if self._reads_declared_index(operands):
             return self._indexed_comparison(operator, operands)

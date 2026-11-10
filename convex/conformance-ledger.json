@@ -1,6 +1,10 @@
 {
   "adapter": "convex",
   "cases": {
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "division by a constant zero whose sign is indeterminate: a query plan is JSON-encoded on its way into a Convex function and JSON has no -0, so the adapter cannot tell +Infinity from -Infinity."
+    },
     "arithmetic/divide/negative-zero-divisor": {
       "status": "unsupported",
       "reason": "IEEE keeps the sign of a zero, and the planner does ship it (the wire operand for -0.0 is `-0`), but a query plan is JSON-encoded on its way into a Convex function and JSON.stringify(-0) is \"0\" — the sign bit is gone before the adapter sees it, so it rejects a constant zero denominator rather than guess which infinity CEL produced"
@@ -8,6 +12,18 @@
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The Convex adapter refuses this shape during structural validation: division requires a constant denominator: the plan does not preserve numeric types needed to distinguish integer errors from floating-point infinity."
+    },
+    "arithmetic/divide/positive-zero-divisor": {
+      "status": "unsupported",
+      "reason": "division by a constant zero whose sign is indeterminate: a query plan is JSON-encoded on its way into a Convex function and JSON has no -0, so the adapter cannot tell +Infinity from -Infinity."
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "division by a constant zero whose sign is indeterminate: a query plan is JSON-encoded on its way into a Convex function and JSON has no -0, so the adapter cannot tell +Infinity from -Infinity."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "division by a constant zero whose sign is indeterminate: a query plan is JSON-encoded on its way into a Convex function and JSON has no -0, so the adapter cannot tell +Infinity from -Infinity."
     },
     "cast/string/from-integral-ternary": {
       "status": "unsupported",

@@ -3,6 +3,27 @@
 area: arithmetic
 description: '+ - * / % over attributes, division by zero, NaN and infinity.'
 cases:
+- id: 'arithmetic/add/absorbed-by-large-double-equals'
+  tier: adversarial
+  intent: 'A double attribute beyond 2^53 plus 1.0, compared for equality with itself (aDouble + 1.0 == -9.5e18).'
+  trap: 'At -9.5e18 a double has no room for 1.0, so the sum rounds back and g1 is allowed; exact-decimal store arithmetic, or solving to aDouble == -9.5e18 - 1 over integers, drops g1.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble + 1.0 == -9.5e18'
+- id: 'arithmetic/add/absorbed-by-large-double-not-equals'
+  tier: adversarial
+  intent: 'The not-equals mirror of the absorbed sum, limited to negative doubles (aDouble + 1.0 != -9.5e18 && aDouble < -1.0).'
+  trap: 'The sum rounds back to -9.5e18 for g1, so only a5 and b3 are allowed; exact-decimal store arithmetic or an integer solve makes g1''s sum differ and over-grants it.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble + 1.0 != -9.5e18 && R.attr.aDouble < -1.0'
+- id: 'arithmetic/add/constant-plus-field-value-first'
+  tier: extended
+  intent: 'Equality with the constant first and the constant first in the sum (10.0 == 3.0 + aNumber).'
+  trap: 'Only b1 (aNumber 7) is allowed; solving with the operands swapped or the sign flipped selects 13 or -7.'
+  condition:
+    match:
+      expr: '10.0 == 3.0 + R.attr.aNumber'
 - id: 'arithmetic/add/exact-fraction-equals'
   tier: adversarial
   intent: 'Control: an attribute plus a fraction that is exact in binary doubles (aDouble + 0.5 == 0.75).'
@@ -73,6 +94,13 @@ cases:
     - 0.56.0
     - 0.57.0
     reason: 'The planner drops the int type of the literal 1: the plan is byte-identical to aNumber + 1.0 > 2.0, which allows rows, while check() has no double + int overload and denies every row.'
+- id: 'arithmetic/add/int-of-string-plus-constant'
+  tier: adversarial
+  intent: 'An int() conversion of a string attribute inside a sum (int(aString) + 1 > 50).'
+  trap: 'Only i1 ("+051") and i6 (2^53 + 1) parse and exceed 50; a cast that reads "51 " or "1e3" leniently, or rounds i6 through a double, moves rows, and i4 overflows int and must deny.'
+  condition:
+    match:
+      expr: 'int(R.attr.aString) + 1 > 50'
 - id: 'arithmetic/add/negated-int-beside-double-field'
   tier: adversarial
   intent: 'A negated int() + double sum, OR''d with aNumber == 5 (!(int(aNumber) + aDouble > 0.0) || aNumber == 5).'
@@ -185,6 +213,13 @@ cases:
   condition:
     match:
       expr: '!(R.attr.aNumber / R.attr.aNumber == 1.0)'
+- id: 'arithmetic/divide/negated-zero-divisor-list-in-list-literal'
+  tier: adversarial
+  intent: 'A one-element list holding a division by 0.0, tested against a list of lists under negation (!([aNumber / 0.0] in [[1.0]])).'
+  trap: 'The element is an infinity or NaN, never 1.0, so every row with aNumber is allowed and only j2 denied; a NULL lowering of the zero divisor makes the membership UNKNOWN and drops every row.'
+  condition:
+    match:
+      expr: '!([R.attr.aNumber / 0.0] in [[1.0]])'
 - id: 'arithmetic/divide/negative-zero-divisor'
   tier: adversarial
   intent: 'An attribute divided by the literal -0.0, compared > 0.0.'
@@ -199,6 +234,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber / (R.attr.aDouble / R.attr.aNumber) > 0'
+- id: 'arithmetic/divide/positive-zero-divisor'
+  tier: adversarial
+  intent: 'An attribute divided by the literal 0.0, compared > 0.0.'
+  trap: 'Dividing by +0.0 gives +Infinity for positive numerators, -Infinity for negative ones and NaN for 0, so exactly the positive rows are allowed; guarding the zero to NULL empties the result, and treating it as -0.0 flips it.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber / 0.0 > 0.0'
 - id: 'arithmetic/divide/self-division-greater-than'
   tier: adversarial
   intent: 'An attribute divided by itself compared > 0.5, where the zero row (a7) makes 0/0.'
@@ -213,6 +255,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber / R.attr.aNumber != 1.0'
+- id: 'arithmetic/divide/zero-divisor-in-list-literal'
+  tier: adversarial
+  intent: 'A one-element list holding a division by 0.0, compared != with a list literal ([aNumber / 0.0] != [1.0]).'
+  trap: 'The element is an infinity or NaN, so every row with aNumber is allowed and only j2 denied; a NULL lowering of the zero divisor makes the comparison UNKNOWN and drops every row.'
+  condition:
+    match:
+      expr: '[R.attr.aNumber / 0.0] != [1.0]'
+- id: 'arithmetic/divide/zero-divisor-in-map-literal'
+  tier: adversarial
+  intent: 'A map literal whose value divides by 0.0, compared != with another map ({"a": aNumber / 0.0} != {"a": 1.0}).'
+  trap: 'The value is an infinity or NaN, so every row with aNumber is allowed and only j2 denied; a NULL lowering of the zero divisor makes the comparison UNKNOWN and drops every row.'
+  condition:
+    match:
+      expr: '{"a": R.attr.aNumber / 0.0} != {"a": 1.0}'
 - id: 'arithmetic/modulo/column-divisor-negative-and-zero'
   tier: adversarial
   intent: 'Integer modulo by a column expression that is negative on most rows and zero on a1 (int(aNumber) % (int(aNumber) - 5) == 1).'
@@ -234,6 +290,13 @@ cases:
   condition:
     match:
       expr: 'int(R.attr.aNumber) % 2 == 1'
+- id: 'arithmetic/modulo/size-of-string'
+  tier: adversarial
+  intent: 'Integer modulo over the length of a string attribute (size(aString) % 3 == 1).'
+  trap: 'size() is a CEL int, so % needs no int(); rows of length 1, 4 and 7 are allowed. Rendering % as / allows lengths 3 to 5 instead.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) % 3 == 1'
 - id: 'arithmetic/multiply/inexact-fraction-equals'
   tier: adversarial
   intent: 'Equality over an attribute times a non-representable fraction (aNumber * 0.1 == 0.3 || aDouble * 3.0 == 3.9).'
@@ -251,6 +314,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber / R.attr.aNumber * 0.0 + R.attr.aDouble > 0.2'
+- id: 'arithmetic/multiply/negated-int-of-double-overflows'
+  tier: adversarial
+  intent: 'An int() conversion of a double doubled under negation (!(int(aDouble) * 2 > 0)), where g1''s product overflows int.'
+  trap: 'int(-9.5e18) * 2 is past -2^63, a CEL overflow error that denies g1 under both polarities; double arithmetic or a wrapping multiply makes the negation true for g1 and over-grants it, and a bigint overflow fails the query.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aDouble) * 2 > 0)'
 - id: 'arithmetic/multiply/negative-multiplier'
   tier: adversarial
   intent: 'Attribute times a negative constant under an inequality (aNumber * -2.0 < 3.0).'
@@ -258,6 +328,27 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber * -2.0 < 3.0'
+- id: 'arithmetic/multiply/nested-sum'
+  tier: extended
+  intent: 'A sum nested inside a product ((aNumber + 1.0) * 2.0 > 11.0).'
+  trap: 'The sum binds first, so aNumber above 4.5 is allowed; flattening to aNumber + 1.0 * 2.0 selects aNumber above 9.'
+  condition:
+    match:
+      expr: '(R.attr.aNumber + 1.0) * 2.0 > 11.0'
+- id: 'arithmetic/subtract/chained'
+  tier: extended
+  intent: 'Two subtractions chained left to right (aNumber - 3.0 - 2.0 > 0.0).'
+  trap: 'Subtraction is left-associative, so aNumber above 5 is allowed; grouping it as aNumber - (3.0 - 2.0) selects aNumber above 1.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber - 3.0 - 2.0 > 0.0'
+- id: 'arithmetic/subtract/constant-minus-field'
+  tier: extended
+  intent: 'A constant minus an attribute under an ordering (10.0 - aNumber <= 5.0).'
+  trap: 'The comparison holds for aNumber of 5 and above; swapping the operands to aNumber - 10.0 selects aNumber of 15 and below.'
+  condition:
+    match:
+      expr: '10.0 - R.attr.aNumber <= 5.0'
 - id: 'arithmetic/subtract/field-minus-constant'
   tier: extended
   intent: 'Attribute minus a double constant compared with zero (aNumber - 3.0 <= 0.0).'

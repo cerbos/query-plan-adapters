@@ -4,6 +4,10 @@
     "null-list": "The harness stores aNumberList as adversarial_number_list rows, one per element, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
   },
   "cases": {
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
+    },
     "arithmetic/add/ternary-selecting-double-beside-int": {
       "status": "unsupported",
       "reason": "Same int() refusal as arithmetic/divide/int-truncates: SQL CAST does not reproduce CEL's int() conversion, so the addition over the ternary is never reached."
@@ -36,9 +40,21 @@
       "status": "unsupported",
       "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "In is applied to a pair this adapter cannot read as one mapped operand against a constant list; the supported shapes are in(collection-attribute, [values]), in(map(collection, lambda), [values]) and in(attribute, collection-attribute)."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "A division as the DIVISOR: the inner division can be a zero-denominator NaN or infinity, SQL has no literal for either, and against a column the sign of the result depends on that column. Refused rather than binding a non-finite double, which PostgreSQL orders above every number"
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "Cannot compare a column with a list() value: it builds a map or list, and a mapped column holds one scalar, which SQL equality cannot compare with either."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "Cannot compare a column with a struct() value: it builds a map or list, and a mapped column holds one scalar, which SQL equality cannot compare with either."
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
@@ -48,9 +64,17 @@
       "status": "unsupported",
       "reason": "CEL `%` is integer-only while an attribute value is always a double at check time, so a satisfiable policy has to cast with int() first, and int() has no faithful SQL lowering: CAST rounds to nearest on PostgreSQL and MySQL where CEL truncates toward zero. The modulo is refused by name before its operands are read, on the same ground that refuses `cast/int/negative-fraction`"
     },
+    "arithmetic/modulo/size-of-string": {
+      "status": "unsupported",
+      "reason": "Mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
+    },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
       "reason": "arithmetic between a column and the NaN or infinity a zero denominator produces is not supported: SQL has no literal for either value, and neither folds to one constant against a column, because an infinity times or divided by a column depends on that column's sign. Compare the division itself, or keep the composition constant."
+    },
+    "arithmetic/multiply/negated-int-of-double-overflows": {
+      "status": "unsupported",
+      "reason": "Cannot translate int(): SQL CAST reads the numeric prefix of a string where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero, so the cast would admit rows the PDP denies."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -108,6 +132,10 @@
       "status": "unsupported",
       "reason": "timestamp() needs a column that stores an absolute instant; createdBy is the varchar the corpus deliberately maps it to, and a string column is ambiguous about which instant it holds, so the conversion failure CEL raises for a malformed string has no SQL counterpart. Refused when the timestamp() operand is resolved"
     },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "Cannot compare a column with a list() value: it builds a map or list, and a mapped column holds one scalar, which SQL equality cannot compare with either."
+    },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
       "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
@@ -143,6 +171,10 @@
     "collection/filter/as-whole-condition": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean, so it cannot be a condition on its own; only size(filter(...)) gives the list a scalar meaning"
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "Size() is applied to a collection this adapter cannot reach as a table: its argument must be a mapped attribute or filter(collection, lambda)."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -240,6 +272,30 @@
       "status": "unsupported",
       "reason": "Same refusal as membership/in/map-attribute-keys, under negation: `in` over the to-one `parent` tests its attribute names, which SQL has no row to read"
     },
+    "null/in/error-or-boolean-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "In is applied to a pair this adapter cannot read as one mapped operand against a constant list; the supported shapes are in(collection-attribute, [values]), in(map(collection, lambda), [values]) and in(attribute, collection-attribute)."
+    },
+    "null/in/exists-over-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "In is applied to a pair this adapter cannot read as one mapped operand against a constant list; the supported shapes are in(collection-attribute, [values]), in(map(collection, lambda), [values]) and in(attribute, collection-attribute)."
+    },
+    "null/in/missing-attribute-conjunction-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "In is applied to a pair this adapter cannot read as one mapped operand against a constant list; the supported shapes are in(collection-attribute, [values]), in(map(collection, lambda), [values]) and in(attribute, collection-attribute)."
+    },
+    "null/in/negated-size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "In is applied to a pair this adapter cannot read as one mapped operand against a constant list; the supported shapes are in(collection-attribute, [values]), in(map(collection, lambda), [values]) and in(attribute, collection-attribute)."
+    },
+    "null/in/size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "In is applied to a pair this adapter cannot read as one mapped operand against a constant list; the supported shapes are in(collection-attribute, [values]), in(map(collection, lambda), [values]) and in(attribute, collection-attribute)."
+    },
+    "null/in/ternary-with-error-branch-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "In is applied to a pair this adapter cannot read as one mapped operand against a constant list; the supported shapes are in(collection-attribute, [values]), in(map(collection, lambda), [values]) and in(attribute, collection-attribute)."
+    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
@@ -300,6 +356,14 @@
       "status": "unsupported",
       "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"
     },
+    "type-mismatch/add/negated-boolean-plus-number": {
+      "status": "unsupported",
+      "reason": "Arithmetic over 'request.resource.attr.aBool' requires a numeric column, but it maps to a BooleanColumnType column."
+    },
+    "type-mismatch/add/negated-string-plus-number": {
+      "status": "unsupported",
+      "reason": "String concatenation over 'request.resource.attr.aNumber' requires a text column, but it maps to a IntegerColumnType column."
+    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
@@ -308,9 +372,33 @@
       "status": "unsupported",
       "reason": "Positional access into a list. Every list this adapter reads is a related table behind a correlated subquery, and the rows it returns carry no CEL list order for a position to index into. Refused in the leaf operand, by the operator's own name"
     },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "Request.resource.attr.tags denotes the elements of adversarial_tags themselves, but the relation declares no element column; map it with element = <column>."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
+      "status": "unsupported",
+      "reason": "Request.resource.attr.tags denotes the elements of adversarial_tags themselves, but the relation declares no element column; map it with element = <column>."
+    },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
       "reason": "CEL compares values of different types without coercion — equality is a definite false and ordering a no-overload error — while SQL coerces one side (MySQL coerces the string column to a number). The operand-type guard compares the constant's or the other column's type with the mapped column's declared type and refuses a mismatch before any SQL is built"
+    },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "Arithmetic over 'request.resource.attr.aString' requires a numeric column, but it maps to a VarCharColumnType column."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "Request.resource.attr.aNumberList is mapped as a relation, but this position needs a scalar column."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "Arithmetic over 'request.resource.attr.createdAt' requires a numeric column, but it maps to a JavaInstantColumnType column."
+    },
+    "type-mismatch/subtract/string-minus-number": {
+      "status": "unsupported",
+      "reason": "Arithmetic over 'request.resource.attr.aString' requires a numeric column, but it maps to a VarCharColumnType column."
     }
   }
 }

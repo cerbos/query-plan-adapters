@@ -88,9 +88,10 @@ Measured against a real MongoDB with typed fields:
 | `R.attr.flag != 0` (`Boolean` field) | `flag != false` | drops documents the PDP allows |
 | `R.attr.x > -1e19` (`Float` field) | an Integer too large for BSON | raises |
 
-The helper wraps each top-level condition in `Mongoid::RawValue`, Mongoid's own opt-out from
-that conversion, so the criteria's selector is the adapter's filter verbatim (Mongoid still drops
-a repeated clause from `$and`/`$or`/`$nor`, which changes nothing). Both are asserted for every
+The helper wraps each condition in `Mongoid::RawValue`, Mongoid's own opt-out from that
+conversion, once for each `$and`/`$or`/`$nor` around it, since Mongoid converts it again at each
+level. The criteria's selector is then the adapter's filter verbatim (Mongoid still drops a
+repeated clause from `$and`/`$or`/`$nor`, which changes nothing). Both are asserted for every
 corpus case. Mongoid is not a dependency of the gem: only `cerbos/mongodb/mongoid` loads it, and
 it is tested against Mongoid 9. Mongoid treats `id` as an alias of `_id`, so map a plan variable to
 `"_id"` rather than to `"id"`.
@@ -213,8 +214,8 @@ case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 99 / 102 |
-| adversarial | 431 / 452 |
+| extended | 103 / 106 |
+| adversarial | 452 / 477 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, the

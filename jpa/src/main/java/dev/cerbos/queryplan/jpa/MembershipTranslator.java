@@ -45,6 +45,14 @@ final class MembershipTranslator {
     }
 
     // The planner can emit a null scalar (`null in R.attr.items`), and List.of rejects null.
+    private static List<?> intersectionList(Object val) {
+        if (val instanceof List<?> l) {
+            return l;
+        }
+        throw Refusals.unsupported("hasIntersection over a " + PlanValues.typeName(val)
+                + " is a CEL no-overload error: it takes two lists");
+    }
+
     private static List<?> asList(Object val) {
         return (val instanceof List<?> l) ? l : Collections.singletonList(val);
     }
@@ -208,7 +216,7 @@ final class MembershipTranslator {
                 && second.getNodeCase() == Operand.NodeCase.VALUE) {
             String var = first.getVariable();
             Object val = PlanValues.protoValueToJava(second.getValue());
-            List<?> values = asList(val);
+            List<?> values = intersectionList(val);
 
             if (scope.resolve(var) instanceof Scope.ResolvedRelation relRef) {
                 return collectionContainsAny(scope, relRef, values);
@@ -229,7 +237,7 @@ final class MembershipTranslator {
                         "hasIntersection second operand must be a value list when used with map()");
             }
             Object val = PlanValues.protoValueToJava(second.getValue());
-            return handleMapIntersection(first.getExpression(), asList(val), scope);
+            return handleMapIntersection(first.getExpression(), intersectionList(val), scope);
         }
 
         // Two collection attributes, or a computed collection on either side.

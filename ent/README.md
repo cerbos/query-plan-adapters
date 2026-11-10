@@ -275,8 +275,8 @@ adversarial cases.
 | Tier | Passed / total (PDP 0.57.0) |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 97 / 102 |
-| adversarial | 395 / 452 |
+| extended | 101 / 106 |
+| adversarial | 405 / 477 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger

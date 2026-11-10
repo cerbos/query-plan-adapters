@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "g1"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/add/absorbed-by-large-double-equals",
+  "intent": "A double attribute beyond 2^53 plus 1.0, compared for equality with itself (aDouble + 1.0 == -9.5e18).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                },
+                {
+                  "value": 1
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": -9500000000000000000
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/absorbed-by-large-double-equals",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aDouble + 1.0 == -9.5e18"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "At -9.5e18 a double has no room for 1.0, so the sum rounds back and g1 is allowed; exact-decimal store arithmetic, or solving to aDouble == -9.5e18 - 1 over integers, drops g1."
+}

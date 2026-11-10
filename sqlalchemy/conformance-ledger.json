@@ -5,6 +5,10 @@
       "status": "unsupported",
       "reason": "The sum adds int(aNumber) to a double, which CEL rejects as a no-such-overload error; int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the cast is refused before the sum is reached."
     },
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "int() has no faithful SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero."
+    },
     "arithmetic/add/negated-int-beside-double-field": {
       "status": "unsupported",
       "reason": "Same int() refusal as `arithmetic/add/int-beside-double-field`, under negation."
@@ -41,9 +45,25 @@
       "status": "unsupported",
       "reason": "Same refused int() cast as arithmetic/divide/int-truncates, under negation."
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "The needle is a constructed list, and a list member of the haystack has no SQL value to hold it."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "Both divisions divide by a column, and a zero divisor makes CEL's quotient an infinity carrying the zero's sign, which SQL cannot read (it compares -0.0 equal to 0.0, and SQLite stores it as 0.0); only a divisor whose zero can give nothing but NaN is lowered."
+    },
+    "arithmetic/divide/positive-zero-divisor": {
+      "status": "unsupported",
+      "reason": "The HTTP transport renders the 0.0 divisor as `0`, which JSON decodes to an integer, so the adapter cannot tell +Infinity from -Infinity and refuses a literal zero denominator."
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "A list constructed from attributes is lowered only as the range of exists()/all() or the right operand of in: SQL has no list value to compare with a list literal."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "A map literal is read by key only when every key and value is a literal; a division in it has no SQL value."
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
@@ -57,9 +77,17 @@
       "status": "unsupported",
       "reason": "int() is what gives `%` an integer operand, and it has no faithful SQL lowering (CAST rounds where CEL truncates toward zero), so the cast is refused before the modulo is reached."
     },
+    "arithmetic/modulo/size-of-string": {
+      "status": "unsupported",
+      "reason": "'%' is not lowered: CEL defines it only over integers and int() has no faithful SQL CAST, so the adapter does not track which operands are ints."
+    },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
       "reason": "The self-division's zero arm folds to NaN, a non-finite value, and arithmetic combining it with a column cannot be carried by SQL."
+    },
+    "arithmetic/multiply/negated-int-of-double-overflows": {
+      "status": "unsupported",
+      "reason": "int() has no faithful SQL CAST: PostgreSQL and MySQL round where CEL truncates toward zero, and CEL errors past int64 where SQL arithmetic overflows or saturates."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -137,6 +165,10 @@
       "status": "unsupported",
       "reason": "timestamp() lowers only an RFC 3339 literal or a SQLAlchemy DateTime column; over a string column a malformed value must stay a CEL error under negation, which no SQL cast preserves."
     },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "A list constructed from attributes is lowered only as the range of exists()/all() or the right operand of in: SQL has no list value to concatenate or compare."
+    },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
       "reason": "attr_map gives both macros' lambda scopes the same unaliased table, so the inner body comparing the inner element with the enclosing one would render as a column compared with itself; the translator refuses the nesting before building SQL (#509)."
@@ -192,6 +224,10 @@
     "collection/filter/as-whole-condition": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean, so it cannot be the whole condition."
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "size() over a ternary is not lowered: its branches are folded only by list concatenation and equality with a literal."
     },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
@@ -392,9 +428,25 @@
       "status": "unsupported",
       "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
     },
+    "type-mismatch/add/negated-boolean-plus-number": {
+      "status": "unsupported",
+      "reason": "CEL has no + overload for a boolean, which SQL would read as 0 or 1, so arithmetic over a boolean column is refused."
+    },
+    "type-mismatch/add/negated-string-plus-number": {
+      "status": "unsupported",
+      "reason": "CEL has no + overload between a string and a number, which SQL would concatenate or coerce, so the sum is refused."
+    },
     "type-mismatch/equals/negated-on-missing-attribute": {
       "status": "unsupported",
       "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "hasIntersection over the tags relation needs a member field to compare, and the map operand is not a list of them."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
+      "status": "unsupported",
+      "reason": "hasIntersection over the tags relation needs a member field to compare, and the scalar operand is not a list of them."
     },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
@@ -407,6 +459,22 @@
     "type-mismatch/less-than/string-field-against-timestamp": {
       "status": "unsupported",
       "reason": "A bare temporal attribute is the RFC 3339 string the application sent, which a stored SQL timestamp no longer spells, and CEL has no string-against-timestamp overload; the translator refuses a DateTime column read outside timestamp() rather than compare it as an instant."
+    },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "CEL has no * overload for a string, which SQLite and MySQL would read as a number, so arithmetic over a string column is refused."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "string() has no CEL overload for a list, and a declared collection has no scalar SQL value to cast."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "CEL holds a bare timestamp attribute as an RFC 3339 string, which has no - overload; the stored timestamp column has lost that spelling, so the shape is refused."
+    },
+    "type-mismatch/subtract/string-minus-number": {
+      "status": "unsupported",
+      "reason": "CEL has no - overload for a string, which SQLite and MySQL would read as a number, so arithmetic over a string column is refused."
     }
   }
 }

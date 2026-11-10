@@ -1,0 +1,77 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a5",
+    "a7",
+    "b3",
+    "h4",
+    "i5"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/multiply/negated-int-of-double-overflows",
+  "intent": "An int() conversion of a double doubled under negation (!(int(aDouble) * 2 > 0)), where g1's product overflows int.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aDouble"
+                            }
+                          ],
+                          "operator": "int"
+                        }
+                      },
+                      {
+                        "value": 2
+                      }
+                    ],
+                    "operator": "mult"
+                  }
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/multiply/negated-int-of-double-overflows",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(int(R.attr.aDouble) * 2 > 0)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "int(-9.5e18) * 2 is past -2^63, a CEL overflow error that denies g1 under both polarities; double arithmetic or a wrapping multiply makes the negation true for g1 and over-grants it, and a bigint overflow fails the query."
+}

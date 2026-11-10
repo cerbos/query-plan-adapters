@@ -8,6 +8,10 @@
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator, so int() is refused wherever it appears; the int + double sum over it (a no-such-overload error in CEL, which denies) is never reached."
     },
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: int."
+    },
     "arithmetic/add/negated-int-beside-double-field": {
       "status": "unsupported",
       "reason": "Same refusal as `arithmetic/add/int-beside-double-field`, under negation."
@@ -48,9 +52,21 @@
       "status": "unsupported",
       "reason": "Same refusal as `arithmetic/divide/int-truncates`, under negation."
     },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: list."
+    },
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Unsupported operator: div."
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: list."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: struct."
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
@@ -64,9 +80,25 @@
       "status": "unsupported",
       "reason": "Prisma filters have no column arithmetic at all, and `mod` is not in the translator's operator set \u2014 the same gap the whole arithmetic/divide group hits, reached here through the modulo operator"
     },
+    "arithmetic/modulo/size-of-string": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: mod."
+    },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
       "reason": "Column arithmetic on every side: aNumber / aNumber * 0.0 + aDouble has no constant to solve against, and Prisma filters cannot compute over columns, nor reproduce the NaN that 0/0 carries through the product; the translator refuses at the division"
+    },
+    "arithmetic/multiply/negated-int-of-double-overflows": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: int."
+    },
+    "arithmetic/multiply/nested-sum": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: add."
+    },
+    "arithmetic/subtract/chained": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: sub."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -120,6 +152,10 @@
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
     },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: list."
+    },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
       "reason": "Same as collection/exists/nested-over-same-collection, reached through all(): the inner some-filter would have to compare its id and name with the enclosing element's, and Prisma field references stay within one model"
@@ -167,6 +203,10 @@
     "collection/exists/two-variable-map-key-and-value": {
       "status": "unsupported",
       "reason": "A two-variable exists over a map binds each key as well as its value, and a Prisma filter enumerates no map keys: obj has no column or relation of its own (only obj.inner is mapped), so the adapter refuses the two-variable lambda"
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "size() of if(...) counts the elements of a derived list, and a Prisma relation filter can only test whether some, every or no related row matches, never count them."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -288,6 +328,18 @@
       "status": "unsupported",
       "reason": "Same exists_one counting limitation"
     },
+    "null/in/error-or-boolean-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "in requires a field member and literal list, or a literal member and field collection."
+    },
+    "null/in/exists-over-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "in requires a field member and literal list, or a literal member and field collection."
+    },
+    "null/in/missing-attribute-conjunction-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "in requires a field member and literal list, or a literal member and field collection."
+    },
     "null/in/missing-attribute-in-resource-list": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Membership between two database attributes is not supported: Prisma cannot compare a related element column with an outer scalar column."
@@ -295,6 +347,18 @@
     "null/in/negated-missing-attribute-in-resource-list": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Membership between two database attributes is not supported: Prisma cannot compare a related element column with an outer scalar column."
+    },
+    "null/in/negated-size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "in requires a field member and literal list, or a literal member and field collection."
+    },
+    "null/in/size-error-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "in requires a field member and literal list, or a literal member and field collection."
+    },
+    "null/in/ternary-with-error-branch-in-list-with-null": {
+      "status": "unsupported",
+      "reason": "in requires a field member and literal list, or a literal member and field collection."
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
@@ -492,6 +556,14 @@
       "status": "unsupported",
       "reason": "Prisma DateTime values retain instants but discard RFC-3339 lexical spelling; raw field equality cannot reproduce CEL string equality, so both operands require timestamp wrappers."
     },
+    "type-mismatch/add/negated-boolean-plus-number": {
+      "status": "unsupported",
+      "reason": "add operator requires exactly one field reference and one value, or two values."
+    },
+    "type-mismatch/add/negated-string-plus-number": {
+      "status": "unsupported",
+      "reason": "add operator requires exactly one field reference and one value, or two values."
+    },
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-boolean-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its boolean element meets the number literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
@@ -499,6 +571,30 @@
     "type-mismatch/equals/number-list-element-against-boolean-literal": {
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-number-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its number element meets the boolean literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "Second operand of hasIntersection must be a value."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
+      "status": "unsupported",
+      "reason": "hasIntersection requires an array value."
+    },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "mult over a string field and a number is a CEL no-overload error."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "Unsupported operator: string."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "sub over a dateTime field and a number is a CEL no-overload error."
+    },
+    "type-mismatch/subtract/string-minus-number": {
+      "status": "unsupported",
+      "reason": "sub operator requires exactly one field reference and one value, or two values."
     }
   }
 }

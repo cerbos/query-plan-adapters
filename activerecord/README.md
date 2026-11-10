@@ -438,8 +438,8 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | Tier | Passed / total |
 | --- | --- |
 | core | 30 / 30 |
-| extended | 99 / 102 |
-| adversarial | 415 / 452 |
+| extended | 103 / 106 |
+| adversarial | 432 / 477 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)

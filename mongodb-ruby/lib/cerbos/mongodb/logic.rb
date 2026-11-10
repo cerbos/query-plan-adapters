@@ -107,8 +107,8 @@ module Cerbos
 
       # Whether +node+ evaluates without a CEL error: each operand does, and the node's own guard
       # holds. A ternary evaluates only the branch its condition selects, and only a boolean
-      # condition. `&&` and `||` inside a value are required to evaluate on every operand, which
-      # can deny where CEL absorbs an error, but never allows where it raises.
+      # condition. `||` evaluates where any operand evaluates to true or every operand to a
+      # boolean, `&&` likewise with false.
       def evaluates(node, mapper, bound)
         return true if value?(node)
         return ok(variable_oks([node.name], mapper, bound)) if variable?(node)
@@ -121,6 +121,14 @@ module Cerbos
             {"$eq" => [{"$type" => selected}, "bool"]},
             {"$cond" => [selected, evaluates(then_branch, mapper, bound), evaluates(else_branch, mapper, bound)]}
           ])
+        end
+        if node.operator == "and" || node.operator == "or"
+          decisive = node.operator == "or"
+          operands = node.operands.map { |child| [evaluates(child, mapper, bound), Aggregation.build(child, mapper)] }
+          return {
+            "$or" => operands.map { |e, value| ok([e, {"$eq" => [value, decisive]}]) } +
+                [ok(operands.map { |e, value| ok([e, {"$eq" => [{"$type" => value}, "bool"]}]) })]
+          }
         end
         return {"$ne" => [filter_value(node, mapper, bound), nil]} if node.operator == "filter"
         return {"$ne" => [map_value(node, mapper, bound), nil]} if node.operator == "map"

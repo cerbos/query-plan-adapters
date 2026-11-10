@@ -147,8 +147,8 @@ const leaf = (node: PlanExpression, mapper: ScopedMapper, bound: Bound): unknown
 /**
  * Whether `node` evaluates without a CEL error: each operand does, and the node's own guard
  * holds. A ternary evaluates only the branch its condition selects, and only a boolean condition.
- * `&&` and `||` inside a value are required to evaluate on every operand, which can deny where CEL
- * absorbs an error, but never allows where it raises.
+ * `||` evaluates where any operand evaluates to true or every operand to a boolean, `&&` likewise
+ * with false.
  */
 const evaluates = (node: PlanExpressionOperand, mapper: ScopedMapper, bound: Bound): unknown => {
   if (isValue(node)) return true;
@@ -166,6 +166,19 @@ const evaluates = (node: PlanExpressionOperand, mapper: ScopedMapper, bound: Bou
       { $eq: [{ $type: selected }, "bool"] },
       { $cond: [selected, evaluates(whenTrue, mapper, bound), evaluates(whenFalse, mapper, bound)] },
     ]);
+  }
+  if (node.operator === "and" || node.operator === "or") {
+    const decisive = node.operator === "or";
+    const operands = node.operands.map((child) => ({
+      evaluates: evaluates(child, mapper, bound),
+      value: buildAggregationExpression(child, mapper),
+    }));
+    return {
+      $or: [
+        ...operands.map(({ evaluates: e, value }) => ok([e, { $eq: [value, decisive] }])),
+        ok(operands.map(({ evaluates: e, value }) => ok([e, { $eq: [{ $type: value }, "bool"] }]))),
+      ],
+    };
   }
   if (node.operator === "filter") return { $ne: [filterValue(node, mapper, bound), null] };
   if (node.operator === "map") return { $ne: [mapValue(node, mapper, bound), null] };

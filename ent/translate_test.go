@@ -244,21 +244,6 @@ func TestNoPlanDataReachesSQLText(t *testing.T) {
 	}
 }
 
-// TestOperatorSymbols pins the spelling of `%`, the one arithmetic operator no case renders.
-//
-// KIND 3. Corpus gap (cerbos/query-plan-adapters#668): every `arithmetic/modulo/*` case reaches `%`
-// through int(), which this adapter refuses, so `size(R.attr.x) % n` — CEL's one integer an
-// attribute yields — is policy-reachable and never rendered against a store. A `/` written where
-// `%` belongs is valid SQL that quietly returns a different row set. The other operators are
-// proven by the comparison and arithmetic cases. Delete this when a size()-modulo case lands.
-func TestOperatorSymbols(t *testing.T) {
-	t.Parallel()
-
-	query, _ := translateWith(t, testMapper(), expr("gt",
-		expr("mod", expr("size", variable("request.resource.attr.name")), val(t, 2)), val(t, 1)))
-	require.Contains(t, query, " % ", query)
-}
-
 // TestNullOperandsRejectedUnderOmitted pins the rejection, and that it matches on the operand
 // rather than an allowlist of operators — a null carried in a value LIST must be caught too.
 func TestNullOperandsRejectedUnderOmitted(t *testing.T) {

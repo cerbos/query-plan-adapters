@@ -4,6 +4,10 @@
     "null-list": "The harness stores aNumberList as NumberElement rows, a one-to-many navigation, so a null list and [] are both zero rows: a row sent to the PDP as null cannot be stored."
   },
   "cases": {
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "int() over a string column has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string."
+    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "Division by a value read from the store has no translation unless it is the dividend itself: CEL divides by zero into an infinity of the zero's sign, which SQL cannot read from a stored zero, and the comparison depends on it."
@@ -11,6 +15,10 @@
     "arithmetic/divide/nested-division-divisor": {
       "status": "unsupported",
       "reason": "Division by a value read from the store has no translation unless it is the dividend itself: CEL divides by zero into an infinity of the zero's sign, which SQL cannot read from a stored zero, and the comparison depends on it."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "A map literal with an entry read from the store has no translation."
     },
     "cast/double/malformed-string": {
       "status": "unsupported",
@@ -123,6 +131,22 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "A timestamp column reaches CEL as an RFC 3339 string whose exact spelling the store does not keep, so comparing it as a string has no translation. Wrap it in timestamp()."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "hasIntersection() over a list built by except(), intersect(), filter() or + has no translation."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
+      "status": "unsupported",
+      "reason": "hasIntersection() over a list built by except(), intersect(), filter() or + has no translation."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "string() is translated only over a string, a boolean or a number, and aNumberList is a list."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "Timestamp arithmetic over a column has no translation."
     }
   }
 }
