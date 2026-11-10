@@ -324,9 +324,37 @@
       "status": "unsupported",
       "reason": "Prisma field references only compare fields of the same model, so a parent field against a root field is refused."
     },
+    "relation/size/less-than-two-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as relation/size/non-negative-to-one-chain: a count threshold other than emptiness over the mainCategory chain, which none/some cannot express"
+    },
+    "relation/size/negated-at-least-two-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as relation/size/non-negative-to-one-chain: a count threshold other than emptiness over the mainCategory chain, which none/some cannot express"
+    },
+    "relation/size/negated-filtered-fractional-equals-to-one-chain": {
+      "status": "unsupported",
+      "reason": "The count is taken over filter(...) rather than a named relation, and a Prisma relation filter can only test whether some, every or no related row matches, never count them"
+    },
+    "relation/size/negated-fractional-equals-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as relation/size/non-negative-to-one-chain: a count threshold other than emptiness over the mainCategory chain, which none/some cannot express"
+    },
+    "relation/size/not-equals-one-to-one-chain": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as relation/size/non-negative-to-one-chain: a count threshold other than emptiness over the mainCategory chain, which none/some cannot express"
+    },
+    "size/equals/collection-two": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
+    },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "The count is taken over filter(tags, ...) rather than a named relation, and a Prisma where-filter can only count a relation it can name; the underlying relation-count limitation is size/greater-than/collection-above-one's, but this operand shape is rejected one step earlier"
+    },
+    "size/equals/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
     },
     "size/greater-or-equal/fractional-threshold": {
       "status": "unsupported",
@@ -336,13 +364,49 @@
       "status": "unsupported",
       "reason": "Same relation-count limitation as relation/size/non-negative-to-one-chain, reached through a fractional threshold: >= 1.5 rounds up to >= 2, and none/some express only emptiness"
     },
+    "size/greater-or-equal/huge-threshold": {
+      "status": "unsupported",
+      "reason": "A string length threshold past 1024 and short of 2^32: the LIKE pattern of '_' it needs exceeds the 1024-character limit, so it is refused rather than spelled out"
+    },
+    "size/greater-or-equal/list-attribute-two": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
+    },
     "size/greater-than/collection-above-one": {
       "status": "unsupported",
       "reason": "Prisma where-filters cannot express relation-count thresholds (only empty/non-empty via none/some)"
     },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() of map(...) counts the elements of a derived list, and a Prisma relation filter can only test whether some, every or no related row matches, never count them"
+    },
+    "size/greater-than/value-first-arbitrary": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
+    },
     "size/less-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
       "reason": "Same relation-count limitation as size/greater-or-equal/fractional-threshold-on-relation under the opposite ordering: <= 1.5 rounds down to <= 1, still an arbitrary count threshold none/some cannot express"
+    },
+    "size/less-or-equal/huge-threshold": {
+      "status": "unsupported",
+      "reason": "A string length threshold past 1024 and short of 2^32: the LIKE pattern of '_' it needs exceeds the 1024-character limit, so it is refused rather than spelled out"
+    },
+    "size/less-or-equal/list-with-null": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
+    },
+    "size/less-than/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
+    },
+    "size/less-than/int-max-threshold": {
+      "status": "unsupported",
+      "reason": "A string length threshold past 1024 and short of 2^32: the LIKE pattern of '_' it needs exceeds the 1024-character limit, so it is refused rather than spelled out"
+    },
+    "size/not-equals/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
     },
     "string/concatenate/ordering": {
       "status": "unsupported",

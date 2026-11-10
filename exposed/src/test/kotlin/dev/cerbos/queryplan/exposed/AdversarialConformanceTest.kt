@@ -2,11 +2,6 @@ package dev.cerbos.queryplan.exposed
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.databind.JsonNode
-import com.google.protobuf.Value
-import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
-import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression
-import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
-import dev.cerbos.api.v1.response.Response.PlanResourcesResponse
 import dev.cerbos.queryplan.exposed.Corpus.LedgerEntry
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.Op
@@ -399,61 +394,6 @@ class AdversarialConformanceTest {
         assertEquals(emptySet<String>(), rows.filterValues { it == 0L }.keys)
         assertEquals(seeds.size.toLong(), rows.getValue(Resources.tableName))
     }
-
-    // -- KIND 3: a policy can reach these, and the corpus does not carry them yet -----------------
-
-    /**
-     * **Corpus gap.** #668: the corpus counts the `mainCategory` chain with two spellings. These are
-     * the other thresholds and polarities, and rows without a `mainCategory` must stay out of every
-     * one (#316). Seeds with one have at least one subCategory (i9 has two), and the rest are CEL
-     * missing-path errors, so each of these is empty.
-     */
-    @Test
-    fun everyCountThresholdOverTheChainInheritsTheAbsentParentGuard() {
-        val size = expression(
-            "size",
-            Operand.newBuilder().setVariable("request.resource.attr.mainCategory.subCategories").build(),
-        )
-        val emptyByConstruction = linkedMapOf(
-            "size(chain) == 0" to compare("eq", size, 0.0),
-            "size(chain) <= 0" to compare("le", size, 0.0),
-            "size(chain) < 1" to compare("lt", size, 1.0),
-            "!(size(chain) > 0)" to expression("not", compare("gt", size, 0.0)),
-            "!(size(chain) >= 1)" to expression("not", compare("ge", size, 1.0)),
-        )
-        emptyByConstruction.forEach { (shape, condition) ->
-            assertEquals(emptyList<String>(), filteredIdsFor(condition), "absent-parent guard leaked for $shape")
-        }
-
-        // The mirror image, so the loop above cannot pass by denying everything.
-        val withParent = filteredIdsFor(compare("ge", size, 0.0))
-        assertFalse(withParent.isEmpty(), "some seed must carry a mainCategory")
-        assertTrue(withParent.size < seeds.size, "not every seed carries one")
-        assertEquals(withParent, filteredIdsFor(compare("lt", size, 3.0)))
-    }
-
-    private fun expression(operator: String, vararg operands: Operand): Operand {
-        val e = Expression.newBuilder().setOperator(operator)
-        operands.forEach { e.addOperands(it) }
-        return Operand.newBuilder().setExpression(e).build()
-    }
-
-    private fun compare(operator: String, left: Operand, threshold: Double): Operand = expression(
-        operator,
-        left,
-        Operand.newBuilder().setValue(Value.newBuilder().setNumberValue(threshold)).build(),
-    )
-
-    private fun filteredIdsFor(condition: Operand): List<String> = idsSelectedBy(
-        ExposedQueryPlanAdapter.toFilter(
-            PlanResourcesResponse.newBuilder().setFilter(
-                PlanResourcesFilter.newBuilder()
-                    .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
-                    .setCondition(condition),
-            ).build(),
-            Options.of(MAPPING),
-        ),
-    )
 
     @Test
     fun anUnknownLedgerKeyFailsTheRead() {

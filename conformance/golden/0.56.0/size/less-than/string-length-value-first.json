@@ -1,0 +1,72 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a6",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "d1",
+    "d2",
+    "e1",
+    "h1",
+    "i4",
+    "i6",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "size/less-than/string-length-value-first",
+  "intent": "A threshold on the left of a string length (5 < size(aString)).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": 5
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                }
+              ],
+              "operator": "size"
+            }
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/less-than/string-length-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "5 < size(R.attr.aString)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Operand inversion: rendering size(aString) < 5 returns the short strings instead of the long ones."
+}

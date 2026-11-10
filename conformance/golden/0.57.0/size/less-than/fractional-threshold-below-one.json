@@ -1,0 +1,84 @@
+{
+  "allowed": [
+    "a2",
+    "b1",
+    "b2",
+    "b3",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "size/less-than/fractional-threshold-below-one",
+  "intent": "size(tags) < 0.5, an emptiness check spelled with a fraction.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 0.5
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/less-than/fractional-threshold-below-one",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.tags) < 0.5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Truncating 0.5 to 0 makes the comparison < 0 and returns nothing instead of the rows with no tags."
+}

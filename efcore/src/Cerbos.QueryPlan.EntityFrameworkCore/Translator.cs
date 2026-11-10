@@ -1181,9 +1181,12 @@ internal sealed class Translator
     /// <summary>The value with a "." appended, which SQL Server's padding and trimming rules cannot reach past.</summary>
     private static Expression Sentinel(Expression value) => Ex.Concat(value, Expression.Constant("."));
 
-    /// <summary>The length in code points, as CEL's size() counts it.</summary>
+    /// <summary>
+    /// The length in code points, as CEL's size() counts it. On SQL Server the sentinel is nvarchar,
+    /// so LEN counts UTF-16 units unless a supplementary-character collation is applied.
+    /// </summary>
     private Expression StringLength(Expression value) => _provider == DatabaseProvider.SqlServer
-        ? Expression.Subtract(Length(Sentinel(value)), Expression.Constant(1))
+        ? Expression.Subtract(Length(Ex.Collate(Sentinel(value), "Latin1_General_100_CI_AS_SC")), Expression.Constant(1))
         : Length(value);
 
     private static Expression Length(Expression value) => Expression.Property(value, nameof(string.Length));

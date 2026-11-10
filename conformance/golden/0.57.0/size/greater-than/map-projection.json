@@ -1,0 +1,75 @@
+{
+  "allowed": [
+    "a3",
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "size/greater-than/map-projection",
+  "intent": "size() of a map() projection over a related collection (size(tags.map(t, t.name)) > 1).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "t.name"
+                            },
+                            {
+                              "variable": "t"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "map"
+                  }
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 1
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/greater-than/map-projection",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.tags.map(t, t.name)) > 1"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "b6's first tag has no name, so map() errors there and CEL denies b6; counting the tags instead of projecting them returns it, and a non-empty check returns single-tag rows."
+}

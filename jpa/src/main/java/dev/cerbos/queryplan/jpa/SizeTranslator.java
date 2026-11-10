@@ -248,8 +248,12 @@ final class SizeTranslator {
                         "Unsupported size comparison operator: " + threshold.op());
             };
         }
-        return compareCount(cb.length(path.as(String.class)), threshold.op(),
-                (int) threshold.value());
+        Expression<Integer> length =
+                RegisteredFunctions.isRegistered(cb, H2CodePointLengthFunctionContributor.FUNCTION_NAME)
+                        ? cb.function(H2CodePointLengthFunctionContributor.FUNCTION_NAME,
+                                Integer.class, path.as(String.class))
+                        : cb.length(path.as(String.class));
+        return compareCount(length, threshold.op(), (int) threshold.value());
     }
 
     /**
