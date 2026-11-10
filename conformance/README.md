@@ -198,7 +198,7 @@ behind each leg, and the adapter's other suites, are in its README's "Developmen
 The cases above are the shapes someone thought to write down. The fuzzer looks for the ones nobody
 did: it composes conditions, records what the pinned PDPs answer, and replays them through every
 harness. A fuzz run is never committed and never gates a pull request; what it finds becomes a case
-([ADR 0011](../docs/adr/0011-fuzzing-finds-cases-the-corpus-keeps-them.md)).
+([ADR 0014](../docs/adr/0014-fuzzing-finds-cases-the-corpus-keeps-them.md)).
 
 ```bash
 conformance/scripts/fuzz.sh -s 7 -n 500 [adapter...]   # record, replay every store leg, report

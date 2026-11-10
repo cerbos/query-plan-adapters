@@ -42,7 +42,7 @@ You'll also need:
   deliberate: JetBrains promises that code built against an older 1.x keeps working on a newer one
   and promises nothing in the other direction, so compiling against the floor is the only
   arrangement where a green build proves the claim for the artifact you actually install
-  ([ADR 0011](../docs/adr/0011-the-exposed-adapter-is-jdbc-first-and-returns-a-sealed-result.md)).
+  ([ADR 0015](../docs/adr/0015-the-exposed-adapter-is-jdbc-first-and-returns-a-sealed-result.md)).
   Exposed 0.x is out of scope: 1.0 moved every symbol from `org.jetbrains.exposed.sql.*` to
   `org.jetbrains.exposed.v1.*`, so one artifact cannot serve both.
 - **Kotlin 2.2 or later** and **JVM 17 or later**. The adapter's language and API levels are pinned

@@ -22,7 +22,7 @@ Three things have changed since.
 - **A harness is smaller than it was.** Since [ADR 0010](0010-conformance-replays-recorded-pdp-decisions.md)
   a harness replays recorded plans and decisions. What is left per adapter is store lifecycle,
   seeding, translation and query execution. The fuzzer
-  ([ADR 0011](0011-fuzzing-finds-cases-the-corpus-keeps-them.md)) replays through the same harness,
+  ([ADR 0014](0014-fuzzing-finds-cases-the-corpus-keeps-them.md)) replays through the same harness,
   so a new adapter gets both nets at once.
 - **The client-evaluation objection is dated.** Since EF Core 3.0 an expression the provider cannot
   translate in a `Where` throws `InvalidOperationException` instead of being evaluated in memory.
