@@ -20,16 +20,8 @@ import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
 
 /**
- * The scalar leaf: one resolved value against one plan constant.
- *
- * THE SINGLE ROUTING POINT. Every comparison of one mapped column against one constant goes
- * through [applyLeaf], under the NORMALISED operator name, whichever path reached it. Nothing hooks
- * into it today; it is what makes operator overrides a one-place change if they are ever added.
- *
- * It also owns the two rules of the explicit-null convention — which attributes the caller sends as
- * an explicit null ([isExplicitNull]) and the asymmetric definite equality that declaration
- * entitles them to ([definiteEquality]) — so those are a property of this class rather than of
- * every caller.
+ * The scalar leaf: one resolved value against one plan constant, under the normalised operator.
+ * Owns the explicit-null rules: [isExplicitNull] and [definiteEquality].
  */
 internal class LeafTranslator(@Suppress("unused") private val translation: Translation) {
 
@@ -71,12 +63,8 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
             throw ScalarRefusals.constantTypeMismatch(operator, target.variable, target.column, value)
         }
 
-        // CEL orders strings by code point. A store may compare by UTF-16 code unit instead (H2
-        // uses Java's String.compareTo), which puts an astral character's high surrogate (from
-        // 0xD800) before U+E000–U+FFFF. The two orders can only disagree at a position where one
-        // side holds a code unit at or above 0xD800, so a literal holding none cannot be ordered
-        // differently; one that does is compared in code point order, spelled per dialect when
-        // the statement renders ([CodePointOrdering]).
+        // CEL orders strings by code point; H2 compares UTF-16 code units, which disagree only at or above
+        // 0xD800, so such a literal is compared in code point order ([CodePointOrdering]).
         if (operator in ORDERING_OPERATORS && value is String && CodePointOrdering.needed(value) &&
             ScalarColumnTypes.isText(target.column)
         ) {
@@ -108,17 +96,8 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
     }
 
     /**
-     * A comparison between values CEL knows to be of different types, answered from the types
-     * alone rather than handed to a store that would coerce one side (MySQL coerces the column:
-     * `'abc' = 0` is TRUE there).
-     *
-     * CEL's heterogeneous equality makes `==` a definite FALSE and `!=` a definite TRUE between
-     * two PRESENT values, and an ordering or any other operator a no-overload error, which denies
-     * under both polarities (SQL UNKNOWN). A missing attribute is itself an error, so an [operands]
-     * column that is NULL without declaring the explicit-null convention drives the equality to
-     * UNKNOWN: `(a IS NULL OR ...) AND UNKNOWN`, FALSE for every present row. A NULL under the
-     * explicit convention is a null VALUE, and `null == "x"` is also a definite FALSE, so it adds
-     * no witness.
+     * A comparison between values CEL knows to be of different types, answered from the types: `==`
+     * FALSE, `!=` TRUE, anything else UNKNOWN. A NULL operand without the explicit convention is UNKNOWN.
      */
     fun typeMismatch(operator: String, operands: List<Resolution.Scalar>): Op<Boolean> {
         if (operator != "eq" && operator != "ne" && operator != "in") return TriLogic.unknown()
@@ -132,14 +111,8 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
     }
 
     /**
-     * `==` / `!=` against null over an attribute that declares [NullAttributeRepresentation.OMITTED].
-     *
-     * A NULL column sends no attribute, so CEL raises a missing-attribute error and `check()`
-     * denies the row under BOTH polarities; a present value is never null, so `== null` is FALSE
-     * and `!= null` TRUE. `x IS NULL AND UNKNOWN` is exactly that: UNKNOWN for the NULL column and
-     * FALSE otherwise, and its negation UNKNOWN and TRUE. The same holds through a to-one relation,
-     * whose correlated read is NULL for an absent row, which is also a missing attribute. `IS NULL`
-     * alone would return the rows the PDP denies.
+     * `==` / `!=` against null over an OMITTED attribute: `x IS NULL AND UNKNOWN`, because CEL denies a
+     * missing attribute under both polarities.
      */
     private fun unknownWhenNull(operator: String, target: Resolution.Scalar): Op<Boolean> {
         val missing = TriLogic.and(IsNullOp(target.expression), TriLogic.unknown())
@@ -153,42 +126,19 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
     }
 
     /**
-     * Whether [target] maps to a scalar the caller sends as an explicit null.
-     *
-     * Read from the MAPPING, never from the column: the corpus (and real applications) map one
-     * column twice under two attribute names with two conventions, so the column cannot
-     * discriminate them.
-     *
-     * Deliberately not falling back to [Options.nullAttributeRepresentation]. Declaring nothing
-     * means "treat this column as NOT NULL", which is the historical rendering; the call-level
-     * setting is the default for the pre-walk null-operand scan, not a blanket claim that every
-     * mapped column sends its NULLs explicitly. Falling back would hand definite equality to an
-     * undeclared column and readmit the rows an omitted-convention `!=` must drop
-     * (docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
+     * Whether [target] is sent as an explicit null. Read from the mapping, with no fallback to the call
+     * option (docs/adr/0004-the-null-convention-is-a-property-of-the-attribute.md).
      */
     fun isExplicitNull(target: Resolution.Scalar): Boolean =
         target.field.nullAttributeRepresentation == NullAttributeRepresentation.EXPLICIT
 
-    /**
-     * Whether [target] maps to a number or boolean column, which CEL's string matches, `size()`
-     * and `hierarchy()` have NO overload for. At check time the call raises a no-overload error on
-     * every row, present or NULL, and `check()` denies under both polarities: SQL UNKNOWN, with
-     * no coercion left for a store to apply. A temporal or unrecognised column is not this case:
-     * a timestamp attribute reaches CEL as a string, so [requireText] still refuses it.
-     */
+    /** Whether [target] is a number or boolean column, which CEL's string functions have no overload for. */
     fun lacksTextOverload(target: Resolution.Scalar): Boolean = when (ScalarColumnTypes.familyOf(target.column)) {
         ScalarValueFamily.NUMERIC, ScalarValueFamily.BOOLEAN -> true
         else -> false
     }
 
-    /**
-     * Refuses [target] unless its declared column type is one CEL's string matches and `size()`
-     * have an overload for.
-     *
-     * Public because the same requirement holds wherever a COLUMN reaches a `LIKE` or a character
-     * count without passing through [applyLeaf]: a column needle, a constant receiver's needle, a
-     * hierarchy path, and `size(string)`.
-     */
+    /** Refuses [target] unless its column type is text. Public for paths that bypass [applyLeaf]. */
     fun requireText(operator: String, target: Resolution.Scalar) {
         if (!ScalarColumnTypes.isText(target.column)) {
             throw ScalarRefusals.textColumnRequired(operator, target.variable, target.column)
@@ -196,18 +146,8 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
     }
 
     /**
-     * An equality that can never be SQL UNKNOWN, for operands the caller sends as explicit nulls.
-     *
-     * A null VALUE is what CEL holds under that convention, so `null == "x"` is a definite FALSE,
-     * `null != "x"` a definite TRUE, and two nulls are EQUAL. SQL answers UNKNOWN to all three,
-     * which excludes the row under BOTH polarities — so the NOT an enclosing negation applies has
-     * nothing definite to flip.
-     *
-     * Deliberately not `IS NOT DISTINCT FROM`, which Exposed can spell per dialect. A null-safe
-     * equality is SYMMETRIC and this rewrite must not be: when only ONE side declares the
-     * convention, the other side's NULL is a MISSING attribute on the check side, CEL raises an
-     * error and denies, and only the asymmetric expansion keeps propagating UNKNOWN for it. A
-     * null-safe operator would match the two NULLs and over-grant.
+     * An equality that is never SQL UNKNOWN, for explicit-null operands. Not `IS NOT DISTINCT FROM`:
+     * that is symmetric, and a NULL on an undeclared side must stay UNKNOWN.
      */
     fun definiteEquality(
         operator: String,
@@ -246,13 +186,7 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
         }
     }
 
-    /**
-     * `haystack LIKE '<escaped needle>' ESCAPE '\'` for a needle known at translation time.
-     *
-     * The adapter escapes the needle itself rather than calling Exposed's `LikePattern.ofLiteral`,
-     * which reads the dialect the moment it is called and so cannot run outside a transaction. The
-     * escape character is declared on every pattern, and Exposed BINDS it rather than inlining it.
-     */
+    /** `haystack LIKE '<escaped needle>' ESCAPE '\'`; escaped here because `LikePattern.ofLiteral` reads the dialect. */
     private fun like(
         haystack: Expression<*>,
         needle: Any,
@@ -268,14 +202,7 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
         return LikeEscapeOp(haystack, ExactString.param(pattern), true, LikeEscaping.ESCAPE_CHAR)
     }
 
-    /**
-     * The target as the comparison sees it: cast into IEEE double space when the constant is
-     * fractional (or too large for an exact `Long`) and the column is numeric.
-     *
-     * `intColumn >= 1.5` is legal CEL that the planner emits verbatim, and a store left to its own
-     * devices compares it in exact decimal. Casting keeps the comparison in the arithmetic CEL
-     * actually performs at check time, where every attribute number is a double.
-     */
+    /** The target cast to IEEE double when the constant is fractional or too large for a `Long`, as CEL compares. */
     private fun comparable(target: Resolution.Scalar, value: Any): Expression<*> =
         if (value is Double && ScalarColumnTypes.isNumeric(target.column)) {
             IeeeDoubleCast(target.expression)

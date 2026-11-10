@@ -11,13 +11,8 @@ import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
 
 /**
- * `overlaps`, `ancestorOf` and `descendentOf` over Cerbos hierarchies.
- *
- * A hierarchy is a delimited path (`"dept.eng.platform"`). Both sides of the operator arrive
- * wrapped in a `hierarchy(...)` expression that resolves to a constant path split into segments, a
- * single column holding the whole delimited string, or a `list(...)` of segments each of which is
- * a constant or a column. Every relation is decided by PREFIX, and the prefixes are enumerated
- * here from the delimiter, which is why the delimiter has to be known at translation time.
+ * `overlaps`, `ancestorOf` and `descendentOf` over Cerbos hierarchies. Every relation is decided by
+ * prefix, enumerated from the delimiter, so the delimiter must be known at translation time.
  */
 internal class HierarchyTranslator(private val translation: Translation) {
 
@@ -107,16 +102,7 @@ internal class HierarchyTranslator(private val translation: Translation) {
         return requirePresent(base, leftSegments, rightSegments)
     }
 
-    /**
-     * [base], made UNKNOWN when a column segment the prefix test never READ is NULL.
-     *
-     * A prefix test only compares the first `min(n, m)` segments, so the longer path's tail is
-     * decided by nothing — and when every compared pair is a matching literal the answer folds to a
-     * constant with that tail still in the expression. The tail is a column read all the same: a
-     * NULL there means the caller sent no attribute, `hierarchy([...])` raises inside CEL and
-     * `check()` denies, while a two-valued `Op.TRUE` returns the row and `NOT (Op.FALSE)` returns
-     * it too. Every segment INSIDE the compared prefix already carries its own three-valued `=`.
-     */
+    /** [base], made UNKNOWN when a column segment past the compared prefix is NULL, since CEL raises there. */
     private fun requirePresent(
         base: Op<Boolean>,
         leftSegments: List<Segment>,
@@ -265,13 +251,7 @@ internal class HierarchyTranslator(private val translation: Translation) {
         else -> throw Refusals.unsupported("hierarchy(string, delimiter) requires a value or field operand")
     }
 
-    /**
-     * A column a hierarchy path is read from.
-     *
-     * Every relation below is a prefix test, lowered to `=` against a delimited string or to a
-     * prefix `LIKE`, so a non-text column is the same hole a string match has: CEL's `hierarchy()`
-     * has no overload for it and denies, while MySQL and SQLite coerce the column and match.
-     */
+    /** A column a hierarchy path is read from; it must be text, as for string matches. */
     private fun pathColumn(name: String, variable: String, scope: Scope): Expression<*> {
         val target = scope.scalar(variable)
         translation.leaf.requireText(name, target)
@@ -359,22 +339,8 @@ internal class HierarchyTranslator(private val translation: Translation) {
     }
 
     /**
-     * A relation between a column and a constant that are BOTH split on the empty delimiter.
-     *
-     * Cerbos splits such a path into one segment per code point, and the empty string into none,
-     * so a segment prefix is a string prefix. With `c` the constant:
-     *  - the column is a strict DESCENDANT of `c` when it starts with `c` and is not `c` itself:
-     *    `col LIKE c || '%' AND col <> c` (a string with `c` as a prefix and unequal to it is
-     *    longer, in code points as in any other unit);
-     *  - a strict ANCESTOR when it is one of `c`'s strict code-point prefixes, the empty string
-     *    (zero segments) included;
-     *  - they OVERLAP when either is a prefix of the other: a prefix of `c`, `c` itself included,
-     *    or an extension of `c`.
-     * A NULL column is a missing attribute: `IN`, `=`, `<>` and `LIKE` are all UNKNOWN for it.
-     * Every comparison is `=` or a prefix `LIKE`, which is byte-exact on the collations the
-     * conformance harness requires (README, "Database collation and case sensitivity").
-     * Any other pairing with an empty delimiter — two columns, a column against a path split on a
-     * real delimiter, a `list()` — is refused.
+     * A column against a constant, both split on the empty delimiter, so a segment prefix is a string
+     * prefix. Other empty-delimiter pairings are refused.
      */
     private fun perCharacterRelation(operator: String, first: Hierarchy, second: Hierarchy): Op<Boolean> {
         val field = (first as? Hierarchy.FieldRef) ?: (second as? Hierarchy.FieldRef)

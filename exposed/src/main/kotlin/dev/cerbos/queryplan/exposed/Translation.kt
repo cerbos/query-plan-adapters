@@ -1,13 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
-/**
- * One translation: the options it was given, its alias numbering, and the collaborators wired
- * together. Built fresh per `toFilter` call and never shared, so nothing in here is thread-safe
- * and nothing needs to be.
- *
- * Every collaborator holds this object and reaches the others through it at call time, which is
- * what lets them refer to each other without an initialisation order.
- */
+/** One translation: its options, alias numbering and collaborators. Built per `toFilter` call, never shared. */
 internal class Translation(val options: Options) {
     val aliases = AliasAllocator()
 

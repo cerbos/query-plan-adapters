@@ -1,13 +1,6 @@
 package dev.cerbos.queryplan.exposed
 
-/**
- * Every refusal in this package is raised through one of these factories, which is what makes the
- * classification (malformed plan, mapping shortfall, inexpressible shape) a property of the walk
- * rather than of the message text.
- *
- * Messages describe SHAPES and TYPES, never constant values: a plan constant can carry a folded
- * principal attribute, and an exception message is logged.
- */
+/** Raises every refusal, so its classification is a property of the walk. Messages never include constant values. */
 internal object Refusals {
     fun unsupported(message: String): UnsupportedPlanShapeException = UnsupportedPlanShapeException(message)
 

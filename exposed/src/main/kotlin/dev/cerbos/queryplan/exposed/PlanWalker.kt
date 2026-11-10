@@ -8,13 +8,7 @@ import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
 import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
 import org.jetbrains.exposed.v1.core.Op
 
-/**
- * The one walk over the plan's expression tree.
- *
- * Polarity is NOT a walk parameter. SQL is three-valued, so negation is applied around a built
- * predicate ([TriLogic.not]) and every collaborator is responsible for yielding UNKNOWN, never
- * FALSE, where CEL would raise an error.
- */
+/** The one walk over the plan. Negation wraps a built predicate ([TriLogic.not]); errors must be UNKNOWN, never FALSE. */
 internal class PlanWalker(private val translation: Translation) {
     private var macroDepth = 0
 
@@ -124,13 +118,8 @@ internal class PlanWalker(private val translation: Translation) {
     }
 
     /**
-     * A macro or membership over a list built from expressions (`[R.attr.a, "x"]`), folded per
-     * element: [any] joins [perElement] with `or` (`exists`, `in`), otherwise with `and` (`all`).
-     * CEL builds the list first, so one erroring element errors the whole result even where another
-     * element decides it, and a plain disjunction would let a TRUE element hide that error. Each
-     * computed element's `e == e || !(e == e)` is TRUE where the element evaluates and UNKNOWN where
-     * it raises, and the fold is taken under that guard as a ternary, which is UNKNOWN under both
-     * polarities whenever the guard is.
+     * A macro or membership over a list built from expressions, folded per element. One erroring element
+     * errors the whole result, so the fold sits under an `e == e || !(e == e)` guard.
      */
     fun overComputedList(elements: List<Operand>, perElement: List<Operand>, any: Boolean, scope: Scope): Op<Boolean> {
         if (perElement.isEmpty()) return if (any) Op.FALSE else Op.TRUE
@@ -145,12 +134,7 @@ internal class PlanWalker(private val translation: Translation) {
         return TriLogic.ternary(traverseExpression(guard, scope), traverseExpression(fold, scope), Op.FALSE)
     }
 
-    /**
-     * `{"k1": v1, ...}[key] == c` (or `!=`), a lookup in a map literal by a computed key: the keys
-     * whose value equals `c` (or differs from it) when `key` is one of the map's keys, and UNKNOWN
-     * under both polarities when it is not, since CEL raises on a missing key. Values compare by CEL
-     * equality (numbers by value). `null` for any other shape.
-     */
+    /** `{"k1": v1, ...}[key] ==/!= c`, UNKNOWN when `key` is missing. `null` for any other shape. */
     private fun mapLiteralLookup(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
         if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
         for (i in 0..1) {
@@ -222,14 +206,7 @@ internal class PlanWalker(private val translation: Translation) {
         return if (expected == (operator == "eq")) translated else TriLogic.not(translated)
     }
 
-    /**
-     * `string(condition) ==/!= "literal"`, where the argument is a boolean-VALUED expression — a
-     * comparison, a connective, a macro, or a ternary whose arms are all boolean — rather than a
-     * mapped column. CEL prints a boolean as exactly `true` or `false`, so the comparison is the
-     * condition itself, its negation, or (any other literal) FALSE; the condition's own UNKNOWN,
-     * CEL's error, carries through each: `"true"` is `c`, `"false"` is `NOT c`, and anything else
-     * is FALSE made UNKNOWN by `NOT (c OR NOT c)`. `null` when the node is not that shape.
-     */
+    /** `string(condition) ==/!= "literal"`: the condition, its negation, or FALSE, keeping its UNKNOWN. `null` otherwise. */
     private fun textOfConditionCompared(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
         if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
         val cast = operands.firstOrNull {

@@ -10,18 +10,9 @@ import org.jetbrains.exposed.v1.core.vendors.SQLiteDialect
 import org.jetbrains.exposed.v1.core.vendors.currentDialect
 
 /**
- * The number of CHARACTERS in a string, which is what CEL's `size()` counts.
- *
- * `LENGTH` is not portable for this: on MySQL it counts BYTES, so every multibyte string would be
- * measured against the wrong threshold and `size(s) > 4` would return rows the PDP denies.
- * `CHAR_LENGTH` is the standard spelling and is what PostgreSQL, MySQL and H2 all accept; SQLite
- * has no `CHAR_LENGTH` at all, and its `LENGTH` counts characters only up to the first NUL. Its
- * `REPLACE` cannot match a NUL either, so each NUL becomes a space inside the string's JSON text,
- * where it is the escape \u0000. H2's `CHAR_LENGTH` counts UTF-16 units, so each astral character
- * is replaced by one unit first.
- *
- * The dialect is only known at RENDER time — an `Op` is built outside any transaction and rendered
- * inside the caller's — so the branch lives here rather than in the translation.
+ * The number of characters in a string, as CEL's `size()` counts. MySQL `LENGTH` counts bytes;
+ * SQLite has no `CHAR_LENGTH` and its `LENGTH` stops at a NUL, so NULs are counted through the JSON
+ * text; H2 counts UTF-16 units, so astral characters are replaced first. Read at render time.
  */
 internal class CountChars(private val value: Expression<*>) : Function<Int>(IntegerColumnType()) {
     override fun toQueryBuilder(queryBuilder: QueryBuilder) {

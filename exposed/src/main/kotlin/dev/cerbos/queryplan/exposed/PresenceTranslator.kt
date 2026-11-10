@@ -7,27 +7,10 @@ import org.jetbrains.exposed.v1.core.IsNullOp
 import org.jetbrains.exposed.v1.core.Op
 
 /**
- * `has(x)`, the presence test the planner emits from Cerbos 0.57.0 for an attribute it does not
- * fold into a guard: whether the attributes the caller sends to `check()` carry the key at all.
- *
- * Presence is a property of the NULL convention, not of the column:
- *  - declared [NullAttributeRepresentation.EXPLICIT], a NULL column is sent as a present null, so
- *    the attribute is present on every row: TRUE;
- *  - declared [NullAttributeRepresentation.OMITTED], a NULL column sends no key, so the attribute
- *    is present exactly when the column `IS NOT NULL`;
- *  - undeclared, the column renders as if it were NOT NULL, as it does everywhere else in the walk.
- *    On a row where it is NULL after all, the convention is not known, and the two readings give
- *    opposite answers, so that row is UNKNOWN: denied under both polarities rather than granted
- *    under one. The call-level [Options.nullAttributeRepresentation] does not decide it, for the
- *    reason [AttributeMapping.Field.nullAttributeRepresentation] gives.
- *
- * A to-one relation is present when its row exists. A to-many relation is refused: CEL holds a
- * list, empty or not, on every row the caller sends one for, and nothing in the mapping says the
- * caller does.
- *
- * `has()` never errors on a missing value, so the predicate is two-valued and [TriLogic.not] over
- * it is exact. The one error it raises is selecting THROUGH a missing to-one hop (`has(parent.x)`
- * on a parentless row), which denies under both polarities, so an absent leading hop is UNKNOWN.
+ * `has(x)`, emitted from Cerbos 0.57.0. Under EXPLICIT the attribute is always present; under OMITTED
+ * it is present when `IS NOT NULL`; undeclared, a NULL row is UNKNOWN, since the convention decides it.
+ * A to-one relation is present when its row exists; a to-many one is refused. An absent leading hop
+ * is UNKNOWN.
  */
 internal class PresenceTranslator(private val translation: Translation) {
 

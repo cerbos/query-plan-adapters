@@ -13,19 +13,9 @@ import org.jetbrains.exposed.v1.core.vendors.SQLiteDialect
 import org.jetbrains.exposed.v1.core.vendors.currentDialect
 
 /**
- * A string ordering in CEL's order, by CODE POINT, where the two operands can hold a UTF-16 code
- * unit at or above 0xD800.
- *
- * Code point order and UTF-16 code unit order disagree exactly there: an astral character is a
- * surrogate pair from 0xD800, which UTF-16 order puts BEFORE U+E000–U+FFFF. H2 compares strings by
- * code unit (Java's `String.compareTo`), so on H2 both sides are compared as their UTF-8 bytes,
- * `STRINGTOUTF8(a) < STRINGTOUTF8(b)`: UTF-8 preserves code point order and H2 compares binary
- * values as unsigned bytes. PostgreSQL under the `C` collation, MySQL under `utf8mb4_0900_bin` and
- * SQLite's BINARY collation already compare UTF-8 bytes, so the comparison is left as it is there
- * (under the collation [ExactString] gives the left side). Any other dialect raises when the
- * statement is rendered rather than guess at its collation.
- *
- * The dialect is read inside [toQueryBuilder] because translation happens outside any transaction.
+ * A string ordering by code point, for operands that may hold a code unit at or above 0xD800. H2
+ * compares UTF-16 units, so both sides compare as UTF-8 bytes there; PostgreSQL `C`, MySQL
+ * `utf8mb4_0900_bin` and SQLite BINARY already do. Any other dialect raises at render time.
  */
 internal class CodePointOrdering(
     private val left: Expression<*>,

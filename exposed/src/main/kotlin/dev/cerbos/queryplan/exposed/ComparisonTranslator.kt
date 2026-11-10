@@ -29,19 +29,10 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
 
 /**
- * Comparisons and string matches: everything the walk does not route by name.
- *
- * The reference adapter fixes the pipeline by CODE ORDER, and this follows it:
- * ternary rewrite (on RAW operands, before mirroring) -> normalise to field-first -> arity check
- * (before the size probe, which would otherwise translate a partial comparison) -> `size()`
- * comparisons -> operand resolution -> dispatch on the resolved pair.
- *
- * One seam classifies each operand into a [Resolved] shape, and [dispatch] translates the resolved
- * PAIR. Resolution is purely structural and conversion is LAZY, at the dispatch site that consumes
- * the operand: WHICH error a malformed operand raises depends on the shape of the whole
- * comparison — a non-numeric constant inside `add` is a fold type error against a field but an
- * "Arithmetic comparison requires numeric operands" when lowered to SQL — so converting eagerly
- * here would re-order messages the corpus pins.
+ * Comparisons and string matches: everything the walk does not route by name. Ternary rewrite on
+ * raw operands, normalise field-first, arity check, `size()`, then resolve each operand and
+ * [dispatch] the pair. Conversion is lazy because which error a malformed operand raises depends on
+ * the whole comparison.
  */
 internal class ComparisonTranslator(private val translation: Translation) {
 
@@ -87,12 +78,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
             )
         }
 
-        /**
-         * `add(field, value)` / `add(value, field)` — solvable for the field under eq/ne against a
-         * constant when the solve is algebraically exact (string concatenation, in-range long
-         * integers); every other pairing lowers to SQL arithmetic, because IEEE subtraction cannot
-         * invert IEEE addition.
-         */
+        /** `add(field, value)` or `add(value, field)`; solved for the field under eq/ne only when exact. */
         class FieldPlusConstant(val fieldVariable: String, val constant: Operand, val fieldIsLeft: Boolean) : Resolved
 
         /** Any other arithmetic-rooted expression, lowered by [ArithmeticTranslator]. */
@@ -101,12 +87,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
         /** `timestamp(variable)` — a temporal column wrapped in CEL's `timestamp()` cast. */
         class TimestampField(val variable: String) : Resolved
 
-        /**
-         * `timestamp(value)` — a constant instant. The planner constant-folds `now()` arithmetic
-         * and re-wraps the result in `timestamp("<RFC-3339>")` on the wire, so both policy
-         * literals and folded relative windows arrive in this shape. Parsed lazily, so the parse
-         * errors belong to the comparison that consumes it.
-         */
+        /** `timestamp(value)`, including the planner's folded `now()` windows. Parsed lazily. */
         class TimestampConstant(val operand: Operand) : Resolved {
             fun instant(): Instant = parseInstant(PlanValues.toKotlin(operand.value))
         }
@@ -422,13 +403,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * Whether a text column is ORDERED against a column plus or minus a finite number:
-     * `R.attr.aString < R.attr.aNumber + 1.0`. The arithmetic is not a concatenation (the caller
-     * checked), so it is a finite number, an infinity or a CEL error, and CEL has no ordering
-     * between a string and a number: the comparison raises on every row, which is UNKNOWN under
-     * both polarities. NaN is the exception — CEL orders NaN against anything as false — which is
-     * why the shape is held to one column and one finite constant under `+` or `-`, an expression
-     * that cannot produce NaN. Equality is not this case: CEL answers a mixed-type `==` as false.
+     * Whether a text column is ordered against a column plus or minus a finite number. CEL has no
+     * string-number ordering, so it raises on every row; one finite constant under `+`/`-` cannot be NaN.
      */
     private fun orderedAgainstText(
         operator: String,
@@ -462,11 +438,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * `timestamp(field) + shift op c`, solved for the column as `timestamp(field) op c - shift`:
-     * adding a duration is exact on instants, so the two agree wherever the sum is a timestamp.
-     * Where it is not, the sum leaves CEL's year-1 to year-9999 range and CEL raises, so a column
-     * within `shift` of that bound is UNKNOWN under both polarities. A solved constant outside the
-     * range is refused: there is no column value on the other side of it to bind.
+     * `timestamp(field) + shift op c`, solved as `timestamp(field) op c - shift`. A column within `shift`
+     * of CEL's year-1..9999 range is UNKNOWN; a solved constant outside it is refused.
      */
     private fun shiftedTimestampLeaf(
         operator: String,
@@ -501,10 +474,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * `timestamp(field).timeSince() op d`: `now - field op d`, solved for the column as
-     * `field op' now - d` with `op` mirrored. `now` is read when the filter is built, which is when
-     * the caller asks the question; a filter kept and reused later goes stale by that much. The
-     * difference of two CEL timestamps always fits a CEL duration.
+     * `timestamp(field).timeSince() op d`, solved as `field op' now - d`. `now` is read when the filter
+     * is built.
      */
     private fun timeSinceLeaf(
         operator: String,
@@ -528,14 +499,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * `column.upperAscii() ==/!= "text"`. CEL's `upperAscii()` folds only the 26 ASCII letters,
-     * while SQL `UPPER` is Unicode-aware (`é` becomes `É`), so the fold is spelled as 26 nested
-     * case-sensitive `REPLACE`s, each mapping one lowercase ASCII letter to its capital, compared
-     * under the column's own collation. A NULL column is UNKNOWN, since `upperAscii()` of a missing
-     * attribute or of null raises, and a number or boolean column has no overload. A non-string
-     * constant is CEL's mixed-type equality: FALSE under `==`, TRUE under `!=`, UNKNOWN for a NULL
-     * column. An ordering is refused: it would compare under the collation, not by code point as
-     * CEL does.
+     * `column.upperAscii() ==/!= "text"`. SQL `UPPER` folds beyond ASCII, so the fold is 26 nested
+     * case-sensitive `REPLACE`s. An ordering is refused: it would compare under the collation.
      */
     private fun upperAsciiComparison(
         operator: String,
@@ -564,13 +529,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * Whether an arithmetic operand raises on EVERY row, whatever the data: CEL has no overload
-     * for it. Cerbos sends every attribute number as a double, so `attr % n` (`%` has no double
-     * overload) and `int(...) + attr` (no int-and-double arithmetic) raise wherever the attribute
-     * is present, and a missing one raises anyway. Arithmetic absorbs no error, so a sub-expression
-     * that always raises makes the whole operand raise, and the comparison over it is UNKNOWN
-     * under both polarities. Only a bare attribute qualifies as the double: a literal's type is
-     * not on the wire.
+     * Whether an arithmetic operand raises on every row: Cerbos sends attribute numbers as doubles, so
+     * `attr % n` and `int(...) + attr` have no overload. Only a bare attribute is known to be a double.
      */
     private fun alwaysRaises(operand: Operand): Boolean {
         if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return false
@@ -588,17 +548,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * `int(column) op constant` over a NUMERIC column, solved for the column rather than cast.
-     *
-     * CEL's `int()` of a double truncates toward zero, and raises for a value at or beyond ±2^63,
-     * for NaN and for an infinity (cel-go's `doubleToInt64Checked`); a NULL column is a missing
-     * attribute. So the answer is UNKNOWN unless `-2^63 < x < 2^63` holds, and otherwise decided
-     * on `x` itself: `trunc(x) >= m` is `x >= m` for `m >= 1` and `x > m - 1` below, and
-     * `trunc(x) <= m` is `x <= m` for `m <= -1` and `x < m + 1` above. CEL orders an int against a
-     * double numerically, so a fractional constant is an integral bound (`> 1.5` is `>= 2`), never
-     * equal. Every bound is a whole number within ±2^53, so the IEEE comparison against the column
-     * is exact; a constant outside that, or not finite, is refused. A text or boolean column is
-     * refused as before (`int()` of a string parses it).
+     * `int(column) op constant` over a numeric column, solved for the column because CEL's `int()`
+     * truncates and raises beyond ±2^63 or on NaN, where SQL casts round. Bounds stay within ±2^53 so
+     * the double comparison is exact; anything else is refused.
      */
     private fun intCastComparison(operator: String, variable: String, value: Any?, scope: Scope): Op<Boolean> {
         val target = scope.scalar(variable)
@@ -645,13 +597,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
         return translation.leaf.applyLeaf(operator, scope.scalar(field.variable), value)
     }
 
-    /**
-     * `timestamp(field) op timestamp(constant)`. [operator] is already field-first.
-     *
-     * A NULL column makes every comparison UNKNOWN under SQL three-valued logic, so the row is
-     * excluded under both polarities — matching CEL, where a missing attribute is an evaluation
-     * error and `check()` denies.
-     */
+    /** `timestamp(field) op timestamp(constant)`. [operator] is already field-first; a NULL column is UNKNOWN. */
     private fun timestampLeaf(
         operator: String,
         field: Resolved.TimestampField,
@@ -664,13 +610,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * CEL's `string()` over a mapped column.
-     *
-     * A boolean is the one column type no single `CAST` gets right: SQLite and MySQL have no
-     * boolean type and store 1/0, so `CAST(a_bool AS CHAR)` is `"1"` where CEL and PostgreSQL say
-     * `"true"`. The column type is known here, so the boolean case lowers to a portable `CASE`
-     * instead of being refused — with its own `IS NULL` arm, because a NULL column must stay NULL
-     * rather than fall through to the `ELSE` and compare as `"false"`.
+     * CEL's `string()` over a mapped column. A boolean lowers to a `CASE` with its own `IS NULL` arm,
+     * because SQLite and MySQL cast it to `1`/`0`.
      */
     private fun textCastComparison(
         operator: String,
@@ -686,14 +627,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * `string(column) ==/!= "literal"` over a floating-point or boolean column, SOLVED for the
-     * column rather than rendered. A boolean prints as exactly `true` or `false`. No SQL CAST
-     * prints a double as CEL does (Go's shortest `%g`: `1e+06`, `2`, `-9.5e+18`), but exactly one
-     * double prints as a given string, so the comparison is the column against that double. A
-     * literal that is not CEL's spelling of any value matches no row: FALSE for a present value,
-     * UNKNOWN for a NULL one, which CEL denies under both polarities. A zero is refused, since CEL
-     * prints `-0.0` as `-0` and SQL cannot tell it from `0.0`. `null` when the shape is not this
-     * one; an ordering over it falls through to the refusal in [textCastOperand].
+     * `string(column) ==/!= "literal"` over a double or boolean column, solved for the column: exactly
+     * one double prints as a given CEL string. A zero is refused (CEL prints `-0.0` as `-0`). `null` when
+     * the shape is not this one.
      */
     private fun solvedTextCastEquality(
         operator: String,
@@ -780,20 +716,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * `timestamp(field) op timestamp(field)` — two mapped columns the policy has SAID are instants.
-     *
-     * This is the ONLY spelling that compares two temporal columns. The bare
-     * `R.attr.createdAt == R.attr.updatedAt` is refused, because Cerbos transports a timestamp
-     * attribute as an RFC 3339 STRING and CEL therefore compares those two as strings, where SQL
-     * compares them as instants and matches spellings CEL does not
-     * ([ScalarColumnTypes.comparable]). Wrapping both in `timestamp()` is the policy saying it
-     * means the instant, which is exactly what makes the SQL comparison the right one.
-     *
-     * Both columns must pin an absolute instant, and must pin it in the same REPRESENTATION: a
-     * `timestamp` against a `timestamptz` is resolved by a store through the session's time zone,
-     * which is not a property of the filter. Representation, not column-type name — the two
-     * datetime modules declare different classes for the same plain instant, and comparing the
-     * names refused that pair while claiming to be about time zones.
+     * `timestamp(field) op timestamp(field)`, the only spelling that compares two temporal columns (a
+     * bare comparison is CEL string comparison). Both columns must pin an absolute instant in the same
+     * representation, since a store resolves `timestamp` against `timestamptz` through the session zone.
      */
     private fun timestampFieldPair(
         operator: String,
@@ -835,17 +760,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * Solves `add(field, const) eq/ne constant` for the field.
-     *
-     * When no solution exists — `"projects:123" == "users:" + R.id` can never be true — `eq` is
-     * false and `ne` is true for every row whose column is PRESENT, and neither is definite: a
-     * missing attribute makes the concatenation a CEL evaluation error and denies under BOTH
-     * polarities, so the answer has to be UNKNOWN for a NULL column.
-     *
-     * Both arms therefore carry the `IS NULL` witness rather than folding to a constant. A bare
-     * `Op.FALSE` is right unnegated and wrong under `not(...)`, which is where every `Op.FALSE`
-     * over a mapped column goes wrong; and `IsNotNullOp` alone is worse still, because `NOT (col
-     * IS NOT NULL)` selects EXACTLY the rows `check()` denies.
+     * Solves `add(field, const) eq/ne constant` for the field. With no solution both arms keep the
+     * `IS NULL` witness, because a missing attribute makes the concatenation raise under both polarities.
      */
     private fun solveAddComparison(
         operator: String,
@@ -964,12 +880,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * Evaluates a comparison between two plan constants.
-     *
-     * Numbers compare with the primitive IEEE operators, NOT a total-order comparator: the total
-     * order ranks NaN above every number, so it would collapse `gt`/`ge` against a NaN constant —
-     * reachable through an unfolded `div(0, 0)` — to always-true and return rows the PDP denies.
-     * CEL and IEEE define every ordering comparison involving NaN as false.
+     * Evaluates a comparison between two plan constants with primitive IEEE operators, so a NaN
+     * constant orders false as in CEL.
      */
     fun constantComparison(operator: String, left: Any?, right: Any?): Op<Boolean> {
         val result: Boolean = if (operator == "eq" || operator == "ne") {
@@ -1136,14 +1048,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 "(?:\\.\\d{1,9})?(?:[Zz]|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)$",
         )
 
-        /**
-         * Parses a `timestamp()` literal to the absolute instant it names, at nanosecond precision.
-         *
-         * Offsets are normalised away: CEL timestamp equality is equality of the instant, so the
-         * offset a literal was written in must not survive into the comparison. CEL's own
-         * `timestamp()` rejects a non-string or unparseable literal, so the planner cannot emit
-         * one — both are malformed plans, not unsupported shapes.
-         */
+        /** Parses a `timestamp()` literal to its instant. A non-string or unparseable one is a malformed plan. */
         private fun parseInstant(raw: Any?): Instant {
             if (raw !is String) {
                 throw Refusals.malformed(

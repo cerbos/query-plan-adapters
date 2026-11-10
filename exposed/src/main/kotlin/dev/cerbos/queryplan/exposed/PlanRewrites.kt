@@ -27,10 +27,8 @@ internal object PlanRewrites {
     private fun number(value: Double): Operand = constant(Value.newBuilder().setNumberValue(value).build())
 
     /**
-     * Rewrites `index(attr, "key")`, CEL's `attr["key"]`, as the attribute `attr.key` wherever the
-     * mapping declares `attr.key` and not `attr` itself. On a map the two spellings are the same
-     * lookup, and both raise on a missing key, so the declared column carries its own null
-     * convention for that error. An attribute mapped whole is left to its translator.
+     * Rewrites `attr["key"]` as the attribute `attr.key` where the mapping declares `attr.key` and not
+     * `attr`; both raise on a missing key.
      */
     fun selectMapKeys(operand: Operand, mapping: AttributeResolver): Operand {
         if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return operand
@@ -77,18 +75,9 @@ internal object PlanRewrites {
     }
 
     /**
-     * `x in coll.map(t, body)`, over a relation, rewritten as `size(coll.filter(t, x == body)) > 0`,
-     * whose strict count is UNKNOWN when any element's comparison is. That is exact because CEL's
-     * `map` raises when any element's body does, and `x == body` is UNKNOWN only where the body
-     * raises or `x` is a missing attribute.
-     *
-     * `x in coll.filter(t, p)`, over a relation or a literal list, likewise becomes
-     * `size(coll.filter(t, p ? x == t : false)) > 0`: CEL's `filter` raises when any element's `p`
-     * does, and the ternary keeps an UNKNOWN `p` UNKNOWN where `p && x == t` would let a FALSE
-     * comparison absorb it.
-     *
-     * `null` for any other shape, and when `x` reads the lambda variable's name, which the rewrite
-     * would capture. A `map` over a literal list is left to [MembershipTranslator], which folds it.
+     * `x in coll.map(t, body)` over a relation as `size(coll.filter(t, x == body)) > 0`, and
+     * `x in coll.filter(t, p)` as `size(coll.filter(t, p ? x == t : false)) > 0`; both keep CEL's errors
+     * UNKNOWN. `null` for other shapes, or when `x` reads the lambda variable's name.
      */
     fun membershipInProjection(operands: List<Operand>): Operand? {
         if (operands.size != 2 || operands[1].nodeCase != Operand.NodeCase.EXPRESSION) return null
@@ -122,11 +111,8 @@ internal object PlanRewrites {
     }
 
     /**
-     * `x in a + b`, rewritten as `x in a || x in b`, when every part of the concatenation is a
-     * literal list or a DIRECT relation. Neither can raise, so the disjunction raises exactly where
-     * `x in (a + b)` does: when `x` is a missing attribute. A part that can raise (a relation
-     * reached through a to-one parent, a computed list) is left to the refusal, since a TRUE
-     * disjunct would hide its error.
+     * `x in a + b` as `x in a || x in b`, when every part is a literal list or a direct relation, neither
+     * of which can raise.
      */
     fun membershipInConcatenation(operands: List<Operand>, scope: Scope): Operand? {
         if (operands.size != 2) return null
@@ -174,12 +160,7 @@ internal object PlanRewrites {
         return everyElementIn(receiver, other)
     }
 
-    /**
-     * `rel.except([...]) == []` as `rel.all(e, e in [...])`, and `!= []` as its negation: the
-     * difference keeps the elements of `rel` the list does not hold, so it is empty exactly when
-     * every element is held, and comparing an element with a constant list never raises. `null` for
-     * any other shape.
-     */
+    /** `rel.except([...]) == []` as `rel.all(e, e in [...])`, and `!= []` as its negation. `null` otherwise. */
     fun differenceEmptiness(operator: String, operands: List<Operand>, scope: Scope): Operand? {
         if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
         for (i in 0..1) {
@@ -202,12 +183,7 @@ internal object PlanRewrites {
         return null
     }
 
-    /**
-     * `intersect(a, b) == []` as `!hasIntersection(a, b)`, and `!= []` as `hasIntersection(a, b)`:
-     * Cerbos's `intersect` keeps the elements the two lists share, so it is empty exactly when they
-     * share none. Its SIZE is not translated, since it counts duplicates from whichever list is
-     * shorter. `null` for any other shape.
-     */
+    /** `intersect(a, b) == []` as `!hasIntersection(a, b)`, and `!= []` as `hasIntersection(a, b)`. `null` otherwise. */
     fun intersectionEmptiness(operator: String, operands: List<Operand>): Operand? {
         if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
         for (i in 0..1) {
