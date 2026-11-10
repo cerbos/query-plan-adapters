@@ -70,6 +70,7 @@ interface DerivedEntry {
 }
 
 const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+
 const DERIVED = (
   readCorpusJson("derived-fields.json") as {
     derived: Record<string, DerivedEntry>;
@@ -78,9 +79,11 @@ const DERIVED = (
 
 function derivedFor(seed: Seed): DerivedEntry {
   const entry = DERIVED[seed.id];
+
   if (entry === undefined) {
     throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
+
   return entry;
 }
 
@@ -92,6 +95,7 @@ function derivedFor(seed: Seed): DerivedEntry {
 // `coOwner`, `tagNames`, the scalar lists) it is a null value.
 
 type StoredDocument = AdversarialDocument;
+
 type StoredRelationLevel = Omit<NonNullable<StoredDocument["parent"]>, "inner">;
 
 // The real to-one relation (conformance/README.md, "The dataset"). `parentSeedId` names the seed
@@ -103,40 +107,53 @@ const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
 
 function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const id = seed?.parentSeedId;
+
   if (id === undefined || id === null) return undefined;
   const parent = SEEDS_BY_ID.get(id);
+
   if (parent === undefined) {
     throw new Error(
       `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
     );
   }
+
   return parent;
 }
 
 /** The four scalars one level of the chain carries. A NULL column is an ABSENT key. */
 function relationLevelOf(seed: Seed): StoredRelationLevel {
   const level: StoredRelationLevel = {};
+
   if (seed.aBool !== null) level.aBool = seed.aBool;
+
   if (seed.aString !== null) level.aString = seed.aString;
+
   if (seed.aNumber !== null) level.aNumber = seed.aNumber;
+
   if (seed.aOptionalString !== null)
     level.aOptionalString = seed.aOptionalString;
+
   return level;
 }
 
 /** The stored `parent` object for a seed, or undefined when it has no parent. */
 function storedParent(seed: Seed): StoredDocument["parent"] {
   const parentSeed = parentSeedOf(seed);
+
   if (parentSeed === undefined) return undefined;
   const innerSeed = parentSeedOf(parentSeed);
+
   const parent: NonNullable<StoredDocument["parent"]> =
     relationLevelOf(parentSeed);
+
   if (innerSeed !== undefined) parent.inner = relationLevelOf(innerSeed);
+
   return parent;
 }
 
 function storedDocument(seed: Seed): StoredDocument {
   const derived = derivedFor(seed);
+
   const document: StoredDocument = {
     id: seed.id,
     createdBy: derived.createdBy,
@@ -167,16 +184,25 @@ function storedDocument(seed: Seed): StoredDocument {
             },
           ],
   };
+
   if (seed.aBool !== null) document.aBool = seed.aBool;
+
   if (seed.aString !== null) document.aString = seed.aString;
+
   if (seed.aNumber !== null) document.aNumber = seed.aNumber;
+
   if (seed.aOptionalString !== null) {
     document.aOptionalString = seed.aOptionalString;
   }
+
   if (derived.aDouble !== null) document.aDouble = derived.aDouble;
+
   if (derived.createdAt !== null) document.createdAt = derived.createdAt;
+
   if (derived.updatedAt !== null) document.updatedAt = derived.updatedAt;
+
   if (derived.scope !== null) document.scope = derived.scope;
+
   if (seed.subCategoryNames.length > 0) {
     document.mainCategory = {
       name: "business",
@@ -184,8 +210,11 @@ function storedDocument(seed: Seed): StoredDocument {
       subNames: seed.subCategoryNames,
     };
   }
+
   const parent = storedParent(seed);
+
   if (parent !== undefined) document.parent = parent;
+
   return document;
 }
 
@@ -209,6 +238,7 @@ const LEDGER = (
 
 function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
   const entry = LEDGER[golden.id];
+
   return entry && (entry.pdp === undefined || entry.pdp.includes(tag))
     ? entry
     : undefined;
@@ -245,11 +275,13 @@ const fuzzResults: FuzzVerdict[] = [];
 async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
   try {
     queryPlanToConvex({ queryPlan: await planOf(golden), mapper: MAPPER, allowPostFilter: true });
+
     return fuzzVerdict(golden, golden.allowed, (await selectAllowed(golden)).ids);
   } catch (error) {
     return fuzzThrown(golden, error, UnsupportedQueryPlanError);
   }
 }
+
 const executions: Record<string, Record<string, number>> = {};
 
 const count = (
@@ -262,6 +294,7 @@ const count = (
 
 beforeAll(async () => {
   await convex.mutation(api.adversarial.deleteAll, {});
+
   for (const seed of SEEDS) {
     await convex.mutation(api.adversarial.insert, storedDocument(seed));
   }
@@ -270,6 +303,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await convex.mutation(api.adversarial.deleteAll, {});
   writeFuzzResults("convex", "convex", fuzzResults);
+
   const summary = (
     table: Record<string, Record<string, number>>,
     tag: string,
@@ -278,8 +312,10 @@ afterAll(async () => {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, n]) => `${key} ${n}`)
       .join(", ");
+
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
+
     return `${tag}: ${tiers
       .map(
         (tier) => `${tier} ${passed[tag]?.[tier] ?? 0}/${totals[tag]?.[tier]}`,
@@ -288,6 +324,7 @@ afterAll(async () => {
       GOLDENS.get(tag)!.filter((golden) => golden.plannerDivergence).length
     } (decided by: ${summary(executions, tag)})`;
   });
+
   console.log(`conformance (convex) passed per tier\n${lines.join("\n")}`);
 });
 
@@ -296,6 +333,7 @@ describe("conformance (convex)", () => {
     const ids = new Set(
       TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)),
     );
+
     expect(Object.keys(LEDGER).filter((id) => !ids.has(id))).toEqual([]);
   });
 
@@ -315,11 +353,14 @@ describe("conformance (convex)", () => {
     const { resources } = readCorpusJson("resources.json") as {
       resources: { id: string; attr: Record<string, unknown> }[];
     };
+
     const stored = (await convex.query(api.adversarial.listAll, {})) as {
       id: string;
     }[];
+
     const byId = (rows: { id: string }[]) =>
       [...rows].sort((a, b) => a.id.localeCompare(b.id));
+
     expect(byId(stored)).toEqual(
       byId(resources.map(({ id, attr }) => ({ id, ...attr }))),
     );
@@ -339,9 +380,12 @@ describe("conformance (convex)", () => {
           const verdict = await fuzzReplay(golden);
           fuzzResults.push(verdict);
           assertFuzzVerdict(verdict);
+
           return;
         }
+
         const entry = ledgerEntry(golden, tag);
+
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);
           expect(() =>
@@ -352,13 +396,18 @@ describe("conformance (convex)", () => {
               nullAttributeRepresentation: "explicit",
             }),
           ).toThrow(UnsupportedQueryPlanError);
+
           return;
         }
+
         const { ids, execution } = await selectAllowed(golden);
+
         if (entry?.status === "divergent") {
           expect(ids).not.toEqual(golden.allowed);
+
           return;
         }
+
         expect(ids).toEqual(golden.allowed);
         count(passed, tag, golden.tier);
         count(executions, tag, execution);

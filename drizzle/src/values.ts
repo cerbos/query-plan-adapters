@@ -125,6 +125,7 @@ const buildBooleanString = (column: AnyColumn, expr: SQL): SQL => {
         sql`_utf8mb4'false' collate utf8mb4_0900_bin`,
       ]
     : [sql`'true'`, sql`'false'`];
+
   return sql`(case when ${expr} is null then null when ${expr} then ${whenTrue} else ${whenFalse} end)`;
 };
 
@@ -137,10 +138,13 @@ const booleanStringColumn = (
   mapper: Mapper,
 ): AnyColumn | undefined => {
   const [inner] = operands;
+
   if (operands.length !== 1 || !inner) {
     return undefined;
   }
+
   const column = columnForOperand(inner, mapper);
+
   return column?.dataType === "boolean" ? column : undefined;
 };
 
@@ -175,6 +179,7 @@ export const isIntegerColumnReference = (
 ): boolean => {
   if (!isNameOperand(operand)) return false;
   const column = columnForOperand(operand, mapper);
+
   return column !== undefined && INTEGER_COLUMN_TYPES.has(column.columnType);
 };
 
@@ -189,8 +194,10 @@ const integerConversionColumn = (
 ): AnyColumn | undefined => {
   if (!isOperatorCall(operand, "int") || !isExpressionOperand(operand)) return undefined;
   const [inner] = operand.operands;
+
   if (operand.operands.length !== 1 || inner === undefined) return undefined;
   const column = columnForOperand(inner, mapper);
+
   return column !== undefined && INTEGER_COLUMN_TYPES.has(column.columnType)
     ? column
     : undefined;
@@ -226,6 +233,7 @@ const INT64_BOUND = 9223372036854775808;
  */
 const buildDoubleToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
   const dialect = columnDialect(column);
+
   const truncated =
     dialect === "postgresql"
       ? sql`trunc(${expr})`
@@ -234,7 +242,9 @@ const buildDoubleToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
         : dialect === "sqlite"
           ? sql`cast(${expr} as integer)`
           : undefined;
+
   if (truncated === undefined) return undefined;
+
   return sql`(case when ${expr} > ${bindConstant(-INT64_BOUND)} and ${expr} < ${bindConstant(INT64_BOUND)} then ${truncated} end)`;
 };
 
@@ -250,23 +260,29 @@ const buildDoubleToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
  */
 const buildStringToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
   const dialect = columnDialect(column);
+
   if (dialect === undefined) return undefined;
   const sign = sql`substr(${expr}, 1, 1)`;
   const unsigned = sql`(case when ${sign} in ('+', '-') then substr(${expr}, 2) else ${expr} end)`;
+
   const nonDigits = [..."0123456789"].reduce<SQL>(
     (rest, digit) => sql`replace(${rest}, ${digit}, '')`,
     unsigned,
   );
+
   const significant =
     dialect === "mysql" ? sql`trim(leading '0' from ${unsigned})` : sql`ltrim(${unsigned}, '0')`;
+
   const bound = sql`(case when ${sign} = '-' then '9223372036854775808' else '9223372036854775807' end)`;
   const valid = sql`length(${unsigned}) > 0 and length(${nonDigits}) = 0 and (length(${significant}) < 19 or (length(${significant}) = 19 and ${significant} <= ${bound}))`;
+
   const cast =
     dialect === "postgresql"
       ? sql`cast(${expr} as bigint)`
       : dialect === "mysql"
         ? sql`cast(${expr} as signed)`
         : sql`cast(${expr} as integer)`;
+
   return sql`(case when ${valid} then ${cast} end)`;
 };
 
@@ -297,18 +313,23 @@ export const buildCheckedIntComparison = (
   ) {
     return undefined;
   }
+
   const inner = conversion.operands[0]!;
   const column = columnForOperand(inner, mapper);
+
   if (column === undefined || INTEGER_COLUMN_TYPES.has(column.columnType)) return undefined;
   const expr = () => buildValueExpression(inner, mapper, options);
+
   const converted =
     column.dataType === "number"
       ? buildDoubleToInt(column, expr())
       : column.dataType === "string"
         ? buildStringToInt(column, expr())
         : undefined;
+
   if (converted === undefined) return undefined;
   const symbol = { eq: "=", ne: "<>", lt: "<", le: "<=", gt: ">", ge: ">=" }[operator];
+
   return sql`(${converted} ${sql.raw(symbol)} ${bindConstant(constant.value)})`;
 };
 
@@ -318,6 +339,7 @@ export const buildCheckedIntComparison = (
  */
 const isIntegerColumnDivisor = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
   if (integerConversionColumn(operand, mapper) !== undefined) return true;
+
   if (
     !(isOperatorCall(operand, "add") || isOperatorCall(operand, "sub")) ||
     !isExpressionOperand(operand) ||
@@ -325,11 +347,15 @@ const isIntegerColumnDivisor = (operand: PlanExpressionOperand, mapper: Mapper):
   ) {
     return false;
   }
+
   const [left, right] = operand.operands;
+
   const isWholeConstant = (side: PlanExpressionOperand | undefined): boolean => {
     const value = side === undefined ? undefined : resolveConstantNumber(side);
+
     return value !== undefined && Number.isSafeInteger(value);
   };
+
   return (
     (integerConversionColumn(left!, mapper) !== undefined && isWholeConstant(right)) ||
     (isWholeConstant(left) && integerConversionColumn(right!, mapper) !== undefined)
@@ -342,10 +368,13 @@ const isIntegerColumnDivisor = (operand: PlanExpressionOperand, mapper: Mapper):
  */
 const isCelIntExpression = (operand: PlanExpressionOperand): boolean => {
   if (isOperatorCall(operand, "int") || isOperatorCall(operand, "size")) return true;
+
   if (!isExpressionOperand(operand) || !(operand.operator in ARITHMETIC_OPERATORS)) return false;
+
   const isIntOrWhole = (side: PlanExpressionOperand): boolean =>
     isCelIntExpression(side) ||
     (isValueOperand(side) && typeof side.value === "number" && Number.isInteger(side.value));
+
   return operand.operands.every(isIntOrWhole) && operand.operands.some(isCelIntExpression);
 };
 
@@ -353,6 +382,7 @@ const isCelIntExpression = (operand: PlanExpressionOperand): boolean => {
 const selectsIntOrDouble = (operand: PlanExpressionOperand): boolean => {
   if (!isOperatorCall(operand, "if") || !isExpressionOperand(operand)) return false;
   const [, whenTrue, whenFalse] = operand.operands;
+
   return (
     whenTrue !== undefined &&
     whenFalse !== undefined &&
@@ -376,6 +406,7 @@ const mixesIntWithDouble = (
     (isValueOperand(operand) &&
       typeof operand.value === "number" &&
       !Number.isInteger(operand.value));
+
   return (
     (isCelIntExpression(left) && isDouble(right)) ||
     (isDouble(left) && isCelIntExpression(right))
@@ -399,6 +430,7 @@ const buildIntDivision = (
   const dividend = integerConversionColumn(leftOperand, mapper);
   const divisor = resolveConstantNumber(rightOperand);
   const dialect = dividend === undefined ? undefined : columnDialect(dividend);
+
   if (
     dialect === undefined ||
     divisor === undefined ||
@@ -412,8 +444,10 @@ const buildIntDivision = (
         "by a non-zero whole constant, where each store has an exact truncating integer division",
     );
   }
+
   const left = buildValueExpression(leftOperand, mapper, options);
   const right = sql.raw(String(divisor));
+
   return dialect === "mysql" ? sql`(${left} div ${right})` : sql`(${left} / ${right})`;
 };
 
@@ -436,8 +470,10 @@ const buildModulo = (
   if (isNameOperand(leftOperand) || isNameOperand(rightOperand)) {
     return sql`cast(null as float(53))`;
   }
+
   const dividend = integerConversionColumn(leftOperand, mapper);
   const divisor = resolveConstantNumber(rightOperand);
+
   if (
     dividend !== undefined &&
     divisor === undefined &&
@@ -445,8 +481,10 @@ const buildModulo = (
   ) {
     const left = buildValueExpression(leftOperand, mapper, options);
     const right = buildValueExpression(rightOperand, mapper, options);
+
     return sql`(${left} % nullif(${right}, 0))`;
   }
+
   if (
     dividend === undefined ||
     divisor === undefined ||
@@ -460,7 +498,9 @@ const buildModulo = (
         "a zero constant divisor raises on PostgreSQL",
     );
   }
+
   const left = buildValueExpression(leftOperand, mapper, options);
+
   return sql`(${left} % ${bindConstant(divisor)})`;
 };
 
@@ -479,14 +519,17 @@ const isStringConcatenation = (
     if (isValueOperand(operand)) {
       return typeof operand.value === "string";
     }
+
     // `string(flag) + string(flag)` is CEL's string `+`. Read as arithmetic it would coerce both
     // CASE results to 0 on SQLite and MySQL and compare `0` with the other side.
     if (isStringConversion(operand)) {
       return true;
     }
+
     if (isOperatorCall(operand, "add")) {
       return isStringConcatenation(operand.operands, mapper);
     }
+
     return columnForOperand(operand, mapper)?.dataType === "string";
   });
 
@@ -504,17 +547,24 @@ const concatenationDialect = (
   mapper: Mapper,
 ): ConcatenationDialect | undefined => {
   const dialects = new Set<ConcatenationDialect>();
+
   const visit = (operand: PlanExpressionOperand): void => {
     if (isExpressionOperand(operand)) {
       operand.operands.forEach(visit);
+
       return;
     }
+
     const column = columnForOperand(operand, mapper);
+
     if (column === undefined) return;
+
     if (is(column, MySqlColumn)) dialects.add("concat");
     else if (is(column, PgColumn) || is(column, SQLiteColumn)) dialects.add("pipes");
   };
+
   operands.forEach(visit);
+
   return dialects.size === 1 ? [...dialects][0] : undefined;
 };
 
@@ -538,7 +588,9 @@ const buildConcatenation = (
   ) {
     return bindConstant(leftOperand.value + rightOperand.value);
   }
+
   const dialect = concatenationDialect([leftOperand, rightOperand], mapper);
+
   if (dialect === undefined) {
     // The numeric `+` the adapter would otherwise emit is silently wrong rather than a syntax
     // error: SQLite and MySQL coerce 'prefix:' to 0, so the comparison quietly matches nothing
@@ -549,8 +601,10 @@ const buildConcatenation = (
         "but is logical OR on MySQL, which spells it CONCAT()",
     );
   }
+
   const left = buildValueExpression(leftOperand, mapper, options);
   const right = buildValueExpression(rightOperand, mapper, options);
+
   return dialect === "concat"
     ? sql`concat(${left}, ${right})`
     : sql`(${left} || ${right})`;
@@ -563,10 +617,13 @@ const operandKind = (
 ): string | undefined => {
   if (isValueOperand(operand)) {
     const type = typeof operand.value;
+
     return type === "string" || type === "number" || type === "boolean" ? type : undefined;
   }
+
   if (!isNameOperand(operand)) return undefined;
   const dataType = columnForOperand(operand, mapper)?.dataType;
+
   return dataType === "bigint" ? "number" : dataType;
 };
 
@@ -579,10 +636,13 @@ const buildArithmeticExpression = (
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError(`Arithmetic operator '${operator}' requires two operands`);
   }
+
   const [leftOperand, rightOperand] = operands;
+
   if (!leftOperand || !rightOperand) {
     throw new UnsupportedQueryPlanError(`Arithmetic operator '${operator}' is missing operands`);
   }
+
   if (
     operator === "div" &&
     isValueOperand(leftOperand) &&
@@ -596,8 +656,10 @@ const buildArithmeticExpression = (
     // semantics; SQLite represents bound NaN as NULL, whose comparisons are never true.
     return sql`${leftOperand.value / rightOperand.value}`;
   }
+
   const kinds = [operandKind(leftOperand, mapper), operandKind(rightOperand, mapper)];
   const concatenates = operator === "add" && isStringConcatenation(operands, mapper);
+
   if (
     kinds.includes("boolean") ||
     kinds.includes("date") ||
@@ -607,26 +669,33 @@ const buildArithmeticExpression = (
       `Cannot translate '${operator}': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce`,
     );
   }
+
   if (concatenates) {
     return buildConcatenation(leftOperand, rightOperand, mapper, options);
   }
+
   if (operator === "mod") {
     return buildModulo(leftOperand, rightOperand, mapper, options);
   }
+
   if (selectsIntOrDouble(leftOperand) || selectsIntOrDouble(rightOperand)) {
     throw new UnsupportedQueryPlanError(
       "Arithmetic over a ternary whose arms are an int and a double is unsupported: whether CEL " +
         "raises a no-overload error depends on the arm each row selects",
     );
   }
+
   if (mixesIntWithDouble(leftOperand, rightOperand)) {
     return sql`cast(null as float(53))`;
   }
+
   if (operator === "div" && (isCelIntExpression(leftOperand) || isCelIntExpression(rightOperand))) {
     return buildIntDivision(leftOperand, rightOperand, mapper, options);
   }
+
   const left = buildValueExpression(leftOperand, mapper, options);
   const right = buildValueExpression(rightOperand, mapper, options);
+
   if (operator === "div") {
     // CEL attribute arithmetic is double-typed: force REAL division so an
     // INTEGER/INTEGER pair does not silently truncate (3 / 2 must be 1.5, not 1).
@@ -634,6 +703,7 @@ const buildArithmeticExpression = (
     // this expression supplies its finite branch.
     return sql`(cast(${left} as float(53)) / ${right})`;
   }
+
   return sql`(${left} ${sql.raw(ARITHMETIC_OPERATORS[operator]!)} ${right})`;
 };
 
@@ -646,15 +716,19 @@ const buildSizeExpression = (
   if (isOperatorCall(operand, "filter")) {
     return buildFilteredCount(operand, mapper, options);
   }
+
   if (isOperatorCall(operand, "except") && isExpressionOperand(operand)) {
     return buildExceptCount(operand, mapper, options);
   }
+
   if (!isNameOperand(operand)) {
     throw new UnsupportedQueryPlanError(
       "'size' operator requires a field reference or filter expression",
     );
   }
+
   const resolved = resolveFieldReference(operand.name, mapper);
+
   // Relation: a correlated COUNT subquery over the tail of the relation chain, joining THROUGH
   // every intermediate hop (never straight off the root).
   if (resolved.relations.length > 0) {
@@ -662,15 +736,19 @@ const buildSizeExpression = (
     const leading = resolved.relations.slice(0, -1);
     const tableName = resolveTableName(primary.table, operand.name);
     const chainWhere = chainCorrelation(primary, leading, operand.name, options);
+
     // A chain ending in a to-ONE hop names a scalar of that hop's row, and size() of it is a
     // string length: counting the row made `size(parent.aString)` 1 for every row with a parent.
     // No hop row, or a NULL column, leaves the subquery NULL, the missing-path error CEL denies.
     if (primary.type === "one") {
       const scalarColumn = columnForOperand(operand, mapper);
+
       if (scalarColumn && scalarColumn.dataType !== "string") return sql`null`;
+
       const length = characterLength([scalarColumn])(
         buildColumnExpression(resolved.mapping, operand.name),
       );
+
       return requireLeadingHops(
         leading,
         sql`(select ${length} from ${sql.identifier(tableName)} where ${chainWhere})`,
@@ -678,6 +756,7 @@ const buildSizeExpression = (
         options,
       );
     }
+
     // An absent to-one parent must count as UNKNOWN, not 0: `size(chain) == 0` and
     // `size(chain) >= 0` are both TRUE over an empty count and would return every
     // parentless row (#309).
@@ -688,11 +767,15 @@ const buildSizeExpression = (
       options,
     );
   }
+
   const list = resolveIndexedList(operand.name, mapper);
+
   if (list) return indexedListSize(list.column, list.indexable);
   // A non-string column has no CEL size(): the comparison is a no-overload error, so UNKNOWN.
   const scalarColumn = columnForOperand(operand, mapper);
+
   if (scalarColumn && scalarColumn.dataType !== "string") return sql`null`;
+
   return characterLength([scalarColumn])(
     buildColumnExpression(resolved.mapping, operand.name),
   );
@@ -706,12 +789,16 @@ const buildTimestampExpression = (
   if (operands.length !== 1) {
     throw new UnsupportedQueryPlanError("'timestamp' operator requires exactly one operand");
   }
+
   const inner = operands[0];
+
   if (!inner) {
     throw new UnsupportedQueryPlanError("'timestamp' operator is missing its operand");
   }
+
   if (isNameOperand(inner)) {
     const resolved = resolveFieldReference(inner.name, mapper);
+
     if (
       !isMappingConfig(resolved.mapping) ||
       resolved.mapping.valueType !== "timestamp"
@@ -720,7 +807,9 @@ const buildTimestampExpression = (
         `'timestamp' field '${inner.name}' requires a mapping with valueType: "timestamp"`,
       );
     }
+
     const { column } = resolved.mapping;
+
     // A direct comparison owns every column it can compare (`comparison.ts`); reaching here means
     // the timestamp sits somewhere else, where only a native temporal column orders instants.
     if (column !== undefined && timestampColumnForm(column, inner.name) === "sqlite-text") {
@@ -730,13 +819,16 @@ const buildTimestampExpression = (
           "would be compared as a string, not as an instant",
       );
     }
+
     return buildValueExpression(inner, mapper, options);
   }
+
   if (!isValueOperand(inner) || typeof inner.value !== "string") {
     throw new UnsupportedQueryPlanError(
       "'timestamp' requires an RFC-3339 string value or field reference",
     );
   }
+
   // Normalize offsets so instant equality is preserved. Removing the zero
   // millisecond suffix matches the canonical UTC strings used by timestamp columns.
   return sql`${normalizeRfc3339Milliseconds(inner.value)}`;
@@ -751,20 +843,25 @@ export const buildValueExpression = (
   if (isValueOperand(operand)) {
     return bindConstant(operand.value);
   }
+
   if (isNameOperand(operand)) {
     const resolved = resolveFieldReference(operand.name, mapper);
+
     // Relations already established by an enclosing lambda subquery (skipRelations) leave
     // the element column directly addressable; anything else cannot be a scalar.
     const unskipped = resolved.relations.filter(
       (relation) => !options.skipRelations?.has(relation),
     );
+
     if (unskipped.length > 0) {
       throw new UnsupportedQueryPlanError(
         `Cannot use relation '${operand.name}' as a scalar value expression`,
       );
     }
+
     return buildColumnExpression(resolved.mapping, operand.name);
   }
+
   if (!isExpressionOperand(operand)) {
     throw new UnsupportedQueryPlanError("Invalid value-expression operand");
   }
@@ -777,16 +874,19 @@ export const buildValueExpression = (
 
   if (operator === "string") {
     const column = booleanStringColumn(operands, mapper);
+
     if (column !== undefined) {
       return buildBooleanString(
         column,
         buildValueExpression(operands[0]!, mapper, options),
       );
     }
+
     // `string()` of a string is the string itself: no cast, so no cast target to disagree on. A
     // NULL column stays NULL, leaving the comparison UNKNOWN under both polarities, as CEL's
     // error over a missing attribute or a null value denies it.
     const [inner] = operands;
+
     if (
       operands.length === 1 &&
       inner !== undefined &&
@@ -797,6 +897,7 @@ export const buildValueExpression = (
   }
 
   const integerColumn = integerConversionColumn(operand, mapper);
+
   if (integerColumn !== undefined) {
     return buildIntegerConversion(
       integerColumn,
@@ -805,6 +906,7 @@ export const buildValueExpression = (
   }
 
   const unsupportedConversion = UNSUPPORTED_CONVERSIONS[operator];
+
   if (unsupportedConversion !== undefined) {
     throw new UnsupportedQueryPlanError(`Cannot translate ${operator}(): ${unsupportedConversion}`);
   }
@@ -814,19 +916,23 @@ export const buildValueExpression = (
       if (operands.length !== 3) {
         throw new UnsupportedQueryPlanError("'if' operator requires exactly three operands");
       }
+
       const cond = buildFilterFromExpression(operands[0]!, mapper, options);
       const thenExpr = buildValueExpression(operands[1]!, mapper, options);
       const elseExpr = buildValueExpression(operands[2]!, mapper, options);
+
       // Two guarded WHEN arms (no bare ELSE): an UNKNOWN condition matches neither arm and
       // the CASE yields NULL, so the enclosing comparison stays UNKNOWN — excluded under
       // both polarities, mirroring the CEL missing-attribute error (deny). A bare ELSE
       // would silently route UNKNOWN rows into the else branch.
       return sql`(case when ${cond} then ${thenExpr} when not (${cond}) then ${elseExpr} end)`;
     }
+
     case "size":
       if (operands.length !== 1) {
         throw new UnsupportedQueryPlanError("'size' operator requires exactly one operand");
       }
+
       if (isOperatorCall(operands[0]!, "intersect")) {
         throw new UnsupportedQueryPlanError(
           "Cannot translate size(intersect(...)): Cerbos's intersect() keeps the duplicates of " +
@@ -834,6 +940,7 @@ export const buildValueExpression = (
             "row by row, which the adapter has no SQL form for",
         );
       }
+
       return buildSizeExpression(operands[0]!, mapper, options);
     case "timestamp":
       return buildTimestampExpression(operands, mapper, options);
@@ -842,22 +949,29 @@ export const buildValueExpression = (
       // store's own Unicode case mapping (PostgreSQL and MySQL fold é to É), so the fold is
       // spelled as 26 byte-exact REPLACEs, which every dialect evaluates identically.
       const [receiver] = operands;
+
       if (operands.length !== 1 || receiver === undefined) {
         throw new UnsupportedQueryPlanError("'upperAscii' operator requires exactly one operand");
       }
+
       const receiverColumn = columnForOperand(receiver, mapper);
+
       if (receiverColumn !== undefined && receiverColumn.dataType !== "string") {
         throw new UnsupportedQueryPlanError(
           "Cannot translate upperAscii() over a column that is not a string column",
         );
       }
+
       let folded = buildValueExpression(receiver, mapper, options);
+
       for (let code = 97; code <= 122; code++) {
         const lower = String.fromCharCode(code);
         folded = sql`replace(${folded}, ${lower}, ${lower.toUpperCase()})`;
       }
+
       return folded;
     }
+
     case "index":
       resolveIndexedColumn(operands, mapper, options);
       throw new UnsupportedQueryPlanError(
@@ -886,13 +1000,16 @@ export const resolveScalarOperand = (
   if (isValueOperand(operand)) {
     return { expr: bindConstant(operand.value), relations: [] };
   }
+
   if (isNameOperand(operand)) {
     const resolved = resolveFieldReference(operand.name, mapper);
+
     return {
       expr: buildColumnExpression(resolved.mapping, operand.name),
       relations: resolved.relations,
     };
   }
+
   return {
     expr: buildValueExpression(operand, mapper, options),
     relations: [],

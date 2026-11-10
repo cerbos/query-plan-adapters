@@ -34,9 +34,11 @@ export function containsCollectionOperator(expr: PlanExpressionOperand): boolean
   if (!isOperatorOperand(expr)) {
     return false;
   }
+
   if (COLLECTION_OPERATORS.has(expr.operator)) {
     return true;
   }
+
   return expr.operands.some(containsCollectionOperator);
 }
 
@@ -57,8 +59,10 @@ export function substituteLambdaVariable(
     if (operand.name === variableName) {
       return { value: element };
     }
+
     if (operand.name.startsWith(`${variableName}.`)) {
       let current: Value = element;
+
       for (const segment of operand.name
         .slice(variableName.length + 1)
         .split(".")) {
@@ -73,10 +77,13 @@ export function substituteLambdaVariable(
             `Cannot resolve "${operand.name}": collection element has no field "${segment}"`
           );
         }
+
         current = current[segment];
       }
+
       return { value: current };
     }
+
     return operand;
   }
 
@@ -85,6 +92,7 @@ export function substituteLambdaVariable(
   }
 
   const [nestedCollection, nestedLambda] = operand.operands;
+
   if (
     LAMBDA_BINDING_OPERATORS.has(operand.operator) &&
     operand.operands.length === 2 &&
@@ -94,6 +102,7 @@ export function substituteLambdaVariable(
     nestedLambda.operator === "lambda"
   ) {
     const nestedVariable = nestedLambda.operands[1];
+
     if (
       nestedVariable !== undefined &&
       isNamedOperand(nestedVariable) &&
@@ -109,6 +118,7 @@ export function substituteLambdaVariable(
       };
     }
   }
+
   return {
     operator: operand.operator,
     operands: operand.operands.map((o) =>
@@ -126,11 +136,13 @@ function mentionsVariable(
       expr.name === variableName || expr.name.startsWith(variableName + ".")
     );
   }
+
   if (isOperatorOperand(expr)) {
     return expr.operands.some((operand) =>
       mentionsVariable(operand, variableName)
     );
   }
+
   return false;
 }
 
@@ -149,6 +161,7 @@ function substituteNamedOperand(
   if (isNamedOperand(expr)) {
     return expr.name === name ? { value } : expr;
   }
+
   if (isOperatorOperand(expr)) {
     return {
       operator: expr.operator,
@@ -157,6 +170,7 @@ function substituteNamedOperand(
       ),
     };
   }
+
   return expr;
 }
 
@@ -176,9 +190,11 @@ function findOuterBooleanReference(
       ? expr.name
       : undefined;
   }
+
   if (!isOperatorOperand(expr)) {
     return undefined;
   }
+
   const booleanPositions = BOOLEAN_POSITION_OPERATORS.has(expr.operator)
     ? expr.operands
     : // Comparisons wrapping a ternary keep the outer reference in the ternary condition.
@@ -187,12 +203,15 @@ function findOuterBooleanReference(
           isOperatorOperand(operand) &&
           BOOLEAN_POSITION_OPERATORS.has(operand.operator)
       );
+
   for (const operand of booleanPositions) {
     const found = findOuterBooleanReference(operand, enclosingVariables);
+
     if (found !== undefined) {
       return found;
     }
   }
+
   return undefined;
 }
 
@@ -208,6 +227,7 @@ function parseLambdaMacro(expr: OperatorOperand):
     }
   | undefined {
   const [collection, lambda] = expr.operands;
+
   if (
     !COLLECTION_OPERATORS.has(expr.operator) ||
     expr.operands.length !== 2 ||
@@ -219,10 +239,13 @@ function parseLambdaMacro(expr: OperatorOperand):
   ) {
     return undefined;
   }
+
   const variable = lambda.operands[1];
+
   if (variable === undefined || !isNamedOperand(variable)) {
     return undefined;
   }
+
   return { collection, lambda, variable };
 }
 
@@ -249,6 +272,7 @@ export function hoistOuterScopeReferences(
   }
 
   const macro = parseLambdaMacro(expr);
+
   if (macro === undefined) {
     return {
       operator: expr.operator,
@@ -257,9 +281,11 @@ export function hoistOuterScopeReferences(
       ),
     };
   }
+
   const { collection, lambda, variable } = macro;
 
   const scopeVariables = [...enclosingVariables, variable.name];
+
   const body = hoistOuterScopeReferences(
     assertDefined(lambda.operands[0], "Lambda requires a condition"),
     scopeVariables
@@ -279,14 +305,17 @@ export function hoistOuterScopeReferences(
     const elementConjuncts = body.operands.filter((operand) =>
       mentionsVariable(operand, variable.name)
     );
+
     const outerConjuncts = body.operands.filter(
       (operand) => !mentionsVariable(operand, variable.name)
     );
+
     if (outerConjuncts.length > 0 && elementConjuncts.length > 0) {
       const innerBody =
         elementConjuncts.length === 1
           ? elementConjuncts[0]!
           : { operator: "and", operands: elementConjuncts };
+
       return {
         operator: "and",
         operands: [rebuild(innerBody), ...outerConjuncts],
@@ -296,9 +325,11 @@ export function hoistOuterScopeReferences(
 
   // Case split on a bare outer boolean reference.
   const outerRef = findOuterBooleanReference(body, scopeVariables);
+
   if (outerRef !== undefined) {
     const q: PlanExpressionOperand = { name: outerRef };
     const notQ: PlanExpressionOperand = { operator: "not", operands: [q] };
+
     const arms: PlanExpressionOperand[] = [
       {
         operator: "and",
@@ -322,6 +353,7 @@ export function hoistOuterScopeReferences(
         ],
       },
     ];
+
     // all() over an empty collection never evaluates its body, so CEL holds it TRUE even when
     // the reference is missing; the arms above are all UNKNOWN on that row. `all(c, false)` is
     // TRUE exactly when the collection is empty, and definite, so it restores that row without
@@ -329,6 +361,7 @@ export function hoistOuterScopeReferences(
     if (expr.operator === "all") {
       arms.push(rebuild({ value: false }));
     }
+
     return { operator: "or", operands: arms };
   }
 
@@ -344,12 +377,17 @@ function foldLogical(
   operands: PlanExpressionOperand[]
 ): PlanExpressionOperand {
   const dominant = operator === "or";
+
   if (operands.some((o) => isValueOperand(o) && o.value === dominant)) {
     return { value: dominant };
   }
+
   const remaining = operands.filter((o) => !isValueOperand(o));
+
   if (remaining.length === 0) return { value: !dominant };
+
   if (remaining.length === 1) return remaining[0]!;
+
   return { operator, operands: remaining };
 }
 
@@ -365,10 +403,12 @@ export function constantFoldExpression(
   if (!isOperatorOperand(expr)) {
     return expr;
   }
+
   assertLogicalOperands(expr.operator, expr.operands);
   const operands = expr.operands.map(constantFoldExpression);
   const folded: OperatorOperand = { operator: expr.operator, operands };
   const [first, second] = operands;
+
   const bothConstant =
     first !== undefined &&
     second !== undefined &&
@@ -378,17 +418,21 @@ export function constantFoldExpression(
   switch (expr.operator) {
     case "if": {
       const [condition, thenBranch, elseBranch] = operands;
+
       if (condition !== undefined && isValueOperand(condition)) {
         if (typeof condition.value !== "boolean") {
           throw new UnsupportedQueryPlanError("if (ternary) condition must be a boolean expression");
         }
+
         return assertDefined(
           condition.value ? thenBranch : elseBranch,
           "if (ternary) requires branch operands"
         );
       }
+
       return folded;
     }
+
     case "and":
     case "or":
       return foldLogical(expr.operator, operands);
@@ -396,6 +440,7 @@ export function constantFoldExpression(
       if (first !== undefined && isValueOperand(first)) {
         return { value: first.value !== true };
       }
+
       return folded;
     case "add":
     case "sub":
@@ -414,6 +459,7 @@ export function constantFoldExpression(
       ) {
         const receiver = first.value;
         const needle = second.value;
+
         return {
           value:
             expr.operator === "contains"
@@ -423,11 +469,14 @@ export function constantFoldExpression(
                 : receiver.endsWith(needle),
         };
       }
+
       return folded;
     }
+
     case "exists":
     case "all": {
       const lambda = second;
+
       if (
         first !== undefined &&
         lambda !== undefined &&
@@ -437,19 +486,25 @@ export function constantFoldExpression(
         isValueOperand(lambda.operands[0])
       ) {
         const bodyValue = lambda.operands[0].value === true;
+
         if (expr.operator === "exists" && !bodyValue) return { value: false };
+
         if (expr.operator === "all" && bodyValue) return { value: true };
+
         const sizeExpr: PlanExpressionOperand = {
           operator: "size",
           operands: [first],
         };
+
         // exists(c, true) is "collection is non-empty"; all(c, false) is "collection is empty".
         return expr.operator === "exists"
           ? { operator: "gt", operands: [sizeExpr, { value: 0 }] }
           : { operator: "eq", operands: [sizeExpr, { value: 0 }] };
       }
+
       return folded;
     }
+
     default:
       if (
         COMPARISON_OPERATORS.has(expr.operator) &&
@@ -463,6 +518,7 @@ export function constantFoldExpression(
           ),
         };
       }
+
       return folded;
   }
 }

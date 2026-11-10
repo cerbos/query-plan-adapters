@@ -14,9 +14,11 @@ import { UnsupportedQueryPlanError } from "./errors";
 
 const RFC3339_MILLISECOND_TIMESTAMP =
   /^((?!0000)\d{4})-(\d{2})-(\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d{1,9}))?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+
 const MIN_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
   "0001-01-01T00:00:00.000Z"
 );
+
 const MAX_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
   "9999-12-31T23:59:59.999Z"
 );
@@ -28,11 +30,13 @@ const MAX_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
  */
 export function normalizeRfc3339Milliseconds(value: string): string {
   const { iso, subMillisecond } = parseRfc3339Instant(value);
+
   if (subMillisecond) {
     throw new UnsupportedQueryPlanError(
       `Timestamp value exceeds millisecond precision: ${value}`
     );
   }
+
   return iso;
 }
 
@@ -50,9 +54,11 @@ export function parseRfc3339Instant(value: string): {
   const monthText = match?.[2];
   const dayText = match?.[3];
   const fraction = match?.[4] ?? "";
+
   if (!yearText || !monthText || !dayText) {
     throw new UnsupportedQueryPlanError(`Invalid RFC 3339 timestamp value: ${value}`);
   }
+
   const subMillisecond = [...fraction.slice(3)].some((digit) => digit !== "0");
 
   const year = Number(yearText);
@@ -61,6 +67,7 @@ export function parseRfc3339Instant(value: string): {
   const calendarDate = new Date(0);
   calendarDate.setUTCHours(0, 0, 0, 0);
   calendarDate.setUTCFullYear(year, month - 1, day);
+
   if (
     calendarDate.getUTCFullYear() !== year ||
     calendarDate.getUTCMonth() !== month - 1 ||
@@ -70,9 +77,11 @@ export function parseRfc3339Instant(value: string): {
   }
 
   const milliseconds = Date.parse(value);
+
   if (Number.isNaN(milliseconds)) {
     throw new UnsupportedQueryPlanError(`Invalid RFC 3339 timestamp value: ${value}`);
   }
+
   if (
     milliseconds < MIN_RFC3339_TIMESTAMP_MILLISECONDS ||
     milliseconds > MAX_RFC3339_TIMESTAMP_MILLISECONDS
@@ -81,14 +90,17 @@ export function parseRfc3339Instant(value: string): {
       `Timestamp value is outside CEL's supported instant range: ${value}`
     );
   }
+
   // Date.parse drops the digits past the millisecond, so a sub-millisecond instant lies strictly
   // between `milliseconds` and the next one.
   const rounded = subMillisecond ? milliseconds + 1 : milliseconds;
+
   if (rounded > MAX_RFC3339_TIMESTAMP_MILLISECONDS) {
     throw new UnsupportedQueryPlanError(
       `Timestamp value is outside CEL's supported instant range: ${value}`
     );
   }
+
   return { iso: new Date(rounded).toISOString(), subMillisecond };
 }
 
@@ -141,19 +153,24 @@ export function rewriteTemporalComparison(
   if (!COMPARISON_OPERATORS.has(expr.operator) || expr.operands.length !== 2) return undefined;
   let [left, right] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
   let operator = expr.operator;
+
   if (!isTemporalArithmetic(left) && isTemporalArithmetic(right)) {
     [left, right] = [right, left];
     operator = mirrorOperator(operator);
   }
+
   if (!isOperatorOperand(left)) return undefined;
 
   if (left.operator === "timeSince") {
     const [column] = left.operands;
     const duration = durationMilliseconds(right);
+
     if (left.operands.length !== 1 || !isTimestampColumn(column) || duration === undefined) {
       return undefined;
     }
+
     const bound = instantLiteral(now - duration);
+
     // now - x CMP d  <=>  x mirror(CMP) now - d
     return bound && compareInstant(mirrorOperator(operator), column, bound);
   }
@@ -161,9 +178,11 @@ export function rewriteTemporalComparison(
   if ((left.operator !== "add" && left.operator !== "sub") || left.operands.length !== 2) {
     return undefined;
   }
+
   const [a, b] = left.operands as [PlanExpressionOperand, PlanExpressionOperand];
   let column: OperatorOperand;
   let duration: number | undefined;
+
   if (isTimestampColumn(a) && durationMilliseconds(b) !== undefined) {
     [column, duration] = [a, durationMilliseconds(b)];
   } else if (left.operator === "add" && isTimestampColumn(b)) {
@@ -171,16 +190,22 @@ export function rewriteTemporalComparison(
   } else {
     return undefined;
   }
+
   const instant = instantMilliseconds(right);
+
   if (duration === undefined || instant === undefined) return undefined;
   const shift = left.operator === "add" ? duration : -duration;
   const bound = instantLiteral(instant - shift);
+
   if (bound === undefined) return undefined;
   const solved = compareInstant(operator, column, bound);
+
   if (shift === 0) return solved;
   const limit = instantLiteral(shift > 0 ? MAX_INSTANT - shift : MIN_INSTANT - shift);
+
   if (limit === undefined) return undefined;
   const inRange = compareInstant(shift > 0 ? "le" : "ge", column, limit);
+
   return positive
     ? { operator: "and", operands: [solved, inRange] }
     : { operator: "or", operands: [solved, { operator: "not", operands: [inRange] }] };
@@ -219,14 +244,20 @@ function durationMilliseconds(operand: PlanExpressionOperand): number | undefine
   ) {
     return undefined;
   }
+
   const [literal] = operand.operands;
+
   if (!isValueOperand(literal!) || typeof literal.value !== "string") return undefined;
   const match = PROTOBUF_DURATION.exec(literal.value);
+
   if (!match) return undefined;
   const fraction = (match[3] ?? "").padEnd(9, "0");
+
   if (fraction.slice(3) !== "000000") return undefined;
   const milliseconds = Number(match[2]) * 1000 + Number(fraction.slice(0, 3));
+
   if (!Number.isSafeInteger(milliseconds)) return undefined;
+
   return match[1] ? -milliseconds : milliseconds;
 }
 
@@ -239,10 +270,14 @@ function instantMilliseconds(operand: PlanExpressionOperand): number | undefined
   ) {
     return undefined;
   }
+
   const [literal] = operand.operands;
+
   if (!isValueOperand(literal!) || typeof literal.value !== "string") return undefined;
+
   try {
     const { iso, subMillisecond } = parseRfc3339Instant(literal.value);
+
     return subMillisecond ? undefined : Date.parse(iso);
   } catch {
     return undefined;
@@ -257,6 +292,7 @@ function instantLiteral(milliseconds: number): PlanExpressionOperand | undefined
   ) {
     return undefined;
   }
+
   return { operator: "timestamp", operands: [{ value: new Date(milliseconds).toISOString() }] };
 }
 

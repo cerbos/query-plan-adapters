@@ -60,17 +60,21 @@ export function handleRelationalOperator(
   context: TranslationContext
 ): PrismaFilter {
   const ternaryFilter = tryHandleTernaryComparison(operator, operands, context);
+
   if (ternaryFilter) {
     return ternaryFilter;
   }
+
   const lookupFilter =
     tryHandleMapLiteralLookup(operator, operands, context) ??
     tryHandleUpperAsciiComparison(operator, operands, context);
+
   if (lookupFilter) {
     return lookupFilter;
   }
 
   ({ operator, operands } = normalizeBinaryOperands(operator, operands));
+
   if (!CERBOS_TO_PRISMA_OPERATOR[operator]) {
     throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
@@ -78,9 +82,11 @@ export function handleRelationalOperator(
   const leftOperand = operands.find(
     (o) => isNamedOperand(o) || isOperatorOperand(o)
   );
+
   if (!leftOperand) throw new UnsupportedQueryPlanError("No valid left operand found");
 
   const rightOperand = operands.find((o) => o !== leftOperand);
+
   if (!rightOperand) throw new UnsupportedQueryPlanError("No valid right operand found");
 
   if (isOperatorOperand(leftOperand) && leftOperand.operator === "size") {
@@ -91,8 +97,10 @@ export function handleRelationalOperator(
     (o): o is OperatorOperand =>
       isOperatorOperand(o) && ARITHMETIC_OPERATORS.has(o.operator)
   );
+
   if (arithOperand) {
     const arithIsLeft = arithOperand === leftOperand;
+
     return handleArithmeticComparison(
       operator,
       arithOperand,
@@ -129,6 +137,7 @@ export function handleRelationalOperator(
         left
       );
     }
+
     return evaluateConstantComparison(operator, left.value, right.value)
       ? {}
       : rejectConstantFalse();
@@ -144,6 +153,7 @@ export function handleRelationalOperator(
         "Raw temporal column comparison loses RFC-3339 string spelling; wrap both operands in timestamp()"
       );
     }
+
     if (
       left.valueType !== undefined &&
       right.valueType !== undefined &&
@@ -151,6 +161,7 @@ export function handleRelationalOperator(
     ) {
       throw new UnsupportedQueryPlanError("Cannot compare fields with different mapped value types");
     }
+
     return buildFieldToFieldFilter(
       context,
       operator,
@@ -169,13 +180,16 @@ function isMapLiteralLookup(operand: PlanExpressionOperand): operand is Operator
   if (!isOperatorOperand(operand) || operand.operator !== "index" || operand.operands.length !== 2) {
     return false;
   }
+
   const [map] = operand.operands;
+
   return isOperatorOperand(map!) && map.operator === "struct";
 }
 
 /** Whether a map-literal lookup appears anywhere in `operand`. */
 export function containsMapLiteralLookup(operand: PlanExpressionOperand): boolean {
   if (!isOperatorOperand(operand)) return false;
+
   return operand.operands.some(containsMapLiteralLookup) || isMapLiteralLookup(operand);
 }
 
@@ -196,11 +210,13 @@ export function tryHandleMapLiteralLookup(
 ): PrismaFilter | null {
   if ((operator !== "eq" && operator !== "ne") || operands.length !== 2) return null;
   const lookupIndex = operands.findIndex(isMapLiteralLookup);
+
   if (lookupIndex === -1) return null;
   const lookup = operands[lookupIndex] as OperatorOperand;
   const other = operands[1 - lookupIndex]!;
   const [mapOperand, key] = lookup.operands as [PlanExpressionOperand, PlanExpressionOperand];
   const map = literalValue(mapOperand);
+
   if (
     map === undefined ||
     map === null ||
@@ -214,22 +230,27 @@ export function tryHandleMapLiteralLookup(
         "and compared with a literal: a Prisma filter has no map lookup"
     );
   }
+
   if (context.scopes.length > 0) {
     throw new UnsupportedQueryPlanError(
       "An index into a map literal inside a lambda body is not supported: a missing key is an " +
         "error under both polarities, and the macro negates its body with a plain NOT"
     );
   }
+
   const fieldRef = resolveFieldReference(key.name, context);
+
   if (fieldRef.valueType !== "string") {
     throw new UnsupportedQueryPlanError(
       `An index into a map literal requires a string key column, and ${key.name} is not mapped ` +
         'with valueType: "string"'
     );
   }
+
   const keys = Object.keys(map);
   const matching = keys.filter((k) => evaluateConstantComparison("eq", map[k]!, other.value));
   const holds = (operator === "eq") !== negated;
+
   return buildFieldFilter(
     fieldRef,
     "in",
@@ -254,13 +275,16 @@ function tryHandleUpperAsciiComparison(
   context: TranslationContext
 ): PrismaFilter | null {
   if ((operator !== "eq" && operator !== "ne") || operands.length !== 2) return null;
+
   const callIndex = operands.findIndex(
     (operand) => isOperatorOperand(operand) && operand.operator === "upperAscii"
   );
+
   if (callIndex === -1) return null;
   const call = operands[callIndex] as OperatorOperand;
   const other = operands[1 - callIndex]!;
   const [subject] = call.operands;
+
   if (
     call.operands.length !== 1 ||
     subject === undefined ||
@@ -273,18 +297,23 @@ function tryHandleUpperAsciiComparison(
         "filter has no ASCII-only case mapping"
     );
   }
+
   const fieldRef = resolveFieldReference(subject.name, context);
   assertStringField(fieldRef, "upperAscii");
   recordErroringNullElement(context, subject, fieldRef);
   let spellings = [""];
+
   for (const character of other.value) {
     if (character >= "a" && character <= "z") {
       spellings = [];
       break;
     }
+
     const cases =
       character >= "A" && character <= "Z" ? [character, character.toLowerCase()] : [character];
+
     spellings = spellings.flatMap((prefix) => cases.map((c) => prefix + c));
+
     if (spellings.length > MAX_UPPER_ASCII_SPELLINGS) {
       throw new UnsupportedQueryPlanError(
         `Cannot translate upperAscii() == ${JSON.stringify(other.value)}: its spellings exceed ` +
@@ -292,7 +321,9 @@ function tryHandleUpperAsciiComparison(
       );
     }
   }
+
   const filter = buildFieldFilter(fieldRef, "in", spellings);
+
   return operator === "eq" ? filter : { NOT: filter };
 }
 
@@ -331,6 +362,7 @@ function assertNoRawTemporalAgainstTimestamp(
 /** A column reference, bare or wrapped in timestamp(). */
 function isColumnOperand(operand: PlanExpressionOperand): boolean {
   if (isNamedOperand(operand)) return true;
+
   return (
     isOperatorOperand(operand) &&
     operand.operator === "timestamp" &&
@@ -349,10 +381,13 @@ function buildValueComparisonFilter(
   if (!constant.subMillisecond) {
     return buildComparisonFilter(context, fieldRef, operator, constant.value);
   }
+
   const rounded = roundSubMillisecond(operator);
+
   if (rounded !== null) {
     return buildComparisonFilter(context, fieldRef, rounded, constant.value);
   }
+
   // No whole millisecond equals the instant. Spelled as a contradiction on the column, so a NULL
   // stays UNKNOWN under both polarities — timestamp() of a missing attribute is an error.
   const never: PrismaFilter = {
@@ -361,6 +396,7 @@ function buildValueComparisonFilter(
       buildComparisonFilter(context, fieldRef, "ge", constant.value),
     ],
   };
+
   return operator === "eq" ? never : { NOT: never };
 }
 
@@ -381,6 +417,7 @@ function countPredicate(operator: string, n: number): CountPredicate {
     count: Math.max(count, 0),
     negated,
   });
+
   switch (operator) {
     case "gt":
       return atLeast(Math.floor(n) + 1);
@@ -393,11 +430,13 @@ function countPredicate(operator: string, n: number): CountPredicate {
     case "eq":
     case "ne": {
       const negated = operator === "ne";
+
       // A fractional size never equals anything; a negative one never exists.
       return Number.isInteger(n) && n >= 0
         ? { kind: "exactly", count: n, negated }
         : atLeast(0, !negated);
     }
+
     default:
       throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
@@ -429,18 +468,22 @@ function buildStringLengthFilter(
     if (count >= STRING_LENGTH_CEILING) {
       return { NOT: buildFieldFilter(fieldRef, "startsWith", "") };
     }
+
     if (count > MAX_LENGTH_PATTERN) {
       throw new UnsupportedQueryPlanError(
         `Cannot translate a string length threshold of ${count}: the LIKE pattern it needs ` +
           `exceeds the ${MAX_LENGTH_PATTERN}-character limit`
       );
     }
+
     return buildFieldFilter(fieldRef, "startsWith", "_".repeat(count));
   };
+
   const filter =
     predicate.kind === "atLeast"
       ? atLeast(predicate.count)
       : { AND: [atLeast(predicate.count), { NOT: atLeast(predicate.count + 1) }] };
+
   return predicate.negated ? { NOT: filter } : filter;
 }
 
@@ -456,6 +499,7 @@ function handleSizeComparison(
   context: TranslationContext
 ): PrismaFilter {
   const collectionOperand = sizeOperand.operands[0];
+
   if (collectionOperand && isOperatorOperand(collectionOperand)) {
     throw new UnsupportedQueryPlanError(
       `size() of ${collectionOperand.operator}(...) counts the elements of a derived list, and a ` +
@@ -463,6 +507,7 @@ function handleSizeComparison(
         "never count them"
     );
   }
+
   if (!collectionOperand || !isNamedOperand(collectionOperand)) {
     throw new UnsupportedQueryPlanError("size operator requires a named collection operand");
   }
@@ -472,13 +517,16 @@ function handleSizeComparison(
   }
 
   const count = valueOperand.value;
+
   if (typeof count !== "number" || !Number.isFinite(count)) {
     throw new UnsupportedQueryPlanError("size comparison requires a numeric value");
   }
+
   const predicate = countPredicate(operator, count);
 
   const fieldRef = resolveFieldReference(collectionOperand.name, context);
   const { relations } = fieldRef;
+
   // A string column reached through to-one hops is measured on the hop's row, never counted as
   // one: `size(parent.aString) >= 1` read as "has a parent" returned a parent whose aString is
   // empty. The length's own negation sits inside the hops, so a missing hop is unmatched under
@@ -489,6 +537,7 @@ function handleSizeComparison(
       buildStringLengthFilter({ ...fieldRef, relations: [] }, predicate)
     );
   }
+
   if (!relations || relations.length === 0) {
     throw new UnsupportedQueryPlanError("size operator requires a relation mapping");
   }
@@ -497,14 +546,17 @@ function handleSizeComparison(
   const hops = relations.slice(0, -1);
   const deepest = relations[relations.length - 1]!;
   const { kind, count: k, negated } = predicate;
+
   // `size >= 0` holds whenever the collection can be reached. Only a chain can fail to reach it;
   // a direct relation would be an unconditional `{}`, which no negation could then express.
   if (kind === "atLeast" && k === 0 && !negated && hops.length > 0) {
     return wrapInRelations(hops, {});
   }
+
   const isNonEmpty =
     (kind === "atLeast" && k === 1 && !negated) ||
     (kind === "exactly" && k === 0 && negated);
+
   const isEmpty =
     (kind === "atLeast" && k === 1 && negated) ||
     (kind === "exactly" && k === 0 && !negated);
@@ -551,6 +603,7 @@ function buildFieldToFieldFilter(
     rightOperand.name,
     right
   );
+
   const leftField = getLeafField(left.path);
   const rightField = getLeafField(right.path);
   const fieldReference = { _ref: rightField, _container: container };
@@ -559,6 +612,7 @@ function buildFieldToFieldFilter(
   // A bare field reference gives UNKNOWN for both, which drops the row under either polarity.
   const leftExplicit = isExplicitNullReference(left);
   const rightExplicit = isExplicitNullReference(right);
+
   if (operator === "eq" || operator === "ne") {
     // Mixing the two conventions across one comparison has no faithful rendering. The declared
     // side needs a definite answer for its NULL (CEL holds a null VALUE); the undeclared side
@@ -578,7 +632,9 @@ function buildFieldToFieldFilter(
       const [explicitField, otherField] = leftExplicit
         ? [leftField, rightField]
         : [rightField, leftField];
+
       const otherReference = { _ref: otherField, _container: container };
+
       const inequality: PrismaFilter = {
         OR: [
           {
@@ -590,8 +646,10 @@ function buildFieldToFieldFilter(
           { NOT: { [explicitField]: { equals: otherReference } } },
         ],
       };
+
       return operator === "ne" ? inequality : { NOT: inequality };
     }
+
     if (leftExplicit) {
       const equality: PrismaFilter = {
         OR: [
@@ -605,6 +663,7 @@ function buildFieldToFieldFilter(
           },
         ],
       };
+
       return operator === "eq" ? equality : { NOT: equality };
     }
   }
@@ -635,22 +694,26 @@ function fieldReferenceContainer(
   right: ResolvedFieldReference
 ): string {
   const scope = currentScope(context);
+
   if (scope) {
     const prefix = scope.variableName + ".";
     const leftInScope = leftName.startsWith(prefix);
     const rightInScope = rightName.startsWith(prefix);
+
     if (leftInScope !== rightInScope) {
       throw new UnsupportedQueryPlanError(
         `Cannot compare a collection element column with an outer column (${leftName} vs ${rightName}): ` +
           "Prisma field references only work between fields of the same model"
       );
     }
+
     if (leftInScope) {
       if (!scope.relationModel) {
         throw new Error(
           "Field-to-field comparison inside a collection requires `relation.model` in the mapper"
         );
       }
+
       return scope.relationModel;
     }
   }
@@ -663,11 +726,13 @@ function fieldReferenceContainer(
       "Cannot compare columns across relations: Prisma field references only work between fields of the same model"
     );
   }
+
   if (!context.rootModel) {
     throw new Error(
       "Field-to-field comparison requires the `model` option (the Prisma model name) to build a field reference"
     );
   }
+
   return context.rootModel;
 }
 
@@ -688,10 +753,12 @@ function handleArithmeticComparison(
   context: TranslationContext
 ): PrismaFilter {
   const arithOp = arithExpr.operator;
+
   const arithLeftOp = assertDefined(
     arithExpr.operands[0],
     `${arithOp} operator requires a left operand`
   );
+
   const arithRightOp = assertDefined(
     arithExpr.operands[1],
     `${arithOp} operator requires a right operand`
@@ -716,11 +783,13 @@ function handleArithmeticComparison(
   // FIRST (`1 + 2 < f`), directional operators mirror to keep the field on the left.
   if (isResolvedValue(arithLeft) && isResolvedValue(arithRight)) {
     const folded = foldArithmetic(arithOp, arithLeft.value, arithRight.value);
+
     if (!isResolvedFieldReference(other)) {
       throw new UnsupportedQueryPlanError(
         `${arithOp} with two values requires a field reference on the other side`
       );
     }
+
     return buildComparisonFilter(
       context,
       other,
@@ -762,6 +831,7 @@ function handleArithmeticComparison(
 
   const declared = fieldRef.valueType;
   const declaredString = declared === "string";
+
   if (
     (typeof constant === "string" && declared !== undefined && !declaredString) ||
     (typeof constant === "number" &&
@@ -779,16 +849,20 @@ function handleArithmeticComparison(
         `Operator ${effectiveOperator} is not supported with string concatenation`
       );
     }
+
     const solvedValue = solveAdd(other.value, constant, fieldIsLeft);
+
     if (solvedValue === null) {
       // A contradictory / exhaustive pair remains SQL UNKNOWN for a missing field.
       // An empty IN or an empty filter loses that error when an outer NOT is applied.
       const equality = buildFieldFilter(fieldRef, "equals", other.value);
       const inequality = buildFieldFilter(fieldRef, "not", other.value);
+
       return effectiveOperator === "eq"
         ? { AND: [equality, inequality] }
         : { OR: [equality, inequality] };
     }
+
     return buildComparisonFilter(context, fieldRef, effectiveOperator, solvedValue);
   }
 
@@ -801,14 +875,17 @@ function handleArithmeticComparison(
       "Multiplication by a constant zero must be folded by the Cerbos planner"
     );
   }
+
   if (arithOp === "div" && !fieldIsLeft) {
     throw new UnsupportedQueryPlanError(
       "Division by a column is not supported: the comparison cannot be solved to a plain column filter"
     );
   }
+
   if (arithOp === "div" && constant === 0) {
     throw new UnsupportedQueryPlanError("Division by a constant zero is not supported");
   }
+
   if (!ARITHMETIC_OPERATORS.has(arithOp)) {
     throw new UnsupportedQueryPlanError(`Unsupported operator: ${arithOp}`);
   }
@@ -817,8 +894,10 @@ function handleArithmeticComparison(
   // arithmetic reverses the order (`c - x`, a negative multiplier or divisor), its negation —
   // negating a double is exact, so `c - x` is `c + y` and `x * c` is `y * -c`.
   const c = constant;
+
   const decreasing =
     (arithOp === "sub" && !fieldIsLeft) || ((arithOp === "mult" || arithOp === "div") && c < 0);
+
   const f = (y: number): number => {
     switch (arithOp) {
       case "add":
@@ -831,13 +910,16 @@ function handleArithmeticComparison(
         return decreasing ? y / -c : y / c;
     }
   };
+
   const solved = solveMonotone(
     f,
     effectiveOperator === "ne" ? "eq" : (effectiveOperator as "eq" | "lt" | "le" | "gt" | "ge"),
     other.value
   );
+
   const interval = decreasing ? negateInterval(solved) : solved;
   const filter = buildIntervalFilter(context, fieldRef, interval);
+
   return effectiveOperator === "ne" ? { NOT: filter } : filter;
 }
 
@@ -858,13 +940,17 @@ function buildIntervalFilter(
       ],
     };
   }
+
   const bounds: PrismaFilter[] = [];
+
   if (interval.lo !== undefined) {
     bounds.push(buildComparisonFilter(context, fieldRef, "ge", interval.lo));
   }
+
   if (interval.hi !== undefined) {
     bounds.push(buildComparisonFilter(context, fieldRef, "le", interval.hi));
   }
+
   if (bounds.length === 0) {
     return {
       OR: [
@@ -873,10 +959,12 @@ function buildIntervalFilter(
       ],
     };
   }
+
   // Each bound may itself be a bracket (see fractionalBracket); one flat AND reads better.
   const flat = bounds.flatMap((bound) =>
     Object.keys(bound).length === 1 && Array.isArray(bound["AND"]) ? bound["AND"] : [bound]
   );
+
   return flat.length === 1 ? flat[0]! : { AND: flat };
 }
 
@@ -892,17 +980,22 @@ function solveAdd(
   if (typeof comparisonValue === "string" && typeof addConstant === "string") {
     if (fieldIsLeft) {
       if (!comparisonValue.endsWith(addConstant)) return null;
+
       return comparisonValue.slice(
         0,
         comparisonValue.length - addConstant.length
       );
     }
+
     if (!comparisonValue.startsWith(addConstant)) return null;
+
     return comparisonValue.slice(addConstant.length);
   }
+
   if (typeof comparisonValue === "number" && typeof addConstant === "number") {
     return comparisonValue - addConstant;
   }
+
   throw new UnsupportedQueryPlanError("Type mismatch in add comparison");
 }
 
@@ -916,11 +1009,15 @@ export function handleInOperator(
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError("in requires exactly two operands");
   }
+
   const ternaryFilter = tryHandleTernaryComparison("in", operands, context);
+
   if (ternaryFilter) {
     return ternaryFilter;
   }
+
   const member = assertDefined(operands[0], "in requires a member operand");
+
   const collection = assertDefined(
     operands[1],
     "in requires a collection operand"
@@ -928,6 +1025,7 @@ export function handleInOperator(
 
   if (isNamedOperand(member) && isValueOperand(collection)) {
     if (!Array.isArray(collection.value)) throw scalarMembership();
+
     return buildMembershipFilter(context, resolveFieldReference(member.name, context), collection.value);
   }
 
@@ -939,8 +1037,11 @@ export function handleInOperator(
           "a Prisma relation filter tests rows, not attribute names"
       );
     }
+
     const fieldRef = resolveFieldReference(collection.name, context);
+
     if (!fieldRef.relations?.length && fieldRef.valueType !== undefined) throw scalarMembership();
+
     return buildMembershipFilter(context, fieldRef, [member.value]);
   }
 
@@ -993,18 +1094,23 @@ function handleListMembership(
   if (elements.length === 0) {
     throw new UnsupportedQueryPlanError("Membership in an empty list must be folded by the Cerbos planner");
   }
+
   const equalities = elements.map((element) =>
     buildPrismaFilterFromCerbosExpression(
       { operator: "eq", operands: [member, element] },
       context
     )
   );
+
   const filter = equalities.length === 1 ? equalities[0]! : { OR: equalities };
+
   if (elements.length === 1) return filter;
 
   const presences: PrismaFilter[] = [];
+
   for (const element of elements) {
     if (isValueOperand(element)) continue;
+
     if (!isNamedOperand(element)) {
       throw new UnsupportedQueryPlanError(
         "Membership in a list holding an expression beside other elements: building the list " +
@@ -1012,16 +1118,21 @@ function handleListMembership(
           "filter carries that error for an expression"
       );
     }
+
     const fieldRef = resolveFieldReference(element.name, context);
+
     if (isExplicitNullReference(fieldRef)) continue;
     const test = presence(element, fieldRef);
+
     if (test === undefined) {
       throw new UnsupportedQueryPlanError(
         `Membership in a list holding ${element.name} beside other elements requires the ` +
           "column's valueType in the mapper, to spell the presence test a missing element needs"
       );
     }
+
     presences.push(buildPrismaFilterFromCerbosExpression(test, context));
   }
+
   return presences.length === 0 ? filter : { AND: [...presences, filter] };
 }

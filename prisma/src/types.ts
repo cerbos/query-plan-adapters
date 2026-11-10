@@ -99,10 +99,13 @@ export function settleTypeMismatches(
     rewriteConcatenation(expr, context) ??
     rewriteTemporalComparison(expr, positive) ??
     splitDivision(expr, context);
+
   if (cast !== undefined) return settleTypeMismatches(cast, context, positive);
 
   const outcomes = leafOutcomes(expr, context);
+
   if (outcomes === undefined) return rewriteLiteralLists(expr, context);
+
   // Definite once every column is present, and an error otherwise: the presence tests carry the
   // error as SQL UNKNOWN, which decides the row as CEL's error does under either polarity.
   if (outcomes.missing !== undefined && outcomes.true !== outcomes.false) {
@@ -110,11 +113,16 @@ export function settleTypeMismatches(
       outcomes.missing.length === 1
         ? outcomes.missing[0]!
         : { operator: "and", operands: outcomes.missing };
+
     if (outcomes.missing.length === 0) return { value: outcomes.true === true };
+
     return outcomes.true ? present : { operator: "not", operands: [present] };
   }
+
   if (positive && !outcomes.true) return { value: false };
+
   if (!positive && !outcomes.false) return { value: true };
+
   // What is left is a leaf that is TRUE (positive) or FALSE (negative) once the relation and its
   // column are present, and an error otherwise. The error rows must not satisfy the leaf's
   // polarity: `reached` is FALSE or UNKNOWN on them, so it stands for the TRUE leaf under an even
@@ -124,9 +132,11 @@ export function settleTypeMismatches(
   if (outcomes.reached !== undefined) {
     return positive ? outcomes.reached : { operator: "not", operands: [outcomes.reached] };
   }
+
   if (!outcomes.error && !(outcomes.true && outcomes.false)) {
     return { value: outcomes.true === true };
   }
+
   return expr;
 }
 
@@ -137,6 +147,7 @@ function settleLambdaBody(
   positive: boolean
 ): PlanExpressionOperand {
   const [collection, lambda] = expr.operands;
+
   if (
     collection === undefined ||
     !isNamedOperand(collection) ||
@@ -149,12 +160,17 @@ function settleLambdaBody(
   ) {
     return expr;
   }
+
   const [body, variable] = lambda.operands;
+
   if (body === undefined || variable === undefined || !isNamedOperand(variable)) {
     return expr;
   }
+
   const scoped = scopedContext(context, collection.name, variable.name);
+
   if (scoped === undefined) return expr;
+
   return {
     operator: expr.operator,
     operands: [
@@ -171,7 +187,9 @@ function scopedContext(
   variableName: string
 ): TranslationContext | undefined {
   const { relations } = resolveFieldReference(collectionName, context);
+
   if (!relations || relations.length === 0) return undefined;
+
   return enterLambdaScope(context, collectionName, {
     variableName,
     relationModel: relations[relations.length - 1]!.model,
@@ -193,36 +211,48 @@ function distributeTernary(
   context: TranslationContext
 ): PlanExpressionOperand | undefined {
   if (!COMPARISON_OPERATORS.has(expr.operator) || expr.operands.length !== 2) return undefined;
+
   const index = expr.operands.findIndex(
     (operand) => isOperatorOperand(operand) && operand.operator === "if" && operand.operands.length === 3
   );
+
   if (index === -1) return undefined;
+
   const [condition, whenTrue, whenFalse] = (expr.operands[index] as OperatorOperand).operands as [
     PlanExpressionOperand,
     PlanExpressionOperand,
     PlanExpressionOperand,
   ];
+
   if (!isNamedOperand(condition)) return undefined;
   const fieldRef = resolveFieldReference(condition.name, context);
+
   if (scalarType(fieldRef) !== "boolean" || fieldRef.relations?.length) return undefined;
   // A missing condition is an error that selects neither branch; its presence test keeps it one.
   const conditionPresent = mayBeMissing(fieldRef) ? presence(condition, fieldRef) : undefined;
+
   // A relation reached in a branch would be required around the whole expansion under an
   // enclosing negation (see negateRequiringHops), where CEL never evaluates the unselected branch.
   const reachesRelation = (operand: PlanExpressionOperand): boolean =>
     isNamedOperand(operand)
       ? (resolveFieldReference(operand.name, context).relations?.length ?? 0) > 0
       : isOperatorOperand(operand) && operand.operands.some(reachesRelation);
+
   if (expr.operands.some(reachesRelation)) return undefined;
+
   const branch = (value: PlanExpressionOperand): PlanExpressionOperand =>
     constantFoldExpression({
       operator: expr.operator,
       operands: expr.operands.map((operand, i) => (i === index ? value : operand)),
     });
+
   const [onTrue, onFalse] = [branch(whenTrue), branch(whenFalse)];
+
   const settles = (leaf: PlanExpressionOperand) =>
     isValueOperand(leaf) || (isOperatorOperand(leaf) && leafOutcomes(leaf, context) !== undefined);
+
   if (!settles(onTrue) && !settles(onFalse)) return undefined;
+
   return {
     operator: "or",
     operands: [
@@ -265,8 +295,10 @@ function unwrapBooleanComparison(expr: OperatorOperand): PlanExpressionOperand |
   if ((expr.operator !== "eq" && expr.operator !== "ne") || expr.operands.length !== 2) {
     return undefined;
   }
+
   const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
   const [inner, literal] = isValueOperand(first) ? [second, first] : [first, second];
+
   if (
     !isValueOperand(literal) ||
     typeof literal.value !== "boolean" ||
@@ -275,7 +307,9 @@ function unwrapBooleanComparison(expr: OperatorOperand): PlanExpressionOperand |
   ) {
     return undefined;
   }
+
   const same = (expr.operator === "eq") === literal.value;
+
   return same ? inner : { operator: "not", operands: [inner] };
 }
 
@@ -301,9 +335,11 @@ function rewriteCastComparison(
   positive: boolean
 ): PlanExpressionOperand | undefined {
   const { operator } = expr;
+
   if ((operator !== "eq" && operator !== "ne") || expr.operands.length !== 2) return undefined;
   const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
   const [cast, literal] = isOperatorOperand(first) ? [first, second] : [second, first];
+
   if (
     !isOperatorOperand(cast) ||
     cast.operands.length !== 1 ||
@@ -312,35 +348,45 @@ function rewriteCastComparison(
   ) {
     return undefined;
   }
+
   const column = cast.operands[0]!;
   const value = literal.value;
+
   if (cast.operator === "string" && typeof value === "string" && !isNamedOperand(column)) {
     if (isBooleanValued(column, context)) {
       return renderedBooleanComparison(column, value, operator);
     }
+
     // string(int(x)) renders the int in plain decimal, so the comparison is int(x) == k for the
     // one k that renders as the literal, solved below on the next pass. A literal no int renders
     // as, or one past 2^53, is left alone: the int's overflow error has no bound an Int column
     // accepts.
     const rendered = isOperatorOperand(column) && column.operator === "int" ? Number(value) : NaN;
+
     return /^(0|-?[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(rendered)
       ? { operator, operands: [column, { value: rendered }] }
       : undefined;
   }
+
   if (!isNamedOperand(column)) return undefined;
   const fieldRef = resolveFieldReference(column.name, context);
+
   if (fieldRef.nullAttributeRepresentation === "explicit") return undefined;
   const type = scalarType(fieldRef);
+
   // A column reached through a to-one relation is solved for only as a boolean rendering: the
   // comparison it becomes is one the translator already guards through the hop.
   if (fieldRef.relations?.length && (cast.operator !== "string" || type !== "boolean")) {
     return undefined;
   }
+
   const compare = (op: string, v: Value): PlanExpressionOperand => ({
     operator: op,
     operands: [column, { value: v }],
   });
+
   const equality = (v: Value): PlanExpressionOperand => compare(operator, v);
+
   // No value of the column prints as the literal: the comparison is settled by its type alone.
   const unmatched: PlanExpressionOperand = {
     operator,
@@ -351,18 +397,23 @@ function rewriteCastComparison(
     if (type === "boolean") {
       return value === "true" || value === "false" ? equality(value === "true") : unmatched;
     }
+
     if (type === "number") {
       const parsed = Number(value);
+
       return value.trim() !== "" && formatCelDouble(parsed) === value
         ? equality(parsed)
         : unmatched;
     }
+
     return undefined;
   }
 
   if (cast.operator === "int" && type === "number" && typeof value === "number") {
     if ((operator === "eq") !== positive) return undefined;
+
     if (!Number.isInteger(value)) return unmatched;
+
     const range: PlanExpressionOperand = {
       operator: "and",
       operands:
@@ -372,8 +423,10 @@ function rewriteCastComparison(
             ? [compare("gt", value - 1), compare("le", value)]
             : [compare("gt", -1), compare("lt", 1)],
     };
+
     return operator === "eq" ? range : { operator: "not", operands: [range] };
   }
+
   return undefined;
 }
 
@@ -388,12 +441,14 @@ function renderedBooleanComparison(
   operator: string
 ): PlanExpressionOperand {
   const negated: PlanExpressionOperand = { operator: "not", operands: [expression] };
+
   const holds: PlanExpressionOperand =
     literal === "true"
       ? expression
       : literal === "false"
         ? negated
         : { operator: "and", operands: [expression, negated] };
+
   return operator === "eq" ? holds : { operator: "not", operands: [holds] };
 }
 
@@ -403,10 +458,13 @@ function renderedBooleanComparison(
  */
 function isBooleanValued(expr: PlanExpressionOperand, context: TranslationContext): boolean {
   if (isValueOperand(expr)) return typeof expr.value === "boolean";
+
   if (isNamedOperand(expr)) {
     return scalarType(resolveFieldReference(expr.name, context)) === "boolean";
   }
+
   if (BOOLEAN_OPERATORS.has(expr.operator)) return true;
+
   return (
     expr.operator === "if" &&
     expr.operands.length === 3 &&
@@ -427,8 +485,10 @@ function splitDivision(
 ): PlanExpressionOperand | undefined {
   if (!COMPARISON_OPERATORS.has(expr.operator)) return undefined;
   const column = divisionColumn(expr);
+
   if (column === undefined) return undefined;
   const fieldRef = resolveFieldReference(column.name, context);
+
   if (
     fieldRef.valueType !== "number" ||
     (fieldRef.relations?.length ?? 0) > 0 ||
@@ -436,20 +496,25 @@ function splitDivision(
   ) {
     return undefined;
   }
+
   const sign = (op: string): PlanExpressionOperand => ({
     operator: op,
     operands: [column, { value: 0 }],
   });
+
   const arms: PlanExpressionOperand[] = [];
+
   for (const [guard, x] of [
     ["gt", 1],
     ["lt", -1],
     ["eq", 0],
   ] as const) {
     const substituted = substituteDivision(expr, column.name, x);
+
     if (substituted === undefined) return undefined;
     arms.push({ operator: "and", operands: [sign(guard), substituted] });
   }
+
   return { operator: "or", operands: arms };
 }
 
@@ -457,31 +522,43 @@ function splitDivision(
 function divisionColumn(expr: PlanExpressionOperand): NamedOperand | undefined {
   let column: NamedOperand | undefined;
   let divided = false;
+
   const visit = (node: PlanExpressionOperand): boolean => {
     if (isNamedOperand(node)) {
       if (column !== undefined && column.name !== node.name) return false;
       column = node;
+
       return false;
     }
+
     if (!isOperatorOperand(node)) return true;
+
     if (node.operator === "lambda") return false;
+
     if (isColumnDivision(node)) {
       const numerator = node.operands[0] as NamedOperand;
+
       if (column !== undefined && column.name !== numerator.name) return false;
       column = numerator;
       divided = true;
+
       return true;
     }
+
     return node.operands.every(visit);
   };
+
   return visit(expr) && divided ? column : undefined;
 }
 
 function isColumnDivision(node: OperatorOperand): boolean {
   if (node.operator !== "div" || node.operands.length !== 2) return false;
   const [numerator, denominator] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (!isNamedOperand(numerator)) return false;
+
   if (isNamedOperand(denominator)) return denominator.name === numerator.name;
+
   return isValueOperand(denominator) && denominator.value === 0;
 }
 
@@ -495,18 +572,25 @@ function substituteDivision(
   x: number
 ): PlanExpressionOperand | undefined {
   if (isNamedOperand(expr)) return undefined;
+
   if (!isOperatorOperand(expr)) return expr;
+
   if (isColumnDivision(expr)) {
     const denominator = expr.operands[1]!;
     const d = isNamedOperand(denominator) ? x : ((denominator as { value: number }).value);
+
     return { value: x / d };
   }
+
   const operands: PlanExpressionOperand[] = [];
+
   for (const operand of expr.operands) {
     const substituted = substituteDivision(operand, name, x);
+
     if (substituted === undefined) return undefined;
     operands.push(substituted);
   }
+
   return { operator: expr.operator, operands };
 }
 
@@ -529,9 +613,11 @@ function rewriteConcatenation(
   context: TranslationContext
 ): PlanExpressionOperand | undefined {
   const { operator } = expr;
+
   if ((operator !== "eq" && operator !== "ne") || expr.operands.length !== 2) return undefined;
   const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
   const [sum, literal] = isOperatorOperand(first) ? [first, second] : [second, first];
+
   if (
     !isOperatorOperand(sum) ||
     sum.operator !== "add" ||
@@ -540,50 +626,69 @@ function rewriteConcatenation(
   ) {
     return undefined;
   }
+
   const terms = concatenationTerms(sum);
+
   if (terms === undefined) return undefined;
   const columns = terms.filter(isNamedOperand);
+
   if (
     columns.length < 2 ||
     columns.some((column) => {
       const fieldRef = resolveFieldReference(column.name, context);
+
       return fieldRef.valueType !== "string" || (fieldRef.relations?.length ?? 0) > 0;
     })
   ) {
     return undefined;
   }
+
   const codePoints = Array.from(literal.value);
+
   if (codePoints.length > MAX_CONCATENATION_SPLITS) return undefined;
 
   const arms: PlanExpressionOperand[] = [];
+
   const split = (index: number, offset: number, pieces: PlanExpressionOperand[]): boolean => {
     if (index === terms.length) {
       if (offset !== codePoints.length) return true;
       arms.push(pieces.length === 1 ? pieces[0]! : { operator: "and", operands: pieces });
+
       return arms.length <= MAX_CONCATENATION_ARMS;
     }
+
     const term = terms[index]!;
+
     if (isValueOperand(term)) {
       const text = Array.from(term.value as string);
       const matches = text.every((point, i) => codePoints[offset + i] === point);
+
       return !matches || split(index + 1, offset + text.length, pieces);
     }
+
     const last = index === terms.length - 1;
+
     for (let end = last ? codePoints.length : offset; end <= codePoints.length; end++) {
       const piece = codePoints.slice(offset, end).join("");
       const equality = { operator: "eq", operands: [term, { value: piece }] };
+
       if (!split(index + 1, end, [...pieces, equality])) return false;
     }
+
     return true;
   };
+
   if (!split(0, 0, [])) return undefined;
+
   for (const column of columns) {
     arms.push({
       operator: "not",
       operands: [{ operator: "startsWith", operands: [column, { value: "" }] }],
     });
   }
+
   const equality: PlanExpressionOperand = { operator: "or", operands: arms };
+
   return operator === "eq" ? equality : { operator: "not", operands: [equality] };
 }
 
@@ -592,14 +697,18 @@ function concatenationTerms(
   expr: PlanExpressionOperand
 ): (NamedOperand | { value: string })[] | undefined {
   if (isNamedOperand(expr)) return [expr];
+
   if (isValueOperand(expr)) {
     return typeof expr.value === "string" ? [{ value: expr.value }] : undefined;
   }
+
   if (!isOperatorOperand(expr) || expr.operator !== "add" || expr.operands.length !== 2) {
     return undefined;
   }
+
   const left = concatenationTerms(expr.operands[0]!);
   const right = concatenationTerms(expr.operands[1]!);
+
   return left && right && [...left, ...right];
 }
 
@@ -609,21 +718,30 @@ function concatenationTerms(
  */
 export function formatCelDouble(x: number): string {
   if (Number.isNaN(x)) return "NaN";
+
   if (x === Infinity) return "+Inf";
+
   if (x === -Infinity) return "-Inf";
+
   if (x === 0) return Object.is(x, -0) ? "-0" : "0";
   const sign = x < 0 ? "-" : "";
   const [mantissa, exponentText] = Math.abs(x).toExponential().split("e") as [string, string];
   const digits = mantissa.replace(".", "");
   const exponent = Number(exponentText);
+
   if (exponent < -4 || exponent >= 6) {
     const fraction = digits.length > 1 ? `.${digits.slice(1)}` : "";
     const magnitude = String(Math.abs(exponent)).padStart(2, "0");
+
     return `${sign}${digits[0]}${fraction}e${exponent < 0 ? "-" : "+"}${magnitude}`;
   }
+
   const point = exponent + 1;
+
   if (point <= 0) return `${sign}0.${"0".repeat(-point)}${digits}`;
+
   if (point >= digits.length) return `${sign}${digits}${"0".repeat(point - digits.length)}`;
+
   return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
@@ -634,13 +752,16 @@ function leafOutcomes(
   context: TranslationContext
 ): Outcomes | undefined {
   const { operator, operands } = expr;
+
   // A pattern RE2 rejects fails on every row it is evaluated for.
   if (operator === "matches" && operands.length === 2) {
     const pattern = operands[1]!;
+
     if (isValueOperand(pattern) && typeof pattern.value === "string" && isInvalidPattern(pattern.value)) {
       return { error: true };
     }
   }
+
   // A list where a boolean is required: CEL's logical operators raise a no-overload error on it,
   // and a condition that is not a boolean denies.
   if (LIST_OPERATORS.has(operator)) return { error: true };
@@ -649,22 +770,31 @@ function leafOutcomes(
     const [left, right] = operands as [PlanExpressionOperand, PlanExpressionOperand];
     // NaN equals nothing and orders against nothing — not even a string, on the current PDP.
     const nan = [left, right].find((o) => isValueOperand(o) && Number.isNaN(o.value));
+
     if (nan !== undefined) {
       const other = nan === left ? right : left;
+
       if (!isNamedOperand(other) && !isValueOperand(other)) return undefined;
+
       return definite(operator === "ne", [other], context);
     }
+
     const nullComparison = omittedNullComparison(operator, left, right, context);
+
     if (nullComparison !== undefined) return nullComparison;
+
     const size = [left, right].find(
       (o): o is OperatorOperand => isOperatorOperand(o) && o.operator === "size"
     );
+
     if (size !== undefined) {
       // size() has overloads for strings, lists and maps only.
       const [subject] = size.operands;
       const type = subject && scalarFieldType(subject, context);
+
       return type === "number" || type === "boolean" ? { error: true } : undefined;
     }
+
     // A bare date-time column is the RFC 3339 STRING the application sends, and a string never
     // orders against a timestamp: no overload, so an error on every row. Equality across the two
     // types is heterogeneous, and false.
@@ -673,8 +803,10 @@ function leafOutcomes(
         ? { error: true }
         : definite(operator !== "eq", [left, right], context);
     }
+
     const leftType = operandType(left, context);
     const rightType = operandType(right, context);
+
     if (
       leftType === undefined ||
       rightType === undefined ||
@@ -684,15 +816,19 @@ function leafOutcomes(
     ) {
       return undefined;
     }
+
     if (ORDERING_OPERATORS.has(operator)) return { error: true };
+
     return definite(operator !== "eq", [left, right], context);
   }
 
   if (STRING_OPERATORS.has(operator) && operands.length === 2) {
     const mistyped = operands.some((operand) => {
       const type = operandType(operand, context)?.type;
+
       return type !== undefined && type !== "string" && type !== "null";
     });
+
     return mistyped ? { error: true } : undefined;
   }
 
@@ -702,8 +838,10 @@ function leafOutcomes(
       if (!isOperatorOperand(operand) || operand.operator !== "hierarchy") return false;
       const [subject] = operand.operands;
       const type = subject && scalarFieldType(subject, context);
+
       return type === "number" || type === "boolean";
     });
+
     return mistyped ? { error: true } : undefined;
   }
 
@@ -712,28 +850,34 @@ function leafOutcomes(
     // A literal member against a mapped list whose elements can never equal it.
     const memberType = literalType(member);
     const list = collectionElementType(collection, context);
+
     if (memberType !== undefined && memberType !== "null" && list !== undefined) {
       return memberType === list.type ? undefined : { false: true, error: list.mayBeMissing };
     }
+
     // A field member against a literal list none of whose elements it can equal.
     const field = operandType(member, context);
     const elements = literalElements(collection);
+
     if (field !== undefined && elements !== undefined) {
       return elements.every((element) => isMismatch(field.type, element))
         ? definite(false, [member], context)
         : undefined;
     }
+
     return undefined;
   }
 
   if (operator === "hasIntersection" && operands.length === 2) {
     const [left, right] = operands as [PlanExpressionOperand, PlanExpressionOperand];
+
     for (const [list, literal] of [
       [left, right],
       [right, left],
     ] as const) {
       const elementType = collectionElementType(list, context);
       const elements = literalElements(literal);
+
       if (elementType !== undefined && elements !== undefined) {
         return elements.every((element) => isMismatch(elementType.type, element))
           ? { false: true, error: elementType.mayBeMissing }
@@ -780,17 +924,23 @@ function omittedNullComparison(
 ): Outcomes | undefined {
   if (operator !== "eq" && operator !== "ne") return undefined;
   const [field, literal] = isNamedOperand(left) ? [left, right] : [right, left];
+
   if (!isNamedOperand(field) || !isValueOperand(literal) || literal.value !== null) {
     return undefined;
   }
+
   const fieldRef = resolveFieldReference(field.name, context);
   const relations = fieldRef.relations ?? [];
+
   if (relations.some((relation) => relation.type !== "one")) return undefined;
   const convention = fieldRef.nullAttributeRepresentation ?? context.nullRepresentation;
+
   if (convention !== "omitted") return undefined;
   const test = presence(field, fieldRef);
+
   const presenceTest =
     test === undefined ? {} : relations.length > 0 ? { reached: test } : { missing: [test] };
+
   return {
     [operator === "eq" ? "false" : "true"]: true,
     error: true,
@@ -809,23 +959,31 @@ function definite(
 ): Outcomes {
   const missing: PlanExpressionOperand[] = [];
   let unknowable = false;
+
   const visit = (operand: PlanExpressionOperand): void => {
     if (literalValue(operand) !== undefined) return;
+
     // Arithmetic raises the error of any column it reads; another expression's errors are not
     // known here, so its leaf is left as it stands.
     if (isOperatorOperand(operand)) {
       if (ARITHMETIC_OPERATORS.has(operand.operator)) operand.operands.forEach(visit);
       else unknowable = true;
+
       return;
     }
+
     if (!isNamedOperand(operand)) return;
     const fieldRef = resolveFieldReference(operand.name, context);
+
     if (!mayBeMissing(fieldRef)) return;
     const test = presence(operand, fieldRef);
+
     if (test === undefined) unknowable = true;
     else missing.push(test);
   };
+
   operands.forEach(visit);
+
   return {
     [value ? "true" : "false"]: true,
     error: unknowable || missing.length > 0,
@@ -846,6 +1004,7 @@ export function presence(
     operator,
     operands: [column, { value }],
   });
+
   switch (scalarType(fieldRef)) {
     case "string":
       return compare("startsWith", "");
@@ -868,28 +1027,37 @@ function rewriteLiteralLists(
   context: TranslationContext
 ): PlanExpressionOperand {
   const { operator, operands } = expr;
+
   if (operands.length !== 2) return expr;
   const [first, second] = operands as [PlanExpressionOperand, PlanExpressionOperand];
 
   if (operator === "in") {
     const field = operandType(first, context);
+
     if (field === undefined) return expr;
     const pruned = pruneLiteralList(second, field.type);
+
     return pruned === undefined ? expr : { operator, operands: [first, pruned] };
   }
 
   if (operator === "hasIntersection") {
     const leftList = collectionElementType(first, context);
+
     if (leftList !== undefined) {
       const pruned = pruneLiteralList(second, leftList.type);
+
       return pruned === undefined ? expr : { operator, operands: [first, pruned] };
     }
+
     const rightList = collectionElementType(second, context);
+
     if (rightList !== undefined) {
       const pruned = pruneLiteralList(first, rightList.type);
+
       return pruned === undefined ? expr : { operator, operands: [pruned, second] };
     }
   }
+
   return expr;
 }
 
@@ -900,7 +1068,9 @@ function pruneLiteralList(
 ): PlanExpressionOperand | undefined {
   if (!isValueOperand(operand) || !Array.isArray(operand.value)) return undefined;
   const kept = operand.value.filter((element) => !isMismatch(type, element));
+
   if (kept.length === operand.value.length || kept.length === 0) return undefined;
+
   return { value: kept };
 }
 
@@ -910,7 +1080,9 @@ type KnownType = { type: CelType; mayBeMissing: boolean };
 
 function valueType(value: Value): CelType | undefined {
   if (value === null) return "null";
+
   if (Array.isArray(value)) return "list";
+
   switch (typeof value) {
     case "string":
       return "string";
@@ -927,16 +1099,20 @@ function valueType(value: Value): CelType | undefined {
 
 function isMismatch(type: CelType, element: Value): boolean {
   const elementType = valueType(element);
+
   return elementType !== undefined && elementType !== "null" && elementType !== type;
 }
 
 /** The CEL type of a literal operand: a value, or a `list(...)`/`struct(...)` constructor. */
 function literalType(operand: PlanExpressionOperand): CelType | undefined {
   if (isValueOperand(operand)) return valueType(operand.value);
+
   if (isOperatorOperand(operand)) {
     if (operand.operator === "list") return "list";
+
     if (operand.operator === "struct") return "map";
   }
+
   return undefined;
 }
 
@@ -945,20 +1121,26 @@ function literalElements(operand: PlanExpressionOperand): Value[] | undefined {
   if (isValueOperand(operand)) {
     return Array.isArray(operand.value) ? operand.value : undefined;
   }
+
   if (isOperatorOperand(operand) && operand.operator === "list") {
     const elements: Value[] = [];
+
     for (const element of operand.operands) {
       if (isValueOperand(element)) {
         elements.push(element.value);
         continue;
       }
+
       const type = literalType(element);
+
       if (type === "list") elements.push([]);
       else if (type === "map") elements.push({});
       else return undefined;
     }
+
     return elements;
   }
+
   return undefined;
 }
 
@@ -967,14 +1149,20 @@ function operandType(
   context: TranslationContext
 ): KnownType | undefined {
   const literal = literalType(operand);
+
   if (literal !== undefined) return { type: literal, mayBeMissing: false };
+
   if (isOperatorOperand(operand)) return arithmeticType(operand, context);
+
   if (!isNamedOperand(operand)) return undefined;
   const fieldRef = resolveFieldReference(operand.name, context);
   const type = scalarType(fieldRef);
+
   if (type === undefined) return undefined;
+
   // A relation-backed reference that is not a to-one scalar is a collection, not a scalar.
   if (fieldRef.relations?.some((relation) => relation.type !== "one")) return undefined;
+
   return { type, mayBeMissing: mayBeMissing(fieldRef) };
 }
 
@@ -989,10 +1177,13 @@ function arithmeticType(
 ): KnownType | undefined {
   if (!ARITHMETIC_OPERATORS.has(expr.operator) || expr.operands.length !== 2) return undefined;
   const [left, right] = expr.operands.map((operand) => operandType(operand, context));
+
   if (left === undefined || right === undefined || left.type !== right.type) return undefined;
+
   if (left.type !== "number" && (left.type !== "string" || expr.operator !== "add")) {
     return undefined;
   }
+
   return { type: left.type, mayBeMissing: left.mayBeMissing || right.mayBeMissing };
 }
 
@@ -1024,7 +1215,9 @@ function scalarType(fieldRef: ResolvedFieldReference): CelType | undefined {
  */
 function mayBeMissing(fieldRef: ResolvedFieldReference): boolean {
   if (fieldRef.relations?.some((relation) => relation.type === "one")) return true;
+
   if (fieldRef.nullAttributeRepresentation === "explicit") return false;
+
   return fieldRef.nullable !== false;
 }
 
@@ -1039,18 +1232,26 @@ function collectionElementType(
   if (isNamedOperand(operand)) {
     const fieldRef = resolveFieldReference(operand.name, context);
     const relations = fieldRef.relations;
+
     if (!relations || relations.length === 0) return undefined;
     const last = relations[relations.length - 1]!;
+
     if (last.type !== "many" || last.field === undefined) return undefined;
+
     const declared =
       lookupMapping(context.mapper, operand.name)?.valueType ??
       elementFieldValueType(context, operand.name, last.field);
+
     const type = declared && scalarType({ path: [], valueType: declared });
+
     if (type === undefined) return undefined;
+
     return { type, mayBeMissing: relations.some((relation) => relation.type === "one") };
   }
+
   if (isOperatorOperand(operand) && operand.operator === "map") {
     const [collection, lambda] = operand.operands;
+
     if (
       collection === undefined ||
       !isNamedOperand(collection) ||
@@ -1060,7 +1261,9 @@ function collectionElementType(
     ) {
       return undefined;
     }
+
     const [projection, variable] = lambda.operands;
+
     if (
       projection === undefined ||
       !isNamedOperand(projection) ||
@@ -1069,13 +1272,18 @@ function collectionElementType(
     ) {
       return undefined;
     }
+
     const scoped = scopedContext(context, collection.name, variable.name);
+
     if (scoped === undefined) return undefined;
     const type = scalarType(resolveFieldReference(projection.name, scoped));
+
     if (type === undefined) return undefined;
+
     // A projected element column can be missing on an element, which errors the whole map().
     return { type, mayBeMissing: true };
   }
+
   return undefined;
 }
 
@@ -1086,5 +1294,6 @@ function elementFieldValueType(
   field: string
 ): MapperConfig["valueType"] {
   const relation = lookupMapping(context.mapper, reference)?.relation;
+
   return relation?.fields?.[field]?.valueType;
 }

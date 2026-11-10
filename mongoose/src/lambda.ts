@@ -35,8 +35,10 @@ export const substituteLambdaVariable = (
     if (operand.name === variableName) {
       return { value: element };
     }
+
     if (operand.name.startsWith(`${variableName}.`)) {
       let current: Value = element;
+
       for (const segment of operand.name
         .slice(variableName.length + 1)
         .split(".")) {
@@ -50,10 +52,13 @@ export const substituteLambdaVariable = (
             `Cannot resolve "${operand.name}": collection element has no field "${segment}"`,
           );
         }
+
         current = current[segment] as Value;
       }
+
       return { value: current };
     }
+
     return operand;
   }
 
@@ -63,6 +68,7 @@ export const substituteLambdaVariable = (
       operand.operands.length === 2
     ) {
       const [nestedCollection, nestedLambda] = operand.operands;
+
       if (
         nestedCollection !== undefined &&
         nestedLambda !== undefined &&
@@ -70,6 +76,7 @@ export const substituteLambdaVariable = (
         nestedLambda.operator === "lambda"
       ) {
         const nestedVariable = nestedLambda.operands[1];
+
         if (
           nestedVariable !== undefined &&
           isVariable(nestedVariable) &&
@@ -87,6 +94,7 @@ export const substituteLambdaVariable = (
         }
       }
     }
+
     return {
       operator: operand.operator,
       operands: operand.operands.map((o) =>
@@ -97,6 +105,7 @@ export const substituteLambdaVariable = (
 
   return operand;
 };
+
 /**
  * Fold a collection macro whose collection operand is a literal value list.
  *
@@ -127,6 +136,7 @@ export const foldLiteralCollection = (
   }
 
   const elements = collection.value;
+
   if (!Array.isArray(elements)) {
     throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection requires a list value`,
@@ -138,6 +148,7 @@ export const foldLiteralCollection = (
       `Second operand of ${operator} must be a lambda expression`,
     );
   }
+
   if (lambda.operands.length !== 2) {
     throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection supports single-variable lambdas only`,
@@ -149,11 +160,13 @@ export const foldLiteralCollection = (
     0,
     "Lambda expression must provide a condition",
   );
+
   const variable = getOperandAt(
     lambda.operands,
     1,
     "Lambda variable must have a name",
   );
+
   if (!isVariable(variable)) {
     throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
@@ -171,6 +184,7 @@ export const foldLiteralCollection = (
   const bodies = elements.map((element) =>
     substituteLambdaVariable(body, variable.name, element),
   );
+
   if (operator === "exists_one") {
     // "Exactly one element matches" is "some element matches and every other does not",
     // duplicates included. An element whose body errors makes CEL's count an error, and each
@@ -180,12 +194,15 @@ export const foldLiteralCollection = (
       const others = bodies
         .filter((_, otherIndex) => otherIndex !== index)
         .map((negative) => translate({ operator: "not", operands: [negative] }));
+
       return others.length === 0
         ? translate(positive)
         : { $and: [translate(positive), ...others] };
     });
+
     return filters.length === 1 ? filters[0]! : { $or: filters };
   }
+
   const filters = bodies.map(translate);
 
   return operator === "exists" ? { $or: filters } : { $and: filters };

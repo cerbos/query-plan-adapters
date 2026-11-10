@@ -137,6 +137,7 @@ const buildFilters = (
   ) {
     const pushable: PlanExpressionOperand[] = [];
     const nonPushable: PlanExpressionOperand[] = [];
+
     for (const op of expression.operands) {
       (canPushToDb(op, mapper) ? pushable : nonPushable).push(op);
     }
@@ -194,9 +195,11 @@ export function queryPlanToConvex({
       const { condition } = queryPlan;
       const omitted = nullAttributeRepresentation === "omitted";
       assertNoListValuedCondition(condition);
+
       if (omitted) {
         assertNoNullComparisonOperands(condition);
       }
+
       validateStructure(condition);
       assertEveryReferenceMapped(condition, mapper);
 
@@ -205,6 +208,7 @@ export function queryPlanToConvex({
         omitted ? withOmittedNullDefault(mapper) : mapper,
         omitted,
       );
+
       if (result.path !== "db" && !allowPostFilter) {
         throw new Error(
           "The query plan contains conditions that cannot be evaluated by Convex's " +
@@ -213,8 +217,10 @@ export function queryPlanToConvex({
             "{ allowPostFilter: true } to opt in to this behavior.",
         );
       }
+
       return result;
     }
+
     default:
       throw new UnsupportedQueryPlanError("Invalid query plan.");
   }

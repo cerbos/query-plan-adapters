@@ -50,11 +50,13 @@ async function translate(
 describe("the refusal type", () => {
   test("an untranslatable shape raises UnsupportedQueryPlanError, which is an Error", async () => {
     let raised: unknown;
+
     try {
       await translate("collection/index/first-element-of-string-list");
     } catch (error) {
       raised = error;
     }
+
     expect(raised).toBeInstanceOf(UnsupportedQueryPlanError);
     expect(raised).toBeInstanceOf(Error);
     expect((raised as Error).name).toBe("UnsupportedQueryPlanError");
@@ -63,11 +65,13 @@ describe("the refusal type", () => {
   test("mapper misconfiguration is a plain Error, not a refusal", async () => {
     const queryPlan = await planFor("comparison/equals/field-to-field");
     let raised: unknown;
+
     try {
       queryPlanToPrisma({ queryPlan, mapper: MAPPER });
     } catch (error) {
       raised = error;
     }
+
     expect(raised).toBeInstanceOf(Error);
     expect(raised).not.toBeInstanceOf(UnsupportedQueryPlanError);
     expect((raised as Error).message).toContain("requires the `model` option");
@@ -91,6 +95,7 @@ describe("declared scalar types", () => {
 const UNDECLARED: Record<string, MapperConfig> = Object.fromEntries(
   Object.entries(MAPPER).map(([reference, config]) => {
     const { nullAttributeRepresentation: _stripped, ...rest } = config;
+
     return [reference, rest];
   })
 );
@@ -99,10 +104,13 @@ const UNDECLARED: Record<string, MapperConfig> = Object.fromEntries(
 function carriesNullLiteral(node: unknown): boolean {
   if (typeof node !== "object" || node === null) return false;
   const record = node as Record<string, unknown>;
+
   if ("value" in record) {
     const value = record["value"];
+
     return value === null || (Array.isArray(value) && value.includes(null));
   }
+
   return Object.values(record).some((child) =>
     Array.isArray(child) ? child.some(carriesNullLiteral) : carriesNullLiteral(child)
   );
@@ -168,6 +176,7 @@ describe("nullAttributeRepresentation", () => {
     expect(ids).toContain("null/has-intersection/literal-list-with-null-element");
 
     const plans = await Promise.all(carrying.map((golden) => planOf(golden)));
+
     const notRejected = carrying.flatMap((golden, index) => {
       try {
         const result = queryPlanToPrisma({
@@ -176,6 +185,7 @@ describe("nullAttributeRepresentation", () => {
           model: MODEL,
           nullAttributeRepresentation: "omitted",
         });
+
         return result.kind === PlanKind.CONDITIONAL && JSON.stringify(result.filters).includes("null")
           ? [golden.id]
           : [];
@@ -186,6 +196,7 @@ describe("nullAttributeRepresentation", () => {
         // is an `in` over a computed member. A null arithmetic operand has no CEL overload, so its
         // fold is refused under either.
         const message = String(error);
+
         return message.includes("missing-attribute error") ||
           message.includes("Unsupported operator: index") ||
           message.includes("in requires a field member and literal list") ||
@@ -196,6 +207,7 @@ describe("nullAttributeRepresentation", () => {
           : [`${golden.id} (${message})`];
       }
     });
+
     expect(notRejected).toEqual([]);
   });
 });
@@ -210,6 +222,7 @@ describe("reentrant function mappers", () => {
     const expected = await translate(action, { mapper: UNDECLARED });
     const nested = await planFor("arithmetic/add/field-plus-constant");
     let calls = 0;
+
     const mapper: Mapper = (key) => {
       calls++;
       queryPlanToPrisma({
@@ -218,8 +231,10 @@ describe("reentrant function mappers", () => {
         model: "NestedModel",
         nullAttributeRepresentation: "omitted",
       });
+
       return UNDECLARED[key] ?? { field: key };
     };
+
     expect(await translate(action, { mapper })).toStrictEqual(expected);
     expect(calls).toBeGreaterThan(0);
   });
@@ -253,11 +268,13 @@ test("an unplannable nested map does not register nullable fields on the outer l
       },
     ],
   };
+
   const result = queryPlanToPrisma({
     queryPlan: { ...(await planFor("collection/all/empty-collection")), kind: PlanKind.CONDITIONAL, condition },
     mapper: MAPPER,
     model: MODEL,
   });
+
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
     filters: { tags: { none: {} } },
@@ -332,9 +349,11 @@ describe("relation subqueryFilter", () => {
 
   const filtersFor = async (action: string, subqueryFilter?: PrismaFilter) => {
     const result = await translate(action, { mapper: mapperFor(subqueryFilter) });
+
     if (result.kind !== PlanKind.CONDITIONAL) {
       throw new Error(`Expected CONDITIONAL result for ${action}`);
     }
+
     return result.filters;
   };
 
@@ -381,6 +400,7 @@ describe("the mapper contract", () => {
       const result = await translate("hierarchy/overlaps/path-built-from-list-value-first", {
         mapper: { "request.resource.attr.scope": { field: "scope", nullable } },
       });
+
       expect(result).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters:
@@ -412,9 +432,11 @@ describe("the mapper contract", () => {
     "%s resolves a projection supplied through a prefix mapper",
     async (action) => {
       const direct = await translate(action);
+
       if (direct.kind !== PlanKind.CONDITIONAL) {
         throw new Error("Expected a conditional projection plan");
       }
+
       const mapper: Mapper = {
         "request.resource.attr": {
           relation: {
@@ -428,6 +450,7 @@ describe("the mapper contract", () => {
           },
         },
       };
+
       expect(await translate(action, { mapper })).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters: { categories: { some: direct.filters } },
@@ -441,9 +464,11 @@ describe("the mapper contract", () => {
     // negation would match every row where CEL's `!true` matches none; the adapter has no
     // field-free false condition to emit instead (cerbos/query-plan-adapters#495).
     const fixture = await planFor("hierarchy/overlaps/path-built-from-list-value-first");
+
     if (fixture.kind !== PlanKind.CONDITIONAL) {
       throw new Error("Expected a conditional hierarchy plan");
     }
+
     expect(() =>
       queryPlanToPrisma({
         queryPlan: {
@@ -467,7 +492,9 @@ describe("the mapper contract", () => {
         { tags: { none: { name: null } } },
       ],
     };
+
     const unguarded = { tags: { every: { name: { equals: "public" } } } };
+
     const allFor = (fields?: Record<string, MapperConfig>) =>
       translate("collection/all/empty-collection", {
         mapper: {
@@ -510,12 +537,14 @@ describe("which patterns RE2 rejects", () => {
       operator: "matches",
       operands: [{ name: "request.resource.attr.aString" }, { value: pattern }],
     };
+
     const condition = sibling
       ? {
           operator: "or",
           operands: [test, { operator: "eq", operands: [{ name: "request.resource.attr.aNumber" }, { value: 5 }] }],
         }
       : test;
+
     return {
       kind: PlanKind.CONDITIONAL,
       condition: condition as PlanExpressionOperand,
@@ -537,6 +566,7 @@ describe("which patterns RE2 rejects", () => {
       mapper: MAPPER,
       model: MODEL,
     });
+
     expect(result).toEqual({ kind: PlanKind.CONDITIONAL, filters: { aNumber: { equals: 5 } } });
     expect(queryPlanToPrisma({ queryPlan: matches("\\8"), mapper: MAPPER, model: MODEL })).toEqual({
       kind: PlanKind.ALWAYS_DENIED,

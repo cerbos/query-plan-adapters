@@ -9,8 +9,10 @@ import { UnsupportedQueryPlanError } from "./errors";
 
 export const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
   "operator" in e;
+
 export const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
   "value" in e;
+
 export const isVariable = (
   e: PlanExpressionOperand,
 ): e is PlanExpressionVariable => "name" in e;
@@ -21,9 +23,11 @@ export const getOperandAt = (
   errorMessage: string,
 ): PlanExpressionOperand => {
   const operand = operands[index];
+
   if (!operand) {
     throw new UnsupportedQueryPlanError(errorMessage);
   }
+
   return operand;
 };
 
@@ -34,9 +38,11 @@ export const collectVariableNames = (
   if (isVariable(operand)) {
     return [operand.name];
   }
+
   if (isExpression(operand)) {
     return operand.operands.flatMap(collectVariableNames);
   }
+
   return [];
 };
 

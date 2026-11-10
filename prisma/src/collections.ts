@@ -107,6 +107,7 @@ function foldKnownValueCollection(
   }
 
   const elements = collection.value;
+
   if (!Array.isArray(elements)) {
     throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection requires a list value`
@@ -118,6 +119,7 @@ function foldKnownValueCollection(
       `Second operand of ${operator} must be a lambda expression`
     );
   }
+
   if (lambda.operands.length !== 2) {
     throw new UnsupportedQueryPlanError(
       `${operator} over a literal collection supports single-variable lambdas only`
@@ -128,22 +130,26 @@ function foldKnownValueCollection(
     lambda.operands[0],
     "Lambda expression must provide a condition"
   );
+
   const variable = assertDefined(
     lambda.operands[1],
     "Lambda variable must have a name"
   );
+
   if (!isNamedOperand(variable)) {
     throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   const filters = elements.map((element) => {
     const substituted = substituteLambdaVariable(body, variable.name, element);
+
     return negated
       ? buildNegatedFilter(substituted, context)
       : buildPrismaFilterFromCerbosExpression(substituted, context);
   });
 
   const combinesWithOr = operator === "exists" ? !negated : negated;
+
   return combinesWithOr ? { OR: filters } : { AND: filters };
 }
 
@@ -173,6 +179,7 @@ function buildCollectionLambdaParts(
     operands[0],
     `${operator} requires a collection operand`
   );
+
   const lambda = assertDefined(
     operands[1],
     `${operator} requires a lambda operand`
@@ -189,20 +196,24 @@ function buildCollectionLambdaParts(
       `Second operand of ${operator} must be a lambda expression`
     );
   }
+
   assertSingleVariableLambda(operator, lambda);
 
   const variable = assertDefined(
     lambda.operands[1],
     "Lambda variable must have a name"
   );
+
   if (!isNamedOperand(variable)) {
     throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   const { relations } = resolveFieldReference(collection.name, context);
+
   if (!relations || relations.length === 0) {
     throw new UnsupportedQueryPlanError(`${operator} operator requires a relation mapping`);
   }
+
   if (relations[relations.length - 1]!.type === "one") {
     // CEL reads a to-one relation as a map, and a macro over a map ranges over its KEYS — the
     // attribute names present on the related row — which no Prisma relation filter enumerates.
@@ -212,6 +223,7 @@ function buildCollectionLambdaParts(
         "and a Prisma relation filter tests rows, not attribute names"
     );
   }
+
   const head = relations[0]!;
   const restRelations = relations.slice(1);
 
@@ -221,6 +233,7 @@ function buildCollectionLambdaParts(
   );
 
   const scope = newLambdaScope(variable.name, relations);
+
   const lambdaCondition = buildPrismaFilterFromCerbosExpression(
     lambdaConditionOperand,
     enterLambdaScope(context, collection.name, scope)
@@ -242,12 +255,15 @@ function buildUnknownElementFilter(
   parts: CollectionLambdaParts
 ): PrismaFilter | undefined {
   const filters = [...parts.unknownFilters];
+
   if (parts.nullableFields.size > 0) {
     filters.push(buildNullWitnessFilter(parts.nullableFields));
   }
+
   if (filters.length === 0) {
     return undefined;
   }
+
   return filters.length === 1 ? filters[0] : { OR: filters };
 }
 
@@ -270,6 +286,7 @@ function wrapCollectionElementFilter(
  */
 function positiveChainAllFilter(parts: CollectionLambdaParts): PrismaFilter {
   let universal = parts.elementFilter;
+
   for (const relation of [...parts.restRelations].reverse()) {
     universal = relationFilter(
       relation,
@@ -277,16 +294,19 @@ function positiveChainAllFilter(parts: CollectionLambdaParts): PrismaFilter {
       universal
     );
   }
+
   const filters = [
     buildLeadingHopsExistFilter(parts.head, parts.restRelations)!,
     relationFilter(parts.head, "every", universal),
   ];
+
   if (parts.nullableFields.size > 0) {
     // As for a direct relation: an element whose referenced column is NULL errors in CEL.
     filters.push({
       NOT: wrapCollectionElementFilter(parts, buildNullWitnessFilter(parts.nullableFields)),
     });
   }
+
   return { AND: filters };
 }
 
@@ -298,6 +318,7 @@ function excludeNullElements(
   if (parts.nullableFields.size === 0) {
     return base;
   }
+
   return {
     AND: [
       base,
@@ -312,6 +333,7 @@ function positiveCollectionFilter(
   context: TranslationContext
 ): PrismaFilter {
   const { head, filterValue } = parts;
+
   switch (operator) {
     case "exists": {
       // A NULL element keeps the per-element predicate UNKNOWN, so it can never create a
@@ -319,6 +341,7 @@ function positiveCollectionFilter(
       // An enclosing macro still needs to know when this one is UNKNOWN, so it is recorded.
       const filter = relationFilter(head, "some", filterValue);
       const unknownElement = buildUnknownElementFilter(parts);
+
       if (unknownElement !== undefined) {
         currentScope(context)?.unknownFilters.push({
           AND: [
@@ -327,14 +350,17 @@ function positiveCollectionFilter(
           ],
         });
       }
+
       return filter;
     }
+
     case "except":
       return relationFilter(head, "some", negateFilter(filterValue));
     case "all":
       if (parts.restRelations.length > 0) {
         return positiveChainAllFilter(parts);
       }
+
       // CEL all() errors when any element evaluation errors without a false witness; SQL
       // `every` would treat those elements as vacuously passing. Exclude rows holding any
       // element whose referenced nullable column is NULL. (`every` already rejects rows
@@ -354,12 +380,14 @@ function negatedCollectionFilter(
   parts: CollectionLambdaParts
 ): PrismaFilter {
   const { head, filterValue } = parts;
+
   // An absent to-one parent must stay denied under negation rather than satisfying it
   // vacuously (#309).
   const leadingHopsExist = buildLeadingHopsExistFilter(
     head,
     parts.restRelations
   );
+
   const requireLeadingHops = (filter: PrismaFilter): PrismaFilter =>
     leadingHopsExist === undefined
       ? filter
@@ -370,16 +398,20 @@ function negatedCollectionFilter(
       const base = requireLeadingHops({
         NOT: relationFilter(head, "some", filterValue),
       });
+
       const unknownElement = buildUnknownElementFilter(parts);
+
       if (unknownElement === undefined) {
         return base;
       }
+
       // !exists is TRUE only when every element is definitively false: no P-match AND no
       // element whose evaluation is UNKNOWN (NULL column = missing attribute = CEL error).
       return {
         AND: [base, { NOT: wrapCollectionElementFilter(parts, unknownElement) }],
       };
     }
+
     case "all":
       // !all is TRUE only with a definitive false witness, which also absorbs error
       // elements — exactly `some(NOT P)` in SQL (NULL columns keep NOT P UNKNOWN). Over a chain
@@ -407,6 +439,7 @@ function translateCollectionMacro(
   // collection (more than 10 elements). Fold it before attempting relation resolution because
   // there is no relation mapping for a literal.
   const [collection, lambda] = operands;
+
   if (
     operands.length === 2 &&
     collection !== undefined &&
@@ -421,6 +454,7 @@ function translateCollectionMacro(
       "exists_one requires counting matching elements, which Prisma where-filters cannot express"
     );
   }
+
   if (operator === "filter") {
     throw new UnsupportedQueryPlanError(
       "The filter() collection operator returns a list, not a boolean. " +
@@ -430,6 +464,7 @@ function translateCollectionMacro(
   }
 
   const parts = buildCollectionLambdaParts(operator, operands, context);
+
   return negated
     ? negatedCollectionFilter(operator, parts)
     : positiveCollectionFilter(operator, parts, context);
@@ -468,6 +503,7 @@ export function handleMapOperator(
     operands[0],
     "map requires a collection operand"
   );
+
   const lambda = assertDefined(operands[1], "map requires a lambda operand");
 
   if (!isNamedOperand(collection)) {
@@ -477,21 +513,25 @@ export function handleMapOperator(
   if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
     throw new UnsupportedQueryPlanError("Second operand of map must be a lambda expression");
   }
+
   assertSingleVariableLambda("map", lambda);
 
   const projection = assertDefined(
     lambda.operands[0],
     "Map lambda expression must provide a projection"
   );
+
   const variable = assertDefined(
     lambda.operands[1],
     "Map lambda expression must provide a variable"
   );
+
   if (!isNamedOperand(projection) || !isNamedOperand(variable)) {
     throw new UnsupportedQueryPlanError("Invalid map lambda expression structure");
   }
 
   const { relations } = resolveFieldReference(collection.name, context);
+
   if (!relations || relations.length === 0) {
     throw new UnsupportedQueryPlanError("map operator requires a relation mapping");
   }
@@ -501,6 +541,7 @@ export function handleMapOperator(
     collection.name,
     newLambdaScope(variable.name, relations)
   );
+
   const resolved = resolveFieldReference(projection.name, scopedContext);
   const fieldName = getLeafField(resolved.path);
   const lastRelation = relations[relations.length - 1]!;
@@ -532,6 +573,7 @@ export function handleHasIntersectionOperator(
     operands[0],
     "hasIntersection requires a left operand"
   );
+
   const rightOperand = assertDefined(
     operands[1],
     "hasIntersection requires a right operand"
@@ -573,6 +615,7 @@ export function handleHasIntersectionOperator(
       "hasIntersection over a scalar attribute is a CEL error, which a Prisma filter cannot express"
     );
   }
+
   return { [getLeafField(fieldRef.path)]: { some: rightOperand.value } };
 }
 
@@ -590,6 +633,7 @@ function handleMapIntersection(
     mapOperands[0],
     "Map expression must include a collection reference"
   );
+
   const lambda = assertDefined(
     mapOperands[1],
     "Map expression must include a lambda expression"
@@ -602,17 +646,20 @@ function handleMapIntersection(
   if (!isOperatorOperand(lambda)) {
     throw new UnsupportedQueryPlanError("Lambda expression must have operands");
   }
+
   assertSingleVariableLambda("map", lambda);
 
   const variable = assertDefined(
     lambda.operands[1],
     "Lambda variable must have a name"
   );
+
   if (!isNamedOperand(variable)) {
     throw new UnsupportedQueryPlanError("Lambda variable must have a name");
   }
 
   const { relations } = resolveFieldReference(collection.name, context);
+
   if (!relations || relations.length === 0) {
     throw new UnsupportedQueryPlanError("Map operation requires relations");
   }
@@ -621,20 +668,24 @@ function handleMapIntersection(
     lambda.operands[0],
     "Invalid map lambda expression structure"
   );
+
   if (!isNamedOperand(projection)) {
     throw new UnsupportedQueryPlanError("Invalid map lambda expression structure");
   }
 
   // Resolve the projection through the scoped mapper, collecting nullable element columns.
   const scope = newLambdaScope(variable.name, relations);
+
   const resolved = resolveFieldReference(
     projection.name,
     enterLambdaScope(context, collection.name, scope)
   );
+
   const fieldName = getLeafField(resolved.path);
 
   if (!Array.isArray(rightOperand.value))
     throw new UnsupportedQueryPlanError("hasIntersection requires a literal list");
+
   const base = wrapInRelations(
     relations,
     buildMembershipFilter(
@@ -643,9 +694,11 @@ function handleMapIntersection(
       rightOperand.value
     )
   );
+
   if (scope.nullableFields.size === 0) {
     return base;
   }
+
   // CEL map() errors if ANY element is missing the projected attribute — even alongside a
   // matching element — and Cerbos treats that error as deny. Exclude rows holding an
   // element whose projected (nullable) column is NULL.
@@ -668,6 +721,7 @@ export function handleLambdaOperator(
     operands[0],
     "Lambda requires a condition operand"
   );
+
   const variable = assertDefined(
     operands[1],
     "Lambda requires a variable operand"

@@ -22,10 +22,12 @@ export function rewriteFunctionCalls(
   context: TranslationContext
 ): PlanExpressionOperand {
   if (!isOperatorOperand(expr)) return expr;
+
   const node: OperatorOperand = {
     operator: expr.operator,
     operands: expr.operands.map((operand) => rewriteFunctionCalls(operand, context)),
   };
+
   return (
     constantPresence(node, context) ??
     memberRead(node, context) ??
@@ -69,6 +71,7 @@ function memberRead(
 ): PlanExpressionOperand | undefined {
   if (node.operator !== "index" || node.operands.length !== 2) return undefined;
   const [subject, key] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (
     !isNamedOperand(subject) ||
     !isValueOperand(key) ||
@@ -78,8 +81,11 @@ function memberRead(
   ) {
     return undefined;
   }
+
   const { relations } = resolveFieldReference(subject.name, context);
+
   if (relations?.some((relation) => relation.type === "many")) return undefined;
+
   return { name: `${subject.name}.${key.value}` };
 }
 
@@ -96,14 +102,18 @@ function keyTest(
 ): PlanExpressionOperand | undefined {
   let map: NamedOperand;
   let keys: string[];
+
   if (node.operator === "in" && node.operands.length === 2) {
     const [key, container] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
     if (!isNamedOperand(container) || !isValueOperand(key) || typeof key.value !== "string") {
       return undefined;
     }
+
     [map, keys] = [container, [key.value]];
   } else if (node.operator === "exists" && node.operands.length === 2) {
     const [container, lambda] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
     if (
       !isNamedOperand(container) ||
       !isOperatorOperand(lambda) ||
@@ -112,21 +122,28 @@ function keyTest(
     ) {
       return undefined;
     }
+
     const [body, variable] = lambda.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
     if (!isNamedOperand(variable)) return undefined;
     const tested = keysTested(body, variable.name);
+
     if (tested === undefined) return undefined;
     [map, keys] = [container, tested];
   } else {
     return undefined;
   }
+
   if (!namesToOneRelation(context.mapper, map.name)) return undefined;
   const declared = lookupElementFields(context.mapper, map.name);
+
   if (declared === undefined || !keys.every((key) => key in declared)) return undefined;
+
   const tests: PlanExpressionOperand[] = keys.map((key) => ({
     operator: "has",
     operands: [{ name: `${map.name}.${key}` }],
   }));
+
   return tests.length === 1 ? tests[0]! : { operator: "or", operands: tests };
 }
 
@@ -134,18 +151,24 @@ function keyTest(
 function keysTested(body: PlanExpressionOperand, variable: string): string[] | undefined {
   if (!isOperatorOperand(body) || body.operands.length !== 2) return undefined;
   const [first, second] = body.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   const isVariable = (operand: PlanExpressionOperand): boolean =>
     isNamedOperand(operand) && operand.name === variable;
+
   if (body.operator === "eq") {
     const literal = isVariable(first) ? second : isVariable(second) ? first : undefined;
+
     return literal !== undefined && isValueOperand(literal) && typeof literal.value === "string"
       ? [literal.value]
       : undefined;
   }
+
   if (body.operator === "in" && isVariable(first)) {
     const values = literalList(second);
+
     return values?.every((value) => typeof value === "string") ? (values as string[]) : undefined;
   }
+
   return undefined;
 }
 
@@ -159,26 +182,34 @@ function emptinessComparison(node: OperatorOperand): PlanExpressionOperand | und
   if ((node.operator !== "eq" && node.operator !== "ne") || node.operands.length !== 2) {
     return undefined;
   }
+
   const [first, second] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
   const [call, other] = isListFunction(first) ? [first, second] : [second, first];
+
   if (!isListFunction(call) || literalList(other)?.length !== 0) return undefined;
 
   let [collection, literals] = call.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   // intersect() is symmetric in which elements it shares, so emptiness is too.
   if (call.operator === "intersect" && !isNamedOperand(collection)) {
     [collection, literals] = [literals, collection];
   }
+
   const values = literalList(literals);
+
   if (!isNamedOperand(collection) || values === undefined) return undefined;
 
   const member: PlanExpressionOperand = { operator: "in", operands: [ELEMENT, { value: values }] };
   const isEmpty = node.operator === "eq";
+
   if (call.operator === "except") {
     return isEmpty
       ? macro("all", collection, member, ELEMENT)
       : macro("exists", collection, not(member), ELEMENT);
   }
+
   const shared = macro("exists", collection, member, ELEMENT);
+
   return isEmpty ? not(shared) : shared;
 }
 
@@ -196,6 +227,7 @@ function subsetTest(node: OperatorOperand): PlanExpressionOperand | undefined {
   const [subset, superset] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
   const subsetValues = literalList(subset);
   const supersetValues = literalList(superset);
+
   if (isNamedOperand(subset) && supersetValues !== undefined) {
     return macro(
       "all",
@@ -204,6 +236,7 @@ function subsetTest(node: OperatorOperand): PlanExpressionOperand | undefined {
       ELEMENT
     );
   }
+
   if (subsetValues !== undefined && isNamedOperand(superset)) {
     return macro(
       "all",
@@ -212,6 +245,7 @@ function subsetTest(node: OperatorOperand): PlanExpressionOperand | undefined {
       ELEMENT
     );
   }
+
   return undefined;
 }
 
@@ -228,6 +262,7 @@ function membershipOfDerivedList(
 ): PlanExpressionOperand | undefined {
   if (node.operator !== "in" || node.operands.length !== 2) return undefined;
   const [member, list] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (
     !isValueOperand(member) ||
     !isOperatorOperand(list) ||
@@ -236,7 +271,9 @@ function membershipOfDerivedList(
   ) {
     return undefined;
   }
+
   const [collection, lambda] = list.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (
     !isNamedOperand(collection) ||
     !isOperatorOperand(lambda) ||
@@ -245,15 +282,19 @@ function membershipOfDerivedList(
   ) {
     return undefined;
   }
+
   const [body, variable] = lambda.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (!isNamedOperand(variable)) return undefined;
 
   const evaluates = (predicate: PlanExpressionOperand): OperatorOperand => ({
     operator: "or",
     operands: [predicate, not(predicate)],
   });
+
   if (list.operator === "map") {
     const matches: PlanExpressionOperand = { operator: "eq", operands: [body, member] };
+
     return {
       operator: "and",
       operands: [
@@ -262,10 +303,13 @@ function membershipOfDerivedList(
       ],
     };
   }
+
   // filter() keeps the element itself, which only a projected scalar list can compare with a
   // literal; the element of a list of related rows is an object.
   const { relations } = resolveFieldReference(collection.name, context);
+
   if (relations?.[relations.length - 1]?.field === undefined) return undefined;
+
   return {
     operator: "and",
     operands: [
@@ -290,9 +334,12 @@ function membershipOfDerivedList(
 function intersectionWithMappedList(node: OperatorOperand): PlanExpressionOperand | undefined {
   if (node.operator !== "hasIntersection" || node.operands.length !== 2) return undefined;
   const [first, second] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   const [mapped, literals] =
     isOperatorOperand(first) && first.operator === "map" ? [first, second] : [second, first];
+
   const values = literalList(literals);
+
   if (
     values === undefined ||
     !isOperatorOperand(mapped) ||
@@ -301,7 +348,9 @@ function intersectionWithMappedList(node: OperatorOperand): PlanExpressionOperan
   ) {
     return undefined;
   }
+
   const [collection, lambda] = mapped.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (
     !isNamedOperand(collection) ||
     !isOperatorOperand(lambda) ||
@@ -310,12 +359,16 @@ function intersectionWithMappedList(node: OperatorOperand): PlanExpressionOperan
   ) {
     return undefined;
   }
+
   const [projection, variable] = lambda.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (!isNamedOperand(variable)) return undefined;
+
   const shared: PlanExpressionOperand = {
     operator: "in",
     operands: [projection, { value: values }],
   };
+
   return {
     operator: "and",
     operands: [
@@ -335,36 +388,47 @@ function hoistTernaryFromConcatenation(
   node: OperatorOperand
 ): PlanExpressionOperand | undefined {
   if (node.operator !== "add" || node.operands.length !== 2) return undefined;
+
   const index = node.operands.findIndex(
     (operand) => isOperatorOperand(operand) && operand.operator === "if"
   );
+
   if (index === -1) return undefined;
   const ternary = node.operands[index] as OperatorOperand;
   const other = node.operands[1 - index]!;
+
   if (ternary.operands.length !== 3) return undefined;
+
   const [condition, thenBranch, elseBranch] = ternary.operands as [
     PlanExpressionOperand,
     PlanExpressionOperand,
     PlanExpressionOperand,
   ];
+
   const lists = [other, thenBranch, elseBranch].map(constantList);
+
   if (lists.some((list) => list === undefined)) return undefined;
+
   const [otherList, thenList, elseList] = lists as [
     PlanExpressionOperand,
     PlanExpressionOperand,
     PlanExpressionOperand,
   ];
+
   const place = (branch: PlanExpressionOperand): OperatorOperand => ({
     operator: "add",
     operands: index === 0 ? [branch, otherList] : [otherList, branch],
   });
+
   return { operator: "if", operands: [condition, place(thenList), place(elseList)] };
 }
 
 /** A literal list as a value operand, or a concatenation of literal lists left for the folder. */
 function constantList(operand: PlanExpressionOperand): PlanExpressionOperand | undefined {
   const literal = literalList(operand);
+
   if (literal !== undefined) return { value: literal };
+
   if (
     isOperatorOperand(operand) &&
     operand.operator === "add" &&
@@ -373,6 +437,7 @@ function constantList(operand: PlanExpressionOperand): PlanExpressionOperand | u
   ) {
     return { operator: "add", operands: operand.operands.map((part) => constantList(part)!) };
   }
+
   return undefined;
 }
 
@@ -392,41 +457,56 @@ function macroOverConstructedList(
   if ((node.operator !== "exists" && node.operator !== "all") || node.operands.length !== 2) {
     return undefined;
   }
+
   const [list, lambda] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (!isOperatorOperand(list) || list.operator !== "list" || literalList(list) !== undefined) {
     return undefined;
   }
+
   if (!isOperatorOperand(lambda) || lambda.operator !== "lambda" || lambda.operands.length !== 2) {
     return undefined;
   }
+
   const [body, variable] = lambda.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (!isNamedOperand(variable)) return undefined;
 
   const presences: PlanExpressionOperand[] = [];
+
   for (const element of list.operands) {
     if (literalValue(element) !== undefined) continue;
+
     if (!isNamedOperand(element)) return undefined;
     const fieldRef = resolveFieldReference(element.name, context);
+
     if ((fieldRef.relations?.length ?? 0) > 0) return undefined;
     // An explicit null is a value, which builds the list like any other.
     const convention = fieldRef.nullAttributeRepresentation ?? context.nullRepresentation;
+
     if (convention === "explicit") continue;
     const test = presence(element, fieldRef);
+
     if (test === undefined) return undefined;
     presences.push(test);
   }
 
   const bodies: PlanExpressionOperand[] = [];
+
   for (const element of list.operands) {
     const substituted = substituteElement(body, variable.name, element);
+
     if (substituted === undefined) return undefined;
     bodies.push(substituted);
   }
+
   const core: PlanExpressionOperand =
     bodies.length === 1
       ? bodies[0]!
       : { operator: node.operator === "exists" ? "or" : "and", operands: bodies };
+
   if (presences.length === 0) return core;
+
   return {
     operator: "and",
     operands: [...presences, { operator: "or", operands: [core, ...presences.map(not)] }],
@@ -444,22 +524,30 @@ function substituteElement(
 ): PlanExpressionOperand | undefined {
   if (isNamedOperand(expr)) {
     if (expr.name !== name && !expr.name.startsWith(`${name}.`)) return expr;
+
     if (isNamedOperand(element)) return { name: element.name + expr.name.slice(name.length) };
     const value = literalValue(element);
+
     return value === undefined ? undefined : substituteLambdaVariable(expr, name, value);
   }
+
   if (!isOperatorOperand(expr)) return expr;
+
   if (
     expr.operator === "lambda" &&
     expr.operands.slice(1).some((bound) => isNamedOperand(bound) && bound.name === name)
   ) {
     return undefined;
   }
+
   const operands: PlanExpressionOperand[] = [];
+
   for (const operand of expr.operands) {
     const substituted = substituteElement(operand, name, element);
+
     if (substituted === undefined) return undefined;
     operands.push(substituted);
   }
+
   return { operator: expr.operator, operands };
 }

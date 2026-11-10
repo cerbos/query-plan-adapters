@@ -27,16 +27,21 @@ export const buildGuardedFieldFilter = (
   requireExists = false,
 ): MongooseFilter => {
   const filter = buildFieldFilter(path, value);
+
   if (!nullable && !requireExists) {
     return filter;
   }
+
   const guards: MongooseFilter[] = [];
+
   if (requireExists) {
     guards.push(buildFieldFilter(path, { $exists: true }));
   }
+
   if (nullable) {
     guards.push(buildFieldFilter(path, { $ne: null }));
   }
+
   return {
     $and: [...guards, filter],
   };
@@ -55,14 +60,17 @@ export const withNullableGuards = (
         .filter((name) => isNullableReference(name, mapper)),
     ),
   ];
+
   if (guardedNames.length === 0) {
     return filter;
   }
 
   const guards = guardedNames.map((name) => {
     const { path } = resolveFieldReference(name, mapper);
+
     return buildFieldFilter(path, { $ne: null });
   });
+
   return { $and: [...guards, filter] };
 };
 
@@ -106,24 +114,30 @@ const buildRequiredParentsFilter = (
 ): MongooseFilter | undefined => {
   const arrayParents = new Set<string>();
   const toOnePaths = new Set<string>();
+
   for (const name of collectVariableNames(operand)) {
     const relation = relationOfReference(name, mapper);
+
     if (relation?.requiresParent !== undefined) {
       arrayParents.add(relation.requiresParent);
     }
+
     if (relation?.type === "one") {
       toOnePaths.add(relation.name);
     }
   }
+
   const clauses: MongooseFilter[] = [
     ...[...arrayParents].map((parentPath) => ({
       [`${parentPath}.0`]: { $exists: true },
     })),
     ...[...toOnePaths].map((path) => ({ [path]: { $ne: null } })),
   ];
+
   if (clauses.length === 0) {
     return undefined;
   }
+
   return clauses.length === 1 ? clauses[0]! : { $and: clauses };
 };
 
@@ -140,7 +154,9 @@ const collectListReads = (
   if (!isExpression(operand)) {
     return [];
   }
+
   const [first, second] = operand.operands;
+
   switch (operand.operator) {
     case "in":
       return second && isVariable(second) ? [second.name] : [];
@@ -154,12 +170,14 @@ const collectListReads = (
       if (strictOnly) {
         return [];
       }
+
       break;
     default:
       if (LAMBDA_BINDING_OPERATORS.has(operand.operator)) {
         return first && isVariable(first) ? [first.name] : [];
       }
   }
+
   return operand.operands.flatMap((child) => collectListReads(child, strictOnly));
 };
 
@@ -185,19 +203,25 @@ export const buildListShapeGuard = (
   rootScope: boolean,
 ): MongooseFilter | undefined => {
   const names = [...new Set(collectListReads(operand, false))];
+
   if (names.length === 0) {
     return undefined;
   }
+
   const alwaysRead = new Set(collectListReads(operand, true));
+
   if (!rootScope || names.some((name) => !alwaysRead.has(name))) {
     throw new UnsupportedQueryPlanError(
       "a negated membership whose list may go unevaluated, or is element-scoped, cannot be guarded " +
         "against a null or absent list, which CEL denies and a $nor would match",
     );
   }
+
   const paths = new Set<string>();
+
   for (const name of names) {
     const { path, relation } = resolveFieldReference(name, mapper);
+
     if (!relation) {
       paths.add(path.join("."));
     } else if (relation.type === "many" && relation.requiresParent === undefined) {
@@ -206,10 +230,13 @@ export const buildListShapeGuard = (
       paths.add(relation.name);
     }
   }
+
   const clauses = [...paths].map((path) => ({ [path]: { $type: "array" } }));
+
   if (clauses.length === 0) {
     return undefined;
   }
+
   return clauses.length === 1 ? clauses[0]! : { $and: clauses };
 };
 
@@ -224,16 +251,20 @@ export const withEvaluationGuards = (
   mapper: ScopedMapper,
 ): MongooseFilter => {
   const guardedFilter = withNullableGuards(filter, operands, mapper);
+
   const guards = operands.flatMap((operand) =>
     buildEvaluationGuards(operand, mapper),
   );
+
   // The absent to-one parent is the other way an operand can be undefined, and it belongs
   // here with the rest: a filter-level conjunct applies to whatever `filter` already is, so
   // both the plain comparison and the `$nor` a negation wraps it in inherit it (#315, #316).
   const requiredParents = operands
     .map((operand) => buildRequiredParentsFilter(operand, mapper))
     .filter((parents): parents is MongooseFilter => parents !== undefined);
+
   const conjuncts = [...guards, ...requiredParents];
+
   return conjuncts.length === 0
     ? guardedFilter
     : { $and: [...conjuncts, guardedFilter] };

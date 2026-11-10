@@ -14,9 +14,11 @@ import { UnsupportedQueryPlanError } from "./errors";
 
 const RFC3339_MILLISECOND_TIMESTAMP =
   /^((?!0000)\d{4})-(\d{2})-(\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d{1,9}))?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+
 const MIN_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
   "0001-01-01T00:00:00.000Z",
 );
+
 const MAX_RFC3339_TIMESTAMP_MILLISECONDS = Date.parse(
   "9999-12-31T23:59:59.999Z",
 );
@@ -27,9 +29,11 @@ export const normalizeRfc3339Milliseconds = (value: string): string => {
   const monthText = match?.[2];
   const dayText = match?.[3];
   const fraction = match?.[4] ?? "";
+
   if (!yearText || !monthText || !dayText) {
     throw new UnsupportedQueryPlanError(`Invalid RFC-3339 timestamp value: ${value}`);
   }
+
   if ([...fraction.slice(3)].some((digit) => digit !== "0")) {
     throw new UnsupportedQueryPlanError(`Timestamp value exceeds millisecond precision: ${value}`);
   }
@@ -40,6 +44,7 @@ export const normalizeRfc3339Milliseconds = (value: string): string => {
   const calendarDate = new Date(0);
   calendarDate.setUTCHours(0, 0, 0, 0);
   calendarDate.setUTCFullYear(year, month - 1, day);
+
   if (
     calendarDate.getUTCFullYear() !== year ||
     calendarDate.getUTCMonth() !== month - 1 ||
@@ -49,9 +54,11 @@ export const normalizeRfc3339Milliseconds = (value: string): string => {
   }
 
   const milliseconds = Date.parse(value);
+
   if (Number.isNaN(milliseconds)) {
     throw new UnsupportedQueryPlanError(`Invalid RFC-3339 timestamp value: ${value}`);
   }
+
   if (
     milliseconds < MIN_RFC3339_TIMESTAMP_MILLISECONDS ||
     milliseconds > MAX_RFC3339_TIMESTAMP_MILLISECONDS
@@ -60,6 +67,7 @@ export const normalizeRfc3339Milliseconds = (value: string): string => {
       `Timestamp value is outside CEL's supported instant range: ${value}`,
     );
   }
+
   return new Date(milliseconds).toISOString().replace(".000Z", "Z");
 };
 
@@ -68,6 +76,7 @@ const NANOS_PER_MILLI = 1_000_000n;
 /** The digits after the third fractional digit of an RFC-3339 literal, if any is non-zero. */
 export const exceedsMillisecondPrecision = (value: string): boolean => {
   const fraction = RFC3339_MILLISECOND_TIMESTAMP.exec(value)?.[4] ?? "";
+
   return [...fraction.slice(3)].some((digit) => digit !== "0");
 };
 
@@ -78,12 +87,15 @@ export const exceedsMillisecondPrecision = (value: string): boolean => {
 export const parseRfc3339Nanoseconds = (value: string): bigint => {
   const match = RFC3339_MILLISECOND_TIMESTAMP.exec(value);
   const fraction = match?.[4];
+
   if (fraction === undefined) {
     return BigInt(Date.parse(normalizeRfc3339Milliseconds(value))) * NANOS_PER_MILLI;
   }
+
   const digits = fraction.padEnd(9, "0");
   const millisecondLiteral = value.replace(`.${fraction}`, `.${digits.slice(0, 3)}`);
   const milliseconds = Date.parse(normalizeRfc3339Milliseconds(millisecondLiteral));
+
   return BigInt(milliseconds) * NANOS_PER_MILLI + BigInt(digits.slice(3));
 };
 
@@ -96,8 +108,10 @@ export const formatRfc3339Nanoseconds = (nanoseconds: bigint, digits: number): s
   const remainder = ((nanoseconds % NANOS_PER_MILLI) + NANOS_PER_MILLI) % NANOS_PER_MILLI;
   const milliseconds = (nanoseconds - remainder) / NANOS_PER_MILLI;
   const iso = new Date(Number(milliseconds)).toISOString();
+
   if (digits <= 3) return iso.replace(".000Z", "Z");
   const fraction = `${iso.slice(20, 23)}${remainder.toString().padStart(6, "0")}`;
+
   return `${iso.slice(0, 19)}.${fraction.slice(0, digits)}Z`;
 };
 
@@ -121,12 +135,14 @@ export const timestampColumnForm = (
   reference: string,
 ): TimestampColumnForm => {
   if (is(column, PgColumn) && column.columnType.startsWith("PgTimestamp")) return "native";
+
   if (
     is(column, MySqlColumn) &&
     (column.columnType.startsWith("MySqlDateTime") || column.columnType.startsWith("MySqlTimestamp"))
   ) {
     return "native";
   }
+
   if (is(column, SQLiteColumn) && column.columnType === "SQLiteText") return "sqlite-text";
   throw new UnsupportedQueryPlanError(
     `Cannot compare '${reference}' as a timestamp: its ${column.columnType} column is not a ` +
@@ -156,6 +172,7 @@ export const sqliteTextInstant = (expr: SQL): SQL => {
   const zone = sql`(case when ${expr} glob '*Z' then 1 when ${expr} glob '*[+-][0-9][0-9]:[0-9][0-9]' then 6 end)`;
   const digits = sql`(length(${expr}) - 20 - ${zone})`;
   const wholeSeconds = sql`strftime('%Y-%m-%dT%H:%M:%S', substr(${expr}, 1, 19) || substr(${expr}, length(${expr}) - ${zone} + 1))`;
+
   const valid = sql.join(
     [
       sql`${expr} glob ${SQLITE_DATE_TIME_PREFIX}`,
@@ -165,6 +182,7 @@ export const sqliteTextInstant = (expr: SQL): SQL => {
     ],
     sql` and `,
   );
+
   return sql`(case when ${valid} then ${wholeSeconds} || '.' || substr(substr(${expr}, 21, max(${digits}, 0)) || '000000000', 1, 9) || 'Z' end)`;
 };
 

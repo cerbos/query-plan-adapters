@@ -40,6 +40,7 @@ const constantEquals = (left: Value, right: Value): boolean => {
   if (Array.isArray(left) && Array.isArray(right)) {
     return left.length === right.length && left.every((element, i) => constantEquals(element, right[i]!));
   }
+
   return isScalar(left) && isScalar(right) && typeof left === typeof right && left === right;
 };
 
@@ -52,9 +53,12 @@ const evaluateConstant = (operand: PlanExpressionOperand): Value | undefined => 
   if (isValueOperand(operand)) {
     return isScalar(operand.value) || isScalarList(operand.value) ? operand.value : undefined;
   }
+
   if (!isExpressionOperand(operand) || operand.operands.length !== 2) return undefined;
   const [left, right] = operand.operands.map(evaluateConstant);
+
   if (left === undefined || right === undefined) return undefined;
+
   switch (operand.operator) {
     case "add":
       return Array.isArray(left) && Array.isArray(right) ? [...left, ...right] : undefined;
@@ -63,12 +67,17 @@ const evaluateConstant = (operand: PlanExpressionOperand): Value | undefined => 
       // CEL compares only values of one kind here: a list with a list, a scalar with a scalar of
       // the same type. Anything else is left to the translators.
       if (Array.isArray(left) !== Array.isArray(right)) return undefined;
+
       if (!Array.isArray(left) && typeof left !== typeof right) return undefined;
+
       return constantEquals(left, right) === (operand.operator === "eq");
     }
+
     case "in":
       if (!isScalar(left) || !Array.isArray(right)) return undefined;
+
       if (right.some((element) => typeof element !== typeof left)) return undefined;
+
       return right.some((element) => constantEquals(left, element));
     default:
       return undefined;
@@ -80,12 +89,15 @@ const findLiftableTernary = (
   operand: PlanExpressionOperand,
 ): ExpressionOperand | undefined => {
   if (isOperatorCall(operand, "if")) return operand;
+
   if (isOperatorCall(operand, "add")) {
     for (const child of operand.operands) {
       const found = findLiftableTernary(child);
+
       if (found) return found;
     }
   }
+
   return undefined;
 };
 
@@ -95,7 +107,9 @@ const replaceNode = (
   replacement: PlanExpressionOperand,
 ): PlanExpressionOperand => {
   if (operand === target) return replacement;
+
   if (!isExpressionOperand(operand)) return operand;
+
   return call(
     operand.operator,
     ...operand.operands.map((child) => replaceNode(child, target, replacement)),
@@ -110,20 +124,26 @@ const replaceNode = (
  */
 const liftConstantTernary = (node: ExpressionOperand): PlanExpressionOperand => {
   if (!["eq", "ne", "in"].includes(node.operator) || node.operands.length !== 2) return node;
+
   for (const side of node.operands) {
     const ternary = findLiftableTernary(side);
+
     if (!ternary || ternary.operands.length !== 3) continue;
+
     const [condition, thenOperand, elseOperand] = ternary.operands as [
       PlanExpressionOperand,
       PlanExpressionOperand,
       PlanExpressionOperand,
     ];
+
     const thenValue = evaluateConstant(replaceNode(node, ternary, thenOperand));
     const elseValue = evaluateConstant(replaceNode(node, ternary, elseOperand));
+
     if (typeof thenValue === "boolean" && typeof elseValue === "boolean") {
       return call("if", condition, value(thenValue), value(elseValue));
     }
   }
+
   return node;
 };
 
@@ -145,38 +165,48 @@ const rewriteListFunction = (node: ExpressionOperand): PlanExpressionOperand => 
       constants.length === 0
         ? value(false)
         : call("or", ...constants.map((constant) => call("eq", { name: ELEMENT }, value(constant))));
+
     return call("all", list, call("lambda", negate ? call("not", body) : body, { name: ELEMENT }));
   };
+
   const listFunctionAll = (operand: PlanExpressionOperand): PlanExpressionOperand | undefined => {
     if (
       (isOperatorCall(operand, "except") || isOperatorCall(operand, "intersect")) &&
       operand.operands.length === 2
     ) {
       const [list, constants] = operand.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
       if (isNameOperand(list) && isValueOperand(constants) && isScalarList(constants.value)) {
         return membershipOver(list, constants.value, operand.operator === "intersect");
       }
     }
+
     return undefined;
   };
 
   if (node.operator === "isSubset" && node.operands.length === 2) {
     const [list, constants] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
     if (isNameOperand(list) && isValueOperand(constants) && isScalarList(constants.value)) {
       return membershipOver(list, constants.value, false);
     }
   }
+
   if ((node.operator === "eq" || node.operator === "ne") && node.operands.length === 2) {
     const [left, right] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
     const isEmptyList = (operand: PlanExpressionOperand) =>
       isValueOperand(operand) && Array.isArray(operand.value) && operand.value.length === 0;
+
     const rewritten = isEmptyList(right)
       ? listFunctionAll(left)
       : isEmptyList(left)
         ? listFunctionAll(right)
         : undefined;
+
     if (rewritten) return node.operator === "eq" ? rewritten : call("not", rewritten);
   }
+
   return node;
 };
 
@@ -190,16 +220,20 @@ const rewriteListFunction = (node: ExpressionOperand): PlanExpressionOperand => 
 const rewriteMembership = (node: ExpressionOperand): PlanExpressionOperand => {
   if (node.operator !== "in" || node.operands.length !== 2) return node;
   const [element, collection] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (isValueOperand(element) && isScalar(element.value) && isOperatorCall(collection, "map")) {
     const [, lambda] = collection.operands;
+
     // Only a field projection: hasIntersection over map() reads nothing else. Any other
     // projection, and filter(), are translated where `in` is (`filter.ts`).
     if (lambda && isOperatorCall(lambda, "lambda") && lambda.operands.every(isNameOperand)) {
       return call("hasIntersection", collection, value([element.value]));
     }
   }
+
   if (isOperatorCall(collection, "add") && collection.operands.length === 2) {
     const [list, constants] = collection.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
     if (isNameOperand(list) && isValueOperand(constants) && isScalarList(constants.value)) {
       return call(
         "or",
@@ -212,6 +246,7 @@ const rewriteMembership = (node: ExpressionOperand): PlanExpressionOperand => {
       );
     }
   }
+
   return node;
 };
 
@@ -226,10 +261,14 @@ const rewriteMembership = (node: ExpressionOperand): PlanExpressionOperand => {
 const rewriteConstantKeyIndex = (node: ExpressionOperand, mapper: Mapper): PlanExpressionOperand => {
   if (node.operator !== "index" || node.operands.length !== 2) return node;
   const [receiver, key] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (!isNameOperand(receiver) || !isValueOperand(key) || typeof key.value !== "string") return node;
+
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key.value)) return node;
   const dotted = `${receiver.name}.${key.value}`;
+
   if (getMappingEntry(receiver.name, mapper) !== undefined) return node;
+
   return getMappingEntry(dotted, mapper) !== undefined ? { name: dotted } : node;
 };
 
@@ -239,10 +278,13 @@ const rewriteConstantKeyIndex = (node: ExpressionOperand, mapper: Mapper): PlanE
 const durationMilliseconds = (operand: PlanExpressionOperand): number | undefined => {
   if (!isOperatorCall(operand, "duration") || operand.operands.length !== 1) return undefined;
   const [literal] = operand.operands;
+
   if (!literal || !isValueOperand(literal) || typeof literal.value !== "string") return undefined;
   const match = /^(-?)(\d+)(?:\.(\d{1,3}))?s$/.exec(literal.value);
+
   if (!match) return undefined;
   const milliseconds = Number(match[2]) * 1000 + Number((match[3] ?? "").padEnd(3, "0"));
+
   return match[1] === "-" ? -milliseconds : milliseconds;
 };
 
@@ -250,10 +292,13 @@ const durationMilliseconds = (operand: PlanExpressionOperand): number | undefine
 const timestampLiteralMilliseconds = (operand: PlanExpressionOperand): number | undefined => {
   if (!isOperatorCall(operand, "timestamp") || operand.operands.length !== 1) return undefined;
   const [literal] = operand.operands;
+
   if (!literal || !isValueOperand(literal) || typeof literal.value !== "string") return undefined;
   const fraction = /\.(\d+)/.exec(literal.value)?.[1] ?? "";
+
   if ([...fraction.slice(3)].some((digit) => digit !== "0")) return undefined;
   const milliseconds = Date.parse(literal.value);
+
   return Number.isNaN(milliseconds) ? undefined : milliseconds;
 };
 
@@ -268,18 +313,25 @@ const shiftedTimestamp = (
 ): { timestamp: PlanExpressionOperand; shift: number } | undefined => {
   if (!isExpressionOperand(operand) || operand.operands.length !== 2) return undefined;
   const [left, right] = operand.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   const isConversion = (candidate: PlanExpressionOperand) =>
     isOperatorCall(candidate, "timestamp") && timestampLiteralMilliseconds(candidate) === undefined;
+
   if (operand.operator === "add") {
     const rightShift = durationMilliseconds(right);
+
     if (isConversion(left) && rightShift !== undefined) return { timestamp: left, shift: rightShift };
     const leftShift = durationMilliseconds(left);
+
     if (isConversion(right) && leftShift !== undefined) return { timestamp: right, shift: leftShift };
   }
+
   if (operand.operator === "sub") {
     const shift = durationMilliseconds(right);
+
     if (isConversion(left) && shift !== undefined) return { timestamp: left, shift: -shift };
   }
+
   return undefined;
 };
 
@@ -292,23 +344,28 @@ const shiftedTimestamp = (
 const rewriteShiftedTimestamp = (node: ExpressionOperand): PlanExpressionOperand => {
   if (!(node.operator in MIRRORED) || node.operands.length !== 2) return node;
   const [left, right] = node.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   for (const [side, other, operator] of [
     [left, right, node.operator],
     [right, left, MIRRORED[node.operator]!],
   ] as const) {
     const shifted = shiftedTimestamp(side);
     const bound = timestampLiteralMilliseconds(other);
+
     if (shifted && bound !== undefined) {
       return call(operator, shifted.timestamp, timestampLiteral(bound - shifted.shift));
     }
+
     if (isOperatorCall(side, "timeSince") && side.operands.length === 1) {
       const [conversion] = side.operands as [PlanExpressionOperand];
       const window = durationMilliseconds(other);
+
       if (isOperatorCall(conversion, "timestamp") && window !== undefined) {
         return call(MIRRORED[operator]!, conversion, timestampLiteral(Date.now() - window));
       }
     }
   }
+
   return node;
 };
 
@@ -320,10 +377,12 @@ export const rewritePlan = (
   mapper: Mapper,
 ): PlanExpressionOperand => {
   if (!isExpressionOperand(operand)) return operand;
+
   let node: PlanExpressionOperand = call(
     operand.operator,
     ...operand.operands.map((child) => rewritePlan(child, mapper)),
   );
+
   for (const rewrite of [
     (candidate: ExpressionOperand) => rewriteConstantKeyIndex(candidate, mapper),
     liftConstantTernary,
@@ -334,5 +393,6 @@ export const rewritePlan = (
     if (!isExpressionOperand(node)) break;
     node = rewrite(node);
   }
+
   return node;
 };

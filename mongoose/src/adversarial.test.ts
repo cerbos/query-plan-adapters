@@ -64,6 +64,7 @@ interface DerivedEntry {
 }
 
 const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+
 const DERIVED = (
   readCorpusJson("derived-fields.json") as {
     derived: Record<string, DerivedEntry>;
@@ -72,9 +73,11 @@ const DERIVED = (
 
 function derivedFor(seed: Seed): DerivedEntry {
   const entry = DERIVED[seed.id];
+
   if (entry === undefined) {
     throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
+
   return entry;
 }
 
@@ -131,10 +134,12 @@ const tagSchema = new Schema<Tag>(
   },
   { _id: false, id: false },
 );
+
 const labelSchema = new Schema<AdversarialLabel>(
   { name: { type: String, default: null } },
   { _id: false, id: false },
 );
+
 const subCategorySchema = new Schema<AdversarialSubCategory>(
   {
     name: { type: String, required: true },
@@ -142,6 +147,7 @@ const subCategorySchema = new Schema<AdversarialSubCategory>(
   },
   { _id: false, id: false },
 );
+
 const categorySchema = new Schema<AdversarialCategory>(
   {
     name: { type: String, required: true },
@@ -149,6 +155,7 @@ const categorySchema = new Schema<AdversarialCategory>(
   },
   { _id: false, id: false },
 );
+
 // The corpus's one real to-one relation. A document store has no join, so both levels are
 // embedded subdocuments — but the SHAPE is the same to-one chain every other store carries, and
 // an absent level is a missing path here exactly as it is a missing row there.
@@ -162,6 +169,7 @@ const innerSchema = new Schema<AdversarialRelationLevel>(
   },
   { _id: false, id: false },
 );
+
 const parentSchema = new Schema<AdversarialParent>(
   {
     aBool: { type: Boolean, default: null },
@@ -172,6 +180,7 @@ const parentSchema = new Schema<AdversarialParent>(
   },
   { _id: false, id: false },
 );
+
 const resourceSchema = new Schema<AdversarialResourceDocument>(
   {
     resourceId: { type: String, required: true, unique: true },
@@ -200,6 +209,7 @@ const resourceSchema = new Schema<AdversarialResourceDocument>(
   },
   { id: false },
 );
+
 const AdversarialResource = model<AdversarialResourceDocument>(
   "MongooseAdversarialResource",
   resourceSchema,
@@ -217,15 +227,19 @@ const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
 
 function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const id = seed?.parentSeedId;
+
   if (id === undefined || id === null) {
     return undefined;
   }
+
   const parent = SEEDS_BY_ID.get(id);
+
   if (parent === undefined) {
     throw new Error(
       `seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`,
     );
   }
+
   return parent;
 }
 
@@ -242,10 +256,13 @@ function relationLevel(seed: Seed): AdversarialRelationLevel {
 /** The stored `parent` subdocument for a seed, or null when it has no parent. */
 function storedParent(seed: Seed): AdversarialParent | null {
   const parentSeed = parentSeedOf(seed);
+
   if (parentSeed === undefined) {
     return null;
   }
+
   const innerSeed = parentSeedOf(parentSeed);
+
   return {
     ...relationLevel(parentSeed),
     inner: innerSeed === undefined ? null : relationLevel(innerSeed),
@@ -254,6 +271,7 @@ function storedParent(seed: Seed): AdversarialParent | null {
 
 function toDocument(seed: Seed): AdversarialResourceDocument {
   const derived = derivedFor(seed);
+
   return {
     resourceId: seed.id,
     aBool: seed.aBool,
@@ -305,6 +323,7 @@ const LEDGER = (
 
 function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
   const entry = LEDGER[golden.id];
+
   return entry && (entry.pdp === undefined || entry.pdp.includes(tag))
     ? entry
     : undefined;
@@ -319,13 +338,16 @@ async function selectAllowed(golden: Golden): Promise<string[]> {
     // The dataset stores what it sends: `owner` as an explicit null, the rest declared `nullable`.
     nullAttributeRepresentation: "explicit",
   });
+
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
+
   const rows = await AdversarialResource.find(
     result.kind === PlanKind.CONDITIONAL ? result.filters : {},
   )
     .select({ resourceId: 1, _id: 0 })
     .lean()
     .exec();
+
   return rows.map((row) => row.resourceId).sort();
 }
 
@@ -354,14 +376,17 @@ afterAll(async () => {
   await mongoose.disconnect();
   // run-harness.sh names the leg, since the MongoDB image is the store dimension here.
   writeFuzzResults("mongoose", process.env["QPA_HARNESS_STORE"] ?? "mongo", fuzzResults);
+
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
+
     return `${tag}: ${tiers
       .map(
         (tier) => `${tier} ${passed[tag]?.[tier] ?? 0}/${totals[tag]?.[tier]}`,
       )
       .join(", ")}`;
   });
+
   console.log(`conformance (mongodb) passed per tier\n${lines.join("\n")}`);
 });
 
@@ -370,6 +395,7 @@ describe("conformance (mongodb)", () => {
     const ids = new Set(
       TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)),
     );
+
     expect(Object.keys(LEDGER).filter((id) => !ids.has(id))).toEqual([]);
   });
 
@@ -387,21 +413,29 @@ describe("conformance (mongodb)", () => {
           const verdict = await fuzzReplay(golden);
           fuzzResults.push(verdict);
           assertFuzzVerdict(verdict);
+
           return;
         }
+
         const entry = ledgerEntry(golden, tag);
+
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);
           expect(() =>
             queryPlanToMongoose({ queryPlan, mapper: MAPPER }),
           ).toThrow(UnsupportedQueryPlanError);
+
           return;
         }
+
         const ids = await selectAllowed(golden);
+
         if (entry?.status === "divergent") {
           expect(ids).not.toEqual(golden.allowed);
+
           return;
         }
+
         expect(ids).toEqual(golden.allowed);
         (passed[tag] ??= {})[golden.tier] =
           (passed[tag]?.[golden.tier] ?? 0) + 1;

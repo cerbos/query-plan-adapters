@@ -43,6 +43,7 @@ const CURRENT = pdpTags()[0]!;
 const golden = (id: string) => readGolden(CURRENT, id);
 
 type Store = "sqlite" | "postgresql" | "mysql";
+
 const STORES: Store[] = ["sqlite", "postgresql", "mysql"];
 
 const MAPPERS: Record<Store, Record<string, MapperEntry>> = {
@@ -66,7 +67,9 @@ function withoutNullDeclarations(
       if (typeof entry !== "object" || entry === null || !("nullAttributeRepresentation" in entry)) {
         return [reference, entry];
       }
+
       const { nullAttributeRepresentation: _stripped, ...rest } = entry;
+
       return [reference, rest as MapperEntry];
     }),
   );
@@ -97,14 +100,17 @@ async function filterFor(
   options: Parameters<typeof translate>[2] = {},
 ): Promise<SQL> {
   const result = await translate(store, id, options);
+
   if (result.kind !== PlanKind.CONDITIONAL) {
     throw new Error(`${id} translated to ${result.kind}, not a filter`);
   }
+
   return result.filter;
 }
 
 function render(store: Store, filter: SQL): { sql: string; params: unknown[] } {
   const query = DIALECTS[store].sqlToQuery(filter);
+
   return { sql: query.sql, params: query.params };
 }
 
@@ -113,11 +119,13 @@ describe("the refusal type", () => {
     // An unmapped reference is a bug in the caller's mapping; reporting it as "unsupported" would
     // let a harness count a typo as a declared limitation.
     let caught: unknown;
+
     try {
       await translate("postgresql", "string/equals/case-sensitive", { mapper: {} });
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(Error);
     expect(caught).not.toBeInstanceOf(UnsupportedQueryPlanError);
     expect(String(caught)).toMatch(/No mapping/);
@@ -139,6 +147,7 @@ describe("mapper forms", () => {
 
   test("a transform replaces the comparison the adapter would have built", async () => {
     const schema = postgresSchema();
+
     const lowered: Mapper = {
       ...MAPPERS.postgresql,
       "request.resource.attr.aString": {
@@ -147,6 +156,7 @@ describe("mapper forms", () => {
           eq(sql`lower(${schema.resources.aString})`, String(value).toLowerCase()),
       },
     };
+
     const id = "string/equals/case-sensitive";
     const plain = render("postgresql", await filterFor("postgresql", id));
     const rendered = render("postgresql", await filterFor("postgresql", id, { mapper: lowered }));
@@ -163,9 +173,11 @@ describe("declared index storage", () => {
 
   test("refuses an undeclared storage shape", async () => {
     const entry = MAPPERS.postgresql[reference];
+
     if (!entry || typeof entry !== "object" || !("indexable" in entry)) {
       throw new Error("The shared mapper must declare index storage");
     }
+
     const { indexable: _indexable, ...undeclared } = entry;
     await expect(
       translate("postgresql", INDEX, { mapper: { ...MAPPERS.postgresql, [reference]: undeclared } }),
@@ -199,6 +211,7 @@ describe("declared index storage", () => {
     bigintNumber: bigint({ mode: "number" }).array(),
     doubleNumber: doublePrecision().array(),
   });
+
   test.each([converted.numericString, converted.bigintNumber, converted.doubleNumber])("refuses array representations that change scalar types or null elements", async (column) => {
     await expect(
       translate("postgresql", INDEX, { mapper: { [reference]: { column, indexable: "pgArray" } } }),
@@ -275,6 +288,7 @@ describe("nullAttributeRepresentation", () => {
       queryPlan: await planOf(golden(NULL_EQ_MISSING)),
       mapper: UNDECLARED,
     });
+
     if (result.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
     expect(render("postgresql", result.filter).sql).toContain(OMITTED_GUARD);
   });
@@ -310,6 +324,7 @@ describe("nullAttributeRepresentation", () => {
 
   test.each(["eq", "ne"])("mixed scalar types preserve explicit-null %s", async (operator) => {
     const resources = postgresSchema().resources;
+
     const mapper: Mapper = {
       ...MAPPERS.postgresql,
       "request.resource.attr.aString": {
@@ -318,8 +333,10 @@ describe("nullAttributeRepresentation", () => {
       },
       "request.resource.id": { column: resources.aNumber, nullAttributeRepresentation: "explicit" },
     };
+
     const id =
       operator === "eq" ? "identifier/equals/field-to-field" : "identifier/not-equals/field-to-field";
+
     const rendered = render("postgresql", await filterFor("postgresql", id, { mapper }));
     expect(rendered.sql).toContain(
       '"adversarial_resources"."a_optional_string" is null and "adversarial_resources"."a_number" is null',
@@ -331,14 +348,17 @@ describe("nullAttributeRepresentation", () => {
   // rather than to the outer value, would both turn the outer "omitted" call explicit.
   test("a reentrant mapper preserves the outer representation", async () => {
     const nested = await planOf(golden("comparison/less-or-equal/value-first"));
+
     const mapper: Mapper = (reference) => {
       queryPlanToDrizzle({
         queryPlan: nested,
         mapper: MAPPERS.postgresql,
         nullAttributeRepresentation: "explicit",
       });
+
       return UNDECLARED[reference];
     };
+
     expect(
       await translate("postgresql", NULL_EQ_MISSING, { mapper, nullAttributeRepresentation: "omitted" }),
     ).toEqual(
@@ -357,12 +377,16 @@ describe("nullAttributeRepresentation", () => {
     const carriesNull = (node: unknown): boolean => {
       if (typeof node !== "object" || node === null) return false;
       const record = node as Record<string, unknown>;
+
       if ("value" in record) {
         const value = record["value"];
+
         return value === null || (Array.isArray(value) && value.includes(null));
       }
+
       return Object.values(record).some(carriesNull);
     };
+
     const INDEXED_ELEMENT = [
       "collection/index/first-element-of-string-list-equals-null",
       "null/in/null-literal-in-number-list",
@@ -372,12 +396,15 @@ describe("nullAttributeRepresentation", () => {
     const nullCarrying = readGoldens(CURRENT)
       .filter((g) => carriesNull(g.plan))
       .map((g) => g.id);
+
     expect(nullCarrying).toEqual(expect.arrayContaining([NULL_EQ_MISSING, ...INDEXED_ELEMENT]));
 
     const plans = await Promise.all(nullCarrying.map((id) => planOf(golden(id))));
+
     const selectingNull = nullCarrying.filter((id, index) => {
       if (INDEXED_ELEMENT.includes(id)) return false;
       let result: QueryPlanToDrizzleResult;
+
       try {
         result = queryPlanToDrizzle({
           queryPlan: plans[index]!,
@@ -388,14 +415,18 @@ describe("nullAttributeRepresentation", () => {
         if (error instanceof UnsupportedQueryPlanError) return false;
         throw error;
       }
+
       if (result.kind !== PlanKind.CONDITIONAL) return false;
+
       // Two guards exclude rather than select: a CASE arm that makes the row NULL, and the
       // NOT EXISTS that denies a row whose projected relation element is missing.
       const unguarded = render("postgresql", result.filter)
         .sql.replace(/case when (?:(?!then).)*? then null/g, "")
         .replace(/not exists \(select 1 from [^()]* where \([^()]* is null\)\)/g, "");
+
       return /\bis null\b/.test(unguarded);
     });
+
     expect(selectingNull).toEqual([]);
   });
 });
@@ -464,6 +495,7 @@ describe("timestamp literals", () => {
       queryPlan: timestampPlan(operator, "2026-08-11T09:13:39.123456789Z"),
       mapper: MAPPERS.postgresql,
     });
+
     if (filter.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
     const rendered = render("postgresql", filter.filter);
     expect(rendered.sql).toContain(` ${symbol} $1`);
@@ -475,6 +507,7 @@ describe("timestamp literals", () => {
       queryPlan: timestampPlan(operator, "2026-08-11T09:13:39.123456789Z"),
       mapper: MAPPERS.postgresql,
     });
+
     if (filter.kind !== PlanKind.CONDITIONAL) throw new Error("expected a filter");
     expect(render("postgresql", filter.filter).params).toEqual([]);
   });
@@ -504,6 +537,7 @@ describe("what the stores cannot show", () => {
     goldens.flatMap((g, index) => {
       try {
         const result = queryPlanToDrizzle({ queryPlan: plans[index]!, mapper });
+
         return result.kind === PlanKind.CONDITIONAL ? [[g.id, result.filter] as const] : [];
       } catch (error) {
         if (error instanceof UnsupportedQueryPlanError) return [];
@@ -517,6 +551,7 @@ describe("what the stores cannot show", () => {
     const rendered = translatedBy(MAPPERS.mysql).map(
       ([id, filter]) => [id, render("mysql", filter).sql] as const,
     );
+
     expect(rendered.filter(([, text]) => text.includes(" as real")).map(([id]) => id)).toEqual([]);
     expect(rendered.some(([, text]) => text.includes("as float(53)"))).toBe(true);
   });
@@ -529,6 +564,7 @@ describe("what the stores cannot show", () => {
         (param) => typeof param === "number" && !Number.isFinite(param),
       ),
     );
+
     expect(offenders.map(([id]) => id)).toEqual([]);
   });
 });

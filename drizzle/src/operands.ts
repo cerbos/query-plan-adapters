@@ -62,6 +62,7 @@ export const extractLambdaComponents = (
   if (!isOperatorCall(lambdaOperand, "lambda")) {
     throw new UnsupportedQueryPlanError(`${context} must be a lambda expression`);
   }
+
   if (lambdaOperand.operands.length === 3) {
     throw new UnsupportedQueryPlanError(
       "Two-variable comprehensions (exists(i, v, ...), all(k, v, ...)) are not supported: the " +
@@ -69,10 +70,13 @@ export const extractLambdaComponents = (
         "is not a column it can read",
     );
   }
+
   if (lambdaOperand.operands.length !== 2) {
     throw new UnsupportedQueryPlanError("Lambda operand requires exactly two operands");
   }
+
   const [first, second] = lambdaOperand.operands;
+
   if (!first || !second) {
     throw new UnsupportedQueryPlanError("Lambda operand is missing operands");
   }
@@ -81,8 +85,10 @@ export const extractLambdaComponents = (
     if (!isNameOperand(first)) {
       throw new UnsupportedQueryPlanError("Lambda operand requires a variable operand");
     }
+
     return { variable: first, expression: second };
   }
+
   if (
     isNameOperand(first) &&
     looksLikeLambdaVariable(first) &&
@@ -90,6 +96,7 @@ export const extractLambdaComponents = (
   ) {
     return { variable: first, expression: second };
   }
+
   return { variable: second, expression: first };
 };
 
@@ -105,14 +112,18 @@ export const foldConstantConstructors = (
 ): PlanExpressionOperand => {
   if (!isExpressionOperand(operand)) return operand;
   const operands = operand.operands.map(foldConstantConstructors);
+
   if (operand.operator === "list" && operands.every(isValueOperand)) {
     return { value: operands.map((element) => element.value) };
   }
+
   if (operand.operator === "struct") {
     const entries: [string, Value][] = [];
+
     for (const field of operands) {
       if (!isExpressionOperand(field) || field.operator !== "set-field") break;
       const [key, value] = field.operands;
+
       if (
         field.operands.length !== 2 || key === undefined || value === undefined ||
         !isValueOperand(key) || typeof key.value !== "string" || !isValueOperand(value) ||
@@ -120,11 +131,14 @@ export const foldConstantConstructors = (
       ) {
         break;
       }
+
       entries.push([key.value, value.value]);
     }
+
     if (entries.length === operands.length) {
       return { value: Object.fromEntries(entries) };
     }
   }
+
   return { operator: operand.operator, operands };
 };

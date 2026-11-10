@@ -68,12 +68,14 @@ class Parser {
 
   parse(): Node[][] {
     const alternatives = this.parseAlternation();
+
     if (this.pos < this.chars.length) {
       // Only an unmatched `)` stops the top level early.
       throw new UnsupportedQueryPlanError(
         "matches pattern is outside the supported common RE2/PCRE2 subset: unmatched )",
       );
     }
+
     return alternatives;
   }
 
@@ -83,37 +85,48 @@ class Parser {
 
   private parseAlternation(): Node[][] {
     const alternatives: Node[][] = [this.parseConcatenation()];
+
     while (this.peek() === "|") {
       this.pos += 1;
       alternatives.push(this.parseConcatenation());
     }
+
     return alternatives;
   }
 
   private parseConcatenation(): Node[] {
     const nodes: Node[] = [];
+
     for (;;) {
       const c = this.peek();
+
       if (c === undefined || c === "|" || c === ")") {
         return nodes;
       }
+
       const repeat = this.parseRepeatOperator();
+
       if (repeat !== undefined) {
         const last = nodes[nodes.length - 1];
+
         if (last === undefined) {
           throw new InvalidRe2Pattern("missing argument to repetition operator");
         }
+
         if (last.kind === "repeat") {
           throw new InvalidRe2Pattern("invalid nested repetition operator");
         }
+
         if (last.kind === "anchor") {
           throw new UnsupportedQueryPlanError(
             "matches pattern is outside the supported common RE2/PCRE2 subset: a quantified anchor",
           );
         }
+
         nodes[nodes.length - 1] = { kind: "repeat", sub: last, ...repeat };
         continue;
       }
+
       nodes.push(this.parseAtom());
     }
   }
@@ -128,6 +141,7 @@ class Parser {
     | undefined {
     const c = this.peek();
     let result: { out: string; min: number; max: number; counted: boolean };
+
     if (c === "*" || c === "+" || c === "?") {
       this.pos += 1;
       result = {
@@ -138,63 +152,84 @@ class Parser {
       };
     } else if (c === "{") {
       const counted = this.parseCountedRepeat();
+
       if (counted === undefined) {
         return undefined;
       }
+
       result = { ...counted, counted: true };
     } else {
       return undefined;
     }
+
     if (this.peek() === "?") {
       this.pos += 1;
       result.out += "?";
     }
+
     return result;
   }
 
   private parseCountedRepeat(): { out: string; min: number; max: number } | undefined {
     const rest = this.chars.slice(this.pos).join("");
     const match = /^\{(\d+)(?:(,)(\d*))?\}/.exec(rest);
+
     if (!match || match[1] === undefined) {
       return undefined;
     }
+
     const [text, minDigits, comma, maxDigits] = match;
+
     const parseInteger = (digits: string): number | undefined => {
       if (digits.length >= 2 && digits.startsWith("0")) return undefined;
+
       // Go gives up on an integer of nine or more digits and reports the repeat size invalid.
       return digits.length >= 9 ? -1 : Number(digits);
     };
+
     const min = parseInteger(minDigits);
+
     if (min === undefined) {
       return undefined;
     }
+
     let max: number;
+
     if (comma === undefined) {
       max = min;
     } else if (maxDigits === undefined || maxDigits === "") {
       max = -1;
     } else {
       const parsed = parseInteger(maxDigits);
+
       if (parsed === undefined) {
         return undefined;
       }
+
       max = parsed;
     }
+
     this.pos += [...text].length;
+
     if (min < 0 || min > MAX_REPEAT || max > MAX_REPEAT || (max >= 0 && min > max)) {
       throw new InvalidRe2Pattern("invalid repeat count");
     }
+
     const out =
       comma === undefined ? `{${min}}` : max < 0 ? `{${min},}` : `{${min},${max}}`;
+
     return { out, min, max };
   }
 
   private parseAtom(): Node {
     const c = this.peek();
+
     if (c === undefined) {
       throw new UnsupportedQueryPlanError("matches pattern ended unexpectedly");
     }
+
     this.pos += 1;
+
     switch (c) {
       case "(":
         return this.parseGroup();
@@ -225,7 +260,9 @@ class Parser {
         "matches pattern is outside the supported common RE2/PCRE2 subset: a control character",
       );
     }
+
     this.assertFoldable(c);
+
     return { kind: "atom", out: isWordChar(c) || c.charCodeAt(0) > 0x7f ? c : `\\${c}`, caseless: true };
   }
 
@@ -241,8 +278,10 @@ class Parser {
 
   private parseGroup(): Node {
     let capturing = true;
+
     if (this.peek() === "?") {
       const next = this.peek(1);
+
       if (next === ":") {
         capturing = false;
         this.pos += 2;
@@ -255,13 +294,17 @@ class Parser {
         );
       }
     }
+
     const alternatives = this.parseAlternation();
+
     if (this.peek() !== ")") {
       throw new UnsupportedQueryPlanError(
         "matches pattern is outside the supported common RE2/PCRE2 subset: missing )",
       );
     }
+
     this.pos += 1;
+
     return { kind: "group", alternatives, capturing };
   }
 
@@ -271,30 +314,40 @@ class Parser {
    */
   private parseEscape(inClass: boolean): Node {
     const c = this.peek();
+
     if (c === undefined) {
       throw new UnsupportedQueryPlanError("matches pattern ends in a trailing backslash");
     }
+
     this.pos += 1;
+
     if (/^[1-9]$/.test(c)) {
       throw new InvalidRe2Pattern("invalid escape sequence: backreference");
     }
+
     if (PERL_CLASSES.has(c)) {
       return { kind: "atom", out: `\\${c}`, caseless: false };
     }
+
     // RE2's `\s` holds no vertical tab, PCRE2's does: spelled as RE2's set.
     if (c === "s") {
       return { kind: "atom", out: inClass ? SPACE_MEMBERS : `[${SPACE_MEMBERS}]`, caseless: false };
     }
+
     if (c === "S" && !inClass) {
       return { kind: "atom", out: `[^${SPACE_MEMBERS}]`, caseless: false };
     }
+
     const control = CONTROL_ESCAPES[c];
+
     if (control !== undefined) {
       return { kind: "atom", out: control, caseless: false };
     }
+
     if (c.charCodeAt(0) < 0x80 && !isWordChar(c)) {
       return { kind: "atom", out: `\\${c}`, caseless: false };
     }
+
     throw new UnsupportedQueryPlanError(
       `matches supports only literal escapes and \\d \\D \\w \\W in the common RE2/PCRE2 subset` +
         (inClass ? " (inside a bracket class)" : ""),
@@ -308,62 +361,80 @@ class Parser {
    */
   private parseClass(): Node {
     let out = "[";
+
     if (this.peek() === "^") {
       out += "^";
       this.pos += 1;
     }
+
     let first = true;
+
     for (;;) {
       const c = this.peek();
+
       if (c === undefined) {
         throw new UnsupportedQueryPlanError(
           "matches pattern is outside the supported common RE2/PCRE2 subset: missing ]",
         );
       }
+
       if (c === "]" && !first) {
         this.pos += 1;
+
         return { kind: "atom", out: `${out}]`, caseless: true };
       }
+
       first = false;
+
       if (c === "[" && this.peek(1) === ":") {
         const rest = this.chars.slice(this.pos).join("");
         const match = /^\[:(\^?)([a-z]+):\]/.exec(rest);
+
         if (!match || match[1] !== "" || !POSIX_CLASSES.has(match[2]!)) {
           throw new UnsupportedQueryPlanError(
             "matches pattern is outside the supported common RE2/PCRE2 subset: a bracket class " +
               "member RE2 and PCRE2 may read differently",
           );
         }
+
         out += match[0];
         this.pos += match[0].length;
         continue;
       }
+
       const low = this.parseClassChar();
+
       if (low.kind === "range-end") {
         throw new UnsupportedQueryPlanError(
           "matches pattern is outside the supported common RE2/PCRE2 subset: a bracket class " +
             "member RE2 and PCRE2 may read differently",
         );
       }
+
       if (low.kind === "class") {
         out += low.out;
         continue;
       }
+
       if (this.peek() === "-" && this.peek(1) !== "]" && this.peek(1) !== undefined) {
         this.pos += 1;
         const high = this.parseClassChar();
+
         if (high.kind !== "char") {
           throw new UnsupportedQueryPlanError(
             "matches pattern is outside the supported common RE2/PCRE2 subset: a range ending " +
               "in a class",
           );
         }
+
         if (high.codePoint < low.codePoint) {
           throw new InvalidRe2Pattern("invalid character class range");
         }
+
         out += `${low.out}-${high.out}`;
         continue;
       }
+
       out += low.out;
     }
   }
@@ -373,35 +444,46 @@ class Parser {
     | { kind: "class"; out: string }
     | { kind: "range-end" } {
     const c = this.peek();
+
     if (c === undefined) {
       throw new UnsupportedQueryPlanError(
         "matches pattern is outside the supported common RE2/PCRE2 subset: missing ]",
       );
     }
+
     this.pos += 1;
+
     if (c === "\\") {
       const escaped = this.peek() ?? "";
       const node = this.parseEscape(true);
+
       if (node.kind !== "atom") {
         throw new UnsupportedQueryPlanError("matches pattern has an invalid class escape");
       }
+
       if (PERL_CLASSES.has(escaped) || escaped === "s") {
         return { kind: "class", out: node.out };
       }
+
       const codePoint = CONTROL_CODE_POINTS[escaped] ?? escaped.codePointAt(0)!;
+
       return { kind: "char", out: node.out, codePoint };
     }
+
     if (c === "[") {
       // A bare `[` is a member in both engines, but PCRE2 reads `[` before `:` as POSIX syntax.
       return { kind: "char", out: "\\[", codePoint: 0x5b };
     }
+
     if (c.charCodeAt(0) < 0x20) {
       throw new UnsupportedQueryPlanError(
         "matches pattern is outside the supported common RE2/PCRE2 subset: a control character",
       );
     }
+
     this.assertFoldable(c);
     const out = c.charCodeAt(0) > 0x7f || isWordChar(c) ? c : `\\${c}`;
+
     return { kind: "char", out, codePoint: c.codePointAt(0)! };
   }
 }
@@ -422,16 +504,21 @@ const assertRepeatBudget = (nodes: Node[][], budget: number): void => {
 const assertNodeRepeatBudget = (node: Node, budget: number): void => {
   if (node.kind === "repeat") {
     let remaining = budget;
+
     if (node.counted) {
       let m = node.max;
+
       if (m !== 0) {
         if (m < 0) m = node.min;
+
         if (m > remaining) {
           throw new InvalidRe2Pattern("invalid repeat count");
         }
+
         if (m > 0) remaining = Math.floor(remaining / m);
       }
     }
+
     assertNodeRepeatBudget(node.sub, remaining);
   } else if (node.kind === "group") {
     assertRepeatBudget(node.alternatives, budget);
@@ -469,13 +556,17 @@ export const lowerRe2PatternForMongo = (pattern: string): Re2Lowering => {
     RE2JS.compile(pattern);
   } catch (error) {
     if (!(error instanceof RE2JSException)) throw error;
+
     return { invalid: error.message };
   }
+
   const caseInsensitive = pattern.startsWith("(?i)");
   const body = caseInsensitive ? pattern.slice(4) : pattern;
+
   try {
     const alternatives = new Parser(body, caseInsensitive).parse();
     assertRepeatBudget(alternatives, MAX_REPEAT);
+
     return { pattern: `${caseInsensitive ? "(?i)" : ""}${emit(alternatives)}` };
   } catch (error) {
     if (error instanceof InvalidRe2Pattern) {
@@ -483,6 +574,7 @@ export const lowerRe2PatternForMongo = (pattern: string): Re2Lowering => {
         `matches pattern is outside the supported common RE2/PCRE2 subset (${error.message})`,
       );
     }
+
     throw error;
   }
 };

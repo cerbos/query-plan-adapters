@@ -15,6 +15,7 @@ import type { PostFilter, PostFilterFields } from "./postFilter";
 export { UnsupportedOperatorError };
 
 export type PlanKind = PK;
+
 export const PlanKind = PK;
 
 export interface FieldNameMapperConfig {
@@ -97,14 +98,17 @@ export function queryPlanToChromaDB({
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
       const resolveField = fieldResolver(fieldNameMapper);
+
       if (!allowPostFilter) {
         return {
           kind: PlanKind.CONDITIONAL,
           filters: mapOperand(queryPlan.condition, resolveField),
         };
       }
+
       return splitCondition(queryPlan.condition, fieldNameMapper, resolveField);
     }
+
     default:
       throw Error("Invalid query plan.");
   }
@@ -145,20 +149,25 @@ function splitCondition(
   resolveField: FieldResolver,
 ): QueryPlanToChromaDBResult<true> {
   const whole = tryPushdown(condition, resolveField);
+
   if (whole !== undefined) return { kind: PlanKind.CONDITIONAL, filters: whole };
 
   const postFilter = compilePostFilter(
     condition,
     postFilterFields(fieldNameMapper, resolveField),
   );
+
   const pushed =
     isExpression(condition) && condition.operator === "and"
       ? condition.operands.flatMap((conjunct) => {
           const where = tryPushdown(conjunct, resolveField);
+
           return where === undefined ? [] : [where];
         })
       : [];
+
   if (pushed.length === 0) return { kind: PlanKind.CONDITIONAL, postFilter };
+
   return {
     kind: PlanKind.CONDITIONAL,
     prefilter: pushed.length === 1 ? pushed[0]! : { $and: pushed },
@@ -180,6 +189,7 @@ function postFilterFields(
     typeof fieldNameMapper === "function"
       ? Boolean(fieldNameMapper(reference))
       : Object.prototype.hasOwnProperty.call(fieldNameMapper, reference);
+
   return {
     isMapped: (reference) =>
       declared(reference) || resolveField(reference).jsonPath !== undefined,
@@ -188,8 +198,10 @@ function postFilterFields(
     jsonPath: (reference) => resolveField(reference).jsonPath,
     jsonPresence: (reference) => {
       const field = resolveField(reference);
+
       const viaJson =
         field.jsonPath !== undefined ? field : resolveField.throughJson(reference);
+
       return viaJson?.jsonPath === undefined
         ? undefined
         : { key: viaJson.name, path: viaJson.jsonPath };
@@ -246,6 +258,7 @@ const COMPARISONS: ReadonlyMap<string, Comparison> = new Map(
 /** A comparison the planner emits, as opposed to any other operator or one only negation reaches. */
 function isPlanComparison(operator: string): boolean {
   const comparison = COMPARISONS.get(operator);
+
   return comparison !== undefined && !comparison.negationOnly;
 }
 
@@ -253,6 +266,7 @@ function isPlanComparison(operator: string): boolean {
 function emit(field: string, operator: string, value: unknown): Where {
   const { chroma, literal } = COMPARISONS.get(operator)!;
   const validated = literal(value, operator);
+
   if (Array.isArray(validated)) {
     // Chroma rejects a `$in`/`$nin` list whose values are not all one type, so a mixed CEL list
     // (`x in ["5", 2]`) is split into one list per scalar type. That is exact rather than a
@@ -260,22 +274,28 @@ function emit(field: string, operator: string, value: unknown): Where {
     // `"5"` never matches a stored 5, and `$nin: ["5"]` holds for every stored number. So
     // membership is the disjunction of the per-type memberships, and `nin` their conjunction.
     const groups = splitByType(validated);
+
     if (groups.length > 1) {
       const clauses = groups.map((group) => ({ [field]: { [chroma]: group } }));
+
       return (operator === "in" ? { $or: clauses } : { $and: clauses }) as Where;
     }
   }
+
   return { [field]: { [chroma]: validated } } as Where;
 }
 
 /** A literal list partitioned by scalar type, each partition in first-appearance order. */
 function splitByType(values: ChromaLiteral[]): ChromaLiteral[][] {
   const groups = new Map<string, ChromaLiteral[]>();
+
   for (const value of values) {
     const group = groups.get(typeof value);
+
     if (group) group.push(value);
     else groups.set(typeof value, [value]);
   }
+
   return [...groups.values()];
 }
 
@@ -285,12 +305,14 @@ function unsupported(operator: string): UnsupportedOperatorError {
 
 function negationOf(operator: string): string {
   const negated = COMPARISONS.get(operator)?.negated;
+
   if (negated === undefined) {
     throw new UnsupportedOperatorError(
       operator,
       `Cannot negate operator ${operator}`,
     );
   }
+
   return negated;
 }
 
@@ -302,10 +324,13 @@ function mirrorOf(operator: string): string {
       "ChromaDB filters cannot test whether a literal is contained in a metadata field",
     );
   }
+
   const mirrored = COMPARISONS.get(operator)?.mirrored;
+
   if (mirrored === undefined) {
     throw unsupported(operator);
   }
+
   return mirrored;
 }
 
@@ -326,6 +351,7 @@ function requireLiteral(value: unknown, operator: string): ChromaLiteral {
       `${operator} requires a finite number, string, or boolean literal`,
     );
   }
+
   return value;
 }
 
@@ -336,6 +362,7 @@ function requireNumber(value: unknown, operator: string): number {
       `${operator} requires a finite number literal`,
     );
   }
+
   return value;
 }
 
@@ -346,12 +373,14 @@ function requireLiteralList(value: unknown, operator: string): ChromaLiteral[] {
       `${operator} requires a non-empty literal list`,
     );
   }
+
   if (!value.every(isChromaLiteral)) {
     throw new UnsupportedOperatorError(
       operator,
       `${operator} requires a list containing only finite numbers, strings, or booleans`,
     );
   }
+
   return value;
 }
 
@@ -386,6 +415,7 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
     typeof fieldNameMapper === "function"
       ? fieldNameMapper(key)
       : fieldNameMapper[key];
+
   const resolve = (
     key: string,
     mapped: FieldNameMapperValue | undefined,
@@ -403,9 +433,11 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
               required: mapped.required ?? false,
             }
           : { name: key, required: false };
+
     if (!field.name) {
       throw Error("Field name is required");
     }
+
     if (
       field.valueType !== undefined &&
       field.valueType !== "boolean" &&
@@ -415,45 +447,58 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
         `Unknown valueType ${JSON.stringify(field.valueType)} for field ${field.name}`,
       );
     }
+
     if (field.valueType !== undefined && field.numericType !== undefined) {
       throw Error(
         `Field ${field.name} cannot declare both valueType and numericType`,
       );
     }
+
     if (field.listElements !== undefined) {
       const { field: key, type } = field.listElements;
+
       if (field.valueType !== "json") {
         throw Error(
           `Field ${field.name} declares listElements without valueType: "json"`,
         );
       }
+
       if (!key)
         throw Error(
           `Field ${field.name} declares listElements without a field`,
         );
+
       if (type !== "string" && type !== "integer") {
         throw Error(
           `Unknown listElements type ${JSON.stringify(type)} for field ${field.name}`,
         );
       }
     }
+
     if (field.valueType === "json") field.jsonPath = jsonPath ?? [];
+
     return field;
   };
+
   // A reference below an attribute declared `valueType: "json"` is read out of its document.
   const throughJson = (key: string): ResolvedField | undefined => {
     for (let dot = key.lastIndexOf("."); dot !== -1; dot = key.lastIndexOf(".", dot - 1)) {
       const prefix = lookup(key.substring(0, dot));
+
       if (typeof prefix === "object" && prefix.valueType === "json") {
         return resolve(key, prefix, key.substring(dot + 1).split("."));
       }
     }
+
     return undefined;
   };
+
   return Object.assign(
     (key: string): ResolvedField => {
       const mapped = lookup(key);
+
       if (mapped !== undefined) return resolve(key, mapped);
+
       return throughJson(key) ?? resolve(key, undefined);
     },
     { throughJson },
@@ -472,16 +517,19 @@ function inequalityWithoutNe(
   value: ChromaLiteral,
 ): Where | undefined {
   const key = field.name;
+
   if (field.valueType === "boolean" && typeof value === "boolean") {
     // A stored boolean that differs from one boolean is the other one.
     return { [key]: { $eq: !value } } as Where;
   }
+
   if (field.numericType === "integer") {
     if (typeof value === "number" && Number.isInteger(value)) {
       return {
         $or: [{ [key]: { $lt: value } }, { [key]: { $gt: value } }],
       } as Where;
     }
+
     if (typeof value !== "number") {
       // CEL equality across types is false, so every present integer differs from a string or
       // boolean literal. Chroma has no existence test, so presence is spelled as the whole integer
@@ -493,6 +541,7 @@ function inequalityWithoutNe(
       } as Where;
     }
   }
+
   return undefined;
 }
 
@@ -517,8 +566,10 @@ function requirePresenceFor(field: ResolvedField, operator: string): void {
 // on them is exact and survives however many copies exist. Same trio as every other adapter.
 const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
   "operator" in e;
+
 const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
   "value" in e;
+
 const isVariable = (e: PlanExpressionOperand): e is PlanExpressionVariable =>
   "name" in e;
 
@@ -530,6 +581,7 @@ function mapOperand(
   if (isVariable(operand)) {
     return mapBooleanVariable(operand, resolveField, negate);
   }
+
   if (!isExpression(operand)) {
     throw Error(
       `Query plan did not contain an expression for operand ${String(operand)}`,
@@ -540,9 +592,11 @@ function mapOperand(
 
   if (operator === "and" || operator === "or") {
     if (operands.length < 2) throw Error("Expected at least 2 operands");
+
     const children = operands.map((child) =>
       mapOperand(child, resolveField, negate),
     );
+
     // De Morgan: under negation a conjunction becomes a disjunction and vice versa.
     return (operator === "and") !== negate
       ? { $and: children }
@@ -552,6 +606,7 @@ function mapOperand(
   if (operator === "not") {
     if (operands.length !== 1 || !operands[0])
       throw Error("Expected exactly one operand");
+
     return mapOperand(operands[0], resolveField, !negate);
   }
 
@@ -579,16 +634,20 @@ function mapComparison(
     resolveField,
     negate,
   );
+
   if (membership !== undefined) return membership;
+
   // Checked before the operands are read, so a non-negatable shape keeps its refusal site under
   // negation whatever its operands are.
   if (negate) {
     negationOf(planOperator);
   }
+
   const { variable, literalFirst, value } = binaryOperands(
     planOperator,
     operands,
   );
+
   const oriented = literalFirst ? mirrorOf(planOperator) : planOperator;
   const operator = negate ? negationOf(oriented) : oriented;
 
@@ -613,12 +672,15 @@ function mapListMembership(
   negate: boolean,
 ): Where | undefined {
   if (operands.length !== 2) return undefined;
+
   const [left, right] = operands as [
     PlanExpressionOperand,
     PlanExpressionOperand,
   ];
+
   let variable: PlanExpressionVariable;
   let needles: unknown[];
+
   if (planOperator === "in" && isValue(left) && isVariable(right)) {
     variable = right;
     needles = [left.value];
@@ -629,6 +691,7 @@ function mapListMembership(
         : isValue(left) && isVariable(right)
           ? { variable: right, value: left.value }
           : undefined;
+
     if (
       pair === undefined ||
       !Array.isArray(pair.value) ||
@@ -636,50 +699,64 @@ function mapListMembership(
     ) {
       return undefined;
     }
+
     variable = pair.variable;
     needles = pair.value;
   } else {
     return undefined;
   }
+
   const field = resolveField(variable.name);
   const list = field.listElements;
+
   if (list === undefined || field.jsonPath?.length !== 0) return undefined;
+
   if (!needles.every((needle) => isListElement(list.type, needle)))
     return undefined;
+
   if (negate && !field.required) {
     throw new UnsupportedOperatorError(
       planOperator,
       `negated ${planOperator} is unsafe for ${field.name} unless it is required, because $not_contains matches records missing ${list.field}`,
     );
   }
+
   const clauses = needles.map(
     (needle) =>
       ({
         [list.field]: { [negate ? "$not_contains" : "$contains"]: needle },
       }) as Where,
   );
+
   if (clauses.length === 1) return clauses[0]!;
+
   return negate ? { $and: clauses } : { $or: clauses };
 }
 
 /** `key <operator> literal`, with the operator already mirrored and negated into key-first form. */
 function compare(field: ResolvedField, operator: string, value: unknown): Where {
   const comparison = COMPARISONS.get(operator);
+
   if (!comparison) {
     throw unsupported(operator);
   }
+
   if (field.valueType === "json") {
     throw new UnsupportedOperatorError(
       operator,
       `${operator} compares ${field.name}, a key declared valueType: "json": a Where clause would compare the JSON text, not the value it encodes`,
     );
   }
+
   // A literal Chroma cannot hold (a null, a list) is left to the `$ne` path, which refuses it.
   if (operator === "ne" && isChromaLiteral(value)) {
     const lowered = inequalityWithoutNe(field, value);
+
     if (lowered !== undefined) return lowered;
   }
+
   requirePresenceFor(field, operator);
+
   if (
     comparison.ordered &&
     typeof value === "number" &&
@@ -691,6 +768,7 @@ function compare(field: ResolvedField, operator: string, value: unknown): Where 
       `${operator} cannot safely compare a fractional threshold unless the mapped Chroma metadata field declares numericType: "float"`,
     );
   }
+
   return emit(field.name, operator, value);
 }
 
@@ -716,6 +794,7 @@ function binaryOperands(
     if (isPlanComparison(operator)) {
       throw Error("Expected exactly two operands");
     }
+
     throw new UnsupportedOperatorError(
       operator,
       "Expected exactly two operands",
@@ -724,6 +803,7 @@ function binaryOperands(
 
   const [left, right] = operands.map((operand): KeyOrLiteral => {
     if (isVariable(operand)) return { variable: operand };
+
     if (isValue(operand)) return { value: operand.value };
     // Inside a comparison, the computed operand is the part Chroma cannot evaluate. Inside
     // anything else — a collection macro, whose second operand is always its lambda — the
@@ -737,9 +817,11 @@ function binaryOperands(
   if ("variable" in left && "value" in right) {
     return { variable: left.variable, literalFirst: false, value: right.value };
   }
+
   if ("value" in left && "variable" in right) {
     return { variable: right.variable, literalFirst: true, value: left.value };
   }
+
   throw new UnsupportedOperatorError(
     operator,
     "variable" in left

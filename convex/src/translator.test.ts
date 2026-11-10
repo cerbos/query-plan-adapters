@@ -43,9 +43,11 @@ import {
  */
 
 const CURRENT = pdpTags()[0]!;
+
 const GOLDENS = readGoldens(CURRENT).filter(
   (golden) => !golden.plannerDivergence,
 );
+
 const golden = (id: string) => readGolden(CURRENT, id);
 
 /**
@@ -57,7 +59,9 @@ const PLANS = new Map<string, PlanResourcesResponse>();
 
 function planFor(id: string): PlanResourcesResponse {
   const queryPlan = PLANS.get(id);
+
   if (!queryPlan) throw new Error(`${id}: no decoded plan`);
+
   return queryPlan;
 }
 
@@ -79,6 +83,7 @@ const RECORDED_NODES = new WeakSet<object>();
 const record = (op: string, args: unknown[]): FilterNode => {
   const node: FilterNode = { op, args };
   RECORDED_NODES.add(node);
+
   return node;
 };
 
@@ -140,18 +145,22 @@ function translated(
 /** The calls the emitted filter makes against Convex's builder. */
 function recordFilter(label: string, filter: ConvexFilter) {
   const emitted: unknown = filter(RECORDING_BUILDER);
+
   if (!isRecordedNode(emitted)) {
     throw new Error(
       `${label} returned something other than a builder call: ${JSON.stringify(emitted)}`,
     );
   }
+
   return emitted;
 }
 
 /** What Convex's own engine is handed for a conditional plan: its `filter` or its `prefilter`. */
 function engineHalf(result: QueryPlanToConvexResult): ConvexFilter | undefined {
   if (result.kind !== PlanKind.CONDITIONAL) return undefined;
+
   if (result.path === "db") return result.filter;
+
   return result.path === "split" ? result.prefilter : undefined;
 }
 
@@ -170,6 +179,7 @@ beforeAll(async () => {
   goldens.forEach((g, index) => PLANS.set(g.id, plans[index]!));
   TRANSLATED = GOLDENS.flatMap((g) => {
     const result = translated(g.id);
+
     return result === "refused" ? [] : [{ id: g.id, result }];
   });
   PUSHED = TRANSLATED.filter(({ result }) => engineHalf(result) !== undefined);
@@ -189,6 +199,7 @@ describe("the refusal type", () => {
   // other side: a mapper mistake or a missing opt-in is NOT a refusal.
   test("an unmapped reference is a plain Error, not a refusal", () => {
     let thrown: unknown;
+
     try {
       queryPlanToConvex({
         queryPlan: planFor("string/equals/case-sensitive"),
@@ -196,17 +207,20 @@ describe("the refusal type", () => {
     } catch (error) {
       thrown = error;
     }
+
     expect(thrown).toBeInstanceOf(Error);
     expect(thrown).not.toBeInstanceOf(UnsupportedQueryPlanError);
   });
 
   test("a missing allowPostFilter opt-in is a plain Error, not a refusal", () => {
     let thrown: unknown;
+
     try {
       translate("regex/matches/anchored-prefix", { allowPostFilter: false });
     } catch (error) {
       thrown = error;
     }
+
     expect(thrown).toBeInstanceOf(Error);
     expect(thrown).not.toBeInstanceOf(UnsupportedQueryPlanError);
   });
@@ -225,6 +239,7 @@ describe("what the adapter asks Convex to do", () => {
         );
 
   const configs = Object.values(MAPPER);
+
   const fieldsWhere = (keep: (config: MapperConfig) => boolean) =>
     new Set(
       configs
@@ -232,12 +247,14 @@ describe("what the adapter asks Convex to do", () => {
         .map((config) => config.field)
         .filter((field): field is string => field !== undefined),
     );
+
   const declaredFields = fieldsWhere(() => true);
   const nullableFields = fieldsWhere((config) => config.nullable === true);
 
   test("each pushed case names only mapped, non-nullable fields", () => {
     // Anti-vacuity: the rule says nothing if no case reaches the engine.
     expect(PUSHED.length).toBeGreaterThan(0);
+
     // A `request.resource.attr.…` name would mean resolution missed a reference the caller DID
     // map — a path no document stores, which a negation reads as a match on every document.
     // A nullable field is CEL's missing-attribute case, which Convex's engine cannot tell from
@@ -246,10 +263,12 @@ describe("what the adapter asks Convex to do", () => {
       const fields = fieldsNamedBy(recordFilter(id, engineHalf(result)!));
       const undeclared = fields.filter((field) => !declaredFields.has(field));
       const nullable = fields.filter((field) => nullableFields.has(field));
+
       return undeclared.length || nullable.length
         ? [{ id, undeclared, nullable }]
         : [];
     });
+
     expect(violations).toEqual([]);
   });
 });
@@ -262,8 +281,10 @@ describe("what the adapter asks Convex to do", () => {
 describe("the allowPostFilter gate", () => {
   test("each case needs the opt-in exactly when it carries a post-filter", () => {
     expect(TRANSLATED.length).toBeGreaterThan(0);
+
     const violations = TRANSLATED.flatMap(({ id, result }) => {
       let outcome: string;
+
       try {
         outcome = translate(id, { allowPostFilter: false }).kind;
       } catch (error) {
@@ -272,9 +293,12 @@ describe("the allowPostFilter gate", () => {
           ? "opt-in required"
           : `threw: ${error.message}`;
       }
+
       const expected = "postFilter" in result ? "opt-in required" : result.kind;
+
       return outcome === expected ? [] : [{ id, expected, outcome }];
     });
+
     expect(violations).toEqual([]);
   });
 });
@@ -286,6 +310,7 @@ describe("the allowPostFilter gate", () => {
  */
 describe("a split result", () => {
   const SPLIT_CASE = "relation/and/one-hop-and-root-attribute";
+
   const mapper: Mapper = {
     ...MAPPER,
     "request.resource.attr.aBool": { field: "aBool", nullable: false },
@@ -293,11 +318,14 @@ describe("a split result", () => {
 
   test("its postFilter decides the whole condition, so the prefilter only narrows", () => {
     const result = translate(SPLIT_CASE, { mapper });
+
     if (result.path !== "split") throw new Error(`${SPLIT_CASE} did not split`);
+
     // Applied alone to every document, with no prefilter, it selects exactly what the PDP allowed.
     const alone = DOCUMENTS.filter((doc) => result.postFilter(doc))
       .map((doc) => doc.id)
       .sort();
+
     expect(alone).toEqual(golden(SPLIT_CASE).allowed);
   });
 });
@@ -310,12 +338,16 @@ describe("mapper forms", () => {
 
   test("a function mapper resolves the same references as a record mapper", () => {
     const asFunction: Mapper = (reference) => MAPPER[reference] ?? {};
+
     const decisions = (mapper: Mapper) => {
       const result = translate(DEEP_CASE, { mapper });
+
       if (!("postFilter" in result))
         throw new Error(`${DEEP_CASE} emitted no postFilter`);
+
       return DOCUMENTS.map((doc) => result.postFilter(doc));
     };
+
     const byRecord = decisions(MAPPER);
     expect(byRecord).toContain(true);
     expect(decisions(asFunction)).toEqual(byRecord);
@@ -352,6 +384,7 @@ describe("mapper forms", () => {
       reference === "request.resource.attr.aNumber"
         ? undefined
         : MAPPER[reference]) as Mapper;
+
     expect(() => translate("logic/not/greater-than", { mapper })).toThrow(
       "No mapper entry for request.resource.attr.aNumber",
     );
@@ -364,6 +397,7 @@ describe("mapper forms", () => {
         mapper: { "request.resource.attr.aString": {} },
       }),
     );
+
     if (!filter)
       throw new Error("emitted no filter under an empty-entry mapper");
     expect(recordFilter("empty entry", filter)).toEqual({
@@ -382,11 +416,15 @@ describe("nullAttributeRepresentation", () => {
 
   const carriesNullLiteral = (node: unknown): boolean => {
     if (Array.isArray(node)) return node.some(carriesNullLiteral);
+
     if (typeof node !== "object" || node === null) return false;
+
     if ("value" in node) {
       const { value } = node as { value: unknown };
+
       return value === null || (Array.isArray(value) && value.includes(null));
     }
+
     return Object.values(node).some(carriesNullLiteral);
   };
 
@@ -402,6 +440,7 @@ describe("nullAttributeRepresentation", () => {
         translated(id, { nullAttributeRepresentation: "omitted" }) ===
         "refused",
     ).map(({ id }) => id);
+
     const carrying = TRANSLATED.filter(({ id }) =>
       carriesNullLiteral(golden(id).plan.condition ?? null),
     ).map(({ id }) => id);
@@ -434,6 +473,7 @@ describe("omitted: an undeclared entry is nullable", () => {
       Object.entries(MAPPER).map(([key, config]) => {
         if (key !== `request.resource.attr.${field}`) return [key, config];
         const { nullable: _nullable, ...rest } = config;
+
         return [key, rest];
       }),
     );
@@ -471,6 +511,7 @@ describe("omitted: an undeclared entry is nullable", () => {
         mapper,
         allowPostFilter: true,
       });
+
     expect(() => call("null/equals/null-literal-on-missing-attribute")).toThrow(
       'the default is "omitted"',
     );
@@ -497,15 +538,19 @@ describe("omitted: an undeclared entry is nullable", () => {
         { ...config, nullable: config.nullable ?? false },
       ]),
     );
+
     const pushedDown = (result: QueryPlanToConvexResult) => {
       const half = engineHalf(result);
+
       return half ? recordFilter("filter", half) : undefined;
     };
+
     const differing = TRANSLATED.filter(
       ({ id }) => !/\bnull\b/.test(JSON.stringify(golden(id).plan)),
     )
       .filter(({ id, result }) => {
         const declaredResult = omitted(id, { mapper: declared });
+
         return (
           declaredResult.path !== result.path ||
           JSON.stringify(pushedDown(declaredResult)) !==
@@ -513,6 +558,7 @@ describe("omitted: an undeclared entry is nullable", () => {
         );
       })
       .map(({ id }) => id);
+
     expect(differing).toEqual([]);
   });
 });
@@ -555,29 +601,40 @@ describe("an ordering against a value of another type, on a non-nullable field",
     "array",
     "object",
   ];
+
   const convexType = (value: unknown): string => {
     if (value === null) return "null";
+
     if (value instanceof ArrayBuffer) return "bytes";
+
     if (Array.isArray(value)) return "array";
+
     return typeof value;
   };
+
   const convexCompare = (a: unknown, b: unknown): number => {
     const byType =
       CONVEX_TYPE_ORDER.indexOf(convexType(a)) -
       CONVEX_TYPE_ORDER.indexOf(convexType(b));
+
     if (byType !== 0) return byType;
+
     if (convexType(a) === "bytes") {
       return (a as ArrayBuffer).byteLength - (b as ArrayBuffer).byteLength;
     }
+
     const [x, y] = [a, b] as [number, number];
+
     return x < y ? -1 : x > y ? 1 : 0;
   };
+
   const convexEvaluate = (
     node: unknown,
     doc: Record<string, unknown>,
   ): unknown => {
     if (!isRecordedNode(node)) return node;
     const [a, b] = node.args.map((arg) => convexEvaluate(arg, doc));
+
     switch (node.op) {
       case "field":
         return doc[String(node.args[0])];
@@ -605,10 +662,13 @@ describe("an ordering against a value of another type, on a non-nullable field",
   };
 
   const ORDERING = new Set(["lt", "le", "gt", "ge"]);
+
   const ordersSomething = (node: unknown): boolean => {
     if (Array.isArray(node)) return node.some(ordersSomething);
+
     if (typeof node !== "object" || node === null) return false;
     const { operator } = node as { operator?: unknown };
+
     return (
       (typeof operator === "string" && ORDERING.has(operator)) ||
       Object.values(node).some(ordersSomething)
@@ -620,6 +680,7 @@ describe("an ordering against a value of another type, on a non-nullable field",
     condition: PlanExpressionOperand;
     filter: ConvexFilter;
   };
+
   let PUSHED_ORDERINGS: PushedOrdering[] = [];
 
   beforeAll(() => {
@@ -628,6 +689,7 @@ describe("an ordering against a value of another type, on a non-nullable field",
     ).flatMap((g) => {
       const result = translated(g.id, { mapper: NON_NULLABLE });
       const queryPlan = planFor(g.id);
+
       return result !== "refused" &&
         result.path === "db" &&
         queryPlan.kind === PlanKind.CONDITIONAL
@@ -656,9 +718,11 @@ describe("an ordering against a value of another type, on a non-nullable field",
         "type-mismatch/less-than/negated-string-field-against-number-literal",
       ]),
     );
+
     const disagreements = PUSHED_ORDERINGS.flatMap(
       ({ id, condition, filter }) => {
         const emitted = recordFilter(id, filter);
+
         return FIELDS.flatMap((field) =>
           VALUES.flatMap((value) => {
             const doc: Record<string, unknown> = {
@@ -668,6 +732,7 @@ describe("an ordering against a value of another type, on a non-nullable field",
               owner: "o",
               [field]: value,
             };
+
             const cel =
               evaluate(condition, {
                 doc,
@@ -675,12 +740,15 @@ describe("an ordering against a value of another type, on a non-nullable field",
                 bindings: {},
                 nullIsMissing: false,
               }) === true;
+
             const convex = convexEvaluate(emitted, doc) === true;
+
             return cel === convex ? [] : [{ id, field, value, cel, convex }];
           }),
         );
       },
     );
+
     expect(disagreements).toEqual([]);
   });
 });
@@ -838,8 +906,10 @@ describe("shapes the corpus does not reach yet", () => {
         mapper: MAPPER,
         allowPostFilter: true,
       });
+
       if (!("postFilter" in result))
         throw new Error(`${macro} emitted no postFilter`);
+
       return result.postFilter;
     };
 
@@ -874,19 +944,25 @@ describe("shapes the corpus does not reach yet", () => {
 // Type-only API contracts: these assignments stop compiling if an impossible result returns.
 test("result types require the payload declared by each execution path", () => {
   type Result = QueryPlanToConvexResult;
+
   type Rejects<T> = T extends Result ? false : true;
+
   const bareConditional: Rejects<{ kind: PlanKind.CONDITIONAL }> = true;
+
   const missingDbFilter: Rejects<{ kind: PlanKind.CONDITIONAL; path: "db" }> =
     true;
+
   const missingPostFilter: Rejects<{
     kind: PlanKind.CONDITIONAL;
     path: "post";
   }> = true;
+
   const missingSplitPostFilter: Rejects<{
     kind: PlanKind.CONDITIONAL;
     path: "split";
     prefilter: ConvexFilter;
   }> = true;
+
   // The pushable half of a split is never named `filter`, which is only ever the whole condition.
   const splitHalfAsFilter: Rejects<{
     kind: PlanKind.CONDITIONAL;
@@ -894,6 +970,7 @@ test("result types require the payload declared by each execution path", () => {
     filter: ConvexFilter;
     postFilter: (doc: Record<string, unknown>) => boolean;
   }> = true;
+
   expect([
     bareConditional,
     missingDbFilter,
@@ -901,6 +978,7 @@ test("result types require the payload declared by each execution path", () => {
     missingSplitPostFilter,
     splitHalfAsFilter,
   ]).toEqual([true, true, true, true, true]);
+
   // The filter cannot be read without narrowing first: no field is common to every result but
   // `kind` and `path`, so an unconditional result has none to apply by mistake (ADR 0011).
   const noUnnarrowedFilter: [
@@ -908,6 +986,7 @@ test("result types require the payload declared by each execution path", () => {
   ] extends [never]
     ? true
     : false = true;
+
   expect(noUnnarrowedFilter).toBe(true);
 });
 
@@ -918,15 +997,20 @@ test("the filter is what a table's .filter() takes, and only that", () => {
     DataModelFromSchemaDefinition<typeof import("../convex/schema").default>,
     "adversarial"
   >;
+
   type Accepts<T> = [ConvexFilter] extends [T] ? true : false;
+
   const tableFilter: Accepts<Parameters<Query<Adversarial>["filter"]>[0]> =
     true;
+
   const anyTableFilter: Accepts<
     Parameters<Query<GenericTableInfo>["filter"]>[0]
   > = true;
+
   const tablePredicate: Accepts<
     (q: FilterBuilder<Adversarial>) => Expression<boolean>
   > = true;
+
   const otherBuilder: Accepts<(q: number) => Expression<boolean>> = false;
   const otherResult: Accepts<(q: FilterBuilder<Adversarial>) => string> = false;
   expect([
@@ -936,10 +1020,12 @@ test("the filter is what a table's .filter() takes, and only that", () => {
     otherBuilder,
     otherResult,
   ]).toEqual([true, true, true, false, false]);
+
   const callerChosenTypes = () =>
     // @ts-expect-error the builder and result types are not the caller's to choose
     queryPlanToConvex<number, string>({
       queryPlan: { kind: PlanKind.ALWAYS_ALLOWED },
     });
+
   expect(callerChosenTypes).toBeInstanceOf(Function);
 });

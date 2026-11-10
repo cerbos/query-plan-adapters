@@ -76,15 +76,18 @@ export function pdpTags(): string[] {
     "current" | "previous",
     { tag: string }
   >;
+
   return [versions.current.tag, versions.previous.tag];
 }
 
 /** Every golden file recorded against `tag`, sorted by case id. */
 export function readGoldens(tag: string): Golden[] {
   const root = FUZZ_DIR ? path.join(FUZZ_DIR, tag) : path.join(CONFORMANCE_DIR, "golden", tag);
+
   const files = (fs.readdirSync(root, { recursive: true }) as string[])
     .filter((file) => file.endsWith(".json"))
     .map((file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8")) as Golden);
+
   return files.sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -116,26 +119,33 @@ export interface FuzzVerdict {
 /** Judges the ids a translated filter returned against the ids the PDP allowed. */
 export function fuzzVerdict(golden: Golden, expected: string[], returned: string[]): FuzzVerdict {
   const base = { pdp: golden.pdp, id: golden.id };
+
   // Compared element by element: under jest the arrays come from different realms, which
   // isDeepStrictEqual tells apart.
   if (returned.length === expected.length && returned.every((id, i) => id === expected[i])) {
     return { ...base, verdict: "match" };
   }
+
   const allowed = new Set(expected);
   const got = new Set(returned);
+
   const verdict = returned.some((id) => !allowed.has(id))
     ? "over-grant"
     : expected.some((id) => !got.has(id))
       ? "under-grant"
       : "error";
+
   const detail = verdict === "error" ? "the right rows, but repeated or out of order" : undefined;
+
   return { ...base, verdict, expected, returned, ...(detail ? { detail } : {}) };
 }
 
 /** A translation or query that threw, judged: the adapter's refusal type is the invariant working. */
 export function fuzzThrown(golden: Golden, error: unknown, refusal: abstract new (...args: never[]) => Error): FuzzVerdict {
   const base = { pdp: golden.pdp, id: golden.id };
+
   if (error instanceof refusal) return { ...base, verdict: "refused" };
+
   return { ...base, verdict: "error", detail: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
 }
 
@@ -167,6 +177,7 @@ export function writeFuzzResults(adapter: string, store: string, results: FuzzVe
  */
 export function nowMinus24h(): string {
   const ms = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
   return `${ms.slice(0, -1)}456789Z`;
 }
 
@@ -196,12 +207,15 @@ let requestCount = 0;
 function takeResponse(requestId: string): JsonObject {
   const body = pendingResponses.get(requestId);
   pendingResponses.delete(requestId);
+
   if (body === undefined) throw new Error(`stub PDP: no response for request ${requestId}`);
+
   return body;
 }
 
 function requestUrl(input: Parameters<typeof fetch>[0]): string {
   if (typeof input === "string") return input;
+
   return input instanceof URL ? input.href : input.url;
 }
 
@@ -214,11 +228,13 @@ function httpClient(): HTTP {
   globalThis.fetch = async (input, init) => {
     if (!requestUrl(input).startsWith(STUB_HTTP_PDP)) return passthrough(input, init);
     const { requestId } = JSON.parse(String(init?.body)) as { requestId: string };
+
     return new Response(toProtoJson(takeResponse(requestId)), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   };
+
   return new HTTP(STUB_HTTP_PDP);
 }
 
@@ -255,16 +271,19 @@ async function grpcClient(): Promise<{ client: GRPC; server: Server }> {
       },
     }
   );
+
   const port = await new Promise<number>((resolve, reject) =>
     server.bindAsync("127.0.0.1:0", ServerCredentials.createInsecure(), (error, bound) =>
       error ? reject(error) : resolve(bound)
     )
   );
+
   // The stub is on loopback; never route it through an ambient proxy.
   const client = new GRPC(`127.0.0.1:${port}`, {
     tls: false,
     channelOptions: { "grpc.enable_http_proxy": 0 },
   });
+
   return { client, server };
 }
 
@@ -276,6 +295,7 @@ function sdkClients(): Promise<{ http: HTTP; grpc: GRPC; server: Server }> {
     grpc: client,
     server,
   }));
+
   return stubClients;
 }
 
@@ -292,24 +312,31 @@ afterAll(async () => {
  */
 function toProtoJson(node: unknown): string {
   if (Object.is(node, -0)) return "-0";
+
   if (Array.isArray(node)) return `[${node.map(toProtoJson).join(",")}]`;
+
   if (node !== null && typeof node === "object") {
     const members = Object.entries(node).map(
       ([key, child]) => `${JSON.stringify(key)}:${toProtoJson(child)}`
     );
+
     return `{${members.join(",")}}`;
   }
+
   return JSON.stringify(node);
 }
 
 function substituteNow(node: unknown, now: string): JsonValue {
   if (node === "__NOW_MINUS_24H__") return now;
+
   if (Array.isArray(node)) return node.map((child) => substituteNow(child, now));
+
   if (node !== null && typeof node === "object") {
     return Object.fromEntries(
       Object.entries(node).map(([key, child]) => [key, substituteNow(child, now)])
     );
   }
+
   return node as JsonValue;
 }
 
@@ -321,6 +348,7 @@ function fetchPlan(
 ): Promise<PlanResourcesResponse> {
   const requestId = `${golden.id}#${++requestCount}`;
   pendingResponses.set(requestId, response);
+
   return client.planResources({
     requestId,
     principal: { id: "stub", roles: ["USER"] },
@@ -345,14 +373,18 @@ export async function planOf(
     policyVersion: "default",
     filter: substituteNow(golden.plan, now),
   };
+
   const { http, grpc } = await sdkClients();
+
   const [overHttp, overGrpc] = await Promise.all([
     fetchPlan(http, golden, response),
     fetchPlan(grpc, golden, response),
   ]);
+
   if (!isDeepStrictEqual(overHttp, overGrpc)) {
     throw new Error(`${golden.id}: @cerbos/http and @cerbos/grpc decode the plan differently`);
   }
+
   return overGrpc;
 }
 

@@ -82,9 +82,11 @@ export function isExplicitNullReference(
 
 export function getLeafField(path: string[]): string {
   const fieldName = path[path.length - 1];
+
   if (!fieldName) {
     throw new Error("Field path cannot be empty");
   }
+
   return fieldName;
 }
 
@@ -106,20 +108,27 @@ export function lookupElementFields(
   collectionPath: string
 ): Record<string, MapperConfig> | undefined {
   const direct = lookupMapping(mapper, collectionPath);
+
   if (direct) {
     return direct.relation?.fields;
   }
+
   const parts = collectionPath.split(".");
+
   for (let i = parts.length - 1; i > 0; i--) {
     let relation = lookupMapping(mapper, parts.slice(0, i).join("."))?.relation;
+
     if (!relation) {
       continue;
     }
+
     for (const part of parts.slice(i)) {
       relation = relation?.fields?.[part]?.relation;
     }
+
     return relation?.fields;
   }
+
   return undefined;
 }
 
@@ -130,18 +139,24 @@ export function lookupElementFields(
  */
 export function namesToOneRelation(mapper: Mapper, reference: string): boolean {
   const direct = lookupMapping(mapper, reference)?.relation;
+
   if (direct) return direct.type === "one" && direct.field === undefined;
   const parts = reference.split(".");
+
   for (let i = parts.length - 1; i > 0; i--) {
     let relation = lookupMapping(mapper, parts.slice(0, i).join("."))?.relation;
+
     if (!relation) {
       continue;
     }
+
     for (const part of parts.slice(i)) {
       relation = relation?.fields?.[part]?.relation;
     }
+
     return relation?.type === "one" && relation.field === undefined;
   }
+
   return false;
 }
 
@@ -170,10 +185,12 @@ export function resolveFieldReference(
   // Without a direct match, the longest dotted prefix that has a mapping applies.
   let matchedPrefix = "";
   let matchedConfig: MapperConfig | undefined;
+
   if (!config) {
     for (let i = parts.length - 1; i >= 0; i--) {
       const prefix = parts.slice(0, i + 1).join(".");
       const prefixConfig = lookupMapping(context.mapper, prefix);
+
       if (prefixConfig) {
         matchedPrefix = prefix;
         matchedConfig = prefixConfig;
@@ -194,11 +211,13 @@ export function resolveFieldReference(
   }
 
   const { fields } = activeConfig.relation;
+
   const remainingParts = matchedPrefix
     ? parts.slice(matchedPrefix.split(".").length)
     : [];
 
   const lastPart = parts[parts.length - 1];
+
   // A function mapper may return a relation config for the full leaf reference.
   // Resolve that leaf here too, before any filter is constructed.
   let field =
@@ -206,28 +225,37 @@ export function resolveFieldReference(
     (config && fields && lastPart
       ? (fields[lastPart]?.field ?? lastPart)
       : undefined);
+
   const relations = [toRelationConfig(activeConfig.relation)];
 
   // Walk the remaining segments through nested relation mappings; the first segment that is
   // not a relation names the leaf column.
   let leafConfig: MapperConfig | undefined;
+
   if (fields) {
     let currentMapper: Record<string, MapperConfig> = fields;
     let currentParts = remainingParts;
+
     while (currentParts.length > 0) {
       const currentPart = currentParts[0];
+
       if (!currentPart) {
         break;
       }
+
       const nextConfig: MapperConfig | undefined = currentMapper[currentPart];
+
       if (!nextConfig?.relation) {
         const leafPart = currentParts[currentParts.length - 1];
+
         if (leafPart) {
           field = nextConfig?.field || leafPart;
         }
+
         if (currentParts.length === 1) leafConfig = nextConfig;
         break;
       }
+
       relations.push(toRelationConfig(nextConfig.relation));
       field = nextConfig.relation.field;
       currentMapper = nextConfig.relation.fields || {};
@@ -262,6 +290,7 @@ function recordNullableElementField(
   if (config.nullable === false || config.relation) {
     return;
   }
+
   currentScope(context)?.nullableFields.add(config.field || defaultField);
 }
 
@@ -278,10 +307,13 @@ export function recordErroringNullElement(
   resolved: ResolvedOperand
 ): void {
   if (!isNamedOperand(operand) || !isResolvedFieldReference(resolved)) return;
+
   if (resolved.nullable === false || (resolved.relations?.length ?? 0) > 0) return;
+
   const scope = [...context.scopes]
     .reverse()
     .find((candidate) => candidate.variableName === operand.name);
+
   scope?.nullableFields.add(getLeafField(resolved.path));
 }
 
@@ -298,6 +330,7 @@ export function enterLambdaScope(
     ...context,
     scopes: [...context.scopes, scope],
   };
+
   const { variableName } = scope;
   const fullMapper = context.mapper;
 
@@ -305,6 +338,7 @@ export function enterLambdaScope(
     if (key === variableName) {
       const { relations } = resolveFieldReference(collectionPath, scopedContext);
       const projection = relations?.[relations.length - 1]?.field;
+
       if (projection) {
         return {
           field: projection,
@@ -322,11 +356,14 @@ export function enterLambdaScope(
     if (key.startsWith(variableName + ".")) {
       const strippedKey = key.replace(variableName + ".", "");
       const baseConfig = lookupElementFields(fullMapper, collectionPath);
+
       if (!baseConfig) {
         const fieldConfig = { field: strippedKey };
+
         if (!strippedKey.includes(".")) {
           recordNullableElementField(scopedContext, fieldConfig, strippedKey);
         }
+
         return fieldConfig;
       }
 
@@ -334,16 +371,21 @@ export function enterLambdaScope(
       const parts = strippedKey.split(".");
       let currentConfig = baseConfig;
       let field = parts[0] || strippedKey;
+
       for (let i = 0; i < parts.length - 1; i++) {
         const part = parts[i];
         const nextPart = parts[i + 1];
+
         if (!part || !nextPart) {
           break;
         }
+
         const nextFields = currentConfig[part]?.relation?.fields;
+
         if (!nextFields) {
           break;
         }
+
         currentConfig = nextFields;
         field = nextPart;
       }
@@ -351,6 +393,7 @@ export function enterLambdaScope(
       // The field config if it exists, otherwise a default one.
       const fieldConfig = currentConfig[field] || { field };
       recordNullableElementField(scopedContext, fieldConfig, field);
+
       return fieldConfig;
     }
 
@@ -358,8 +401,10 @@ export function enterLambdaScope(
     if (typeof fullMapper === "function") {
       return fullMapper(key);
     }
+
     return fullMapper[key] || { field: key };
   };
+
   return { ...scopedContext, mapper: scopedMapper };
 }
 
@@ -403,6 +448,7 @@ export function assertStructuralNulls(
   const sibling = operand.operands.find(isNamedOperand);
   const mapping = sibling && lookupMapping(context.mapper, sibling.name);
   const convention = mapping?.nullAttributeRepresentation ?? declared;
+
   if (
     operand.operator === "set-field" &&
     operand.operands.some((part) => isValueOperand(part) && part.value === null)
@@ -413,6 +459,7 @@ export function assertStructuralNulls(
       convention
     );
   }
+
   operand.operands.forEach((part) =>
     assertStructuralNulls(part, context, convention)
   );

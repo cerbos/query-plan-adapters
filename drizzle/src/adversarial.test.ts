@@ -82,10 +82,12 @@ interface DerivedEntry {
 }
 
 const STORE_NAMES = ["sqlite", "postgres", "mysql"] as const;
+
 type StoreName = (typeof STORE_NAMES)[number];
 
 function selectedStoreName(): StoreName {
   const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
+
   // A typo must fail rather than silently fall back to SQLite: a CI leg that believes it is
   // proving PostgreSQL while replaying SQLite is exactly the coverage gap this leg closes.
   if (!STORE_NAMES.includes(requested as StoreName)) {
@@ -93,6 +95,7 @@ function selectedStoreName(): StoreName {
       `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`,
     );
   }
+
   return requested as StoreName;
 }
 
@@ -109,22 +112,28 @@ const LACKS = Object.entries(
 )
   .filter(([, entry]) => entry.stores?.includes(STORE_NAME) ?? true)
   .map(([capability]) => capability);
+
 const ALL_SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+
 const UNHELD = new Set(
   ALL_SEEDS.filter((seed) => seed.requires?.some((capability) => LACKS.includes(capability))).map(
     (seed) => seed.id,
   ),
 );
+
 const SEEDS = ALL_SEEDS.filter((seed) => !UNHELD.has(seed.id));
+
 const DERIVED = (
   readCorpusJson("derived-fields.json") as { derived: Record<string, DerivedEntry> }
 ).derived;
 
 function derivedFor(seed: Seed): DerivedEntry {
   const entry = DERIVED[seed.id];
+
   if (entry === undefined) {
     throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
+
   return entry;
 }
 
@@ -134,13 +143,17 @@ const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
 
 function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const id = seed?.parentSeedId;
+
   if (id === undefined || id === null) {
     return undefined;
   }
+
   const parent = SEEDS_BY_ID.get(id);
+
   if (parent === undefined) {
     throw new Error(`seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`);
   }
+
   return parent;
 }
 
@@ -245,6 +258,7 @@ function seedRows(): SeedRows {
       aBoolListJson: seed.aBoolList,
     });
     const parentSeed = parentSeedOf(seed);
+
     if (parentSeed !== undefined) {
       const parentId = `${seed.id}-parent`;
       rows.parents.push({
@@ -256,6 +270,7 @@ function seedRows(): SeedRows {
         resourceId: seed.id,
       });
       const innerSeed = parentSeedOf(parentSeed);
+
       if (innerSeed !== undefined) {
         rows.inners.push({
           id: `${parentId}-inner`,
@@ -267,11 +282,13 @@ function seedRows(): SeedRows {
         });
       }
     }
+
     seed.tags.forEach((tag, position) => {
       rows.tags.push({ tagId: tag.id, name: tag.name, position, resourceId: seed.id });
     });
     // One category holding every subcategory name (conformance/README.md, "The dataset").
     const categoryId = `${seed.id}-cat`;
+
     if (seed.subCategoryNames.length > 0) {
       rows.categories.push({
         id: categoryId,
@@ -279,6 +296,7 @@ function seedRows(): SeedRows {
         resourceId: seed.id,
       });
     }
+
     seed.subCategoryNames.forEach((subName, index) => {
       const subCategoryId = `${categoryId}-sub-${index}`;
       rows.subCategories.push({
@@ -336,6 +354,7 @@ interface AdversarialStore {
 
 function sqliteStore(): AdversarialStore {
   const schema = sqliteSchema();
+
   const {
     resources,
     parents,
@@ -433,11 +452,13 @@ function sqliteStore(): AdversarialStore {
         .from(resources)
         .where(filter)
         .all();
+
       return selected.map((row) => row.id).sort();
     },
 
     async serverBanner(): Promise<string> {
       const row = sqlite.prepare("select sqlite_version() as version").get();
+
       return `SQLite ${(row as { version: string }).version}`;
     },
   };
@@ -490,6 +511,7 @@ const POSTGRES_INITDB_ARGS =
  */
 function postgresStore(): AdversarialStore {
   const schema = postgresSchema();
+
   const {
     resources,
     parents,
@@ -508,6 +530,7 @@ function postgresStore(): AdversarialStore {
     if (!db) {
       throw new Error("PostgreSQL store used before start()");
     }
+
     return db;
   };
 
@@ -639,6 +662,7 @@ function postgresStore(): AdversarialStore {
         .select({ id: resources.id })
         .from(resources)
         .where(filter);
+
       return selected.map((row) => row.id).sort();
     },
 
@@ -646,6 +670,7 @@ function postgresStore(): AdversarialStore {
       const result = await connected().execute<{ version: string }>(
         sql`select version() as version`,
       );
+
       return result.rows[0]?.version ?? "";
     },
   };
@@ -727,6 +752,7 @@ const MYSQL_COLLATION =
  */
 function mysqlStore(): AdversarialStore {
   const schema = mysqlSchema();
+
   const {
     resources,
     parents,
@@ -747,6 +773,7 @@ function mysqlStore(): AdversarialStore {
     if (!db) {
       throw new Error("MySQL store used before start()");
     }
+
     return db;
   };
 
@@ -854,6 +881,7 @@ function mysqlStore(): AdversarialStore {
         .select({ id: resources.id })
         .from(resources)
         .where(filter);
+
       return selected.map((row) => row.id).sort();
     },
 
@@ -866,6 +894,7 @@ function mysqlStore(): AdversarialStore {
       const result = (await connected().execute(
         sql`select @@version_comment as version`,
       )) as unknown as [{ version: string }[]];
+
       return result[0][0]?.version ?? "";
     },
   };
@@ -888,16 +917,20 @@ function mysqlStore(): AdversarialStore {
 function toMysqlResourceRow(row: ResourceRow): ResourceRow {
   function timestamp(value: string | null): string | null {
     if (value === null) return null;
+
     const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}(?:\.\d+)?)Z$/.exec(
       value,
     );
+
     if (!match) {
       throw new Error(
         `derived-fields.json timestamp "${value}" is not the RFC-3339 UTC instant this store rewrites`,
       );
     }
+
     return `${match[1]} ${match[2]}`;
   }
+
   return {
     ...row,
     createdAt: timestamp(row.createdAt),
@@ -913,6 +946,7 @@ const STORE_FACTORIES: Record<StoreName, () => AdversarialStore> = {
   postgres: postgresStore,
   mysql: mysqlStore,
 };
+
 const store: AdversarialStore = STORE_FACTORIES[STORE_NAME]();
 const MAPPER = store.mapper;
 
@@ -923,10 +957,12 @@ function withListColumns(
   columns: Record<"tagNames" | "aNumberList" | "aBoolList", unknown>,
 ): Record<string, MapperEntry> {
   const mapper = { ...base };
+
   for (const [name, column] of Object.entries(columns)) {
     const reference = `request.resource.attr.${name}`;
     mapper[reference] = { ...(base[reference] as object), column, indexable } as MapperEntry;
   }
+
   return mapper;
 }
 
@@ -947,6 +983,7 @@ const LEDGER = (
 
 function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
   const entry = LEDGER[golden.id];
+
   return entry && (entry.pdp === undefined || entry.pdp.includes(tag)) ? entry : undefined;
 }
 
@@ -960,7 +997,9 @@ const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) =>
 
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
   const result = translatePlan(await planOf(golden), mapper);
+
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
+
   return store.selectIds(result.kind === PlanKind.CONDITIONAL ? result.filter : undefined);
 }
 
@@ -972,7 +1011,9 @@ async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
   const mappers = LIST_REFERENCE.test(JSON.stringify(golden.plan))
     ? [MAPPER, ...(store.indexMappers ?? [])]
     : [MAPPER];
+
   const verdicts: FuzzVerdict[] = [];
+
   for (const mapper of mappers) {
     try {
       verdicts.push(fuzzVerdict(golden, golden.allowed, await selectAllowed(golden, mapper)));
@@ -980,10 +1021,12 @@ async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
       verdicts.push(fuzzThrown(golden, error, UnsupportedQueryPlanError));
     }
   }
+
   return verdicts.find((v) => v.verdict !== "match" && v.verdict !== "refused") ?? verdicts[0]!;
 }
 
 const TAGS = pdpTags();
+
 const GOLDENS = new Map(
   TAGS.map((tag) => [
     tag,
@@ -993,6 +1036,7 @@ const GOLDENS = new Map(
     })),
   ]),
 );
+
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
 const skipped: Record<string, number> = {};
@@ -1003,10 +1047,13 @@ beforeAll(() => store.start(), STORE_STARTUP_TIMEOUT_MS);
 afterAll(async () => {
   await store.stop();
   writeFuzzResults("drizzle", STORE_NAME, fuzzResults);
+
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
+
     return `${tag}: ${tiers.map((tier) => `${tier} ${passed[tag]?.[tier] ?? 0}/${totals[tag]?.[tier]}`).join(", ")} (${skipped[tag] ?? 0} planner divergence skipped)`;
   });
+
   console.log(`conformance (${STORE_NAME}) passed per tier\n${lines.join("\n")}`);
 }, STORE_STARTUP_TIMEOUT_MS);
 
@@ -1048,31 +1095,42 @@ describe(`conformance (${STORE_NAME})`, () => {
       async (_id, golden) => {
         // A golden filed under the wrong tag directory would be replayed against the wrong ledger scope.
         expect(golden.pdp).toBe(tag);
+
         if (FUZZ_DIR) {
           const verdict = await fuzzReplay(golden);
           fuzzResults.push(verdict);
           assertFuzzVerdict(verdict);
+
           return;
         }
+
         const entry = ledgerEntry(golden, tag);
+
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);
           expect(() => translatePlan(queryPlan, MAPPER)).toThrow(
             UnsupportedQueryPlanError,
           );
+
           return;
         }
+
         const ids = await selectAllowed(golden, MAPPER);
+
         if (entry?.status === "divergent") {
           expect(ids).not.toEqual(golden.allowed);
+
           return;
         }
+
         expect(ids).toEqual(golden.allowed);
+
         if (LIST_REFERENCE.test(JSON.stringify(golden.plan))) {
           for (const mapper of store.indexMappers ?? []) {
             expect(await selectAllowed(golden, mapper)).toEqual(golden.allowed);
           }
         }
+
         (passed[tag] ??= {})[golden.tier] = (passed[tag]?.[golden.tier] ?? 0) + 1;
       },
     );
@@ -1081,6 +1139,7 @@ describe(`conformance (${STORE_NAME})`, () => {
     for (const golden of GOLDENS.get(tag)!) {
       (totals[tag] ??= {})[golden.tier] = (totals[tag]?.[golden.tier] ?? 0) + 1;
     }
+
     skipped[tag] = GOLDENS.get(tag)!.length - cases.length;
   }
 });

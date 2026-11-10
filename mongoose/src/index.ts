@@ -6,6 +6,7 @@ import { translateCondition } from "./filter";
 import { rootMapper } from "./mapper";
 
 export { PlanKind };
+
 export { UnsupportedQueryPlanError };
 
 export type MongooseFilter = Record<string, any>;
@@ -108,6 +109,7 @@ export function queryPlanToMongoose({
     nullRepresentation: nullAttributeRepresentation,
     scope: { kind: "root" },
   };
+
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
@@ -132,9 +134,11 @@ export function queryPlanToMongoose({
  */
 const shieldExpressions = (filter: unknown): unknown => {
   if (Array.isArray(filter)) return filter.map(shieldExpressions);
+
   if (typeof filter !== "object" || filter === null || Object.getPrototypeOf(filter) !== Object.prototype) {
     return filter;
   }
+
   return Object.fromEntries(
     Object.entries(filter).map(([key, value]) => [
       key,

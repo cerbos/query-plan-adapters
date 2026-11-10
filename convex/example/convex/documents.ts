@@ -34,6 +34,7 @@ import { mutation, query } from "./_generated/server";
 import { documentFields } from "./schema";
 
 type Documents = DataModel["documents"];
+
 /** What `queryPlanToConvex` hands back, and what `.filter()` takes: a function of the builder. */
 type Predicate = (q: FilterBuilder<Documents>) => Expression<boolean>;
 
@@ -63,6 +64,7 @@ const applicationFilterValidator = v.object({
   archived: v.boolean(),
   region: v.string(),
 });
+
 type ApplicationFilter = Infer<typeof applicationFilterValidator>;
 
 /**
@@ -79,14 +81,17 @@ const translate = (
     queryPlan: queryPlan as PlanResourcesResponse,
     mapper: MAPPER,
   });
+
   // Only a conditional result carries a filter, and only `path: "db"` carries one that is the
   // whole condition. Without the opt-in the adapter throws rather than return any other path, so
   // this throw is unreachable — and a fall-through to `undefined` here would read as "no filter".
   if (result.kind !== PlanKind.CONDITIONAL)
     return { kind: result.kind, filter: undefined };
+
   if (result.path !== "db") {
     throw new Error(`a "${result.path}" result without allowPostFilter`);
   }
+
   return { kind: result.kind, filter: result.filter };
 };
 
@@ -105,14 +110,19 @@ const compose = (
   application: ApplicationFilter | undefined,
 ): Predicate | undefined => {
   if (!filter && !application) return undefined;
+
   return (q) => {
     const clauses: Expression<boolean>[] = [];
+
     if (filter) clauses.push(filter(q));
+
     if (application) {
       clauses.push(q.eq(q.field("archived"), application.archived));
       clauses.push(q.eq(q.field("region"), application.region));
     }
+
     const [only] = clauses;
+
     return clauses.length === 1 && only ? only : q.and(...clauses);
   };
 };
@@ -133,6 +143,7 @@ export const seed = mutation({
     for (const stored of await ctx.db.query("documents").collect()) {
       await ctx.db.delete(stored._id);
     }
+
     for (const document of args.documents) {
       await ctx.db.insert("documents", document);
     }
@@ -154,6 +165,7 @@ export const list = query({
   },
   handler: async (ctx, args) => {
     const { kind, filter } = translate(args.queryPlan);
+
     // Short-circuited before any predicate is built: the application's predicate must not be able
     // to turn a denial into a query that returns rows.
     if (kind === PlanKind.ALWAYS_DENIED) return { kind, ids: [] as string[] };
@@ -162,6 +174,7 @@ export const list = query({
       ctx.db.query("documents"),
       compose(filter, args.applicationFilter),
     ).collect();
+
     return { kind, ids: documents.map((document) => document.id).sort() };
   },
 });
@@ -178,6 +191,7 @@ export const page = query({
   args: { queryPlan: v.any(), paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
     const { kind, filter } = translate(args.queryPlan);
+
     if (kind === PlanKind.ALWAYS_DENIED) {
       return { kind, ids: [] as string[], isDone: true, cursor: null };
     }
@@ -189,6 +203,7 @@ export const page = query({
       ctx.db.query("documents"),
       filter,
     ).paginate(args.paginationOpts);
+
     return {
       kind,
       ids: result.page.map((document) => document.id).sort(),

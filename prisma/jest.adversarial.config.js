@@ -10,6 +10,7 @@ const STORE_SUFFIXES = {
   postgres: ".pg",
   mysql: ".mysql",
 };
+
 if (!Object.hasOwn(STORE_SUFFIXES, store)) {
   // A typo must fail rather than silently fall back to SQLite: a CI leg that believes it is
   // proving PostgreSQL or MySQL while replaying SQLite is exactly the coverage gap #320 and #340

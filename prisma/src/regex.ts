@@ -61,9 +61,12 @@ function repeatIsValid(node: Node, budget: number): boolean {
     case "repeat": {
       if (node.max === 0) return true;
       const count = node.max === Infinity ? node.min : node.max;
+
       if (count > budget) return false;
+
       return repeatIsValid(node.node, count === 0 ? budget : Math.floor(budget / count));
     }
+
     case "alt":
       return node.branches.every((branch) => branch.every((inner) => repeatIsValid(inner, budget)));
     default:
@@ -74,10 +77,14 @@ function repeatIsValid(node: Node, budget: number): boolean {
 /** RE2's simple case folding over ASCII letters: `k` and `s` fold with a non-ASCII sign too. */
 function foldOrbit(char: string): string[] {
   const lower = char.toLowerCase();
+
   if (!/^[a-z]$/.test(lower)) return [char];
   const orbit = [lower, lower.toUpperCase()];
+
   if (lower === "k") orbit.push("K");
+
   if (lower === "s") orbit.push("ſ");
+
   return orbit;
 }
 
@@ -96,8 +103,11 @@ class Parser {
       this.caseInsensitive = true;
       this.index = 4;
     }
+
     const branches = this.alternation();
+
     if (this.index !== this.chars.length) refuse(this.pattern, "unbalanced parenthesis");
+
     return branches;
   }
 
@@ -115,18 +125,22 @@ class Parser {
 
   private alternation(): Node[][] {
     const branches: Node[][] = [this.sequence()];
+
     while (this.peek() === "|") {
       this.index++;
       branches.push(this.sequence());
     }
+
     return branches;
   }
 
   private sequence(): Node[] {
     const nodes: Node[] = [];
+
     for (let char = this.peek(); char !== undefined && char !== "|" && char !== ")"; char = this.peek()) {
       nodes.push(this.quantified(this.atom()));
     }
+
     return nodes;
   }
 
@@ -134,37 +148,48 @@ class Parser {
     const char = this.peek();
     let min: number;
     let max: number;
+
     if (char === "*" || char === "+" || char === "?") {
       this.index++;
       [min, max] = char === "*" ? [0, Infinity] : char === "+" ? [1, Infinity] : [0, 1];
     } else if (char === "{") {
       const match = REPEAT.exec(this.rest());
+
       // RE2 reads a brace that does not open a repetition as a literal.
       if (match === null) return node;
       this.index += Array.from(match[0]).length;
       min = Number(match[1]);
       max = match[2] === undefined ? min : match[3] === undefined ? Infinity : Number(match[3]);
+
       if (min > MAX_REPEAT || (max !== Infinity && (max > MAX_REPEAT || max < min))) {
         throw new InvalidRegexError("invalid repeat count");
       }
     } else {
       return node;
     }
+
     const next = this.peek();
+
     if (next === "?") refuse(this.pattern, "non-greedy repetition");
+
     if (next === "*" || next === "+" || (next === "{" && REPEAT.test(this.rest()))) {
       throw new InvalidRegexError("invalid nested repetition");
     }
+
     if (node.kind === "begin" || node.kind === "end") {
       refuse(this.pattern, "a repeated anchor");
     }
+
     const repeat: Node = { kind: "repeat", node, min, max };
+
     if (!repeatIsValid(repeat, MAX_REPEAT)) throw new InvalidRegexError("invalid repeat count");
+
     return repeat;
   }
 
   private atom(): Node {
     const char = this.next()!;
+
     switch (char) {
       case "^":
         return { kind: "begin" };
@@ -175,18 +200,24 @@ class Parser {
       case "(": {
         if (this.peek() === "?") {
           const rest = this.rest();
+
           if (/^\?(=|!|<=|<!)/.test(rest)) throw new InvalidRegexError("lookaround");
+
           if (rest.startsWith("?:")) {
             this.index += 2;
           } else {
             refuse(this.pattern, "a group flag");
           }
         }
+
         const branches = this.alternation();
+
         if (this.peek() !== ")") refuse(this.pattern, "unbalanced parenthesis");
         this.index++;
+
         return { kind: "alt", branches };
       }
+
       case "[":
         return this.characterClass();
       case "\\":
@@ -200,6 +231,7 @@ class Parser {
         if (REPEAT.test(`{${this.rest()}`)) {
           throw new InvalidRegexError("missing argument to repetition operator");
         }
+
         return this.literal(char);
       default:
         return this.literal(char);
@@ -210,16 +242,22 @@ class Parser {
     if (this.caseInsensitive && /[^\x00-\x7F]/.test(char)) {
       refuse(this.pattern, "case-insensitive matching of a non-ASCII character");
     }
+
     return { kind: "char", chars: this.caseInsensitive ? foldOrbit(char) : [char] };
   }
 
   private escape(): Node {
     const char = this.next();
+
     if (char === undefined) throw new InvalidRegexError("trailing backslash");
+
     if (char === "d") return { kind: "char", chars: DIGITS };
     const octal = this.octalEscape(char);
+
     if (octal !== undefined) return this.literal(octal);
+
     if (/[A-Za-z0-9]/.test(char)) refuse(this.pattern, `the escape \\${char}`);
+
     return this.literal(char);
   }
 
@@ -230,17 +268,23 @@ class Parser {
    */
   private octalEscape(first: string): string | undefined {
     const isOctal = (c: string | undefined): c is string => c !== undefined && c >= "0" && c <= "7";
+
     if (!isOctal(first)) {
       if (/[89]/.test(first)) throw new InvalidRegexError(`invalid escape sequence: \\${first}`);
+
       return undefined;
     }
+
     if (first !== "0" && !isOctal(this.peek())) {
       throw new InvalidRegexError(`invalid escape sequence: \\${first}`);
     }
+
     let code = Number(first);
+
     for (let digits = 1; digits < 3 && isOctal(this.peek()); digits++) {
       code = code * 8 + Number(this.next());
     }
+
     return String.fromCodePoint(code);
   }
 
@@ -248,26 +292,36 @@ class Parser {
     if (this.peek() === "^") refuse(this.pattern, "a negated character class");
     const chars = new Set<string>();
     let first = true;
+
     for (;;) {
       const char = this.next();
+
       if (char === undefined) throw new InvalidRegexError("missing closing ]");
+
       if (char === "]" && !first) break;
       first = false;
+
       if (char === "[" && this.rest().startsWith(":digit:]")) {
         this.index += ":digit:]".length;
         DIGITS.forEach((digit) => chars.add(digit));
         continue;
       }
+
       if (char === "[" && this.peek() === ":") refuse(this.pattern, "a POSIX class other than digit");
       let from = char;
+
       if (char === "\\") {
         const escaped = this.next();
+
         if (escaped === undefined) throw new InvalidRegexError("trailing backslash");
+
         if (escaped === "d") {
           DIGITS.forEach((digit) => chars.add(digit));
           continue;
         }
+
         const octal = this.octalEscape(escaped);
+
         if (octal !== undefined) {
           from = octal;
         } else {
@@ -275,25 +329,34 @@ class Parser {
           from = escaped;
         }
       }
+
       if (this.peek() === "-" && this.peek(1) !== "]") {
         this.index++;
         const to = this.next();
+
         if (to === undefined || to === "\\") refuse(this.pattern, "an escaped class range");
         const start = from.codePointAt(0)!;
         const end = to.codePointAt(0)!;
+
         if (end < start) throw new InvalidRegexError("invalid character class range");
+
         if (end - start > 128) refuse(this.pattern, "a wide character range");
+
         for (let code = start; code <= end; code++) chars.add(String.fromCodePoint(code));
         continue;
       }
+
       chars.add(from);
     }
+
     const members = [...chars].flatMap((char) => {
       if (this.caseInsensitive && /[^\x00-\x7F]/.test(char)) {
         refuse(this.pattern, "case-insensitive matching of a non-ASCII character");
       }
+
       return this.caseInsensitive ? foldOrbit(char) : [char];
     });
+
     return { kind: "char", chars: [...new Set(members)] };
   }
 }
@@ -306,15 +369,18 @@ function product(pattern: string, left: Token[][], right: Token[][]): Token[][] 
   if (left.length * right.length > MAX_ALTERNATIVES) {
     refuse(pattern, `more than ${MAX_ALTERNATIVES} alternatives`);
   }
+
   return left.flatMap((l) => right.map((r) => [...l, ...r]));
 }
 
 /** Every token sequence `nodes` (holding no anchor) can match. */
 function expand(pattern: string, nodes: Node[]): Token[][] {
   let sequences: Token[][] = [[]];
+
   for (const node of nodes) {
     sequences = product(pattern, sequences, expandNode(pattern, node));
   }
+
   return sequences;
 }
 
@@ -326,24 +392,34 @@ function expandNode(pattern: string, node: Node): Token[][] {
       return [[{ any: true }]];
     case "alt": {
       const all = node.branches.flatMap((branch) => expand(pattern, branch));
+
       if (all.length > MAX_ALTERNATIVES) refuse(pattern, `more than ${MAX_ALTERNATIVES} alternatives`);
+
       return all;
     }
+
     case "repeat": {
       if (node.max === Infinity) {
         if (node.node.kind !== "any") refuse(pattern, "unbounded repetition of anything but .");
+
         return [[...Array.from({ length: node.min }, (): Token => ({ any: true })), { star: true }]];
       }
+
       const unit = expandNode(pattern, node.node);
       const results: Token[][] = [];
       let power: Token[][] = [[]];
+
       for (let count = 0; count <= node.max; count++) {
         if (count >= node.min) results.push(...power);
+
         if (results.length > MAX_ALTERNATIVES) refuse(pattern, `more than ${MAX_ALTERNATIVES} alternatives`);
+
         if (count < node.max) power = product(pattern, power, unit);
       }
+
       return results;
     }
+
     default:
       refuse(pattern, "an anchor inside a group or away from the pattern's ends");
   }
@@ -353,19 +429,25 @@ function expandNode(pattern: string, node: Node): Token[][] {
 export function expandPattern(pattern: string): Expansion[] {
   const branches = new Parser(pattern).parse();
   const expansions: Expansion[] = [];
+
   for (const branch of branches) {
     let nodes = branch;
     const begin = nodes[0]?.kind === "begin";
+
     if (begin) nodes = nodes.slice(1);
     const end = nodes[nodes.length - 1]?.kind === "end";
+
     if (end) nodes = nodes.slice(0, -1);
+
     for (const tokens of expand(pattern, nodes)) {
       expansions.push({ begin, end, tokens });
+
       if (expansions.length > MAX_ALTERNATIVES) {
         refuse(pattern, `more than ${MAX_ALTERNATIVES} alternatives`);
       }
     }
   }
+
   return expansions;
 }
 
@@ -388,27 +470,35 @@ function alternativeFilter(
   const literal = tokens.every((token) => "char" in token)
     ? tokens.map((token) => (token as { char: string }).char).join("")
     : undefined;
+
   if (literal !== undefined && begin && end) {
     return buildFieldFilter(fieldRef, "equals", literal);
   }
+
   const likeText = tokens
     .map((token) => ("char" in token ? token.char : "any" in token ? "_" : "%"))
     .join("");
+
   // A prefix is matched as a range, so it needs no escaping (see buildPrefixFilter).
   if (literal !== undefined && begin) return buildPrefixFilter(fieldRef, literal);
   const literals = tokens.flatMap((token) => ("char" in token ? [token.char] : []));
+
   if (literals.some((char) => LIKE_METACHARACTERS.test(char))) {
     refuse(pattern, "a literal LIKE metacharacter (%, _ or \\), which Prisma does not escape");
   }
+
   if (literal !== undefined) {
     return buildFieldFilter(fieldRef, end ? "endsWith" : "contains", literal);
   }
+
   if (!begin || !end) {
     refuse(pattern, "a wildcard in a pattern not anchored at both ends");
   }
+
   if (literals.includes("\n")) refuse(pattern, "a literal newline beside a wildcard");
   const noNewline: PrismaFilter = { NOT: buildFieldFilter(fieldRef, "contains", "\n") };
   const segments = likeText.split("%");
+
   if (segments.length === 1) {
     // Exactly the pattern's length: it matches as a prefix, and one more character never fits.
     return {
@@ -419,16 +509,22 @@ function alternativeFilter(
       ],
     };
   }
+
   if (segments.length > 2) refuse(pattern, "more than one .* in one alternative");
   // `A.*B`: A at the start, B at the end, and room for both without overlapping.
   const [head, tail] = segments as [string, string];
   const filters: PrismaFilter[] = [];
+
   if (head !== "") filters.push(buildFieldFilter(fieldRef, "startsWith", head));
+
   if (tail !== "") filters.push(buildFieldFilter(fieldRef, "endsWith", tail));
+
   if (head !== "" && tail !== "") {
     filters.push(buildFieldFilter(fieldRef, "startsWith", "_".repeat(Array.from(head).length + Array.from(tail).length)));
   }
+
   if (filters.length === 0) filters.push(buildFieldFilter(fieldRef, "startsWith", ""));
+
   return { AND: [...filters, noNewline] };
 }
 
@@ -445,6 +541,7 @@ export function isInvalidPattern(pattern: string): boolean {
 function re2Rejection(pattern: string): string | undefined {
   try {
     RE2JS.compile(pattern);
+
     return undefined;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
@@ -456,6 +553,7 @@ export function handleMatchesOperator(
   context: TranslationContext
 ): PrismaFilter {
   const [receiver, patternOperand] = operands;
+
   if (
     operands.length !== 2 ||
     receiver === undefined ||
@@ -468,23 +566,31 @@ export function handleMatchesOperator(
       "matches() is translated only for a column receiver and a literal pattern"
     );
   }
+
   const pattern = patternOperand.value;
   const fieldRef = resolveFieldReference(receiver.name, context);
+
   if (!isResolvedFieldReference(fieldRef)) {
     throw new UnsupportedQueryPlanError("matches() requires a column receiver");
   }
+
   assertStringField(fieldRef, "matches");
   const rejection = re2Rejection(pattern);
+
   if (rejection !== undefined) refuse(pattern, `RE2 rejects it (${rejection})`);
   let expansions: Expansion[];
+
   try {
     expansions = expandPattern(pattern);
   } catch (error) {
     if (error instanceof InvalidRegexError) {
       refuse(pattern, `RE2 rejects it (${error.message})`);
     }
+
     throw error;
   }
+
   const filters = expansions.map((expansion) => alternativeFilter(pattern, fieldRef, expansion));
+
   return filters.length === 1 ? filters[0]! : { OR: filters };
 }

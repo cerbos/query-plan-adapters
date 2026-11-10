@@ -26,56 +26,71 @@ const MAX_UNROLLED_ELEMENTS = 100;
  */
 export function expandLiteralCollections(expr: PlanExpressionOperand): PlanExpressionOperand {
   if (!isOperatorOperand(expr)) return expr;
+
   const node: OperatorOperand = {
     operator: expr.operator,
     operands: expr.operands.map(expandLiteralCollections),
   };
+
   return expandMacro(node) ?? expandSizeComparison(node) ?? node;
 }
 
 function expandMacro(expr: OperatorOperand): PlanExpressionOperand | undefined {
   const { operator } = expr;
+
   if (operator !== "exists" && operator !== "all" && operator !== "exists_one") return undefined;
   const parts = literalMacro(expr);
+
   if (parts === undefined) return undefined;
   const { elements, body, variable } = parts;
 
   if (operator === "exists_one") {
     return countMembership(elements, body, variable, (count) => count === 1);
   }
+
   if (elements.length > MAX_UNROLLED_ELEMENTS) return undefined;
+
   if (elements.length === 0) return { value: operator === "all" };
+
   const substituted = elements.map((element) =>
     substituteLambdaVariable(body, variable.name, element)
   );
+
   if (substituted.length === 1) return substituted[0]!;
+
   return { operator: operator === "exists" ? "or" : "and", operands: substituted };
 }
 
 /** `size(filter(...)) CMP n`, `size(except(...)) CMP n`. */
 function expandSizeComparison(expr: OperatorOperand): PlanExpressionOperand | undefined {
   const comparison = sizeComparison(expr);
+
   if (comparison === undefined) return undefined;
   const { counted, holds } = comparison;
 
   if (counted.operator === "filter") {
     const parts = literalMacro(counted);
+
     return parts && countMembership(parts.elements, parts.body, parts.variable, holds);
   }
 
   if (counted.operator !== "except" || counted.operands.length !== 2) return undefined;
   const [minuend, subtrahend] = counted.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (isOperatorOperand(subtrahend) && subtrahend.operator === "lambda") return undefined;
 
   // except(literals, [x]) keeps every element that is not x.
   const elements = literalList(minuend);
+
   if (elements !== undefined) {
     const removed = isOperatorOperand(subtrahend) && subtrahend.operator === "list"
       ? subtrahend.operands
       : undefined;
+
     if (removed?.length !== 1 || literalValue(removed[0]!) !== undefined) return undefined;
     const variable: NamedOperand = { name: "__except" };
     const body: PlanExpressionOperand = { operator: "ne", operands: [variable, removed[0]!] };
+
     return countMembership(elements, body, variable, holds);
   }
 
@@ -83,11 +98,14 @@ function expandSizeComparison(expr: OperatorOperand): PlanExpressionOperand | un
   if (isNamedOperand(minuend) && literalList(subtrahend) !== undefined) {
     const nonEmpty = holds(1) && !holds(0);
     const empty = holds(0) && !holds(1);
+
     if (!nonEmpty && !empty) return undefined;
+
     // Only counts 0 and 1 are distinguished, so every count >= 1 must agree with 1.
     if ([2, 3].some((count) => holds(count) !== holds(1))) return undefined;
     const variable: NamedOperand = { name: "__except" };
     const member: PlanExpressionOperand = { operator: "in", operands: [variable, subtrahend] };
+
     return {
       operator: nonEmpty ? "exists" : "all",
       operands: [
@@ -99,6 +117,7 @@ function expandSizeComparison(expr: OperatorOperand): PlanExpressionOperand | un
       ],
     };
   }
+
   return undefined;
 }
 
@@ -115,33 +134,42 @@ function countMembership(
   // Over no elements `x` is never evaluated, so its error cannot surface.
   if (elements.length === 0) return undefined;
   const comparison = uniformComparison(body, variable);
+
   if (comparison === undefined) return undefined;
   const { operator, path, other } = comparison;
 
   const projected: Value[] = [];
+
   for (const element of elements) {
     const value = project(element, path);
+
     // An element without the field errors on its own; a non-scalar compares structurally.
     if (value === undefined || (value !== null && typeof value === "object")) return undefined;
     projected.push(value);
   }
+
   const distinct = [...new Set(projected)];
   const multiplicity = (value: Value) => projected.filter((v) => v === value).length;
+
   const countFor = (matches: number) =>
     operator === "eq" ? matches : projected.length - matches;
 
   const accepted = distinct.filter((value) => holds(countFor(multiplicity(value))));
   const absentHolds = holds(countFor(0));
+
   // Decided for every x: only the error of a missing x is left, which an empty IN cannot carry
   // under negation.
   if (absentHolds ? accepted.length === distinct.length : accepted.length === 0) {
     return undefined;
   }
+
   const membership = (values: Value[]): PlanExpressionOperand =>
     values.length === 1
       ? { operator: "eq", operands: [other, { value: values[0]! }] }
       : { operator: "in", operands: [other, { value: values }] };
+
   if (!absentHolds) return membership(accepted);
+
   return {
     operator: "not",
     operands: [membership(distinct.filter((value) => !accepted.includes(value)))],
@@ -161,13 +189,17 @@ function uniformComparison(
   if (!isOperatorOperand(body) || (body.operator !== "eq" && body.operator !== "ne")) {
     return undefined;
   }
+
   if (body.operands.length !== 2) return undefined;
+
   for (const [element, other] of [
     [body.operands[0]!, body.operands[1]!],
     [body.operands[1]!, body.operands[0]!],
   ] as const) {
     if (!isNamedOperand(element) || mentions(other, variable.name)) continue;
+
     if (element.name === variable.name) return { operator: body.operator, path: [], other };
+
     if (element.name.startsWith(`${variable.name}.`)) {
       return {
         operator: body.operator,
@@ -176,22 +208,27 @@ function uniformComparison(
       };
     }
   }
+
   return undefined;
 }
 
 function mentions(expr: PlanExpressionOperand, name: string): boolean {
   if (isNamedOperand(expr)) return expr.name === name || expr.name.startsWith(`${name}.`);
+
   return isOperatorOperand(expr) && expr.operands.some((operand) => mentions(operand, name));
 }
 
 function project(element: Value, path: string[]): Value | undefined {
   let current: Value | undefined = element;
+
   for (const segment of path) {
     if (current === null || typeof current !== "object" || Array.isArray(current)) {
       return undefined;
     }
+
     current = (current as Record<string, Value>)[segment];
   }
+
   return current;
 }
 
@@ -202,12 +239,16 @@ function sizeComparison(
   expr: OperatorOperand
 ): { counted: OperatorOperand; holds: (count: number) => boolean } | undefined {
   const mirrored: Record<string, string> = { lt: "gt", gt: "lt", le: "ge", ge: "le" };
+
   if (!["eq", "ne", "lt", "le", "gt", "ge"].includes(expr.operator)) return undefined;
+
   if (expr.operands.length !== 2) return undefined;
   const [first, second] = expr.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   const [size, threshold, operator] = isValueOperand(first)
     ? [second, first, mirrored[expr.operator] ?? expr.operator]
     : [first, second, expr.operator];
+
   if (
     !isOperatorOperand(size) ||
     size.operator !== "size" ||
@@ -218,9 +259,12 @@ function sizeComparison(
   ) {
     return undefined;
   }
+
   const counted = size.operands[0]!;
+
   if (!isOperatorOperand(counted)) return undefined;
   const n = threshold.value;
+
   const holds = (count: number): boolean => {
     switch (operator) {
       case "eq":
@@ -237,6 +281,7 @@ function sizeComparison(
         return count >= n;
     }
   };
+
   return { counted, holds };
 }
 
@@ -245,6 +290,7 @@ function literalMacro(
   expr: OperatorOperand
 ): { elements: Value[]; body: PlanExpressionOperand; variable: NamedOperand } | undefined {
   const [collection, lambda] = expr.operands;
+
   if (
     expr.operands.length !== 2 ||
     collection === undefined ||
@@ -255,9 +301,12 @@ function literalMacro(
   ) {
     return undefined;
   }
+
   const elements = literalList(collection);
   const [body, variable] = lambda.operands as [PlanExpressionOperand, PlanExpressionOperand];
+
   if (elements === undefined || !isNamedOperand(variable)) return undefined;
+
   return { elements, body, variable };
 }
 
@@ -266,35 +315,48 @@ export function literalList(operand: PlanExpressionOperand): Value[] | undefined
   if (isValueOperand(operand)) {
     return Array.isArray(operand.value) ? operand.value : undefined;
   }
+
   if (isOperatorOperand(operand) && operand.operator === "list") {
     const elements: Value[] = [];
+
     for (const element of operand.operands) {
       const value = literalValue(element);
+
       if (value === undefined) return undefined;
       elements.push(value);
     }
+
     return elements;
   }
+
   return undefined;
 }
 
 /** A literal operand's value: a value, or a `struct(set-field(...), ...)` of literals. */
 export function literalValue(operand: PlanExpressionOperand): Value | undefined {
   if (isValueOperand(operand)) return operand.value;
+
   if (!isOperatorOperand(operand)) return undefined;
+
   if (operand.operator === "list") return literalList(operand);
+
   if (operand.operator !== "struct") return undefined;
   const fields: Record<string, Value> = {};
+
   for (const field of operand.operands) {
     if (!isOperatorOperand(field) || field.operator !== "set-field" || field.operands.length !== 2) {
       return undefined;
     }
+
     const [key, value] = field.operands as [PlanExpressionOperand, PlanExpressionOperand];
     const literal = literalValue(value);
+
     if (!isValueOperand(key) || typeof key.value !== "string" || literal === undefined) {
       return undefined;
     }
+
     fields[key.value] = literal;
   }
+
   return fields;
 }

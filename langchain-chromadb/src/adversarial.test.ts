@@ -35,10 +35,12 @@ import type { FuzzVerdict, Golden } from "./corpus";
  */
 
 const chromaUrl = new URL(process.env["CHROMA_URL"] ?? "http://127.0.0.1:8234");
+
 const chroma = new ChromaClient({
   host: chromaUrl.hostname,
   port: Number(chromaUrl.port) || 8000,
 });
+
 const COLLECTION_NAME = "adapter-conformance";
 const BASE_EMBEDDING = [0.1, 0.2, 0.3, 0.4];
 
@@ -68,20 +70,25 @@ interface DerivedEntry {
 }
 
 const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+
 const DERIVED = (
   readCorpusJson("derived-fields.json") as {
     derived: Record<string, DerivedEntry>;
   }
 ).derived;
+
 const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
 
 function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const id = seed?.parentSeedId;
+
   if (id === undefined || id === null) return undefined;
   const parent = SEEDS_BY_ID.get(id);
+
   if (parent === undefined) {
     throw new Error(`seeds.json: "${seed?.id}" names unknown parent "${id}"`);
   }
+
   return parent;
 }
 
@@ -97,13 +104,16 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
 
 function metadataFor(seed: Seed): Metadata {
   const derived = DERIVED[seed.id];
+
   if (derived === undefined) {
     throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
+
   const metadata: Metadata = {
     // Chroma's `where` filters metadata only, so the id is mirrored into a key for `R.id`.
     id: seed.id,
   };
+
   // `obj.inner` mirrors aString in the corpus resource. Every scalar can be NULL (seeds j1, j2 and
   // j3 each leave one of the first three out), and a NULL column writes no key.
   const scalars: [string, string | number | boolean | null][] = [
@@ -113,9 +123,11 @@ function metadataFor(seed: Seed): Metadata {
     ["obj.inner", seed.aString],
     ["aOptionalString", seed.aOptionalString],
   ];
+
   for (const [key, value] of scalars) {
     if (value !== null) metadata[key] = value;
   }
+
   for (const key of [
     "aDouble",
     "createdAt",
@@ -124,17 +136,22 @@ function metadataFor(seed: Seed): Metadata {
     "scope",
   ] as const) {
     const value = derived[key];
+
     if (value !== null) metadata[key] = value;
   }
+
   // The real to-one chain (conformance/README.md, "The dataset"), flattened onto dotted keys. A
   // level that does not exist writes no key, which is the missing `parent` / `parent.inner` path.
   const parent = parentSeedOf(seed);
+
   const levels: [string, Seed | undefined][] = [
     ["parent", parent],
     ["parent.inner", parentSeedOf(parent)],
   ];
+
   for (const [prefix, level] of levels) {
     if (level === undefined) continue;
+
     for (const key of [
       "aBool",
       "aString",
@@ -142,14 +159,17 @@ function metadataFor(seed: Seed): Metadata {
       "aOptionalString",
     ] as const) {
       const value = level[key];
+
       if (value !== null) metadata[`${prefix}.${key}`] = value;
     }
   }
+
   // A NULL tag name or label name is a missing element attribute. A seed with subCategoryNames
   // owns one category holding every name as a subcategory.
   const tags = seed.tags.map(({ id, name }) => (name === null ? { id } : { id, name }));
   const labels = derived.labels.map((name) => (name === null ? {} : { name }));
   const subCategories = seed.subCategoryNames.map((name) => ({ name, labels }));
+
   const json: [string, unknown][] = [
     ["owner", seed.aOptionalString],
     ["coOwner", derived.scope],
@@ -160,6 +180,7 @@ function metadataFor(seed: Seed): Metadata {
     ["categories", subCategories.length === 0 ? [] : [{ name: "business", subCategories }]],
     ["obj", seed.aString === null ? {} : { inner: seed.aString }],
   ];
+
   if (seed.subCategoryNames.length > 0) {
     json.push([
       "mainCategory",
@@ -170,6 +191,7 @@ function metadataFor(seed: Seed): Metadata {
       },
     ]);
   }
+
   // The to-one chain whole, for the shapes that read `parent` itself (its keys, its presence).
   const relationAttr = (level: Seed): Record<string, unknown> =>
     Object.fromEntries(
@@ -177,6 +199,7 @@ function metadataFor(seed: Seed): Metadata {
         .filter((key) => level[key] !== null)
         .map((key) => [key, level[key]]),
     );
+
   if (parent !== undefined) {
     const inner = parentSeedOf(parent);
     json.push([
@@ -186,15 +209,20 @@ function metadataFor(seed: Seed): Metadata {
         : { ...relationAttr(parent), inner: relationAttr(inner) },
     ]);
   }
+
   for (const [key, value] of json) metadata[key] = JSON.stringify(value);
+
   const lists: [string, (string | number | null)[] | null][] = [
     ["tagNames.elements", seed.tags.map(({ name }) => name)],
     ["aNumberList.elements", seed.aNumberList],
   ];
+
   for (const [key, list] of lists) {
     const elements = (list ?? []).filter((element) => element !== null);
+
     if (elements.length > 0) metadata[key] = elements as Metadata[string];
   }
+
   return metadata;
 }
 
@@ -218,6 +246,7 @@ const LEDGER = (
 
 function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
   const entry = LEDGER[golden.id];
+
   return entry && (entry.pdp === undefined || entry.pdp.includes(tag))
     ? entry
     : undefined;
@@ -243,15 +272,19 @@ async function translate(golden: Golden) {
 
 async function selectAllowed(golden: Golden): Promise<string[]> {
   const result = await translate(golden);
+
   if (result.kind !== PlanKind.CONDITIONAL) {
     return result.kind === PlanKind.ALWAYS_DENIED
       ? []
       : (await collection!.get()).ids.sort();
   }
+
   if (!("postFilter" in result)) {
     return (await collection!.get({ where: result.filters })).ids.sort();
   }
+
   const { postFilter } = result;
+
   // The post-filter is part of the authorization predicate: it is applied to every record the
   // prefilter returned, exactly as a caller must. Its prefilter only narrows, so the post-filter
   // alone over every record has to agree.
@@ -259,16 +292,21 @@ async function selectAllowed(golden: Golden): Promise<string[]> {
     where: result.prefilter,
     include: ["metadatas"],
   });
+
   const ids = narrowed.ids
     .filter((_id, index) => postFilter(narrowed.metadatas[index]))
     .sort();
+
   if (result.prefilter !== undefined) {
     const every = await collection!.get({ include: ["metadatas"] });
+
     const alone = every.ids
       .filter((_id, index) => postFilter(every.metadatas[index]))
       .sort();
+
     expect(alone).toEqual(ids);
   }
+
   return ids;
 }
 
@@ -286,15 +324,18 @@ async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
     return fuzzThrown(golden, error, UnsupportedOperatorError);
   }
 }
+
 const skipped: Record<string, Record<string, number>> = {};
 
 beforeAll(async () => {
   await chroma.heartbeat();
+
   try {
     await chroma.deleteCollection({ name: COLLECTION_NAME });
   } catch (error: unknown) {
     if (!(error instanceof ChromaNotFoundError)) throw error;
   }
+
   collection = await chroma.createCollection({ name: COLLECTION_NAME });
   await collection.add({
     ids: SEEDS.map(({ id }) => id),
@@ -306,8 +347,10 @@ beforeAll(async () => {
 afterAll(async () => {
   if (collection) await chroma.deleteCollection({ name: COLLECTION_NAME });
   writeFuzzResults("langchain-chromadb", "chroma", fuzzResults);
+
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
+
     return `${tag}: ${tiers
       .map(
         (tier) =>
@@ -316,6 +359,7 @@ afterAll(async () => {
       )
       .join(", ")}`;
   });
+
   console.log(`conformance (chromadb) passed per tier\n${lines.join("\n")}`);
 });
 
@@ -324,6 +368,7 @@ describe("conformance (chromadb)", () => {
     const ids = new Set(
       TAGS.flatMap((tag) => GOLDENS.get(tag)!.map((golden) => golden.id)),
     );
+
     expect(Object.keys(LEDGER).filter((id) => !ids.has(id))).toEqual([]);
   });
 
@@ -332,20 +377,26 @@ describe("conformance (chromadb)", () => {
   test("every ledger entry is well-formed", () => {
     const malformed = Object.entries(LEDGER).flatMap(([id, entry]) => {
       const problems: string[] = [];
+
       if (entry.status !== "unsupported" && entry.status !== "divergent") {
         problems.push(`unknown status ${JSON.stringify(entry.status)}`);
       }
+
       if (typeof entry.reason !== "string" || entry.reason.trim() === "") {
         problems.push("no reason");
       }
+
       if (entry.status === "divergent" && !entry.issue) {
         problems.push("divergent without issue");
       }
+
       for (const pdp of entry.pdp ?? []) {
         if (!TAGS.includes(pdp)) problems.push(`unknown pdp tag ${pdp}`);
       }
+
       return problems.map((problem) => `${id}: ${problem}`);
     });
+
     expect(malformed).toEqual([]);
   });
 
@@ -355,7 +406,9 @@ describe("conformance (chromadb)", () => {
         .filter((golden) => golden.pdp !== tag)
         .map((golden) => `${tag}/${golden.id}: pdp ${golden.pdp}`),
     );
+
     expect(misplaced).toEqual([]);
+
     for (const tag of TAGS) expect(GOLDENS.get(tag)!.length).toBeGreaterThan(0);
   });
 
@@ -375,20 +428,28 @@ describe("conformance (chromadb)", () => {
           const verdict = await fuzzReplay(golden);
           fuzzResults.push(verdict);
           assertFuzzVerdict(verdict);
+
           return;
         }
+
         const entry = ledgerEntry(golden, tag);
+
         if (entry?.status === "unsupported") {
           await expect(translate(golden)).rejects.toThrow(
             UnsupportedOperatorError,
           );
+
           return;
         }
+
         const ids = await selectAllowed(golden);
+
         if (entry?.status === "divergent") {
           expect(ids).not.toEqual(golden.allowed);
+
           return;
         }
+
         expect(ids).toEqual(golden.allowed);
         (passed[tag] ??= {})[golden.tier] =
           (passed[tag]?.[golden.tier] ?? 0) + 1;
@@ -398,6 +459,7 @@ describe("conformance (chromadb)", () => {
     // The total is every golden file in the tier, skipped planner divergences included.
     for (const golden of GOLDENS.get(tag)!) {
       (totals[tag] ??= {})[golden.tier] = (totals[tag]?.[golden.tier] ?? 0) + 1;
+
       if (!cases.includes(golden)) {
         (skipped[tag] ??= {})[golden.tier] =
           (skipped[tag]?.[golden.tier] ?? 0) + 1;

@@ -89,6 +89,7 @@ const APPLICATION_FILTER = and(
  * Checked before anything is opened or deleted, so a misinvocation costs nothing.
  */
 const cerbosHost = process.env["CERBOS_HOST"];
+
 if (!cerbosHost) {
   throw new Error(
     "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh drizzle"
@@ -96,6 +97,7 @@ if (!cerbosHost) {
 }
 
 rmSync(DB_PATH, { force: true });
+
 const sqlite = new Database(DB_PATH);
 const db = drizzle(sqlite);
 
@@ -106,7 +108,9 @@ type QueryPlan = Awaited<ReturnType<Cerbos["planResources"]>>;
 
 function principal(id: string): { id: string; roles: string[] } {
   const found = seeds.principals.find((p) => p.id === id);
+
   if (!found) throw new Error(`demo/seeds.json declares no principal '${id}'`);
+
   return found;
 }
 
@@ -139,6 +143,7 @@ function toWhere(result: QueryPlanToDrizzleResult): Where {
 
 function findIds(where: Where): string[] {
   if (where === "denied") return [];
+
   return db
     .select({ id: documents.id })
     .from(documents)
@@ -169,6 +174,7 @@ async function filtered(
 ): Promise<ShapeResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
+
   return { kind: result.kind, ids: findIds(toWhere(result)) };
 }
 
@@ -188,6 +194,7 @@ async function paginated(
 
   const pageSizes: number[] = [];
   const ids: string[] = [];
+
   if (where !== "denied") {
     for (let offset = 0; ; offset += pageSize) {
       const page = db
@@ -201,9 +208,11 @@ async function paginated(
         .limit(pageSize)
         .offset(offset)
         .all();
+
       if (page.length === 0) break;
       pageSizes.push(page.length);
       ids.push(...page.map((row) => row.id));
+
       if (page.length < pageSize) break;
     }
   }
@@ -227,9 +236,11 @@ async function composed(
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
+
   if (where === "denied") {
     return { kind: result.kind, ids: [] };
   }
+
   return { kind: result.kind, ids: findIds(and(where, APPLICATION_FILTER)) };
 }
 

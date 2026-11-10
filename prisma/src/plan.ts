@@ -44,6 +44,7 @@ export function assertDefined<T>(value: T | undefined, message: string): T {
   if (value === undefined) {
     throw new UnsupportedQueryPlanError(message);
   }
+
   return value;
 }
 
@@ -106,6 +107,7 @@ export function normalizeBinaryOperands(
   operands: PlanExpressionOperand[]
 ): { operator: string; operands: PlanExpressionOperand[] } {
   const [first, second] = operands;
+
   if (
     operands.length === 2 &&
     first !== undefined &&
@@ -115,5 +117,6 @@ export function normalizeBinaryOperands(
   ) {
     return { operator: mirrorOperator(operator), operands: [second, first] };
   }
+
   return { operator, operands };
 }

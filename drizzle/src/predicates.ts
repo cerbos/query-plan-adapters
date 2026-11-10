@@ -67,6 +67,7 @@ export const buildNullGuard = (
   const guards = operands
     .filter((operand) => operand.canBeNull)
     .map((operand) => sql`${operand.expr} is null`);
+
   return guards.length ? sql.join(guards, sql` or `) : undefined;
 };
 
@@ -161,10 +162,12 @@ export const characterLength = (
   if (columns.some((column) => column !== undefined && is(column, MySqlColumn))) {
     return (expr) => sql`char_length(${expr})`;
   }
+
   if (columns.some((column) => column !== undefined && is(column, SQLiteColumn))) {
     return (expr) =>
       sql`length(json_extract(replace(replace(replace(json_quote(${expr}), '\\\\', char(1)), '\\u0000', ' '), char(1), '\\\\'), '$'))`;
   }
+
   return (expr) => sql`length(${expr})`;
 };
 
@@ -183,6 +186,7 @@ export const buildStringMatchCondition = (
 ): SQL => {
   const receiverExpr = receiver.expr;
   const needleExpr = needle.expr;
+
   switch (operator) {
     case "contains": {
       // REPLACE is case-sensitive and treats the needle literally on SQLite,
@@ -192,10 +196,12 @@ export const buildStringMatchCondition = (
       // remains true for every present receiver.
       const body = sql`when ${needleExpr} = '' then true else length(replace(${receiverExpr}, ${needleExpr}, '')) < length(${receiverExpr}) end`;
       const nullGuard = buildNullGuard(receiver, needle);
+
       return nullGuard
         ? sql`(case when ${nullGuard} then null ${body})`
         : sql`(case ${body})`;
     }
+
     case "startsWith":
       return sql`substr(${receiverExpr}, 1, ${length(needleExpr)}) = ${needleExpr}`;
     case "endsWith":
@@ -224,22 +230,28 @@ const definiteEquality = (
 ): SQL => {
   const nullMatches: SQL[] = [];
   const bothPresent: SQL[] = [];
+
   if (leftExplicitNull) {
     nullMatches.push(sql`${leftExpr} is null`);
     bothPresent.push(sql`${leftExpr} is not null`);
   }
+
   if (rightExplicitNull) {
     nullMatches.push(sql`${rightExpr} is null`);
     bothPresent.push(sql`${rightExpr} is not null`);
   }
+
   // Two nulls are EQUAL in CEL, so a row where every explicit-null operand is NULL matches.
   const bothNull = and(...nullMatches);
   const present = and(...bothPresent, sql`${leftExpr} = ${rightExpr}`);
+
   const combined =
     leftExplicitNull && rightExplicitNull ? or(bothNull, present) : present;
+
   if (!combined) {
     throw new UnsupportedQueryPlanError("Unable to combine null-aware equality conditions");
   }
+
   return combined;
 };
 
@@ -276,6 +288,7 @@ export const applyComparisonWithExpression = (
   valueExplicitNull = false,
 ): SQL => {
   const isEquality = operator === "eq" || operator === "ne";
+
   // Mixing the two conventions across one comparison. The declared side needs a definite answer
   // for its NULL (CEL holds a null VALUE); the undeclared side needs UNKNOWN for its NULL (a
   // missing attribute, which CEL denies under both polarities). The asymmetric expansion alone is
@@ -284,24 +297,31 @@ export const applyComparisonWithExpression = (
   // leaves the expansion to answer only rows where that side is present.
   if (isEquality && fieldExplicitNull !== valueExplicitNull) {
     const omittedExpr = fieldExplicitNull ? valueExpr : fieldExpr;
+
     const equality = sql`(case when ${omittedExpr} is null then null else ${definiteEquality(
       fieldExpr,
       valueExpr,
       fieldExplicitNull,
       valueExplicitNull,
     )} end)`;
+
     return operator === "eq" ? equality : not(equality);
   }
+
   if (isEquality && fieldExplicitNull && valueExplicitNull) {
     const equality = definiteEquality(fieldExpr, valueExpr, true, true);
+
     return operator === "eq" ? equality : not(equality);
   }
+
   const comparison = binaryComparison(operator, fieldExpr, valueExpr);
+
   if (!comparison) {
     throw new UnsupportedQueryPlanError(
       `Operator '${operator}' is not supported for expression-valued operands`,
     );
   }
+
   return comparison;
 };
 
@@ -347,20 +367,28 @@ const applyOmittedNullComparison = (
   value: Value,
 ): SQL | undefined => {
   const column = isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
+
   if (column === undefined) return undefined;
+
   const whenPresent = (present: SQL): SQL =>
     sql`(case when ${column} is null then null else ${present} end)`;
+
   if (value === null) {
     if (operator === "eq") return whenPresent(FALSE_CONDITION);
+
     if (operator === "ne") return whenPresent(TRUE_CONDITION);
+
     return sql`(null = true)`;
   }
+
   if (operator === "in" && Array.isArray(value) && value.includes(null)) {
     const present = value.filter((element) => element !== null);
+
     return present.length === 0
       ? whenPresent(FALSE_CONDITION)
       : applyColumnComparison(column, "in", present, false);
   }
+
   return undefined;
 };
 
@@ -396,10 +424,13 @@ const buildColumnMembership = (
   explicitNull: boolean,
 ): SQL => {
   const values = Array.isArray(value) ? value : [value];
+
   if (values.length === 0) {
     return FALSE_CONDITION;
   }
+
   const hasNullElement = values.includes(null);
+
   // CEL's equality is heterogeneous: `5 in ["5"]` is false. Bound into `IN (…)`, SQL would read
   // the literal as the column's type instead — SQLite's affinity and PostgreSQL's parameter
   // inference turn '5' into 5, and MySQL reads a non-numeric string as 0 — so a constant the
@@ -408,19 +439,23 @@ const buildColumnMembership = (
     (candidate) =>
       candidate !== null && !isCrossTypeScalar(column.dataType, candidate),
   );
+
   if (nonNullValues.length === 0) {
     if (hasNullElement) {
       return isNull(column);
     }
+
     // Every element was of another type: definitely false for a present value, and UNKNOWN for
     // a NULL column unless the caller sends it as an explicit null, as `col IN (…)` would be.
     return explicitNull
       ? FALSE_CONDITION
       : sql`(case when ${column} is null then null else ${FALSE_CONDITION} end)`;
   }
+
   const membership = sql`${column} in ${nonNullValues.map((candidate) =>
     bindAgainstColumn(candidate, column),
   )}`;
+
   if (!hasNullElement) {
     // No null element, so nothing has made the predicate definite yet: `NOT (col IN (…))`
     // over a NULL column is UNKNOWN and drops the row, while CEL compares a null VALUE
@@ -429,16 +464,22 @@ const buildColumnMembership = (
     if (!explicitNull) {
       return membership;
     }
+
     const present = and(sql`${column} is not null`, membership);
+
     if (!present) {
       throw new UnsupportedQueryPlanError("Unable to combine null-aware membership conditions");
     }
+
     return present;
   }
+
   const withNull = or(membership, isNull(column));
+
   if (!withNull) {
     throw new UnsupportedQueryPlanError("Unable to combine null-aware membership conditions");
   }
+
   return withNull;
 };
 
@@ -457,6 +498,7 @@ const applyColumnComparison = (
   // fix confined to `ne` would leave `!(col = x)` still dropping the row.
   if (explicitNull && value !== null && (operator === "eq" || operator === "ne")) {
     const equality = definiteEquality(sql`${column}`, sql`${bound}`, true, false);
+
     return operator === "eq" ? equality : not(equality);
   }
 
@@ -473,6 +515,7 @@ const applyColumnComparison = (
       if (typeof value !== "string") {
         throw new UnsupportedQueryPlanError(`The '${operator}' operator requires a string value`);
       }
+
       return buildStringMatchCondition(
         operator,
         columnExpression(sql`${column}`),
@@ -480,10 +523,13 @@ const applyColumnComparison = (
         characterLength([column]),
       );
   }
+
   const ordering = binaryComparison(operator, column, bound);
+
   if (!ordering) {
     throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
+
   return ordering;
 };
 
@@ -501,13 +547,17 @@ export const applyComparison = (
   // The declaration lives on the mapper entry, but the entry unwraps to a bare column one frame
   // down, so it has to be carried rather than re-read.
   const declared = mappingNullRepresentation(mapping) ?? inherited;
+
   const plainColumn =
     isColumn(mapping) ||
     (isMappingConfig(mapping) && !mapping.transform && !mapping.relation && !mapping.indexable);
+
   if (plainColumn && (declared ?? options.nullRepresentation) === "omitted") {
     const omitted = applyOmittedNullComparison(mapping, operator, value);
+
     if (omitted !== undefined) return omitted;
   }
+
   if (value === null) {
     assertNullOperandTranslatable(
       `\`${operator}\` against a null operand`,
@@ -521,19 +571,24 @@ export const applyComparison = (
       declared,
     );
   }
+
   if (isRelationValue(mapping)) {
     return applyRelationComparison(operator);
   }
+
   if (typeof mapping === "function") {
     return mapping({ operator, value });
   }
+
   if (isMappingConfig(mapping)) {
     if (mapping.relation) {
       throw new Error("Relation mappings must be resolved before comparison");
     }
+
     if (mapping.transform) {
       return mapping.transform({ operator, value });
     }
+
     if (mapping.indexable) {
       // A declared indexable column holds the whole list. Comparing it as one scalar would test
       // the serialized list against an element — never equal, so its negation is always true.
@@ -541,14 +596,18 @@ export const applyComparison = (
         "A column declared indexable holds a list: it can only be read by constant position, membership or hasIntersection",
       );
     }
+
     if (!mapping.column) {
       throw new Error("Mapping configuration requires a column or transform");
     }
+
     return applyComparison(mapping.column, operator, value, options, declared);
   }
+
   if (!isColumn(mapping)) {
     throw new Error("Expected a column mapping");
   }
+
   return applyColumnComparison(
     mapping,
     operator,

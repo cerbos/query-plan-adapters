@@ -60,6 +60,7 @@ function filtersOf(result: QueryPlanToMongooseResult): MongooseFilter {
   if (result.kind !== PlanKind.CONDITIONAL) {
     throw new Error(`translated to ${result.kind}, not a filter`);
   }
+
   return result.filters;
 }
 
@@ -79,6 +80,7 @@ async function translate(
 // (cerbos/query-plan-adapters#323).
 test("the adapter source emits no $lookup and reaches no second collection", () => {
   const forbidden = /\$lookup|\$graphLookup|\bpopulate\s*\(|\baggregate\s*\(/;
+
   const sourceFiles = fs
     .readdirSync(__dirname)
     .filter(
@@ -88,14 +90,17 @@ test("the adapter source emits no $lookup and reaches no second collection", () 
         file !== "corpus.ts",
     )
     .sort();
+
   // Guard the guard: a scan that found no files, or lost the entry point, would pass vacuously.
   expect(sourceFiles).toContain("index.ts");
   expect(sourceFiles).toContain("filter.ts");
+
   // Prose about the guard is not a violation of it, so comments come off first.
   const stripComments = (line: string): string =>
     /^(\/\/|\/\*|\*)/.test(line.trimStart())
       ? ""
       : line.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "");
+
   const offendingLines = sourceFiles.flatMap((file) =>
     fs
       .readFileSync(path.join(__dirname, file), "utf8")
@@ -105,6 +110,7 @@ test("the adapter source emits no $lookup and reaches no second collection", () 
       )
       .filter(([, code]) => forbidden.test(code)),
   );
+
   expect(offendingLines).toEqual([]);
 });
 
@@ -122,6 +128,7 @@ describe("nullAttributeRepresentation", () => {
     const queryPlan = await planFor(
       "null/equals/null-literal-on-missing-attribute",
     );
+
     expect(() => queryPlanToMongoose({ queryPlan, mapper: MAPPER })).toThrow(
       'the default is "omitted"',
     );
@@ -142,25 +149,32 @@ describe("nullAttributeRepresentation", () => {
     async (nullAttributeRepresentation) => {
       const nestedRepresentation =
         nullAttributeRepresentation === "explicit" ? "omitted" : "explicit";
+
       const nested = await planFor("string/equals/case-sensitive");
+
       const outerPlan = await planFor(
         "null/equals/null-literal-on-missing-attribute",
       );
+
       let nestedCalls = 0;
+
       const mapper: Mapper = (key) => {
         translatePlan(nested, {
           nullAttributeRepresentation: nestedRepresentation,
         });
         nestedCalls += 1;
+
         return typeof MAPPER === "function"
           ? MAPPER(key)
           : (MAPPER[key] ?? { field: key });
       };
+
       const outer = () =>
         translatePlan(outerPlan, {
           mapper,
           nullAttributeRepresentation,
         });
+
       if (nullAttributeRepresentation === "explicit") {
         expect(outer()).toStrictEqual(
           await translate("null/equals/null-literal-on-missing-attribute"),
@@ -168,6 +182,7 @@ describe("nullAttributeRepresentation", () => {
       } else {
         expect(outer).toThrow("missing-attribute error");
       }
+
       expect(nestedCalls).toBeGreaterThan(0);
     },
   );
@@ -191,28 +206,36 @@ describe("nullAttributeRepresentation", () => {
     const carriesNull = (node: unknown): boolean => {
       if (typeof node !== "object" || node === null) return false;
       const record = node as Record<string, unknown>;
+
       if ("value" in record) {
         const value = record["value"];
+
         return value === null || (Array.isArray(value) && value.includes(null));
       }
+
       const expression = record["expression"] as
         | { operands?: unknown[] }
         | undefined;
+
       return (expression?.operands ?? []).some(carriesNull);
     };
+
     const indexedNull =
       "collection/index/first-element-of-string-list-equals-null";
+
     const nullCarrying = readGoldens(CURRENT)
       .filter(
         (g) =>
           g.plan.kind === PlanKind.CONDITIONAL && carriesNull(g.plan.condition),
       )
       .map((g) => g.id);
+
     // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
     expect(nullCarrying).toContain(
       "null/equals/null-literal-on-missing-attribute",
     );
     expect(nullCarrying).toContain(indexedNull);
+
     const plans = new Map(
       await Promise.all(
         nullCarrying.map(async (id) => [id, await planFor(id)] as const),
@@ -224,20 +247,25 @@ describe("nullAttributeRepresentation", () => {
     const refusedRegardless = (id: string): boolean => {
       try {
         translatePlan(plans.get(id)!);
+
         return false;
       } catch (error) {
         return error instanceof UnsupportedQueryPlanError;
       }
     };
+
     const notRejected = nullCarrying.filter((id) => {
       if (id === indexedNull || refusedRegardless(id)) return false;
+
       try {
         translatePlan(plans.get(id)!, { nullAttributeRepresentation: "omitted" });
+
         return true;
       } catch (error) {
         return !(error instanceof UnsupportedQueryPlanError);
       }
     });
+
     expect(notRejected).toEqual([]);
     expect(() =>
       translatePlan(plans.get(indexedNull)!, {
@@ -261,12 +289,15 @@ describe("nullAttributeRepresentation", () => {
           : String(error);
       }
     };
+
     const nullFree = readGoldens(CURRENT).filter(
       (g) => !/\bnull\b/.test(JSON.stringify(g.plan)),
     );
+
     // Guard the guard: the loop below must cover real plans.
     expect(nullFree.map((g) => g.id)).toContain("string/equals/case-sensitive");
     const plans = await Promise.all(nullFree.map((g) => planOf(g)));
+
     const differing = nullFree
       .filter(
         (_g, index) =>
@@ -281,6 +312,7 @@ describe("nullAttributeRepresentation", () => {
           ),
       )
       .map((g) => g.id);
+
     expect(differing).toEqual([]);
   });
 });
@@ -308,7 +340,9 @@ function declaringNullable(mapper: Mapper, value: boolean): Mapper {
         }
       : {}),
   });
+
   if (typeof mapper === "function") return (key) => declare(mapper(key));
+
   return Object.fromEntries(
     Object.entries(mapper).map(([key, config]) => [key, declare(config)]),
   );
@@ -322,8 +356,10 @@ function declaringNullable(mapper: Mapper, value: boolean): Mapper {
 describe("omitted: an undeclared entry is nullable", () => {
   const omitted = (id: string, mapper: Mapper = MAPPER) =>
     translate(id, { mapper, nullAttributeRepresentation: "omitted" });
+
   const topLevelConjuncts = (filter: unknown): unknown[] => {
     const record = filter as Record<string, unknown>;
+
     return Array.isArray(record["$and"])
       ? record["$and"].flatMap(topLevelConjuncts)
       : [filter];
@@ -339,10 +375,12 @@ describe("omitted: an undeclared entry is nullable", () => {
         ([key, config]) => {
           if (config.field !== field) return [key, config];
           const { nullable: _nullable, ...rest } = config;
+
           return [key, rest];
         },
       ),
     );
+
   const guard = (field: string) => JSON.stringify({ [field]: { $ne: null } });
 
   test.each([
@@ -386,6 +424,7 @@ describe("omitted: an undeclared entry is nullable", () => {
   test("a function mapper takes the default too", async () => {
     const mapper = undeclared("aString") as Record<string, MapperConfig>;
     const asFunction: Mapper = (key) => mapper[key]!;
+
     for (const id of ["string/equals/case-sensitive", "logic/not/over-and"]) {
       expect(await omitted(id, asFunction)).toStrictEqual(
         await omitted(id, mapper),
@@ -596,6 +635,7 @@ describe("an unmapped reference", () => {
       key === "request.resource.attr.aOptionalString"
         ? undefined
         : (MAPPER as Record<string, MapperConfig>)[key]) as Mapper;
+
     await expect(
       translate("null/not-equals/missing-attribute-against-literal", {
         mapper,
@@ -607,12 +647,15 @@ describe("an unmapped reference", () => {
     const queryPlan = await planFor(
       "null/not-equals/missing-attribute-against-literal",
     );
+
     let thrown: unknown;
+
     try {
       queryPlanToMongoose({ queryPlan });
     } catch (error) {
       thrown = error;
     }
+
     // A mapping mistake is a bug in the caller's mapping, not a refusal: as a refusal, an
     // `unsupported` ledger entry could hide it.
     expect(thrown).toBeInstanceOf(Error);

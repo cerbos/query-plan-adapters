@@ -89,11 +89,13 @@ const APPLICATION_FILTER: Where = {
 /** Both addresses below are supplied, and neither has a fallback. See each in turn. */
 function requiredEnv(name: string): string {
   const value = process.env[name];
+
   if (!value) {
     throw new Error(
       `${name} is not set — run this example through demo/scripts/run-example.sh langchain-chromadb`
     );
   }
+
   return value;
 }
 
@@ -114,6 +116,7 @@ const cerbosHost = requiredEnv("CERBOS_HOST");
  * demo run create and delete collections inside a conformance run's server.
  */
 const chromaEndpoint = new URL(requiredEnv("CHROMA_URL"));
+
 const chroma = new ChromaClient({
   host: chromaEndpoint.hostname,
   port: Number(chromaEndpoint.port),
@@ -126,7 +129,9 @@ type QueryPlan = Awaited<ReturnType<Cerbos["planResources"]>>;
 
 function principal(id: string): { id: string; roles: string[] } {
   const found = seeds.principals.find((p) => p.id === id);
+
   if (!found) throw new Error(`demo/seeds.json declares no principal '${id}'`);
+
   return found;
 }
 
@@ -177,11 +182,13 @@ function toFilter(result: QueryPlanToChromaDBResult): Filter {
       return undefined;
     case PlanKind.CONDITIONAL: {
       const filters = result.filters;
+
       if (Object.keys(filters).length === 0) {
         throw new Error(
           "a KIND_CONDITIONAL plan carried no filter — refusing to query without one"
         );
       }
+
       return filters;
     }
   }
@@ -198,6 +205,7 @@ function conjoin(
   applicationFilter: Where
 ): Where {
   if (adapterFilter === undefined) return applicationFilter;
+
   return { $and: [adapterFilter, applicationFilter] };
 }
 
@@ -230,11 +238,13 @@ async function findIds(
   filter: Filter
 ): Promise<string[]> {
   if (filter === "denied") return [];
+
   const results = await collection.query({
     queryEmbeddings: [QUERY_EMBEDDING],
     where: filter,
     nResults: seeds.documents.length,
   });
+
   return [...(results.ids[0] ?? [])].sort();
 }
 
@@ -259,6 +269,7 @@ async function filtered(
   action: string
 ): Promise<ShapeResult> {
   const result = await translate(principalId, action);
+
   return { kind: result.kind, ids: await findIds(collection, toFilter(result)) };
 }
 
@@ -293,6 +304,7 @@ async function paginated(
 
   const pageSizes: number[] = [];
   const ids: string[] = [];
+
   if (filter !== "denied") {
     for (let offset = 0; ; offset += pageSize) {
       const page = await collection.get({
@@ -300,9 +312,11 @@ async function paginated(
         limit: pageSize,
         offset,
       });
+
       if (page.ids.length === 0) break;
       pageSizes.push(page.ids.length);
       ids.push(...page.ids);
+
       if (page.ids.length < pageSize) break;
     }
   }
@@ -322,9 +336,11 @@ async function composed(
 ): Promise<ShapeResult> {
   const result = await translate(principalId, action);
   const filter = toFilter(result);
+
   if (filter === "denied") {
     return { kind: result.kind, ids: [] };
   }
+
   return {
     kind: result.kind,
     ids: await findIds(collection, conjoin(filter, APPLICATION_FILTER)),

@@ -68,40 +68,53 @@ const resolveSegments = (
 ): Segment[] | "error" => {
   if (isValueOperand(listOperand) && Array.isArray(listOperand.value)) {
     if (listOperand.value.some((segment) => typeof segment !== "string")) return "error";
+
     return listOperand.value.map((value) => ({ kind: "constant", value: value as string }));
   }
+
   if (!isOperatorCall(listOperand, "list")) {
     throw new UnsupportedQueryPlanError(
       "Segmented hierarchy expressions are supported only as a list() of constants and columns",
     );
   }
+
   let error = false;
+
   const segments = listOperand.operands.map((segment): Segment => {
     if (isValueOperand(segment)) {
       if (typeof segment.value !== "string") {
         error = true;
+
         return { kind: "constant", value: "" };
       }
+
       return { kind: "constant", value: segment.value };
     }
+
     if (isNameOperand(segment)) {
       const resolved = resolveFieldReference(segment.name, mapper);
+
       if (resolved.relations.length > 0) {
         throw new UnsupportedQueryPlanError(
           `Hierarchy segment '${segment.name}' behind a relation is not supported`,
         );
       }
+
       const column = columnForOperand(segment, mapper);
+
       if (column && column.dataType !== "string") error = true;
+
       return {
         kind: "column",
         expr: buildColumnExpression(resolved.mapping, segment.name),
       };
     }
+
     throw new UnsupportedQueryPlanError(
       "Hierarchy segments must be string constants or field references",
     );
   });
+
   return error ? "error" : segments;
 };
 
@@ -112,14 +125,19 @@ const resolveHierarchy = (
   if (!isOperatorCall(operand, "hierarchy")) {
     throw new UnsupportedQueryPlanError("Hierarchy operators require hierarchy(...) operands");
   }
+
   if (operand.operands.length < 1 || operand.operands.length > 2) {
     throw new UnsupportedQueryPlanError("'hierarchy' operator requires one or two operands");
   }
+
   const [pathOperand, delimiterOperand] = operand.operands;
+
   if (!pathOperand) {
     throw new UnsupportedQueryPlanError("'hierarchy' operator is missing its path operand");
   }
+
   let delimiter = ".";
+
   if (delimiterOperand) {
     if (
       !isValueOperand(delimiterOperand) ||
@@ -127,6 +145,7 @@ const resolveHierarchy = (
     ) {
       throw new UnsupportedQueryPlanError("Hierarchy delimiter must be a string value");
     }
+
     delimiter = delimiterOperand.value;
   }
 
@@ -136,6 +155,7 @@ const resolveHierarchy = (
         "Hierarchy path must be a string value or field reference",
       );
     }
+
     return {
       kind: "constant",
       // Go's strings.Split on an empty separator yields one segment per character (code point),
@@ -144,6 +164,7 @@ const resolveHierarchy = (
       delimiter,
     };
   }
+
   if (isNameOperand(pathOperand)) {
     return {
       kind: "field",
@@ -152,14 +173,18 @@ const resolveHierarchy = (
       delimiter,
     };
   }
+
   if (delimiterOperand) {
     // Cerbos's hierarchy() takes a delimiter only with a string path.
     throw new UnsupportedQueryPlanError(
       "A segmented hierarchy path takes no delimiter",
     );
   }
+
   const segments = resolveSegments(pathOperand, mapper);
+
   if (segments === "error") return "error";
+
   return { kind: "segmented", segments };
 };
 
@@ -169,9 +194,11 @@ const hierarchyStrictPrefixes = (
   delimiter: string,
 ): string[] => {
   const prefixes: string[] = [];
+
   for (let length = 1; length < segments.length; length += 1) {
     prefixes.push(segments.slice(0, length).join(delimiter));
   }
+
   return prefixes;
 };
 
@@ -183,19 +210,23 @@ const buildFieldHierarchyFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   const { mapping } = field.resolved;
+
   const fieldColumn = isColumn(mapping)
     ? mapping
     : isMappingConfig(mapping)
       ? mapping.column
       : undefined;
+
   // A hierarchy over a non-string column is a CEL error: UNKNOWN under both polarities.
   if (fieldColumn && fieldColumn.dataType !== "string") return sql`null`;
 
   const fieldExpr = buildColumnExpression(mapping, field.reference);
   const constantPath = constant.segments.join(field.delimiter);
   const prefixes = hierarchyStrictPrefixes(constant.segments, field.delimiter);
+
   const isOneOfPrefixes = () =>
     sql`${fieldExpr} in ${prefixes.map((prefix) => sql`${prefix}`)}`;
+
   const isDescendantOfConstant = () =>
     buildStringMatchCondition(
       "startsWith",
@@ -209,15 +240,18 @@ const buildFieldHierarchyFilter = (
     (operator === "descendentOf" && !fieldIsLeft);
 
   let filter: SQL;
+
   if (operator === "overlaps") {
     const combined = or(
       ...(prefixes.length > 0 ? [isOneOfPrefixes()] : []),
       sql`${fieldExpr} = ${constantPath}`,
       isDescendantOfConstant(),
     );
+
     if (!combined) {
       throw new UnsupportedQueryPlanError("Unable to combine hierarchy overlap conditions");
     }
+
     filter = combined;
   } else if (fieldIsAncestor) {
     filter = prefixes.length === 0 ? falseUnlessNull(fieldExpr) : isOneOfPrefixes();
@@ -261,28 +295,36 @@ const buildSegmentedHierarchyFilter = (
 
   const segmentSql = (segment: Segment): SQL =>
     segment.kind === "constant" ? sql`${segment.value}` : segment.expr;
+
   let core: SQL = FALSE_CONDITION;
+
   if (sharedPrefixLength !== undefined) {
     const equalities: SQL[] = [];
     let contradicted = false;
+
     for (let index = 0; index < sharedPrefixLength; index += 1) {
       const a = left[index]!;
       const b = right[index]!;
+
       if (a.kind === "constant" && b.kind === "constant") {
         if (a.value !== b.value) contradicted = true;
         continue;
       }
+
       equalities.push(sql`${segmentSql(a)} = ${segmentSql(b)}`);
     }
+
     core = contradicted
       ? FALSE_CONDITION
       : equalities.length === 0
         ? TRUE_CONDITION
         : and(...equalities)!;
   }
+
   const nullable = [...left, ...right].flatMap((segment) =>
     segment.kind === "column" ? [sql`${segment.expr} is null`] : [],
   );
+
   return nullable.length === 0
     ? core
     : sql`(case when ${sql.join(nullable, sql` or `)} then null else ${core} end)`;
@@ -315,32 +357,39 @@ const buildCharacterHierarchyFilter = (
     : isMappingConfig(field.resolved.mapping)
       ? field.resolved.mapping.column
       : undefined;
+
   if (fieldColumn && fieldColumn.dataType !== "string") return sql`null`;
   const expr = buildColumnExpression(field.resolved.mapping, field.reference);
   const characters = constant.segments;
   const path = characters.join("");
   const length = characterLength([fieldColumn]);
+
   const prefixes = (upTo: number): SQL[] =>
     Array.from({ length: upTo + 1 }, (_, size) => sql`${characters.slice(0, size).join("")}`);
+
   const isPrefixOf = (includeWhole: boolean): SQL =>
     characters.length === 0 && !includeWhole
       ? falseUnlessNull(expr)
       : sql`${expr} in ${prefixes(includeWhole ? characters.length : characters.length - 1)}`;
+
   const startsWithPath = buildStringMatchCondition(
     "startsWith",
     columnExpression(expr),
     constantExpression(sql`${path}`),
     length,
   );
+
   const fieldIsAncestor =
     (operator === "ancestorOf" && fieldIsLeft) ||
     (operator === "descendentOf" && !fieldIsLeft);
+
   const filter =
     operator === "overlaps"
       ? or(isPrefixOf(true), startsWithPath)!
       : fieldIsAncestor
         ? isPrefixOf(false)
         : sql`(${startsWithPath} and ${length(expr)} > ${characters.length})`;
+
   return wrapRelationChain(field.resolved.relations, filter, field.reference, options);
 };
 
@@ -353,28 +402,36 @@ export const buildHierarchyFilter = (
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
   }
+
   const [leftOperand, rightOperand] = operands;
+
   if (!leftOperand || !rightOperand) {
     throw new UnsupportedQueryPlanError(`'${operator}' operator is missing operands`);
   }
+
   const left = resolveHierarchy(leftOperand, mapper);
   const right = resolveHierarchy(rightOperand, mapper);
+
   // A path CEL cannot build (a non-string segment) is an error: UNKNOWN under both polarities.
   if (left === "error" || right === "error") return sql`null`;
+
   if (left.kind === "segmented" || right.kind === "segmented") {
     if (left.kind === "field" || right.kind === "field") {
       throw new UnsupportedQueryPlanError(
         `'${operator}' between a list()-built hierarchy and a field-backed one is not supported`,
       );
     }
+
     return buildSegmentedHierarchyFilter(
       operator,
       left.kind === "segmented" ? left.segments : constantSegments(left),
       right.kind === "segmented" ? right.segments : constantSegments(right),
     );
   }
+
   const field = left.kind === "field" ? left : right.kind === "field" ? right : undefined;
   const constant = left.kind === "constant" ? left : right.kind === "constant" ? right : undefined;
+
   if (field?.delimiter === "" || constant?.delimiter === "") {
     if (
       field === undefined || constant === undefined ||
@@ -386,19 +443,24 @@ export const buildHierarchyFilter = (
           "column path split that way against a constant whose segments are single characters",
       );
     }
+
     return buildCharacterHierarchyFilter(operator, field, constant, field === left, options);
   }
+
   if (left.kind === "field" && right.kind === "constant") {
     return buildFieldHierarchyFilter(operator, left, right, true, options);
   }
+
   if (left.kind === "constant" && right.kind === "field") {
     return buildFieldHierarchyFilter(operator, right, left, false, options);
   }
+
   if (left.kind === "field") {
     throw new UnsupportedQueryPlanError(
       `'${operator}' between two field-backed hierarchies is not supported`,
     );
   }
+
   throw new UnsupportedQueryPlanError(
     `'${operator}' between two constant hierarchies should be folded by the planner`,
   );

@@ -67,6 +67,7 @@ export const adversarialDocument = {
 };
 
 const adversarialDocumentValidator = v.object(adversarialDocument);
+
 export type AdversarialDocument = Infer<typeof adversarialDocumentValidator>;
 
 export default defineSchema({

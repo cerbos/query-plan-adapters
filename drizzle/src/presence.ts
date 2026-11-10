@@ -36,12 +36,15 @@ export const buildHasFilter = (
   negated: boolean,
 ): SQL => {
   const [operand] = operands;
+
   if (operands.length !== 1 || operand === undefined || !isNameOperand(operand)) {
     throw new UnsupportedQueryPlanError("'has' operator requires exactly one attribute reference");
   }
+
   const reference = operand.name;
   const { relations, mapping } = resolveFieldReference(reference, mapper);
   const open = relations.filter((relation) => !options.skipRelations?.has(relation));
+
   if (open.some((relation) => relation.type === "many")) {
     throw new UnsupportedQueryPlanError(
       `Cannot translate has(${reference}): a presence test over a to-many relation has no ` +
@@ -51,17 +54,21 @@ export const buildHasFilter = (
 
   let presence: SQL;
   let hops = open;
+
   if (isRelationValue(mapping)) {
     presence = wrapWithRelations(open, TRUE_CONDITION, reference, options);
     hops = open.slice(0, -1);
   } else {
     const element = relations.some((relation) => options.skipRelations?.has(relation));
+
     const convention =
       mappingNullRepresentation(mapping) ?? (element ? "omitted" : options.nullRepresentation);
+
     const leaf =
       convention === "omitted"
         ? sql`(${buildColumnExpression(mapping, reference)} is not null)`
         : TRUE_CONDITION;
+
     presence = wrapWithRelations(open, leaf, reference, options);
   }
 

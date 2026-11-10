@@ -41,8 +41,10 @@ const foldableArithmetic = (
   if (!isExpressionOperand(operand) || operand.operands.length !== 2) {
     return undefined;
   }
+
   const apply = FOLDABLE_ARITHMETIC.get(operand.operator);
   const [left, right] = operand.operands;
+
   return apply && left && right ? { apply, left, right } : undefined;
 };
 
@@ -56,12 +58,16 @@ export const resolveConstantNumber = (
   if (isValueOperand(operand)) {
     return typeof operand.value === "number" ? operand.value : undefined;
   }
+
   const arithmetic = foldableArithmetic(operand);
+
   if (!arithmetic) {
     return undefined;
   }
+
   const left = resolveConstantNumber(arithmetic.left);
   const right = resolveConstantNumber(arithmetic.right);
+
   return left === undefined || right === undefined
     ? undefined
     : arithmetic.apply(left, right);
@@ -77,16 +83,21 @@ const isZeroCapableDivision = (
   if (!isExpressionOperand(operand) || operand.operator !== "div") {
     return false;
   }
+
   // A division of two constants already folds to an exact IEEE value, and the
   // constant/NaN paths render it more tightly than a CASE can.
   if (resolveConstantNumber(operand) !== undefined) {
     return false;
   }
+
   const denominatorOperand = operand.operands[1];
+
   if (!denominatorOperand) {
     return false;
   }
+
   const denominator = resolveConstantNumber(denominatorOperand);
+
   return denominator === undefined || denominator === 0;
 };
 
@@ -101,18 +112,22 @@ export const findZeroCapableDivision = (
   if (isZeroCapableDivision(operand)) {
     return operand;
   }
+
   if (
     !isExpressionOperand(operand) ||
     !(operand.operator in ARITHMETIC_OPERATORS)
   ) {
     return undefined;
   }
+
   for (const child of operand.operands) {
     const found = findZeroCapableDivision(child);
+
     if (found) {
       return found;
     }
   }
+
   return undefined;
 };
 
@@ -131,16 +146,21 @@ export const foldWithSubstitution = (
   if (operand === target) {
     return substitute;
   }
+
   if (isValueOperand(operand)) {
     return typeof operand.value === "number" ? operand.value : undefined;
   }
+
   // A modulus is not foldable, so it fails closed here rather than being answered.
   const arithmetic = foldableArithmetic(operand);
+
   if (!arithmetic) {
     return undefined;
   }
+
   const left = foldWithSubstitution(arithmetic.left, target, substitute);
   const right = foldWithSubstitution(arithmetic.right, target, substitute);
+
   return left === undefined || right === undefined
     ? undefined
     : arithmetic.apply(left, right);
@@ -157,6 +177,7 @@ export const evaluateConstantNumberComparison = (
     (Number.isNaN(left) || Number.isNaN(right))
   )
     return false;
+
   switch (operator) {
     case "eq":
       return left === right;
@@ -183,9 +204,11 @@ export const evaluateScalarValueComparison = (
   const bothStrings = typeof left === "string" && typeof right === "string";
   const bothBooleans = typeof left === "boolean" && typeof right === "boolean";
   const bothNull = left === null && right === null;
+
   if (!bothNumbers && !bothStrings && !bothBooleans && !bothNull) {
     return undefined;
   }
+
   switch (operator) {
     case "eq":
       return left === right;

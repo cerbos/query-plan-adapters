@@ -73,6 +73,7 @@ const APPLICATION_FILTER = {
  * exactly that reason.
  */
 const cerbosHost = process.env["CERBOS_HOST"];
+
 if (!cerbosHost) {
   throw new Error(
     "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh convex"
@@ -91,6 +92,7 @@ if (!cerbosHost) {
  * started the backend, and writing it here would be a second copy of a number that must not drift.
  */
 const convexUrl = process.env["CONVEX_URL"];
+
 if (!convexUrl) {
   throw new Error(
     "CONVEX_URL is not set — run this example through demo/scripts/run-example.sh convex"
@@ -144,7 +146,9 @@ const pageDocuments = makeFunctionReference<
 
 function principal(id: string): { id: string; roles: string[] } {
   const found = seeds.principals.find((p) => p.id === id);
+
   if (!found) throw new Error(`demo/seeds.json declares no principal '${id}'`);
+
   return found;
 }
 
@@ -167,6 +171,7 @@ async function plan(principalId: string, action: string): Promise<QueryPlan> {
     resource: { kind: RESOURCE_KIND },
     action,
   });
+
   return JSON.parse(JSON.stringify(queryPlan)) as QueryPlan;
 }
 
@@ -185,7 +190,9 @@ const PLAN_KINDS: PlanKind[] = [
  */
 function asPlanKind(reported: string): PlanKind {
   const kind = PLAN_KINDS.find((candidate) => candidate === reported);
+
   if (!kind) throw new Error(`unknown plan kind '${reported}'`);
+
   return kind;
 }
 
@@ -214,10 +221,12 @@ async function listed(
   applicationFilter?: typeof APPLICATION_FILTER
 ): Promise<ShapeResult> {
   const queryPlan = await plan(principalId, action);
+
   const result = await convex.query(listDocuments, {
     queryPlan,
     ...(applicationFilter ? { applicationFilter } : {}),
   });
+
   return { kind: asPlanKind(result.kind), ids: result.ids };
 }
 
@@ -254,10 +263,12 @@ async function paginated(
       queryPlan,
       paginationOpts: { numItems: pageSize, cursor },
     });
+
     if (result.ids.length > 0) {
       pageSizes.push(result.ids.length);
       ids.push(...result.ids);
     }
+
     if (result.isDone) {
       return {
         kind: asPlanKind(result.kind),
@@ -266,6 +277,7 @@ async function paginated(
         ids: ids.sort(),
       };
     }
+
     cursor = result.cursor;
   }
 

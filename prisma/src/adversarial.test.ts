@@ -74,10 +74,12 @@ interface DerivedEntry {
 }
 
 const STORE_NAMES = ["sqlite", "postgres", "mysql"] as const;
+
 type StoreName = (typeof STORE_NAMES)[number];
 
 function selectedStoreName(): StoreName {
   const requested = process.env["ADAPTER_TEST_DB"] ?? "sqlite";
+
   // A typo must fail rather than silently fall back to SQLite (jest.adversarial.config.js rejects
   // it first; the repeat keeps this file reading against a value it trusts).
   if (!STORE_NAMES.includes(requested as StoreName)) {
@@ -85,6 +87,7 @@ function selectedStoreName(): StoreName {
       `Unknown ADAPTER_TEST_DB "${requested}": expected one of ${STORE_NAMES.join(", ")}`
     );
   }
+
   return requested as StoreName;
 }
 
@@ -101,11 +104,13 @@ const LACKS = Object.entries(
 )
   .filter(([, entry]) => entry.stores?.includes(STORE_NAME) ?? true)
   .map(([capability]) => capability);
+
 const UNHELD = new Set(
   (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds
     .filter((seed) => seed.requires?.some((capability) => LACKS.includes(capability)))
     .map((seed) => seed.id)
 );
+
 const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds.filter(
   (seed) => !UNHELD.has(seed.id)
 );
@@ -113,15 +118,18 @@ const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds.filter(
 function held(allowed: string[]): string[] {
   return allowed.filter((id) => !UNHELD.has(id));
 }
+
 const DERIVED = (
   readCorpusJson("derived-fields.json") as { derived: Record<string, DerivedEntry> }
 ).derived;
 
 function derivedFor(seed: Seed): DerivedEntry {
   const entry = DERIVED[seed.id];
+
   if (entry === undefined) {
     throw new Error(`derived-fields.json has no entry for seed "${seed.id}"`);
   }
+
   return entry;
 }
 
@@ -131,13 +139,17 @@ const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
 
 function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const id = seed?.parentSeedId;
+
   if (id === undefined || id === null) {
     return undefined;
   }
+
   const parent = SEEDS_BY_ID.get(id);
+
   if (parent === undefined) {
     throw new Error(`seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`);
   }
+
   return parent;
 }
 
@@ -252,12 +264,15 @@ function modelBlocks(schema: string): string {
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("//"))
     .join("\n");
+
   const models = withoutComments.match(/^model\s[\s\S]*$/m) ?? [];
+
   return models.join("\n").replace(/[ \t]+/g, " ").replace(/\n\s*\n/g, "\n").trim();
 }
 
 async function selectIds(where: object): Promise<string[]> {
   const rows = await prisma.adversarialResource.findMany({ where, select: { id: true } });
+
   return rows.map((row) => row.id).sort();
 }
 
@@ -274,7 +289,9 @@ const translatePlan = (queryPlan: PlanResourcesResponse) =>
 
 async function selectAllowed(queryPlan: PlanResourcesResponse): Promise<string[]> {
   const result = translatePlan(queryPlan);
+
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
+
   return selectIds(result.kind === PlanKind.CONDITIONAL ? result.filters : {});
 }
 
@@ -295,6 +312,7 @@ const LEDGER = (
 
 function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
   const entry = LEDGER[golden.id];
+
   return entry && (entry.pdp === undefined || entry.pdp.includes(tag)) ? entry : undefined;
 }
 
@@ -322,17 +340,21 @@ beforeAll(async () => {
   if (STORE_NAME === "sqlite") {
     await prisma.$executeRawUnsafe("PRAGMA case_sensitive_like = ON");
   }
+
   await seedStore();
 }, 120_000);
 
 afterAll(async () => {
   await prisma.$disconnect();
   writeFuzzResults("prisma", `${STORE_NAME}-v${process.env["PRISMA_VERSION"] ?? "7"}`, fuzzResults);
+
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
     const skipped = GOLDENS.get(tag)!.filter((golden) => golden.plannerDivergence !== null);
+
     return `${tag}: ${tiers.map((tier) => `${tier} ${passed[tag]?.[tier] ?? 0}/${totals[tag]?.[tier]}`).join(", ")} (planner divergences skipped: ${skipped.map((golden) => golden.id).join(", ") || "none"})`;
   });
+
   console.log(`conformance (${STORE_NAME}) passed per tier\n${lines.join("\n")}`);
 });
 
@@ -343,6 +365,7 @@ describe(`conformance (${STORE_NAME})`, () => {
     const rows = await prisma.$queryRawUnsafe<{ banner: string }[]>(
       STORE_BANNERS[STORE_NAME].query
     );
+
     expect(rows[0]?.banner?.split(" ")[0]).toBe(STORE_BANNERS[STORE_NAME].engine);
   });
 
@@ -372,6 +395,7 @@ describe(`conformance (${STORE_NAME})`, () => {
       const results = await Promise.all(
         Array.from({ length: 32 }, () => selectIds({ aString: { contains: "one" } }))
       );
+
       expect(results[0]?.length).toBeGreaterThan(0);
       expect(results.filter((ids) => ids.includes("c1"))).toEqual([]);
     }
@@ -384,7 +408,9 @@ describe(`conformance (${STORE_NAME})`, () => {
         fs.readFileSync(path.join(__dirname, "..", "prisma", name), "utf8")
       ),
     }));
+
     expect(reference?.models).toContain(`model ${MODEL}`);
+
     for (const schema of rest) {
       expect(schema).toEqual({ name: schema.name, models: reference?.models });
     }
@@ -403,6 +429,7 @@ describe(`conformance (${STORE_NAME})`, () => {
         .filter((golden) => golden.pdp !== tag || golden.plannerDivergence === undefined)
         .map((golden) => `${tag}/${golden.id}`)
     );
+
     expect(malformed).toEqual([]);
   });
 
@@ -418,21 +445,29 @@ describe(`conformance (${STORE_NAME})`, () => {
           const verdict = await fuzzReplay(golden);
           fuzzResults.push(verdict);
           assertFuzzVerdict(verdict);
+
           return;
         }
+
         const entry = ledgerEntry(golden, tag);
         const queryPlan = await planOf(golden);
+
         if (entry?.status === "unsupported") {
           expect(() => translatePlan(queryPlan)).toThrow(UnsupportedQueryPlanError);
+
           return;
         }
+
         // Both sides sorted the same way, so a divergent entry cannot pass on ordering alone.
         const ids = await selectAllowed(queryPlan);
         const allowed = held(golden.allowed).sort();
+
         if (entry?.status === "divergent") {
           expect(ids).not.toEqual(allowed);
+
           return;
         }
+
         expect(ids).toEqual(allowed);
         (passed[tag] ??= {})[golden.tier] = (passed[tag]?.[golden.tier] ?? 0) + 1;
       }
@@ -463,6 +498,7 @@ describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
       validationErrors: [],
       metadata: undefined,
     };
+
     return selectAllowed(queryPlan);
   }
 
@@ -473,8 +509,10 @@ describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
     const size = new PlanExpression("size", [
       new PlanExpressionVariable("request.resource.attr.mainCategory.subCategories"),
     ]);
+
     const compare = (operator: string, threshold: number) =>
       new PlanExpression(operator, [size, new PlanExpressionValue(threshold)]);
+
     const negate = (condition: PlanExpressionOperand) => new PlanExpression("not", [condition]);
 
     for (const [shape, condition] of [
@@ -500,8 +538,10 @@ describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
       new PlanExpressionValue("finance"),
       new PlanExpressionVariable("request.resource.attr.mainCategory.subNames"),
     ]);
+
     const TRUE = new PlanExpressionValue(true);
     const FALSE = new PlanExpressionValue(false);
+
     const ternary = (
       condition: PlanExpressionOperand,
       thenBranch: PlanExpressionOperand,

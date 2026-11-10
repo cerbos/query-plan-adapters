@@ -39,10 +39,13 @@ export const relationCorrelation = (
     alias === undefined
       ? relation.targetColumn
       : aliasedTableColumn(relation.targetColumn as AnyColumn, alias);
+
   const joinCondition = eq(targetColumn, relation.sourceColumn);
+
   if (relation.subqueryFilter === undefined) {
     return joinCondition;
   }
+
   return and(joinCondition, relation.subqueryFilter) ?? joinCondition;
 };
 
@@ -56,6 +59,7 @@ export const relationSource = (
   alias?: string,
 ): SQL => {
   const table = sql.identifier(resolveTableName(relation.table, reference));
+
   return alias === undefined ? sql`${table}` : sql`${table} ${sql.identifier(alias)}`;
 };
 
@@ -80,6 +84,7 @@ export const wrapWithRelations = (
       if (options?.skipRelations?.has(relation)) {
         return currentFilter;
       }
+
       // The caller-declared store-side predicate goes in alongside the join, not around the
       // EXISTS, so it narrows the rows the subquery examines rather than the rows it returns.
       // That is what makes it correct under negation too: `all` compiles to `NOT EXISTS (… AND
@@ -87,6 +92,7 @@ export const wrapWithRelations = (
       // P" instead of "every row in the table does".
       const alias = options?.aliases?.get(relation);
       const condition = and(relationCorrelation(relation, alias), currentFilter);
+
       return exists(
         sql`(select 1 from ${relationSource(relation, reference, alias)} where ${condition})`,
       );
@@ -135,10 +141,13 @@ export const requireLeadingHops = (
   const required = leadingRelations.filter(
     (relation) => !options.skipRelations?.has(relation),
   );
+
   if (required.length === 0) {
     return inner;
   }
+
   const hopsExist = wrapWithRelations(required, TRUE_CONDITION, reference);
+
   return sql`(case when ${hopsExist} then ${inner} end)`;
 };
 
@@ -177,9 +186,11 @@ export const wrapRelationChain = (
   options: BuildFilterOptions,
 ): SQL => {
   const wrapped = relations.filter((relation) => !options.skipRelations?.has(relation));
+
   if (wrapped.length > 0 && wrapped.every((relation) => relation.type === "one")) {
     return wrapToOneChain(relations, filter, reference, options);
   }
+
   return requireLeadingHops(
     requiredRelationHops(relations),
     wrapWithRelations(relations, filter, reference, options),
@@ -211,6 +222,7 @@ const wrapToOneChain = (
 ): SQL => {
   const holds = wrapWithRelations(relations, filter, reference, options);
   const refuted = wrapWithRelations(relations, sql`not (${filter})`, reference, options);
+
   return sql`(case when ${holds} then ${TRUE_CONDITION} when ${refuted} then ${FALSE_CONDITION} end)`;
 };
 
@@ -236,6 +248,7 @@ export const wrapCombinedRelations = (
   options: BuildFilterOptions,
 ): SQL => {
   let shared = 0;
+
   while (
     shared < primary.length &&
     shared < secondary.length &&
@@ -243,16 +256,21 @@ export const wrapCombinedRelations = (
   ) {
     shared++;
   }
+
   const seen = new Set(primary);
+
   const chain = [
     ...primary.slice(0, shared),
     ...secondary.slice(shared).filter((relation) => !seen.has(relation)),
     ...primary.slice(shared),
   ];
+
   const wrapped = chain.filter((relation) => !options.skipRelations?.has(relation));
+
   if (wrapped.length > 0 && wrapped.every((relation) => relation.type === "one")) {
     return wrapToOneChain(chain, filter, reference, options);
   }
+
   return requireLeadingHops(
     requiredRelationHops(secondary),
     requireLeadingHops(

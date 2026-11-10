@@ -15,8 +15,10 @@ export type ComparisonOperator = "eq" | "ne" | "lt" | "le" | "gt" | "ge";
 
 export const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
   "operator" in e;
+
 export const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
   "value" in e;
+
 export const isVariable = (
   e: PlanExpressionOperand,
 ): e is PlanExpressionVariable => "name" in e;
@@ -27,9 +29,11 @@ export const operandAt = (
   errorMessage: string,
 ): PlanExpressionOperand => {
   const operand = operands[index];
+
   if (!operand) {
     throw new UnsupportedQueryPlanError(errorMessage);
   }
+
   return operand;
 };
 
@@ -68,12 +72,15 @@ export const withOmittedNullDefault = (mapper: Mapper): Mapper => {
     ...config,
     nullable: config.nullable ?? true,
   });
+
   if (typeof mapper === "function") {
     return (key) => {
       const config = mapper(key);
+
       return config && nullableByDefault(config);
     };
   }
+
   return Object.fromEntries(
     Object.entries(mapper).map(([key, config]) => [
       key,

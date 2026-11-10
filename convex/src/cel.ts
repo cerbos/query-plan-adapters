@@ -32,6 +32,7 @@ export class CelDuration {
 /** Reads a dotted path; an absent key at any level is CEL's missing-attribute error. */
 export const getNestedValue = (obj: unknown, path: string): unknown => {
   let current: unknown = obj;
+
   for (const part of path.split(".")) {
     if (
       !isRecord(current) ||
@@ -39,8 +40,10 @@ export const getNestedValue = (obj: unknown, path: string): unknown => {
     ) {
       return EVALUATION_ERROR;
     }
+
     current = current[part];
   }
+
   return current;
 };
 
@@ -57,6 +60,7 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       isSegmentPrefix(left.segments, right.segments)
     );
   }
+
   if (left instanceof CelDuration || right instanceof CelDuration) {
     return (
       left instanceof CelDuration &&
@@ -64,6 +68,7 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       left.nanos === right.nanos
     );
   }
+
   if (isNumeric(left) && isNumeric(right)) {
     // JavaScript compares a bigint with a number exactly, so 2^53 + 1 never equals 2^53.
     return (
@@ -72,16 +77,20 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       !(left < right || left > right)
     );
   }
+
   if (Object.is(left, right)) return true;
+
   if (Array.isArray(left) && Array.isArray(right)) {
     return (
       left.length === right.length &&
       left.every((value, index) => valuesEqual(value, right[index]))
     );
   }
+
   if (isRecord(left) && isRecord(right)) {
     const leftKeys = Object.keys(left).sort();
     const rightKeys = Object.keys(right).sort();
+
     return (
       leftKeys.length === rightKeys.length &&
       leftKeys.every(
@@ -90,6 +99,7 @@ export const valuesEqual = (left: unknown, right: unknown): boolean => {
       )
     );
   }
+
   return false;
 };
 
@@ -101,14 +111,18 @@ export const compareValues = (
   if (isEvaluationError(left) || isEvaluationError(right)) {
     return EVALUATION_ERROR;
   }
+
   if (operator === "eq" || operator === "ne") {
     const equal = valuesEqual(left, right);
+
     return operator === "eq" ? equal : !equal;
   }
+
   // An ordering against NaN is false, whatever the other operand is.
   if (Number.isNaN(left) || Number.isNaN(right)) return false;
   let a: number | bigint;
   let b: number | bigint;
+
   if (typeof left === "string" && typeof right === "string") {
     // cel-go orders strings by their UTF-8 bytes, which is code point order. JavaScript's `<`
     // compares UTF-16 code units instead, and puts an astral character (a surrogate pair, from
@@ -128,6 +142,7 @@ export const compareValues = (
   } else {
     return EVALUATION_ERROR;
   }
+
   switch (operator) {
     case "lt":
       return a < b;
@@ -144,13 +159,16 @@ export const compareValues = (
 const compareCodePoints = (a: string, b: string): number => {
   let i = 0;
   let j = 0;
+
   while (i < a.length && j < b.length) {
     const x = a.codePointAt(i)!;
     const y = b.codePointAt(j)!;
+
     if (x !== y) return x < y ? -1 : 1;
     i += x > 0xffff ? 2 : 1;
     j += y > 0xffff ? 2 : 1;
   }
+
   return Number(i < a.length) - Number(j < b.length);
 };
 
@@ -216,6 +234,7 @@ const daysInMonth = (year: number, month: number): number => {
     30,
     31,
   ];
+
   return days[month - 1] ?? 0;
 };
 
@@ -224,6 +243,7 @@ export const parseRfc3339Timestamp = (
   value: string,
 ): bigint | EvaluationError => {
   const match = RFC3339_TIMESTAMP.exec(value);
+
   if (!match) return EVALUATION_ERROR;
 
   const [
@@ -240,6 +260,7 @@ export const parseRfc3339Timestamp = (
     offsetHourPart,
     offsetMinutePart,
   ] = match;
+
   if (
     !yearPart ||
     !monthPart ||
@@ -258,6 +279,7 @@ export const parseRfc3339Timestamp = (
   const hour = Number(hourPart);
   const minute = Number(minutePart);
   const second = Number(secondPart);
+
   if (
     year < 1 ||
     year > 9999 ||
@@ -273,12 +295,15 @@ export const parseRfc3339Timestamp = (
   }
 
   let offsetMinutes = 0;
+
   if (zonePart !== "Z") {
     if (!offsetSign || !offsetHourPart || !offsetMinutePart) {
       return EVALUATION_ERROR;
     }
+
     const offsetHour = Number(offsetHourPart);
     const offsetMinute = Number(offsetMinutePart);
+
     if (offsetHour > 23 || offsetMinute > 59) return EVALUATION_ERROR;
     offsetMinutes =
       (offsetHour * 60 + offsetMinute) * (offsetSign === "+" ? 1 : -1);
@@ -288,10 +313,12 @@ export const parseRfc3339Timestamp = (
   instant.setUTCFullYear(year, month - 1, day);
   instant.setUTCHours(hour, minute, second, 0);
   const epochMillis = instant.getTime() - offsetMinutes * 60_000;
+
   if (!Number.isFinite(epochMillis)) return EVALUATION_ERROR;
 
   const fractionNanos = BigInt((fractionPart ?? "").padEnd(9, "0") || "0");
   const timestampNanos = BigInt(epochMillis) * 1_000_000n + fractionNanos;
+
   return timestampNanos < MIN_TIMESTAMP_NANOS ||
     timestampNanos > MAX_TIMESTAMP_NANOS
     ? EVALUATION_ERROR
@@ -329,38 +356,48 @@ export const parseCelDuration = (
 ): CelDuration | EvaluationError => {
   let s = input;
   let negative = false;
+
   if (s[0] === "-" || s[0] === "+") {
     negative = s[0] === "-";
     s = s.slice(1);
   }
+
   if (s === "0") return new CelDuration(0n);
+
   if (s === "") return EVALUATION_ERROR;
   let total = 0n;
+
   while (s !== "") {
     if (!(s[0] === "." || isDigit(s[0]))) return EVALUATION_ERROR;
     let i = 0;
     let whole = 0n;
+
     while (isDigit(s[i])) {
       if (whole > TWO_TO_63 / 10n) return EVALUATION_ERROR;
       whole = whole * 10n + BigInt(s.charCodeAt(i) - 48);
+
       if (whole > TWO_TO_63) return EVALUATION_ERROR;
       i += 1;
     }
+
     const sawWhole = i > 0;
     s = s.slice(i);
     let fraction = 0n;
     let scale = 1;
     let sawFraction = false;
+
     if (s[0] === ".") {
       s = s.slice(1);
       let j = 0;
       let overflow = false;
+
       while (isDigit(s[j])) {
         if (!overflow) {
           if (fraction > INT64_MAX_NANOS / 10n) {
             overflow = true;
           } else {
             const next = fraction * 10n + BigInt(s.charCodeAt(j) - 48);
+
             if (next > TWO_TO_63) {
               overflow = true;
             } else {
@@ -369,27 +406,39 @@ export const parseCelDuration = (
             }
           }
         }
+
         j += 1;
       }
+
       sawFraction = j > 0;
       s = s.slice(j);
     }
+
     if (!sawWhole && !sawFraction) return EVALUATION_ERROR;
     let k = 0;
+
     while (k < s.length && !(s[k] === "." || isDigit(s[k]))) k += 1;
     const unit = DURATION_UNITS[s.slice(0, k)];
+
     if (k === 0 || unit === undefined) return EVALUATION_ERROR;
     s = s.slice(k);
+
     if (whole > TWO_TO_63 / unit) return EVALUATION_ERROR;
     let value = whole * unit;
+
     if (fraction > 0n) {
       value += BigInt(Math.trunc(Number(fraction) * (Number(unit) / scale)));
+
       if (value > TWO_TO_63) return EVALUATION_ERROR;
     }
+
     total += value;
+
     if (total > TWO_TO_63) return EVALUATION_ERROR;
   }
+
   if (negative) return new CelDuration(-total);
+
   return total > INT64_MAX_NANOS ? EVALUATION_ERROR : new CelDuration(total);
 };
 
@@ -414,6 +463,7 @@ export const checkedTimestamp = (nanos: bigint): bigint | EvaluationError =>
  */
 export const timeSince = (nowNanos: bigint, timestamp: bigint): CelDuration => {
   const nanos = nowNanos - timestamp;
+
   return new CelDuration(
     nanos > INT64_MAX_NANOS
       ? INT64_MAX_NANOS
@@ -438,25 +488,35 @@ const CEL_INT_STRING = /^[+-]?\d+$/;
  */
 const formatGoDouble = (value: number): string => {
   if (Number.isNaN(value)) return "NaN";
+
   if (!Number.isFinite(value)) return value > 0 ? "+Inf" : "-Inf";
   // JavaScript renders a negative zero as "0" where CEL renders "-0".
   const sign = value < 0 || Object.is(value, -0) ? "-" : "";
+
   if (value === 0) return `${sign}0`;
+
   const [mantissa = "", exponentPart = ""] = Math.abs(value)
     .toExponential()
     .split("e");
+
   const digits = mantissa.replace(".", "");
   const exponent = Number(exponentPart);
+
   if (exponent < -4 || exponent >= 6) {
     const fraction = digits.length > 1 ? `.${digits.slice(1)}` : "";
     const magnitude = String(Math.abs(exponent)).padStart(2, "0");
+
     return `${sign}${digits[0]}${fraction}e${exponent < 0 ? "-" : "+"}${magnitude}`;
   }
+
   const pointAt = exponent + 1;
+
   if (pointAt <= 0) return `${sign}0.${"0".repeat(-pointAt)}${digits}`;
+
   if (pointAt >= digits.length) {
     return `${sign}${digits}${"0".repeat(pointAt - digits.length)}`;
   }
+
   return `${sign}${digits.slice(0, pointAt)}.${digits.slice(pointAt)}`;
 };
 
@@ -473,13 +533,17 @@ export const convertToString = (
   int = false,
 ): string | EvaluationError => {
   if (typeof value === "string") return value;
+
   if (typeof value === "boolean") return value ? "true" : "false";
+
   if (typeof value === "bigint") return value.toString();
+
   if (typeof value === "number") {
     return int && Number.isInteger(value)
       ? BigInt(value).toString()
       : formatGoDouble(value);
   }
+
   return EVALUATION_ERROR;
 };
 
@@ -487,11 +551,15 @@ export const convertToDouble = (value: unknown): number | EvaluationError => {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : EVALUATION_ERROR;
   }
+
   if (typeof value === "bigint") return Number(value);
+
   if (typeof value !== "string" || !CEL_DOUBLE_STRING.test(value)) {
     return EVALUATION_ERROR;
   }
+
   const converted = Number(value);
+
   return Number.isFinite(converted) ? converted : EVALUATION_ERROR;
 };
 
@@ -506,6 +574,7 @@ const INT64_MAX = 2n ** 63n - 1n;
 const celInt = (value: bigint): number | bigint | EvaluationError => {
   if (value < INT64_MIN || value > INT64_MAX) return EVALUATION_ERROR;
   const asNumber = Number(value);
+
   return Number.isSafeInteger(asNumber) ? asNumber : value;
 };
 
@@ -513,18 +582,22 @@ export const convertToInt = (
   value: unknown,
 ): number | bigint | EvaluationError => {
   if (typeof value === "bigint") return celInt(value);
+
   if (typeof value === "number") {
     // cel-go refuses a double at or beyond either int64 bound, -2^63 included.
     if (!Number.isFinite(value) || value <= -(2 ** 63) || value >= 2 ** 63) {
       return EVALUATION_ERROR;
     }
+
     return celInt(BigInt(Math.trunc(value)));
   }
+
   // Go's strconv.ParseInt: an optional sign, then decimal digits and nothing else. BigInt() alone
   // would also accept surrounding whitespace, which ParseInt rejects.
   if (typeof value !== "string" || !CEL_INT_STRING.test(value)) {
     return EVALUATION_ERROR;
   }
+
   return celInt(BigInt(value));
 };
 
@@ -532,9 +605,11 @@ export const convertToInt = (
 
 const toBigInt = (value: unknown): bigint | undefined => {
   if (typeof value === "bigint") return value;
+
   if (typeof value === "number" && Number.isInteger(value)) {
     return BigInt(value);
   }
+
   return undefined;
 };
 
@@ -552,7 +627,9 @@ export const intArithmetic = (
 ): number | bigint | EvaluationError => {
   const a = toBigInt(left);
   const b = toBigInt(right);
+
   if (a === undefined || b === undefined) return EVALUATION_ERROR;
+
   switch (operator) {
     case "add":
       return celInt(a + b);
