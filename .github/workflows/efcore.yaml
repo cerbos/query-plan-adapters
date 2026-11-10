@@ -7,14 +7,14 @@ on:
       - "conformance/**"
       - "demo/**"
       - ".github/workflows/efcore.yaml"
+      - ".github/workflows/efcore-publish.yaml"
       # No script, harness or build reads Markdown, except the package README, which only
       # `dotnet pack` reads and the example job packs. A negation must come after every pattern it
       # narrows.
       - "!**/*.md"
       - "efcore/README.md"
-  push:
-    tags:
-      - efcore/v*
+  # Release tags invoke these same checks through the publish workflow.
+  workflow_call:
 
 # A newer push to the same pull request makes this run's result moot, so cancel it rather than
 # let it finish. Only pull_request runs are ever cancelled; every other trigger runs to the end.

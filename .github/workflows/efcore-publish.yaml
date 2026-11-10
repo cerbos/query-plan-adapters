@@ -17,7 +17,14 @@ env:
   DOTNET_NOLOGO: "1"
 
 jobs:
+  # A local call runs the full adapter matrix and example at this release's commit.
+  test:
+    uses: ./.github/workflows/efcore.yaml
+    permissions:
+      contents: read
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     environment: nuget
     permissions:

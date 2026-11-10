@@ -12,7 +12,14 @@ defaults:
     working-directory: sqlalchemy
 
 jobs:
+  # A local call runs the full adapter matrix and example at this release's commit.
+  test:
+    uses: ./.github/workflows/sqlalchemy_pr.yaml
+    permissions:
+      contents: read
+
   release-sqla:
+    needs: test
     name: SQLA publish
     runs-on: ubuntu-latest
     # PyPI trusted publishing names this workflow and the `pypi` environment.
