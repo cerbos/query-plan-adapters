@@ -212,9 +212,9 @@ case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 30 / 30 |
-| extended | 99 / 102 |
-| adversarial | 417 / 435 |
+| core | 31 / 31 |
+| extended | 101 / 105 |
+| adversarial | 437 / 461 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, the

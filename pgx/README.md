@@ -276,9 +276,9 @@ PDP's goldens (0.55.0) are replayed too.
 
 | Tier | Passed / total (PDP 0.57.0) |
 | --- | --- |
-| core | 30 / 30 |
-| extended | 97 / 102 |
-| adversarial | 386 / 435 |
+| core | 31 / 31 |
+| extended | 99 / 105 |
+| adversarial | 404 / 461 |
 
 The total is every golden case in the tier for PDP 0.57.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.

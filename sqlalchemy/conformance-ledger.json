@@ -141,6 +141,10 @@
       "status": "unsupported",
       "reason": "attr_map gives both macros' lambda scopes the same unaliased table, so the inner body comparing the inner element with the enclosing one would render as a column compared with itself; the translator refuses the nesting before building SQL (#509)."
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
       "reason": "Two-list except has no SQL list-difference lowering, and the relation-mapped tagNames reaches it outside any operator override."
@@ -152,6 +156,10 @@
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "Two-list except has no SQL list-difference lowering, and the relation-mapped tagNames reaches it outside any operator override."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "Once dyn() is unwrapped, except() over tagNames needs a column, and the harness maps tagNames only through its hasIntersection and in overrides."
     },
     "collection/except/size-of-difference": {
       "status": "unsupported",
@@ -192,6 +200,18 @@
     "collection/filter/as-whole-condition": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean, so it cannot be the whole condition."
+    },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged; the harness's override handles only hasIntersection, so tagNames reaches the translator unmapped."
+    },
+    "collection/has-intersection/scalar-field-against-empty-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only over a relation or its map() projection; over a scalar column it is a CEL no-overload error."
+    },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only against a literal list."
     },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
@@ -305,6 +325,14 @@
       "status": "unsupported",
       "reason": "The planner emits list/struct constructors for the principal's objects; a constructed list is folded only over scalar attribute and expression elements, and a struct element is a map, which SQL has no value to hold."
     },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "Once dyn() is unwrapped, filter() over a principal list is folded only under exists(), all() and exists_one(); as a whole condition it is a CEL no-overload error."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "Once dyn() is unwrapped, map() over a principal list is folded only under exists(), all() and exists_one(); as a whole condition it is a CEL no-overload error."
+    },
     "relation/equals/negated-one-hop-against-explicit-null-field": {
       "status": "unsupported",
       "reason": "Same refusal as `relation/not-equals/one-hop-against-explicit-null-field`, under negation."
@@ -356,6 +384,18 @@
       "status": "unsupported",
       "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
     },
+    "type-mismatch/has-intersection/negated-against-map-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
+    "type-mismatch/has-intersection/negated-against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
+    "type-mismatch/has-intersection/negated-scalar-field-against-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only over a relation or its map() projection; over a scalar column it is a CEL no-overload error."
+    },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
       "reason": "The planner emits a list/struct constructor expression here, and the translator has no SQL lowering for a constructed value."
@@ -364,9 +404,17 @@
       "status": "unsupported",
       "reason": "A relation member is scalar; a list-valued membership needle cannot be bound as one SQL value."
     },
+    "type-mismatch/less-than/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "Ordering against a list literal is a CEL no-overload error, and binding the list as a parameter would compare it by the driver's coercion."
+    },
     "type-mismatch/less-than/string-field-against-timestamp": {
       "status": "unsupported",
       "reason": "A bare temporal attribute is the RFC 3339 string the application sent, which a stored SQL timestamp no longer spells, and CEL has no string-against-timestamp overload; the translator refuses a DateTime column read outside timestamp() rather than compare it as an instant."
+    },
+    "type-mismatch/matches/list-literal-pattern": {
+      "status": "unsupported",
+      "reason": "matches() is translated only with a constant string pattern; a list pattern is a CEL no-overload error."
     }
   }
 }

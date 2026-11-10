@@ -906,16 +906,7 @@ RSpec.describe Cerbos::ActiveRecord do
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
   # gap tracked by #668; delete it when its corpus action lands.
   describe "an operand of no type the operator takes" do
-    let(:tags) { variable("request.resource.attr.tags") }
     let(:may_divide_by_zero) { expression("div", variable("request.resource.attr.aNumber"), value(0.0)) }
-
-    # Corpus gap. hasIntersection takes two lists; a map or a scalar is CEL's no-overload error.
-    it "denies a hasIntersection against a map or a scalar under negation" do
-      map = expression("struct", expression("set-field", value("a"), value(1)))
-      [map, value("public")].each do |operand|
-        expect(translate(conditional(expression("not", expression("hasIntersection", tags, operand))))).to be_empty
-      end
-    end
 
     # Corpus gap. A division by zero is held as branches; it is no constant to fold in Ruby.
     it "refuses a value that may be NaN or Infinity inside a list or map literal" do
@@ -948,11 +939,10 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
-  # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
-  # gap tracked by #668; delete it when its corpus action lands.
+  # A plan the planner never emits: it folds `x in` a map literal, a dyn() map or a principal map
+  # to its keys. The adapter accepts plans from any source, and answering FALSE would grant the
+  # negation.
   describe "a list or map literal" do
-    # Corpus gap. `x in map` tests the keys. The planner folds a literal map to `==`, but a map
-    # can still arrive as a value, and answering FALSE would grant its negation.
     it "tests the keys of a map value in a membership" do
       plan = conditional(expression("in", variable("request.resource.attr.aString"), value({"one" => 1})))
 

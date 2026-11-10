@@ -1,0 +1,83 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b3",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-intersection/negated-empty-literal-list",
+  "intent": "The negation of hasIntersection of a resource list and an empty literal list, beside a discriminating conjunct.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tagNames"
+                      },
+                      {
+                        "value": []
+                      }
+                    ],
+                    "operator": "hasIntersection"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-intersection/negated-empty-literal-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!hasIntersection(R.attr.tagNames, []) && R.attr.aNumber < 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The intersection is false on every row, so its negation holds on every row; a translation that refuses the empty list as a whole condition, or folds it to UNKNOWN, denies rows the PDP allows."
+}

@@ -186,7 +186,8 @@ describe("nullAttributeRepresentation", () => {
         const message = String(error);
         return message.includes("missing-attribute error") ||
           message.includes("Unsupported operator: index") ||
-          message.includes("Prisma cannot compare list or map elements")
+          message.includes("Prisma cannot compare list or map elements") ||
+          message.includes("in over a scalar is a CEL error")
           ? []
           : [`${golden.id} (${message})`];
       }

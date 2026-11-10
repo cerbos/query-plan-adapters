@@ -329,6 +329,12 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 		if rel, parent, ok := relationFor(m, left); ok {
 			return b.membershipOverRelation(right, rel, parent, m, negated)
 		}
+		// `in` over a scalar is a CEL error, which the enclosing && and || absorb as UNKNOWN does.
+		if right.isVariable() {
+			if entry, ok := m.Resolve(right.variable); ok && entry.Relation == nil && entry.Column != "" {
+				return Lit{V: nil}, nil
+			}
+		}
 	}
 
 	// The planner preserves policy source order, so `1 < R.attr.x` arrives value-first and must
@@ -832,6 +838,13 @@ func (b *builder) hasIntersection(n *node, m Mapper, negated bool) (Expr, error)
 			return nil, err
 		}
 		return b.triStateExists(rel, alias, parent, body, existsSemantics, negated), nil
+	}
+
+	// hasIntersection over a scalar is a CEL error, which the enclosing && and || absorb as UNKNOWN does.
+	if otherNode.isVariable() {
+		if entry, ok := m.Resolve(otherNode.variable); ok && entry.Relation == nil && entry.Column != "" {
+			return Lit{V: nil}, nil
+		}
 	}
 
 	otherValue, err := b.value(otherNode, m)

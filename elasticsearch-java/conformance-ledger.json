@@ -103,7 +103,7 @@
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
-      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all, and here the divisor is itself computed from a document field"
+      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright \u2014 mod is not in the leaf resolver at all, and here the divisor is itself computed from a document field"
     },
     "arithmetic/modulo/negated-double-operand": {
       "status": "unsupported",
@@ -111,7 +111,7 @@
     },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
-      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all"
+      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright \u2014 mod is not in the leaf resolver at all"
     },
     "arithmetic/multiply/inexact-fraction-equals": {
       "status": "unsupported",
@@ -229,6 +229,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no script-free computed operand for CEL string conversion."
     },
+    "collection/all/conjunctive-body": {
+      "status": "unsupported",
+      "reason": "A positive all() cannot distinguish a missing nested collection from an empty one in Elasticsearch."
+    },
     "collection/all/empty-collection": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a positive all predicate cannot distinguish an empty collection (true) from a missing collection (CEL error)"
@@ -257,9 +261,13 @@
       "status": "unsupported",
       "reason": "List concatenation with + and the ternary branch it concatenates are computed operands: the Query DSL has no list-valued expression or conditional value, and a term query compares one field against a literal"
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no Query DSL translation."
+    },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead \u2014 e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
     "collection/except/equals-empty-list": {
       "status": "unsupported",
@@ -267,11 +275,19 @@
     },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead \u2014 e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "except() computes a list difference, which has no Query DSL translation."
     },
     "collection/except/size-of-difference": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead \u2014 e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+    },
+    "collection/exists-one/disjunctive-body": {
+      "status": "unsupported",
+      "reason": "exists_one needs a count of nested matches, which the Query DSL does not give without scripts."
     },
     "collection/exists-one/several-matches": {
       "status": "unsupported",
@@ -369,9 +385,21 @@
       "status": "unsupported",
       "reason": "filter() over the flat tagNames array evaluates its predicate per element, and errors on a null element, which Elasticsearch does not index; a flat keyword array has no per-element query scope, so the filtered list is a computed operand the Query DSL cannot build without scripts"
     },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
+    },
+    "collection/has-intersection/negated-empty-literal-list": {
+      "status": "unsupported",
+      "reason": "A negated hasIntersection cannot distinguish a missing collection from an empty one in Elasticsearch."
+    },
     "collection/has-intersection/negated-mapped-names": {
       "status": "unsupported",
       "reason": "Negated hasIntersection over the map() projection of the nested tags path: a bool.must_not of the nested query matches a document whose tags are missing (CEL error), and Elasticsearch does not index an empty nested array, so the two cannot be told apart"
+    },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only with a value list as its second operand."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -563,7 +591,7 @@
     },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",
-      "reason": "The one hierarchy shape the term-level lowering cannot reach. Every other hierarchy/* case compares a field's whole stored path against an adapter-controlled constant, which prefix/terms/term express; here the descendant path is CONSTRUCTED by list() from a constant segment and the primary key, so matching it would mean concatenating a stored field value into a path first. The Query DSL has no computed operand to do that with — the same missing evaluation step that refuses arithmetic and casts here"
+      "reason": "The one hierarchy shape the term-level lowering cannot reach. Every other hierarchy/* case compares a field's whole stored path against an adapter-controlled constant, which prefix/terms/term express; here the descendant path is CONSTRUCTED by list() from a constant segment and the primary key, so matching it would mean concatenating a stored field value into a path first. The Query DSL has no computed operand to do that with \u2014 the same missing evaluation step that refuses arithmetic and casts here"
     },
     "hierarchy/overlaps/path-built-from-list-value-first": {
       "status": "unsupported",
@@ -639,7 +667,7 @@
     },
     "null/equals/field-to-field-both-explicit-null": {
       "status": "unsupported",
-      "reason": "Elasticsearch Query DSL compares a field against a literal only, so the field-to-field operand is rejected before either side's null convention is reached — the same limitation as field-to-field"
+      "reason": "Elasticsearch Query DSL compares a field against a literal only, so the field-to-field operand is rejected before either side's null convention is reached \u2014 the same limitation as field-to-field"
     },
     "null/equals/negated-explicit-null-against-literal": {
       "status": "unsupported",
@@ -676,6 +704,10 @@
     "null/has-intersection/literal-list-with-null-element-against-mapped-names-value-first": {
       "status": "unsupported",
       "reason": "hasIntersection with null requires an explicit null-value mapping"
+    },
+    "null/has-intersection/literal-list-with-null-element-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "hasIntersection over map() inside a lambda computes a projection per element, which a Query DSL leaf cannot do without a script."
     },
     "null/has-intersection/literal-list-with-null-element-value-first": {
       "status": "unsupported",
@@ -752,11 +784,19 @@
     },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
-      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
+      "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead \u2014 e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
     },
     "principal/exists/list-of-structs-with-null-field": {
       "status": "unsupported",
       "reason": "The fold compares aOptionalString with each element's null name, a positive equality with null: Elasticsearch does not index a JSON null, so it cannot distinguish an explicit null attribute (check() allows) from a missing field (CEL error, denies) without an indexed null_value sentinel"
+    },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "filter() over a literal collection folds only under exists() and all(); as a whole condition it is a CEL no-overload error."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "map() over a literal collection folds only under exists() and all(); as a whole condition it is a CEL no-overload error."
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
@@ -768,7 +808,7 @@
     },
     "regex/matches/case-fold-kelvin-and-long-s": {
       "status": "unsupported",
-      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^ks — Lucene regexp has no inline flags, and its case_insensitive option does not follow RE2's Unicode simple-folding orbits"
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: (?i)^ks \u2014 Lucene regexp has no inline flags, and its case_insensitive option does not follow RE2's Unicode simple-folding orbits"
     },
     "regex/matches/case-insensitive-flag": {
       "status": "unsupported",
@@ -784,7 +824,7 @@
     },
     "regex/matches/dot-plus-excludes-empty-and-newline": {
       "status": "unsupported",
-      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .+ — Lucene's . matches a newline where RE2's does not"
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .+ \u2014 Lucene's . matches a newline where RE2's does not"
     },
     "regex/matches/leading-zero-count-is-literal": {
       "status": "unsupported",
@@ -800,7 +840,7 @@
     },
     "regex/matches/negated-invalid-patterns-from-principal": {
       "status": "unsupported",
-      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 3: (a)\\1 — the invalid patterns are refused rather than handed to Lucene, and the disjunction with them"
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 3: (a)\\1 \u2014 the invalid patterns are refused rather than handed to Lucene, and the disjunction with them"
     },
     "regex/matches/negated-nested-repetition-over-budget-from-principal": {
       "status": "unsupported",
@@ -832,7 +872,7 @@
     },
     "regex/matches/unbounded-count": {
       "status": "unsupported",
-      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .{8,} — RE2's `.` excludes a newline and Lucene's does not, so an unescaped `.` is refused"
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .{8,} \u2014 RE2's `.` excludes a newline and Lucene's does not, so an unescaped `.` is refused"
     },
     "regex/matches/whitespace-class": {
       "status": "unsupported",
@@ -1001,6 +1041,14 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot express arbitrary collection-count thresholds without scripts"
     },
+    "size/greater-than/filtered-collection": {
+      "status": "unsupported",
+      "reason": "size() of a filter() needs an element count, which the Query DSL does not give."
+    },
+    "size/greater-than/filtered-collection-value-first": {
+      "status": "unsupported",
+      "reason": "size() of a filter() needs an element count, which the Query DSL does not give."
+    },
     "size/greater-than/map-projection": {
       "status": "unsupported",
       "reason": "size() takes a mapped field or a foldable filter(); a map() projection is refused, since its body is evaluated per element and one erroring element (b6's unnamed tag) makes the count an error."
@@ -1012,6 +1060,10 @@
     "size/greater-than/value-first-arbitrary": {
       "status": "unsupported",
       "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
+    },
+    "size/greater-than/value-first-emptiness": {
+      "status": "unsupported",
+      "reason": "An emptiness check on a nested collection cannot distinguish a missing collection from an empty one in Elasticsearch."
     },
     "size/less-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
@@ -1032,6 +1084,10 @@
     "size/less-than/string-length-value-first": {
       "status": "unsupported",
       "reason": "size() of a string needs its length, which the Query DSL cannot compare without scripts; over a string field only emptiness, and thresholds every length or no length satisfies, translate."
+    },
+    "size/not-equals/filtered-collection": {
+      "status": "unsupported",
+      "reason": "size() of a filter() needs an element count, which the Query DSL does not give."
     },
     "size/not-equals/fractional-threshold": {
       "status": "unsupported",
@@ -1059,7 +1115,7 @@
     },
     "string/contains/negated-field-to-field": {
       "status": "unsupported",
-      "reason": "The needle is a second document field. The Query DSL compares a field against a value, never against another field, so a column-valued LIKE needs a script — the same refusal as the positive string/contains/field-to-field, reached before the negation"
+      "reason": "The needle is a second document field. The Query DSL compares a field against a value, never against another field, so a column-valued LIKE needs a script \u2014 the same refusal as the positive string/contains/field-to-field, reached before the negation"
     },
     "string/ends-with/field-to-field": {
       "status": "unsupported",
@@ -1089,6 +1145,10 @@
       "status": "unsupported",
       "reason": "The runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"
     },
+    "type-mismatch/contains/list-literal-needle": {
+      "status": "unsupported",
+      "reason": "contains against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
+    },
     "type-mismatch/contains/number-field-needle": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
@@ -1100,6 +1160,10 @@
     "type-mismatch/equals/boolean-list-element-against-number-literal": {
       "status": "unsupported",
       "reason": "The cross-type question this probe asks is never reached: the positional read of aBoolList is refused as a computed leaf operand before the literal 1 is compared with anything, and a disjunction with one untranslatable branch is refused whole, so the aNumber == 5 branch that keeps the oracle live goes with it"
+    },
+    "type-mismatch/equals/list-literal-against-string-field-value-first": {
+      "status": "unsupported",
+      "reason": "eq against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
     },
     "type-mismatch/equals/negated-on-missing-attribute": {
       "status": "unsupported",
@@ -1125,6 +1189,18 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
     },
+    "type-mismatch/has-intersection/negated-against-map-value": {
+      "status": "unsupported",
+      "reason": "A negated hasIntersection cannot distinguish a missing collection from an empty one in Elasticsearch."
+    },
+    "type-mismatch/has-intersection/negated-against-string-value": {
+      "status": "unsupported",
+      "reason": "A negated hasIntersection cannot distinguish a missing collection from an empty one in Elasticsearch."
+    },
+    "type-mismatch/has-intersection/negated-scalar-field-against-literal-list": {
+      "status": "unsupported",
+      "reason": "A negated hasIntersection cannot distinguish a missing collection from an empty one in Elasticsearch."
+    },
     "type-mismatch/has-intersection/resource-string-list-against-map-element": {
       "status": "unsupported",
       "reason": "Unexpected list expression in leaf operand"
@@ -1133,9 +1209,17 @@
       "status": "unsupported",
       "reason": "in with a list element cannot be expressed: a terms query matches scalar terms only"
     },
+    "type-mismatch/in/null-literal-in-string-field": {
+      "status": "unsupported",
+      "reason": "null membership needs an explicit null-value mapping, which the harness's index does not declare."
+    },
     "type-mismatch/in/string-field-in-list-of-lists": {
       "status": "unsupported",
       "reason": "Unexpected list expression in leaf operand"
+    },
+    "type-mismatch/in/string-field-in-string-field": {
+      "status": "unsupported",
+      "reason": "Comparing two document fields needs a script, which the adapter does not emit."
     },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",
@@ -1153,13 +1237,33 @@
       "status": "unsupported",
       "reason": "Same missing computed operand as arithmetic/add/on-both-sides: a range query compares a field against a literal, and Elasticsearch Query DSL cannot evaluate aNumber + 1.0 per document without scripts"
     },
+    "type-mismatch/less-than/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "lt against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
+    },
     "type-mismatch/less-than/string-field-against-timestamp": {
       "status": "unsupported",
       "reason": "The runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve; the translator refuses it before the string-against-timestamp mismatch is reached"
     },
+    "type-mismatch/matches/list-literal-pattern": {
+      "status": "unsupported",
+      "reason": "matches against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
+    },
+    "type-mismatch/not-equals/list-literal-against-string-field-value-first": {
+      "status": "unsupported",
+      "reason": "ne against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
+    },
+    "type-mismatch/not-equals/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "ne against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
+    },
     "type-mismatch/not-equals/string-field-against-map-literal": {
       "status": "unsupported",
       "reason": "Unexpected struct expression in leaf operand"
+    },
+    "type-mismatch/starts-with/list-literal-needle": {
+      "status": "unsupported",
+      "reason": "startsWith against a list literal is a CEL no-overload error that a term or range query cannot express: the Query DSL has no whole-list comparison."
     },
     "type-mismatch/starts-with/number-field-needle": {
       "status": "unsupported",

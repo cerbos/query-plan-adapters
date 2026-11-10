@@ -215,25 +215,6 @@ class JpaQueryPlanAdapterTest {
         throw new OverrideInvoked();
     };
 
-    // Distinctive values, so a leak into an error message is easy to detect.
-    private static final String ELEM_A = "leak-canary-alpha";
-    private static final String ELEM_B = "leak-canary-beta";
-
-    private static IllegalArgumentException assertNamedError(Operand cond, String op,
-                                                             String attribute, String shape) {
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> runCount(cond));
-        String msg = ex.getMessage();
-        assertTrue(msg.contains(op), "expected operator '" + op + "' in: " + msg);
-        assertTrue(msg.contains(attribute), "expected attribute '" + attribute + "' in: " + msg);
-        assertTrue(msg.contains(shape), "expected shape '" + shape + "' in: " + msg);
-        assertTrue(msg.contains("hasIntersection"),
-                "expected the supported alternative in: " + msg);
-        assertFalse(msg.contains(ELEM_A), "element value leaked into: " + msg);
-        assertFalse(msg.contains(ELEM_B), "element value leaked into: " + msg);
-        return ex;
-    }
-
     // Scope paths that tell a correct hierarchy translation from the likely bugs: "a:bb:c"
     // shares the string prefix "a:b" but not the path prefix. In check(), ancestorOf and
     // descendentOf are strict (a path is not its own ancestor); overlaps is inclusive.
@@ -1318,96 +1299,6 @@ class JpaQueryPlanAdapterTest {
     // ============================================================================================
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code collection/exists-one/several-matches} carries a single-equality body; a
-     * disjunctive body is not carried.
-     */
-    @Test
-    void existsOneWithCompoundBody() {
-        assertEquals(0, runCount(exprOp("exists_one",
-                var("request.resource.attr.tags"),
-                lambda("t",
-                        exprOp("or",
-                                exprOp("eq", var("t.id"), sval("tag1")),
-                                exprOp("eq", var("t.name"), sval("public")))))));
-    }
-
-    // hasIntersection with an empty list is always false and must not emit `IN ()`, which some
-    // databases reject.
-
-    /**
-     * <strong>Corpus gap.</strong> #668: {@code hasIntersection(x, [])} against a scalar column is
-     * not carried. It is not known whether the planner folds it as it folds {@code membership/in/empty-list}.
-     */
-    @Test
-    void hasIntersectionScalarEmptyListCompiles() {
-        assertEquals(0, runCount(exprOp("hasIntersection",
-                var("request.resource.attr.aString"), listOp())));
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> #668: The same empty constant list, over a relation.
-     */
-    @Test
-    void hasIntersectionRelationEmptyListCompiles() {
-        assertEquals(0, runCount(exprOp("hasIntersection",
-                var("request.resource.attr.tags"), listOp())));
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> #668: The same empty constant list, over a {@code map()}
-     * projection.
-     */
-    @Test
-    void hasIntersectionMapEmptyListCompiles() {
-        Operand mapExpr = exprOp("map",
-                var("request.resource.attr.tags"),
-                lambda("t", var("t.name")));
-        assertEquals(0, runCount(exprOp("hasIntersection", mapExpr, listOp())));
-    }
-
-    /**
-     * {@code eq}/{@code ne} against a list constant, in either operand order. CEL equality across
-     * types is false, so a scalar column never equals a list; a relation must throw a named
-     * {@link IllegalArgumentException} rather than a raw Hibernate conversion error, whose message
-     * must not contain the element values.
-     */
-    @Nested
-    class StructuredConstantComparison {
-
-        /** Rows whose aString is present: {@code aString != canary} holds for every one. */
-        private int presentStrings() {
-            return runCount(exprOp("ne", var("request.resource.attr.aString"), sval(ELEM_A)));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: the corpus carries {@code aString == [...]} field
-         * first ({@code type-mismatch/equals/string-field-against-list-literal}); the value-first
-         * order and {@code !=} are not carried.
-         */
-        @Test
-        void aScalarFieldNeverEqualsAListConstant() {
-            assertEquals(0, runCount(
-                    exprOp("eq", listOp(ELEM_A), var("request.resource.attr.aString"))));
-            assertEquals(presentStrings(), runCount(
-                    exprOp("ne", var("request.resource.attr.aString"), listOp(ELEM_A, ELEM_B))));
-            assertEquals(presentStrings(), runCount(
-                    exprOp("ne", listOp(ELEM_A, ELEM_B), var("request.resource.attr.aString"))));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code comparison/equals/whole-list-literal} carries this shape with a one-element
-         * list; a multi-element list is not carried.
-         */
-        @Test
-        void eqRelationAgainstListConstantThrowsNamedError() {
-            assertNamedError(
-                    exprOp("eq", var("request.resource.attr.tags"), listOp(ELEM_A, ELEM_B)),
-                    "eq", "request.resource.attr.tags", "list of 2 elements");
-        }
-
-    }
-
-    /**
      * <strong>Corpus gap.</strong> #668: {@code identifier/equals/concatenation-value-first} solves a PREFIX concatenation back to
      * a key equality; the suffix form is not carried.
      */
@@ -1505,115 +1396,6 @@ class JpaQueryPlanAdapterTest {
     }
 
     @Nested
-    class CollectionMacroComposition {
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code all} with a conjunctive body is not carried.
-         */
-        @Test
-        void allWithNestedAnd() {
-            Operand cond = exprOp("all",
-                    var("request.resource.attr.tags"),
-                    lambda("t", exprOp("and",
-                            exprOp("eq", var("t.name"), sval("public")),
-                            exprOp("ne", var("t.id"), sval("tag1")))));
-            assertEquals(0, runCount(cond));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code size/equals/filtered-collection} carries {@code == 1}; the
-         * other operators and the value-first mirror are not carried.
-         */
-        @Test
-        void sizeOfFilterCountsMatchingElements() {
-            // Translates to a correlated COUNT with the lambda as its WHERE clause.
-            ResourceEntity r = new ResourceEntity("size-filter-seed-1");
-            r.addTag("tagA", "public");
-            r.addTag("tagB", "public");
-            r.addTag("tagC", "x");
-            Operand filterExpr = exprOp("filter",
-                    var("request.resource.attr.tags"),
-                    lambda("t", exprOp("eq", var("t.name"), sval("public"))));
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("eq", exprOp("size", filterExpr), nval(2))));
-                assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(3))));
-                assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(1))));
-                assertEquals(0, runCount(exprOp("gt", exprOp("size", filterExpr), nval(2))));
-                assertEquals(1, runCount(exprOp("gt", exprOp("size", filterExpr), nval(0))));
-                assertEquals(0, runCount(exprOp("eq", exprOp("size", filterExpr), nval(0))));
-                // Value-first is mirrored.
-                assertEquals(1, runCount(exprOp("gt", nval(3), exprOp("size", filterExpr))));
-            });
-        }
-    }
-
-    /**
-     * Null in membership tests. CEL's {@code null in ["a", null]} is true, but SQL's
-     * {@code IN ('a', NULL)} never matches a NULL, so a null is translated as an extra
-     * {@code IS NULL} condition.
-     */
-    @Nested
-    class InListNullElements {
-
-        /** Seeds rows whose aOptionalString is "a", "b" and NULL. */
-        private void withOwnerRows(Runnable body) {
-            ResourceEntity a = new ResourceEntity("in-null-a");
-            a.setaOptionalString("a");
-            ResourceEntity b = new ResourceEntity("in-null-b");
-            b.setaOptionalString("b");
-            ResourceEntity nul = new ResourceEntity("in-null-nul");
-            nul.setaOptionalString(null);
-            withResource(a, () -> withResource(b, () -> withResource(nul, body)));
-        }
-
-        /** Seeds rows with a tag named "x", a tag with a NULL name, and no tags. */
-        private void withTagRows(Runnable body) {
-            ResourceEntity withX = new ResourceEntity("in-null-tag-x");
-            withX.addTag("int1", "x");
-            ResourceEntity withNullName = new ResourceEntity("in-null-tag-nul");
-            withNullName.addTag("int2", null);
-            ResourceEntity noTags = new ResourceEntity("in-null-tag-none");
-            withResource(withX, () -> withResource(withNullName, () -> withResource(noTags, body)));
-        }
-
-        /** Translates {@code condition}, runs it, and returns the matched ids. */
-        private Set<String> runIds(Operand condition) {
-            PlanResourcesResponse resp =
-                    buildResponse(PlanResourcesFilter.Kind.KIND_CONDITIONAL, condition);
-            QueryPlanFilter filter = JpaQueryPlanAdapter.toFilter(resp, JpaQueryPlanAdapter.Options.of(MAPPER)
-                    .withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT));
-            EntityManager em = emf.createEntityManager();
-            try {
-                CriteriaBuilder cb = em.getCriteriaBuilder();
-                CriteriaQuery<String> cq = cb.createQuery(String.class);
-                Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-                cq.select(root.get("id")).distinct(true);
-                Predicate p = filter.toPredicate(root, cq, cb);
-                if (p != null) {
-                    cq.where(p);
-                }
-                return Set.copyOf(em.createQuery(cq).getResultList());
-            } finally {
-                em.close();
-            }
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code null in R.attr.x} over a scalar column is not
-         * carried; the corpus's null needles are over relations ({@code null/in/null-literal-in-resource-list}).
-         */
-        @Test
-        void nullNeedleAgainstScalarFieldIsIsNull() {
-            // Membership in a scalar is equality, so this is IS NULL.
-            Operand cond = exprOp("in",
-                    nullVal(), var("request.resource.attr.aOptionalString"));
-            withOwnerRows(() ->
-                    assertEquals(Set.of("in-null-nul"), runIds(cond)));
-        }
-
-    }
-
-    @Nested
     class HierarchyOperators {
 
         private Operand hierarchy(Operand inner, String delimiter) {
@@ -1667,49 +1449,6 @@ class JpaQueryPlanAdapterTest {
 
     }
 
-    // The planner keeps policy source order, so a constant can come before the column.
-    // Ordering operators must be mirrored.
-    @Nested
-    class OperandOrderSemantics {
-
-        /**
-         * <strong>Corpus gap.</strong> #668: The corpus carries {@code comparison/less-or-equal/value-first}, {@code comparison/greater-or-equal/value-first},
-         * {@code comparison/less-than/value-first} and {@code comparison/not-equals/value-first}; value-first {@code gt} is not carried.
-         */
-        @Test
-        void gtValueFirstMeansFieldLessThan() {
-            // 10 > aNumber, with aNumber = 5.
-            withResource(orderSeed(), () ->
-                    assertEquals(1, runCount(exprOp("gt", nval(10), var("request.resource.attr.aNumber")))));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code size/less-than/value-first} spells {@code 0 < size(...)}; the
-         * {@code 1 > size(...)} mirror, which lowers to NOT EXISTS, is not carried.
-         */
-        @Test
-        void sizeValueFirstEmptinessCheck() {
-            // 1 > size(ownedBy) is NOT EXISTS; the seeded row has owners.
-            withResource(orderSeed(), () ->
-                    assertEquals(0, runCount(exprOp("gt",
-                            nval(1),
-                            exprOp("size", var("request.resource.attr.ownedBy"))))));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: The deprecated {@code has_intersection} spelling the
-         * PDP still accepts is not carried.
-         */
-        @Test
-        void hasIntersectionSnakeCaseAliasIsAccepted() {
-            withResource(orderSeed(), () ->
-                    assertEquals(1, runCount(exprOp("has_intersection",
-                            var("request.resource.attr.ownedBy"),
-                            listOp("user1")))));
-        }
-
-    }
-
     /**
      * <strong>Corpus gap.</strong> #668: Concatenating a null principal attribute is not carried;
      * the corpus principal has no null attribute.
@@ -1737,22 +1476,6 @@ class JpaQueryPlanAdapterTest {
                         exprOp("add", sval("canary-secret-value"), nullVal()))));
         assertFalse(ex2.getMessage().contains("canary-secret-value"),
                 "constant value leaked into the error message: " + ex2.getMessage());
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> #668: {@code hasIntersection} between two attributes is not
-     * carried.
-     */
-    @Test
-    void hasIntersectionVariableVariableReportsBothOperands() {
-        // The message names both operands and lists the supported shapes.
-        assertConditionThrows(
-                exprOp("hasIntersection",
-                        var("request.resource.attr.tagNames"),
-                        var("request.resource.attr.ownedBy")),
-                "VARIABLE 'request.resource.attr.tagNames'",
-                "VARIABLE 'request.resource.attr.ownedBy'",
-                "Supported shapes");
     }
 
     @Nested
@@ -1796,25 +1519,6 @@ class JpaQueryPlanAdapterTest {
                 assertEquals(0, runCount(plan("startsWith", "anything")));
                 assertEquals(0, runCount(plan("endsWith", "anything")));
             });
-        }
-
-    }
-
-    // in(variable, variable): the second attribute must be a relation.
-    @Nested
-    class InVariableVariable {
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code in} whose second attribute is a scalar is not
-         * carried; {@code membership/in/field-in-resource-list} maps a relation.
-         */
-        @Test
-        void scalarSecondOperandThrowsNamedError() {
-            assertConditionThrows(
-                    exprOp("in",
-                            var("request.resource.attr.aString"),
-                            var("request.resource.attr.createdBy")),
-                    "request.resource.attr.createdBy", "Relation", "scalar Field mapping");
         }
 
     }

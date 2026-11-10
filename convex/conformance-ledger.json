@@ -17,6 +17,14 @@
       "status": "unsupported",
       "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`"
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/filter/as-conjunct": {
       "status": "unsupported",
       "reason": "filter() one level below the root is still a list in a boolean position; refused for the same reason as `collection/filter/as-whole-condition`"
@@ -24,6 +32,10 @@
     "collection/filter/as-whole-condition": {
       "status": "unsupported",
       "reason": "filter() returns a list, not a boolean; the post-filter would read it as an evaluation error and deny every row, silently agreeing with the PDP while emitting a filter for a shape with no boolean meaning, so it is refused"
+    },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
     },
     "collection/map/as-whole-condition": {
       "status": "unsupported",
@@ -48,6 +60,18 @@
     "comparison/less-than/infinity-on-both-sides": {
       "status": "unsupported",
       "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: the 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator, which survives the JSON hop as an unsigned 0"
+    },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped filter() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "type-mismatch/matches/list-literal-pattern": {
+      "status": "unsupported",
+      "reason": "matches() needs a constant string pattern, which the post-filter compiles at translation; a list pattern is a CEL no-overload error."
     }
   }
 }

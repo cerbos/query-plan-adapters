@@ -56,12 +56,14 @@ class RefusalTypesTest {
 
     /**
      * The corpus refusals the mapping raises before any Criteria limit is reached:
-     * {@code createdBy} is a String column, which does not pin an instant. Every other corpus
+     * {@code createdBy} is a String column, which does not pin an instant, and
+     * {@code aOptionalString} is a Field where {@code in} needs a Relation. Every other corpus
      * refusal is an {@link UnsupportedPlanShapeException}.
      */
     private static final Set<String> UNMAPPED = Set.of(
             "cast/timestamp/malformed-string",
-            "cast/timestamp/negated-malformed-string");
+            "cast/timestamp/negated-malformed-string",
+            "type-mismatch/in/string-field-in-string-field");
 
     private static EntityManagerFactory emf;
 

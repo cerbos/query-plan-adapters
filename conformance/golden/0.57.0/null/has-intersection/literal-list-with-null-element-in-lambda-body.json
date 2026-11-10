@@ -1,0 +1,92 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "i9"
+  ],
+  "degenerateReason": null,
+  "id": "null/has-intersection/literal-list-with-null-element-in-lambda-body",
+  "intent": "hasIntersection with a null-bearing literal list inside an exists() body over an object list.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.categories"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "c.subCategories"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "s.name"
+                                  },
+                                  {
+                                    "variable": "s"
+                                  }
+                                ],
+                                "operator": "lambda"
+                              }
+                            }
+                          ],
+                          "operator": "map"
+                        }
+                      },
+                      {
+                        "value": [
+                          "finance",
+                          null
+                        ]
+                      }
+                    ],
+                    "operator": "hasIntersection"
+                  }
+                },
+                {
+                  "variable": "c"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/has-intersection/literal-list-with-null-element-in-lambda-body",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.categories.exists(c, hasIntersection(c.subCategories.map(s, s.name), [\"finance\", null]))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The null element must keep the meaning it has at the root; an adapter that refuses it at the root must refuse it in a lambda too, not drop it."
+}

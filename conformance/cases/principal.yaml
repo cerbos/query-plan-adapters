@@ -161,6 +161,13 @@ cases:
   condition:
     match:
       expr: P.attr.fewTeams.exists(t, t == R.attr.aOptionalString)
+- id: 'principal/filter/as-whole-condition'
+  tier: adversarial
+  intent: 'filter() over a principal list used as the whole condition, a list where CEL needs a boolean, beside a discriminating disjunct.'
+  trap: 'A list condition is a CEL error; reading a non-empty filtered list as true grants every row whose aString is in the list.'
+  condition:
+    match:
+      expr: 'dyn(P.attr.fewTeams.filter(t, t == R.attr.aOptionalString)) || R.attr.aNumber == 5'
 - id: 'principal/filter/size-of-filtered-long-list'
   tier: extended
   intent: 'size() of a principal list filtered by equality with a resource attribute, compared > 0.'
@@ -182,6 +189,13 @@ cases:
   condition:
     match:
       expr: R.attr.aOptionalString in P.attr.fewTeams
+- id: 'principal/map/as-whole-condition'
+  tier: adversarial
+  intent: 'map() over a principal list used as the whole condition, a list where CEL needs a boolean, beside a discriminating disjunct.'
+  trap: 'A list condition is a CEL error; reading the mapped list as a boolean grants rows the PDP denies.'
+  condition:
+    match:
+      expr: 'dyn(P.attr.fewTeams.map(t, t == R.attr.aOptionalString)) || R.attr.aNumber == 5'
 - id: 'principal/map/membership-in-mapped-list'
   tier: extended
   intent: A resource attribute in a principal list mapped by concatenating each element with another resource attribute.

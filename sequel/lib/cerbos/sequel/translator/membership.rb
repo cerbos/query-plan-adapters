@@ -30,6 +30,9 @@ module Cerbos
           # translation.
           reject_collection("in", needle)
           reject_collection("in", haystack)
+          # `in` over a scalar is a CEL no-overload error.
+          return cel_type_error unless haystack.is_a?(Array)
+
           scalar_membership(needle, haystack)
         end
 

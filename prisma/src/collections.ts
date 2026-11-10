@@ -557,6 +557,10 @@ export function handleHasIntersectionOperator(
     throw new UnsupportedQueryPlanError("hasIntersection requires an array value");
   }
 
+  if (rightOperand.value.length === 0 && fieldRef.relations?.length === 1) {
+    return { OR: [] };
+  }
+
   if (fieldRef.relations && fieldRef.relations.length > 0) {
     // The whole reference, not just its path: the mapped valueType is what refuses a literal of
     // another type (`hasIntersection(numberList, ["2", 3])`), which CEL's heterogeneous equality
@@ -564,6 +568,11 @@ export function handleHasIntersectionOperator(
     return buildMembershipFilter(context, fieldRef, rightOperand.value);
   }
 
+  if (fieldRef.valueType !== undefined) {
+    throw new UnsupportedQueryPlanError(
+      "hasIntersection over a scalar attribute is a CEL error, which a Prisma filter cannot express"
+    );
+  }
   return { [getLeafField(fieldRef.path)]: { some: rightOperand.value } };
 }
 

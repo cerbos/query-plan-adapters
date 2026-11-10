@@ -128,6 +128,12 @@ final class PlanWalker {
             // A list where CEL needs a boolean is a no-overload error on every row, which denies
             // under both polarities. size(filter(...)) and the like never reach here.
             case "filter", "map", "except", "intersect" -> tri.unknown();
+            case "dyn" -> {
+                if (operands.size() != 1) {
+                    throw Refusals.malformed("dyn requires exactly 1 operand");
+                }
+                yield traverse(operands.get(0), scope);
+            }
             case "has" -> {
                 if (operands.size() == 1
                         && operands.get(0).getNodeCase() == Operand.NodeCase.VARIABLE
