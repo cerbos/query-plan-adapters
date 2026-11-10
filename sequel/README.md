@@ -57,7 +57,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 30 / 30 |
 | extended | 92 / 103 |
-| adversarial | 397 / 455 |
+| adversarial | 407 / 465 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
 [`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known

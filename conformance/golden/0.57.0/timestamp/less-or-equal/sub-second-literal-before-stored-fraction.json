@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/less-or-equal/sub-second-literal-before-stored-fraction",
+  "intent": "timestamp(createdAt) <= a literal one microsecond past a1 (2020-03-15T10:30:00.000001Z), inside a5's second.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2020-03-15T10:30:00.000001Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "le"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/less-or-equal/sub-second-literal-before-stored-fraction",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdAt) <= timestamp(\"2020-03-15T10:30:00.000001Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a1 is allowed and a5 (…00.123456Z) denied. A literal whose fraction is dropped and then filled to the end of its second at an upper bound, as an Elasticsearch date bound does, over-grants a5."
+}
