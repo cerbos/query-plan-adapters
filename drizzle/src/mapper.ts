@@ -1,7 +1,8 @@
 import type { PlanExpressionOperand } from "@cerbos/core";
-import { aliasedTableColumn, sql } from "drizzle-orm";
+import { aliasedTableColumn } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 
+import { exactString } from "./collation";
 import { UnsupportedQueryPlanError } from "./errors";
 import { isNameOperand } from "./operands";
 import { resolveTableName } from "./relations";
@@ -440,12 +441,12 @@ export const buildColumnExpression = (
         `Mapping for '${reference}' requires a column to be used as a value expression`,
       );
     }
-    return sql`${mapping.column}`;
+    return exactString(mapping.column);
   }
   if (!isColumn(mapping)) {
     throw new Error(`Expected column mapping for '${reference}'`);
   }
-  return sql`${mapping}`;
+  return exactString(mapping);
 };
 
 /** Whether `reference` reads one scalar column on this row, where CEL has no membership overload. */

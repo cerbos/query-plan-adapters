@@ -455,26 +455,11 @@ const POSTGRES_IMAGE =
   "postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b";
 
 /**
- * How the PostgreSQL leg's database is initialised: `--lc-collate=C`, a byte-order collation.
- *
- * **This is a correctness requirement, not a preference.** CEL orders strings by code point, and
- * `<`, `<=`, `>` and `>=` on a text column follow the column's collation. PostgreSQL collations are
- * deterministic, so `=` is byte-exact under any of them, but a linguistic one orders case,
- * accents and punctuation below the letter: under glibc's `en_US.utf8` `'One' > 'a'` is TRUE,
- * which over-grants `comparison/greater-than/string-code-point-order`
- * (cerbos/query-plan-adapters#489). `"C"` orders by byte, which for UTF-8 is code point order.
- *
- * Stated rather than inherited: the Alpine image reports `en_US.utf8` without it, and orders by
- * byte only because musl's `strcoll` does. The same database on a glibc image, or on a managed
- * service, orders linguistically.
- *
- * Overridable so the over-grant can be reproduced rather than taken on trust —
- * `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US" npm run
- * test:adversarial:postgres` gives the pinned image ICU's linguistic order, which musl cannot, and
- * fails both `string-code-point-order` cases. A measurement escape hatch, not a CI leg.
+ * The PostgreSQL leg runs under ICU's linguistic `en-US` order, as a managed service's default
+ * does, so the corpus proves the adapter orders strings by code point itself (#489).
  */
 const POSTGRES_INITDB_ARGS =
-  process.env["ADAPTER_TEST_POSTGRES_INITDB_ARGS"] ?? "--lc-collate=C";
+  process.env["ADAPTER_TEST_POSTGRES_INITDB_ARGS"] ?? "--locale-provider=icu --icu-locale=en-US";
 
 /**
  * The PostgreSQL leg (cerbos/query-plan-adapters#320).
@@ -486,7 +471,7 @@ const POSTGRES_INITDB_ARGS =
  * division by zero where SQLite returns NULL, which is what proves the adapter's IEEE CASE arms
  * guard the division rather than merely reshaping its NULL.
  *
- * The database is initialised under `POSTGRES_INITDB_ARGS`, below: a byte-order collation.
+ * The database is initialised under `POSTGRES_INITDB_ARGS`, above: a linguistic collation.
  */
 function postgresStore(): AdversarialStore {
   const schema = postgresSchema();
@@ -659,53 +644,19 @@ const MYSQL_IMAGE =
   "mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69";
 
 /**
- * The collation this leg runs the whole corpus under, set on the SERVER so that the database the
- * container creates, and every table in it, inherits it.
- *
- * **This is a correctness requirement, not a preference.** CEL string equality is byte-exact.
- * MySQL's default `utf8mb4_0900_ai_ci` is case- AND accent-insensitive, and its `LIKE` follows the
- * column's collation, so under the default the following are all TRUE on MySQL 8.4 — measured,
- * not inferred:
- *
- * | probe | `utf8mb4_0900_ai_ci` (default) | `utf8mb4_0900_as_cs` | `utf8mb4_bin` | `utf8mb4_0900_bin` |
- * |---|---|---|---|---|
- * | `'One' = 'one'` | TRUE — over-grants `string/equals/case-sensitive` | FALSE | FALSE | FALSE |
- * | `'héllo' = 'hello'` | TRUE — over-grants `string/equals/non-ascii-literal` | FALSE | FALSE | FALSE |
- * | `'one' LIKE 'ON%'` | TRUE — over-grants every `hierarchy/*` prefix probe | FALSE | FALSE | FALSE |
- * | `'o\u00ADne' = 'one'` (soft hyphen) | TRUE | TRUE — over-grants `string/equals/case-sensitive` on seed h6 | FALSE | FALSE |
- * | `'one ' = 'one'` | FALSE | FALSE | TRUE (PAD SPACE) | FALSE |
- *
- * A collation that makes `=` match strings CEL tells apart is a **store misconfiguration**, not a
- * limitation of this adapter: no filter it could emit would restore byte-exact equality, and
- * listing `string/equals/case-sensitive` as `unsupported` in the ledger on that basis would blame the translator for the
- * DDL. So the leg pins a byte-exact collation and states the requirement, exactly as `ent` pins
- * one per column and `spring-data` passes `--collation-server`.
- *
- * Case-sensitive is not byte-exact. `utf8mb4_0900_as_cs` is a UCA collation, and UCA gives a
- * default-ignorable code point such as SOFT HYPHEN (U+00AD) no weight at all, so seed h6's
- * `"o\u00ADne"` equals `"one"` under it — an over-grant on `string/equals/case-sensitive` and every `in` over the
- * principal's teams, and an under-grant on `logic/and/three-conjuncts`'s `!=`
- * (cerbos/query-plan-adapters#474). `utf8mb4_bin` is byte-exact but PAD SPACE. Only
- * `utf8mb4_0900_bin` (MySQL 8.0.17+) is byte-exact AND NO PAD, which is why it is the collation
- * the adapter already puts on its own `string()` literals (`buildBooleanString` in `values.ts`),
- * and the one every MySQL leg in this repository runs.
- *
- * Overridable so the over-grant can be reproduced rather than taken on trust —
- * `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci npm run test:adversarial:mysql` fails on the
- * case and accent probes, and `…=utf8mb4_0900_as_cs` on the h6 soft-hyphen probes. Same escape
- * hatch as spring-data's `-Dadapter.test.mysql.collation`.
+ * The MySQL leg runs under the server's default collation, `utf8mb4_0900_ai_ci`, which folds case
+ * and accents, so the corpus proves the adapter compares strings byte for byte itself (#474).
  */
 const MYSQL_COLLATION =
-  process.env["ADAPTER_TEST_MYSQL_COLLATION"] ?? "utf8mb4_0900_bin";
+  process.env["ADAPTER_TEST_MYSQL_COLLATION"] ?? "utf8mb4_0900_ai_ci";
 
 /**
  * The MySQL leg (cerbos/query-plan-adapters#340).
  *
  * What it discriminates that neither other store can:
  *
- * - **Collation.** See `MYSQL_COLLATION` above. SQLite has `PRAGMA case_sensitive_like` and
- *   nothing else; PostgreSQL's collations are deterministic; only MySQL ships a default under
- *   which `=` itself over-grants.
+ * - **Collation.** See `MYSQL_COLLATION` above: only MySQL ships a default under which `=` itself
+ *   folds case.
  * - **Division.** MySQL returns NULL for `x / 0` where PostgreSQL raises, and `5 / 2` is `2.5`
  *   where PostgreSQL's integer division truncates to `2`. The adapter's guarded CASE arms and its
  *   `float(53)` cast on the numerator are what make the two agree; a translation that leaned on
@@ -721,9 +672,7 @@ const MYSQL_COLLATION =
  *   here, not the server's `MYSQL_COLLATION` (`buildBooleanString` in `values.ts`).
  *
  * The DDL is written here rather than derived from the drizzle schema because a store owns its own
- * schema in this harness — but it deliberately names NO collation per column, unlike `ent`'s. The
- * server is started with the collation as its default and every table inherits it, so the
- * requirement lives in one constant rather than repeated on nine columns.
+ * schema in this harness. It names no collation per column, so every table inherits the server's.
  */
 function mysqlStore(): AdversarialStore {
   const schema = mysqlSchema();
@@ -1018,18 +967,10 @@ describe(`conformance (${STORE_NAME})`, () => {
     expect(banner.split(" ")[0]).toBe(STORE_ENGINES[STORE_NAME]);
   });
 
-  // Store configuration is part of conformance: under MySQL's default collation these return the
-  // case variant, the accent variant and the wrong-case prefix. Asserted by name so a failure reads
-  // as "the store is misconfigured" rather than as a translation bug.
   (STORE_NAME === "mysql" ? test : test.skip)(
-    "the MySQL leg runs under a byte-exact NO PAD collation",
+    "the MySQL leg runs under a case-folding collation",
     async () => {
-      expect({
-        caseVariant: await store.selectIds(sql`a_string = ${"one"}`),
-        accentFolded: await store.selectIds(sql`a_string = ${"hello🚀"}`),
-        wrongCasePrefix: await store.selectIds(sql`a_string like ${"ON%"}`),
-        trailingSpace: await store.selectIds(sql`a_string = ${"one "}`),
-      }).toEqual({ caseVariant: ["a1"], accentFolded: [], wrongCasePrefix: [], trailingSpace: [] });
+      expect((await store.selectIds(sql`a_string = ${"one"}`)).length).toBeGreaterThan(1);
     },
   );
 

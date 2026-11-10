@@ -13,6 +13,7 @@ import {
   isRelationValue,
   mappingNullRepresentation,
 } from "./mapper";
+import { exactOrdering, exactString } from "./collation";
 import { isValueOperand } from "./operands";
 import type {
   BaseMapperEntry,
@@ -418,7 +419,7 @@ const buildColumnMembership = (
       ? FALSE_CONDITION
       : sql`(case when ${column} is null then null else ${FALSE_CONDITION} end)`;
   }
-  const membership = sql`${column} in ${nonNullValues.map((candidate) =>
+  const membership = sql`${exactString(column)} in ${nonNullValues.map((candidate) =>
     bindAgainstColumn(candidate, column),
   )}`;
   if (!hasNullElement) {
@@ -456,15 +457,15 @@ const applyColumnComparison = (
   // excludes the row under BOTH polarities, so the predicate has to be made definite here; a
   // fix confined to `ne` would leave `!(col = x)` still dropping the row.
   if (explicitNull && value !== null && (operator === "eq" || operator === "ne")) {
-    const equality = definiteEquality(sql`${column}`, sql`${bound}`, true, false);
+    const equality = definiteEquality(exactString(column), sql`${bound}`, true, false);
     return operator === "eq" ? equality : not(equality);
   }
 
   switch (operator) {
     case "eq":
-      return value === null ? isNull(column) : sql`${column} = ${bound}`;
+      return value === null ? isNull(column) : sql`${exactString(column)} = ${bound}`;
     case "ne":
-      return value === null ? not(isNull(column)) : sql`${column} <> ${bound}`;
+      return value === null ? not(isNull(column)) : sql`${exactString(column)} <> ${bound}`;
     case "in":
       return buildColumnMembership(column, value, explicitNull);
     case "contains":
@@ -475,12 +476,12 @@ const applyColumnComparison = (
       }
       return buildStringMatchCondition(
         operator,
-        columnExpression(sql`${column}`),
+        columnExpression(exactString(column)),
         constantExpression(sql`${value}`),
         characterLength([column]),
       );
   }
-  const ordering = binaryComparison(operator, column, bound);
+  const ordering = binaryComparison(operator, exactOrdering(column), bound);
   if (!ordering) {
     throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
