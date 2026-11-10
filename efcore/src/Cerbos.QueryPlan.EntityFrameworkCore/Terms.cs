@@ -184,6 +184,12 @@ internal static class Ex
     public static Expression Like(Expression value, Expression pattern) =>
         Expression.Call(LikeMethod, Functions, value, pattern, Expression.Constant("\\"));
 
+    private static readonly MethodInfo CollateMethod = typeof(RelationalDbFunctionsExtensions)
+        .GetMethod(nameof(RelationalDbFunctionsExtensions.Collate))!.MakeGenericMethod(typeof(string));
+
+    public static Expression Collate(Expression value, string collation) =>
+        Expression.Call(CollateMethod, Functions, value, Expression.Constant(collation));
+
     private static readonly MethodInfo ConcatMethod = typeof(string).GetMethod(nameof(string.Concat), [typeof(string), typeof(string)])!;
 
     public static Expression Concat(Expression a, Expression b) => Expression.Add(a, b, ConcatMethod);

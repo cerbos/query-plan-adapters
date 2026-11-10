@@ -545,7 +545,7 @@ final class ArithmeticTranslator {
      */
     Expression<Double> toIeeeDouble(
             Expression<? extends Number> path) {
-        if (IeeeDoubleCast.isRegistered(cb)) {
+        if (RegisteredFunctions.isRegistered(cb, MySqlDoubleCastFunctionContributor.FUNCTION_NAME)) {
             return cb.function(
                     MySqlDoubleCastFunctionContributor.FUNCTION_NAME, Double.class, path);
         }

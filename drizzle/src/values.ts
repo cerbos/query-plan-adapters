@@ -9,7 +9,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 import { ARITHMETIC_OPERATORS, resolveConstantNumber } from "./arithmetic";
 import { buildExceptCount, buildFilteredCount } from "./collections";
 import { buildFilterFromExpression } from "./filter";
-import { resolveIndexedColumn } from "./indexed";
+import { indexedListSize, resolveIndexedColumn, resolveIndexedList } from "./indexed";
 import {
   buildColumnExpression,
   columnForOperand,
@@ -663,6 +663,8 @@ const buildSizeExpression = (
       options,
     );
   }
+  const list = resolveIndexedList(operand.name, mapper);
+  if (list) return indexedListSize(list.column, list.indexable);
   // A non-string column has no CEL size(): the comparison is a no-overload error, so UNKNOWN.
   const scalarColumn = columnForOperand(operand, mapper);
   if (scalarColumn && scalarColumn.dataType !== "string") return sql`null`;

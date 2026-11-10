@@ -8,10 +8,6 @@ package dev.cerbos.queryplan.jpa;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 
-import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
-import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression;
-import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
-import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.queryplan.jpa.Corpus.LedgerEntry;
 import dev.cerbos.queryplan.jpa.testmodel.AdversarialInnerEntity;
 import dev.cerbos.queryplan.jpa.testmodel.AdversarialParentEntity;
@@ -20,7 +16,6 @@ import dev.cerbos.queryplan.jpa.testmodel.LabelEntity;
 import dev.cerbos.queryplan.jpa.testmodel.ResourceEntity;
 import dev.cerbos.queryplan.jpa.testmodel.SubCategoryEntity;
 
-import com.google.protobuf.Value;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -413,60 +408,5 @@ class AdversarialConformanceTest {
                 ? "cerbos_ieee_double must be registered on MySQL (is the "
                         + "META-INF/services FunctionContributor entry intact?)"
                 : "cerbos_ieee_double must not be registered off-MySQL");
-    }
-
-    // -- KIND 3: a policy can reach these, and the corpus does not carry them yet --------------
-
-    /**
-     * <strong>Corpus gap.</strong> #668: the corpus counts the {@code mainCategory} chain with
-     * two spellings. These are the other thresholds and polarities, and rows without a
-     * {@code mainCategory} must stay out of every one (#316). Seeds with one have one or two
-     * subCategories, and the rest are CEL missing-path errors, so each of these is empty.
-     */
-    @Test
-    void everyCountThresholdOverTheChainInheritsTheAbsentParentGuard() {
-        Operand size = expression("size", Operand.newBuilder()
-                .setVariable("request.resource.attr.mainCategory.subCategories").build());
-        Map<String, Operand> emptyByConstruction = Map.of(
-                "size(chain) == 0", compare("eq", size, 0),
-                "size(chain) <= 0", compare("le", size, 0),
-                "size(chain) < 1", compare("lt", size, 1),
-                "size(chain) >= 3", compare("ge", size, 3),
-                "!(size(chain) > 0)", expression("not", compare("gt", size, 0)),
-                "!(size(chain) >= 1)", expression("not", compare("ge", size, 1)),
-                "!(size(chain) < 3)", expression("not", compare("lt", size, 3)));
-        emptyByConstruction.forEach((shape, condition) -> assertEquals(List.of(),
-                filteredIdsFor(condition), "absent-parent guard leaked for " + shape));
-
-        // The mirror image, so the loop above cannot pass by denying everything.
-        List<String> withParent = filteredIdsFor(compare("ge", size, 0));
-        assertFalse(withParent.isEmpty(), "some seed must carry a mainCategory");
-        assertTrue(withParent.size() < executeIds(JpaQueryPlanAdapter.toFilter(
-                PlanResourcesResponse.newBuilder().setFilter(PlanResourcesFilter.newBuilder()
-                        .setKind(PlanResourcesFilter.Kind.KIND_ALWAYS_ALLOWED)).build(),
-                OPTIONS)).size(),
-                "not every seed carries one");
-        assertEquals(withParent, filteredIdsFor(compare("lt", size, 3)));
-    }
-
-    private static Operand expression(String operator, Operand... operands) {
-        Expression.Builder e = Expression.newBuilder().setOperator(operator);
-        for (Operand operand : operands) {
-            e.addOperands(operand);
-        }
-        return Operand.newBuilder().setExpression(e).build();
-    }
-
-    private static Operand compare(String operator, Operand left, double threshold) {
-        return expression(operator, left,
-                Operand.newBuilder().setValue(Value.newBuilder().setNumberValue(threshold)).build());
-    }
-
-    private static List<String> filteredIdsFor(Operand condition) {
-        return executeIds(JpaQueryPlanAdapter.toFilter(
-                PlanResourcesResponse.newBuilder().setFilter(PlanResourcesFilter.newBuilder()
-                        .setKind(PlanResourcesFilter.Kind.KIND_CONDITIONAL)
-                        .setCondition(condition)).build(),
-                OPTIONS));
     }
 }

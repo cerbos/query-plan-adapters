@@ -1,0 +1,80 @@
+{
+  "allowed": [
+    "i8",
+    "i9",
+    "j1",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "size/equals/huge-threshold",
+  "intent": "size(aString) == 4294967296 (2^32), OR'd with aNumber > 30.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      }
+                    ],
+                    "operator": "size"
+                  }
+                },
+                {
+                  "value": 4294967296
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 30
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/equals/huge-threshold",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aString) == 4294967296 || R.attr.aNumber > 30"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A narrowing int cast wraps 2^32 to 0 and returns a8, whose aString is empty."
+}

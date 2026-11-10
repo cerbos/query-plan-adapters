@@ -105,6 +105,10 @@
       "status": "unsupported",
       "reason": "Same refusal as `membership/in/map-attribute-keys`, under negation."
     },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() of a map() projection: each element is read through the lambda body, and a body that errors on one element (b6's unnamed tag) makes the whole count an error. The adapter counts only a named collection or a filter(), so the projection is refused."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead."

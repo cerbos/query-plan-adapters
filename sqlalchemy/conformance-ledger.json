@@ -328,6 +328,10 @@
       "status": "unsupported",
       "reason": "owner is declared explicit-null and the parent field is on the omitted convention; an equality across mixed null conventions is refused, since no single predicate keeps the omitted side UNKNOWN and the declared side definite."
     },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() over map() is refused: SQL has no list value to count, and a projection whose body errors on one element (b6's unnamed tag) makes the whole count an error."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal attributes compare RFC 3339 strings in CEL; a stored timestamp loses the original spelling, so both operands need timestamp()."

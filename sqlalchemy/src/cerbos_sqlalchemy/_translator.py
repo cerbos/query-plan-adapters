@@ -748,6 +748,17 @@ class Translator:
             if count is not None:
                 return count
 
+        if (
+            operator == "size"
+            and len(operands) == 1
+            and isinstance(operands[0], Expr)
+            and operands[0].operator == "map"
+        ):
+            raise UnsupportedPlanError(
+                "size() over map() is not lowered: SQL has no list value to count, and a "
+                "projection that errors on an element denies the whole row"
+            )
+
         if operator == "hierarchy":
             target = self._resolve(operands[0])
             delimiter = self._resolve(operands[1]) if len(operands) == 2 else None

@@ -666,21 +666,6 @@ class ElasticsearchQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> Tracked by #668. {@code size(c) != 0} and its negation over a
-     * flat array; the negation is refused because an empty array and a missing field look the
-     * same.
-     */
-    @Test
-    void everySpellingOfNonEmptinessIsTheSameCheck() {
-        Operand notEqualZero = expressionOperand("ne",
-                sizeOf("request.resource.attr.ownedBy"), numberValueOperand(0));
-        assertEquals(exists("ownedBy"), translate(notEqualZero));
-        IllegalArgumentException ex = refusal(expressionOperand("not", notEqualZero));
-        assertTrue(ex.getMessage().contains("emptiness cannot distinguish a missing collection"),
-                ex.getMessage());
-    }
-
-    /**
      * <strong>Corpus gap.</strong> Tracked by #668. A null-bearing {@code hasIntersection} inside a
      * nested lambda.
      */

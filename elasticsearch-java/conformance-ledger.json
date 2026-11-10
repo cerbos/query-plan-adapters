@@ -885,6 +885,26 @@
       "status": "unsupported",
       "reason": "`parent.inner.aOptionalString == null` is a null-selecting comparison, and the `||` does not change the leaf. Elasticsearch does not index a JSON null, so an explicitly-null value and a missing field are the same document, and without a declared convention the adapter refuses every null-selecting direction rather than guess which one the caller sends"
     },
+    "relation/size/fractional-not-equals-to-one-chain": {
+      "status": "unsupported",
+      "reason": "The comparison holds for an empty collection, and an Elasticsearch document holds an empty array and a missing field the same way (no indexed value), so the NOT(exists) it needs would admit a missing collection, which CEL denies; the shape is refused."
+    },
+    "relation/size/less-than-two-to-one-chain": {
+      "status": "unsupported",
+      "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
+    },
+    "relation/size/negated-at-least-two-to-one-chain": {
+      "status": "unsupported",
+      "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
+    },
+    "relation/size/negated-filtered-fractional-equals-to-one-chain": {
+      "status": "unsupported",
+      "reason": "size() of a filter() is refused: the Query DSL counts no elements, and only a filter over a literal list by a comparison of each element with one operand folds to the exists() it is non-empty by."
+    },
+    "relation/size/negated-fractional-equals-to-one-chain": {
+      "status": "unsupported",
+      "reason": "The comparison holds for an empty collection, and an Elasticsearch document holds an empty array and a missing field the same way (no indexed value), so the NOT(exists) it needs would admit a missing collection, which CEL denies; the shape is refused."
+    },
     "relation/size/negated-non-empty-to-one-chain": {
       "status": "unsupported",
       "reason": "Same missing-versus-empty ambiguity as relation/size/zero-to-one-chain, reached through the negated positive-count spelling rather than the direct zero-count one"
@@ -892,6 +912,10 @@
     "relation/size/non-negative-to-one-chain": {
       "status": "unsupported",
       "reason": ">= 0 accepts every count, the empty collection included, and Elasticsearch does not index an empty nested array, so the query cannot tell an empty subCategories (true) from an absent to-one parent (CEL error, denies)"
+    },
+    "relation/size/not-equals-one-to-one-chain": {
+      "status": "unsupported",
+      "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
     },
     "relation/size/string-length-one-hop": {
       "status": "unsupported",
@@ -909,9 +933,17 @@
       "status": "unsupported",
       "reason": "The ternary's else branch needs the condition false, a negated membership in mainCategory.subNames: Elasticsearch does not index an empty array, so a bool.must_not over the collection cannot tell an empty collection from a missing one (CEL error)"
     },
+    "size/equals/collection-two": {
+      "status": "unsupported",
+      "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
+    },
     "size/equals/filtered-collection": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot count only nested elements matching a predicate without scripts"
+    },
+    "size/equals/string-length": {
+      "status": "unsupported",
+      "reason": "size() of a string needs its length, which the Query DSL cannot compare without scripts; over a string field only emptiness, and thresholds every length or no length satisfies, translate."
     },
     "size/equals/string-trailing-space": {
       "status": "unsupported",
@@ -925,17 +957,53 @@
       "status": "unsupported",
       "reason": "Same arbitrary-count-threshold limitation as relation/size/non-negative-to-one-chain, reached through a fractional threshold: >= 1.5 rounds up to >= 2, and the Query DSL expresses only emptiness over nested collections"
     },
+    "size/greater-or-equal/list-attribute-two": {
+      "status": "unsupported",
+      "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
+    },
     "size/greater-than/collection-above-one": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot express arbitrary collection-count thresholds without scripts"
+    },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() takes a mapped field or a foldable filter(); a map() projection is refused, since its body is evaluated per element and one erroring element (b6's unnamed tag) makes the count an error."
     },
     "size/greater-than/string-length": {
       "status": "unsupported",
       "reason": "size(aString) > 4 needs the string's length, which Elasticsearch Query DSL cannot compare without scripts; over a string field only emptiness, and a threshold every length or no length satisfies, translate"
     },
+    "size/greater-than/value-first-arbitrary": {
+      "status": "unsupported",
+      "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
+    },
     "size/less-or-equal/fractional-threshold-on-relation": {
       "status": "unsupported",
       "reason": "Same arbitrary-count-threshold limitation as size/greater-or-equal/fractional-threshold-on-relation under the opposite ordering: <= 1.5 rounds down to <= 1, still not an emptiness check"
+    },
+    "size/less-or-equal/list-with-null": {
+      "status": "unsupported",
+      "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
+    },
+    "size/less-than/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "The Query DSL counts no array elements: a size() comparison translates only as an emptiness check (exists or its negation), and a threshold other than emptiness is refused."
+    },
+    "size/less-than/fractional-threshold-below-one": {
+      "status": "unsupported",
+      "reason": "The comparison holds for an empty collection, and an Elasticsearch document holds an empty array and a missing field the same way (no indexed value), so the NOT(exists) it needs would admit a missing collection, which CEL denies; the shape is refused."
+    },
+    "size/less-than/string-length-value-first": {
+      "status": "unsupported",
+      "reason": "size() of a string needs its length, which the Query DSL cannot compare without scripts; over a string field only emptiness, and thresholds every length or no length satisfies, translate."
+    },
+    "size/not-equals/fractional-threshold": {
+      "status": "unsupported",
+      "reason": "The comparison holds for an empty collection, and an Elasticsearch document holds an empty array and a missing field the same way (no indexed value), so the NOT(exists) it needs would admit a missing collection, which CEL denies; the shape is refused."
+    },
+    "size/not-equals/negated-collection-zero": {
+      "status": "unsupported",
+      "reason": "The comparison holds for an empty collection, and an Elasticsearch document holds an empty array and a missing field the same way (no indexed value), so the NOT(exists) it needs would admit a missing collection, which CEL denies; the shape is refused."
     },
     "string/concatenate/field-to-field": {
       "status": "unsupported",

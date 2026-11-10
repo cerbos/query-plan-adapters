@@ -1,0 +1,61 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "b4",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "size/not-equals/collection-zero",
+  "intent": "size(aNumberList) != 0, where j4 sends the list as null.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumberList"
+                }
+              ],
+              "operator": "size"
+            }
+          },
+          {
+            "value": 0
+          }
+        ],
+        "operator": "ne"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/not-equals/collection-zero",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "size(R.attr.aNumberList) != 0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The != 0 spelling is non-emptiness; size(null) denies j4."
+}

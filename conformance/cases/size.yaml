@@ -3,6 +3,13 @@
 area: size
 description: 'size() of strings and collections, including thresholds no integer can meet.'
 cases:
+- id: 'size/equals/collection-two'
+  tier: adversarial
+  intent: 'A collection counted against a threshold other than zero or one (size(tags) == 2).'
+  trap: 'Only emptiness maps to EXISTS; reading any equality as non-empty returns every tagged row, not the three with two tags.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) == 2'
 - id: 'size/equals/filtered-collection'
   tier: extended
   intent: 'Size of a filtered collection compared with a literal (size(tags.filter(t, t.name == "public")) == 1).'
@@ -10,6 +17,20 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.tags.filter(t, t.name == "public")) == 1'
+- id: 'size/equals/fractional-threshold'
+  tier: adversarial
+  intent: 'size(tags) == dyn(1.5), OR''d with aNumber > 30 to keep the oracle discriminating.'
+  trap: 'A count never equals 1.5; truncating the threshold to 1 returns every single-tag row.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) == dyn(1.5) || R.attr.aNumber > 30'
+- id: 'size/equals/huge-threshold'
+  tier: adversarial
+  intent: 'size(aString) == 4294967296 (2^32), OR''d with aNumber > 30.'
+  trap: 'A narrowing int cast wraps 2^32 to 0 and returns a8, whose aString is empty.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) == 4294967296 || R.attr.aNumber > 30'
 - id: 'size/equals/negated-collection-zero'
   tier: adversarial
   intent: 'Negation over an emptiness check on a collection (!(size(tags) == 0)).'
@@ -24,6 +45,13 @@ cases:
   condition:
     match:
       expr: '!(size(R.attr.aOptionalString) == dyn(1.5)) || R.attr.aNumber > 10'
+- id: 'size/equals/string-length'
+  tier: adversarial
+  intent: 'size(aString) == 6, an exact string length.'
+  trap: 'CEL counts code points: a6 ("héllo🚀") has six, seven UTF-16 units and eleven bytes, so a unit or byte count drops it.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) == 6'
 - id: 'size/equals/string-trailing-space'
   tier: adversarial
   intent: 'size() of a string ending in whitespace (i2 "51 ", i8 "\t ") compared with 2.'
@@ -52,6 +80,20 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.mainCategory.subCategories) >= 1.5'
+- id: 'size/greater-or-equal/huge-threshold'
+  tier: adversarial
+  intent: 'size(aString) >= 2147483648 (2^31), OR''d with aNumber > 30.'
+  trap: 'A narrowing int cast wraps 2^31 to -2^31 and returns every present string.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) >= 2147483648 || R.attr.aNumber > 30'
+- id: 'size/greater-or-equal/list-attribute-two'
+  tier: adversarial
+  intent: 'size() of a list attribute compared >= 2 (size(tagNames) >= 2).'
+  trap: 'A count of a list attribute against a threshold above one needs its length; reading it as non-empty returns every row with one name.'
+  condition:
+    match:
+      expr: 'size(R.attr.tagNames) >= 2'
 - id: 'size/greater-than/collection-above-one'
   tier: extended
   intent: 'Collection size compared with a non-zero threshold (size(tags) > 1).'
@@ -59,6 +101,20 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.tags) > 1'
+- id: 'size/greater-than/fractional-threshold'
+  tier: adversarial
+  intent: 'size(tags) > 0.5.'
+  trap: 'A count above 0.5 is any non-empty count; rounding the threshold up to 1 under > drops the single-tag rows.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) > 0.5'
+- id: 'size/greater-than/huge-negative-threshold'
+  tier: adversarial
+  intent: 'size(aString) > -4294967296 (-2^32).'
+  trap: 'A narrowing int cast wraps -2^32 to 0 and drops a8 (""); the comparison holds for every present string and errors on j1.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) > -4294967296'
 - id: 'size/greater-than/huge-threshold'
   tier: adversarial
   intent: 'size() of a string compared > 4294967296 (2^32), outside 32-bit int range.'
@@ -69,6 +125,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'No string''s length exceeds 2^32. An unguarded int narrowing that wraps the threshold to 0 would return every non-empty aString; the less-than sibling is the other half.'
+- id: 'size/greater-than/map-projection'
+  tier: adversarial
+  intent: 'size() of a map() projection over a related collection (size(tags.map(t, t.name)) > 1).'
+  trap: 'b6''s first tag has no name, so map() errors there and CEL denies b6; counting the tags instead of projecting them returns it, and a non-empty check returns single-tag rows.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags.map(t, t.name)) > 1'
 - id: 'size/greater-than/negated-huge-negative-threshold-on-missing-attribute'
   tier: adversarial
   intent: 'Negated size(optional string) > -5000000000, OR''d with aNumber > 10.'
@@ -97,6 +160,20 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.aString) > 0'
+- id: 'size/greater-than/value-first-arbitrary'
+  tier: adversarial
+  intent: 'A threshold on the left of a count (2 > size(tags)).'
+  trap: 'Operand inversion: rendering size(tags) > 2 returns nothing instead of every row with fewer than two tags.'
+  condition:
+    match:
+      expr: '2 > size(R.attr.tags)'
+- id: 'size/less-or-equal/fractional-huge-threshold'
+  tier: adversarial
+  intent: 'size(aString) <= 4294967296.5, a fractional threshold outside 32-bit int range.'
+  trap: 'Rounding down to 2^32 and then narrowing to int wraps it to 0, which only a8 ("") meets; the comparison holds for every present string.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) <= 4294967296.5'
 - id: 'size/less-or-equal/fractional-threshold-on-relation'
   tier: adversarial
   intent: size() of a list reached through the mainCategory chain compared <= 1.5.
@@ -104,6 +181,34 @@ cases:
   condition:
     match:
       expr: size(R.attr.mainCategory.subCategories) <= 1.5
+- id: 'size/less-or-equal/huge-threshold'
+  tier: adversarial
+  intent: 'size(aString) <= 2147483648 (2^31).'
+  trap: 'A narrowing int cast wraps 2^31 to -2^31 and returns nothing; the comparison holds for every present string and errors on j1.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) <= 2147483648'
+- id: 'size/less-or-equal/list-with-null'
+  tier: adversarial
+  intent: 'size(aNumberList) <= 1, where j4 sends the list as null.'
+  trap: 'size(null) has no overload and denies; a store that counts a null list as zero elements returns j4.'
+  condition:
+    match:
+      expr: 'size(R.attr.aNumberList) <= 1'
+- id: 'size/less-than/fractional-threshold'
+  tier: adversarial
+  intent: 'size(tags) < 1.5.'
+  trap: 'A count below 1.5 is at most one; rounding the threshold down to 1 under < drops the single-tag rows.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) < 1.5'
+- id: 'size/less-than/fractional-threshold-below-one'
+  tier: adversarial
+  intent: 'size(tags) < 0.5, an emptiness check spelled with a fraction.'
+  trap: 'Truncating 0.5 to 0 makes the comparison < 0 and returns nothing instead of the rows with no tags.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) < 0.5'
 - id: 'size/less-than/huge-threshold'
   tier: adversarial
   intent: 'size() of a string compared < 4294967296 (2^32), outside 32-bit int range.'
@@ -111,6 +216,13 @@ cases:
   condition:
     match:
       expr: size(R.attr.aString) < 4294967296
+- id: 'size/less-than/int-max-threshold'
+  tier: adversarial
+  intent: 'size(aString) < 2147483647, the largest 32-bit int.'
+  trap: 'The boundary is in range and must compare as written; a guard that folds thresholds at or above it to always-false returns nothing.'
+  condition:
+    match:
+      expr: 'size(R.attr.aString) < 2147483647'
 - id: 'size/less-than/negated-huge-negative-threshold-on-missing-attribute'
   tier: adversarial
   intent: 'Negated size(optional string) < -5000000000, OR''d with aNumber > 10.'
@@ -125,6 +237,13 @@ cases:
   condition:
     match:
       expr: '!(size(R.attr.aOptionalString) < 5000000000) || R.attr.aNumber > 10'
+- id: 'size/less-than/string-length-value-first'
+  tier: adversarial
+  intent: 'A threshold on the left of a string length (5 < size(aString)).'
+  trap: 'Operand inversion: rendering size(aString) < 5 returns the short strings instead of the long ones.'
+  condition:
+    match:
+      expr: '5 < size(R.attr.aString)'
 - id: 'size/less-than/value-first'
   tier: adversarial
   intent: size() of a related collection on the right of an ordering (0 < size(tags)).
@@ -132,6 +251,41 @@ cases:
   condition:
     match:
       expr: 0 < size(R.attr.tags)
+- id: 'size/not-equals/collection-zero'
+  tier: adversarial
+  intent: 'size(aNumberList) != 0, where j4 sends the list as null.'
+  trap: 'The != 0 spelling is non-emptiness; size(null) denies j4.'
+  condition:
+    match:
+      expr: 'size(R.attr.aNumberList) != 0'
+- id: 'size/not-equals/fractional-threshold'
+  tier: adversarial
+  intent: 'size(tags) != dyn(1.5) AND''d with aNumber < 10.'
+  trap: 'A count is never 1.5, so the arm holds for every row; truncating the threshold to != 1 drops the single-tag rows.'
+  condition:
+    match:
+      expr: 'size(R.attr.tags) != dyn(1.5) && R.attr.aNumber < 10'
+- id: 'size/not-equals/fractional-threshold-on-missing-attribute'
+  tier: adversarial
+  intent: 'size(aOptionalString) != dyn(1.5), the positive polarity.'
+  trap: 'The comparison holds for every present string, so folding it to TRUE returns the missing-attribute rows (a2/a4/a8/c2/e1), which CEL denies.'
+  condition:
+    match:
+      expr: 'size(R.attr.aOptionalString) != dyn(1.5)'
+- id: 'size/not-equals/huge-threshold'
+  tier: adversarial
+  intent: 'size(aOptionalString) != 4294967296 (2^32).'
+  trap: 'A narrowing int cast wraps 2^32 to 0 and drops a6 (""); folding the arm to TRUE returns the missing-attribute rows.'
+  condition:
+    match:
+      expr: 'size(R.attr.aOptionalString) != 4294967296'
+- id: 'size/not-equals/negated-collection-zero'
+  tier: adversarial
+  intent: '!(size(aNumberList) != 0), where j4 sends the list as null.'
+  trap: 'NOT over an EXISTS reads a null list as empty and returns j4; size(null) denies under both polarities.'
+  condition:
+    match:
+      expr: '!(size(R.attr.aNumberList) != 0)'
 - id: 'size/not-equals/negated-fractional-threshold-on-missing-attribute'
   tier: adversarial
   intent: 'Negated size(optional string) != dyn(1.5), OR''d with aNumber > 10; dyn() makes the int/double comparison plannable.'
