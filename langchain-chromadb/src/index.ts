@@ -5,12 +5,14 @@ import {
   PlanExpressionVariable,
   PlanKind as PK,
   PlanResourcesResponse,
+  Value,
 } from "@cerbos/core";
 import type { Where } from "chromadb";
 
 import { UnsupportedOperatorError } from "./errors";
 import { compilePostFilter } from "./postFilter";
 import type { PostFilter, PostFilterFields } from "./postFilter";
+import { isBoolean, isFunction, isNumber, isString, isTypeofObject, pair, typeofValue } from "./narrowing";
 
 export { UnsupportedOperatorError };
 
@@ -186,7 +188,7 @@ function postFilterFields(
   resolveField: FieldResolver,
 ): PostFilterFields {
   const declared = (reference: string): boolean =>
-    typeof fieldNameMapper === "function"
+    isFunction(fieldNameMapper)
       ? Boolean(fieldNameMapper(reference))
       : Object.prototype.hasOwnProperty.call(fieldNameMapper, reference);
 
@@ -217,7 +219,7 @@ interface Comparison {
   /** The Chroma operator the comparison is emitted as. */
   chroma: "$eq" | "$ne" | "$lt" | "$lte" | "$gt" | "$gte" | "$in" | "$nin";
   /** Validates the literal operand, refusing one Chroma metadata cannot be compared with. */
-  literal: (value: unknown, operator: string) => ChromaLiteral | ChromaLiteral[];
+  literal: (value: Value, operator: string) => ChromaLiteral | ChromaLiteral[];
   /** The operator `not(key <op> literal)` becomes. Absent: the comparison cannot be negated. */
   negated?: string;
   /** The operator `literal <op> key` becomes once the key is moved left. Absent: no mirror. */
@@ -263,7 +265,7 @@ function isPlanComparison(operator: string): boolean {
 }
 
 /** `{ field: { $op: literal } }`, once the literal has passed the comparison's validation. */
-function emit(field: string, operator: string, value: unknown): Where {
+function emit(field: string, operator: string, value: Value): Where {
   const { chroma, literal } = COMPARISONS.get(operator)!;
   const validated = literal(value, operator);
 
@@ -276,13 +278,20 @@ function emit(field: string, operator: string, value: unknown): Where {
     const groups = splitByType(validated);
 
     if (groups.length > 1) {
-      const clauses = groups.map((group) => ({ [field]: { [chroma]: group } }));
+      const clauses = groups.map((group) => clause(field, chroma, group));
 
-      return (operator === "in" ? { $or: clauses } : { $and: clauses }) as Where;
+      return operator === "in" ? { $or: clauses } : { $and: clauses };
     }
   }
 
-  return { [field]: { [chroma]: validated } } as Where;
+  return clause(field, chroma, validated);
+}
+
+/** `{ field: { operator: value } }`. */
+function clause(field: string, operator: string, value: ChromaLiteral | ChromaLiteral[]): Where {
+  // SAFETY: a computed operator key widens past Chroma's operator union; every caller passes an
+  // operator from COMPARISONS or $contains/$not_contains, with the operand type that operator takes.
+  return { [field]: { [operator]: value } } as Where;
 }
 
 /** A literal list partitioned by scalar type, each partition in first-appearance order. */
@@ -290,10 +299,10 @@ function splitByType(values: ChromaLiteral[]): ChromaLiteral[][] {
   const groups = new Map<string, ChromaLiteral[]>();
 
   for (const value of values) {
-    const group = groups.get(typeof value);
+    const group = groups.get(typeofValue(value));
 
     if (group) group.push(value);
-    else groups.set(typeof value, [value]);
+    else groups.set(typeofValue(value), [value]);
   }
 
   return [...groups.values()];
@@ -336,7 +345,7 @@ function mirrorOf(operator: string): string {
 
 // -- literal operands ------------------------------------------------------------------------------
 
-function isChromaLiteral(value: unknown): value is ChromaLiteral {
+function isChromaLiteral(value: Value): value is ChromaLiteral {
   return (
     typeof value === "string" ||
     typeof value === "boolean" ||
@@ -344,7 +353,7 @@ function isChromaLiteral(value: unknown): value is ChromaLiteral {
   );
 }
 
-function requireLiteral(value: unknown, operator: string): ChromaLiteral {
+function requireLiteral(value: Value, operator: string): ChromaLiteral {
   if (!isChromaLiteral(value)) {
     throw new UnsupportedOperatorError(
       operator,
@@ -355,8 +364,8 @@ function requireLiteral(value: unknown, operator: string): ChromaLiteral {
   return value;
 }
 
-function requireNumber(value: unknown, operator: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function requireNumber(value: Value, operator: string): number {
+  if (!isNumber(value) || !Number.isFinite(value)) {
     throw new UnsupportedOperatorError(
       operator,
       `${operator} requires a finite number literal`,
@@ -366,7 +375,7 @@ function requireNumber(value: unknown, operator: string): number {
   return value;
 }
 
-function requireLiteralList(value: unknown, operator: string): ChromaLiteral[] {
+function requireLiteralList(value: Value, operator: string): ChromaLiteral[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new UnsupportedOperatorError(
       operator,
@@ -412,7 +421,7 @@ interface FieldResolver {
 // a spelling that needs no `$ne` (`inequalityWithoutNe`).
 function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
   const lookup = (key: string): FieldNameMapperValue | undefined =>
-    typeof fieldNameMapper === "function"
+    isFunction(fieldNameMapper)
       ? fieldNameMapper(key)
       : fieldNameMapper[key];
 
@@ -422,7 +431,7 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
     jsonPath?: string[],
   ): ResolvedField => {
     const field: ResolvedField =
-      typeof mapped === "string"
+      isString(mapped)
         ? { name: mapped, required: false }
         : mapped
           ? {
@@ -485,7 +494,7 @@ function fieldResolver(fieldNameMapper: FieldMapper): FieldResolver {
     for (let dot = key.lastIndexOf("."); dot !== -1; dot = key.lastIndexOf(".", dot - 1)) {
       const prefix = lookup(key.substring(0, dot));
 
-      if (typeof prefix === "object" && prefix.valueType === "json") {
+      if (isTypeofObject(prefix) && prefix.valueType === "json") {
         return resolve(key, prefix, key.substring(dot + 1).split("."));
       }
     }
@@ -518,19 +527,19 @@ function inequalityWithoutNe(
 ): Where | undefined {
   const key = field.name;
 
-  if (field.valueType === "boolean" && typeof value === "boolean") {
+  if (field.valueType === "boolean" && isBoolean(value)) {
     // A stored boolean that differs from one boolean is the other one.
-    return { [key]: { $eq: !value } } as Where;
+    return { [key]: { $eq: !value } };
   }
 
   if (field.numericType === "integer") {
-    if (typeof value === "number" && Number.isInteger(value)) {
+    if (isNumber(value) && Number.isInteger(value)) {
       return {
         $or: [{ [key]: { $lt: value } }, { [key]: { $gt: value } }],
-      } as Where;
+      };
     }
 
-    if (typeof value !== "number") {
+    if (!isNumber(value)) {
       // CEL equality across types is false, so every present integer differs from a string or
       // boolean literal. Chroma has no existence test, so presence is spelled as the whole integer
       // line, split at zero. A fractional literal is not lowered: the pinned server compares a
@@ -538,7 +547,7 @@ function inequalityWithoutNe(
       // keeps the `$ne` path and its `required` gate.
       return {
         $or: [{ [key]: { $lt: 0 } }, { [key]: { $gte: 0 } }],
-      } as Where;
+      };
     }
   }
 
@@ -654,12 +663,12 @@ function mapComparison(
   return compare(resolveField(variable.name), operator, value);
 }
 
-function isListElement(type: ListElements["type"], value: unknown): boolean {
+function isListElement(type: ListElements["type"], value: Value): value is string | number {
   switch (type) {
     case "string":
-      return typeof value === "string";
+      return isString(value);
     case "integer":
-      return typeof value === "number" && Number.isSafeInteger(value);
+      return isNumber(value) && Number.isSafeInteger(value);
   }
 }
 
@@ -673,19 +682,16 @@ function mapListMembership(
 ): Where | undefined {
   if (operands.length !== 2) return undefined;
 
-  const [left, right] = operands as [
-    PlanExpressionOperand,
-    PlanExpressionOperand,
-  ];
+  const [left, right] = pair(operands);
 
   let variable: PlanExpressionVariable;
-  let needles: unknown[];
+  let needles: Value[];
 
   if (planOperator === "in" && isValue(left) && isVariable(right)) {
     variable = right;
     needles = [left.value];
   } else if (planOperator === "hasIntersection") {
-    const pair =
+    const membership =
       isVariable(left) && isValue(right)
         ? { variable: left, value: right.value }
         : isValue(left) && isVariable(right)
@@ -693,15 +699,15 @@ function mapListMembership(
           : undefined;
 
     if (
-      pair === undefined ||
-      !Array.isArray(pair.value) ||
-      pair.value.length === 0
+      membership === undefined ||
+      !Array.isArray(membership.value) ||
+      membership.value.length === 0
     ) {
       return undefined;
     }
 
-    variable = pair.variable;
-    needles = pair.value;
+    variable = membership.variable;
+    needles = membership.value;
   } else {
     return undefined;
   }
@@ -711,8 +717,9 @@ function mapListMembership(
 
   if (list === undefined || field.jsonPath?.length !== 0) return undefined;
 
-  if (!needles.every((needle) => isListElement(list.type, needle)))
-    return undefined;
+  const elements = needles.filter((needle) => isListElement(list.type, needle));
+
+  if (elements.length !== needles.length) return undefined;
 
   if (negate && !field.required) {
     throw new UnsupportedOperatorError(
@@ -721,11 +728,8 @@ function mapListMembership(
     );
   }
 
-  const clauses = needles.map(
-    (needle) =>
-      ({
-        [list.field]: { [negate ? "$not_contains" : "$contains"]: needle },
-      }) as Where,
+  const clauses = elements.map((needle) =>
+    clause(list.field, negate ? "$not_contains" : "$contains", needle),
   );
 
   if (clauses.length === 1) return clauses[0]!;
@@ -734,7 +738,7 @@ function mapListMembership(
 }
 
 /** `key <operator> literal`, with the operator already mirrored and negated into key-first form. */
-function compare(field: ResolvedField, operator: string, value: unknown): Where {
+function compare(field: ResolvedField, operator: string, value: Value): Where {
   const comparison = COMPARISONS.get(operator);
 
   if (!comparison) {
@@ -759,7 +763,7 @@ function compare(field: ResolvedField, operator: string, value: unknown): Where 
 
   if (
     comparison.ordered &&
-    typeof value === "number" &&
+    isNumber(value) &&
     !Number.isInteger(value) &&
     field.numericType !== "float"
   ) {
@@ -776,6 +780,12 @@ type KeyOrLiteral =
   | { variable: PlanExpressionVariable }
   | { value: PlanExpressionValue["value"] };
 
+type BinaryOperands = {
+  variable: PlanExpressionVariable;
+  literalFirst: boolean;
+  value: PlanExpressionValue["value"];
+};
+
 /**
  * The metadata key and the literal a comparison relates, and which side the literal is on. Anything
  * else — a computed operand, two keys, two literals — is a shape the `Where` grammar cannot hold.
@@ -783,11 +793,7 @@ type KeyOrLiteral =
 function binaryOperands(
   operator: string,
   operands: PlanExpressionOperand[],
-): {
-  variable: PlanExpressionVariable;
-  literalFirst: boolean;
-  value: PlanExpressionValue["value"];
-} {
+): BinaryOperands {
   if (operands.length !== 2) {
     // A known comparison short of an operand is a malformed plan; any other operator — a ternary,
     // in the corpus — is a shape the `Where` grammar has no comparison for.
@@ -801,7 +807,7 @@ function binaryOperands(
     );
   }
 
-  const [left, right] = operands.map((operand): KeyOrLiteral => {
+  const [left, right] = pair(operands.map((operand): KeyOrLiteral => {
     if (isVariable(operand)) return { variable: operand };
 
     if (isValue(operand)) return { value: operand.value };
@@ -812,7 +818,7 @@ function binaryOperands(
       isPlanComparison(operator) ? operand.operator : operator,
       "Nested expressions are not supported by ChromaDB filters",
     );
-  }) as [KeyOrLiteral, KeyOrLiteral];
+  }));
 
   if ("variable" in left && "value" in right) {
     return { variable: left.variable, literalFirst: false, value: right.value };

@@ -27,9 +27,10 @@ import {
   toHierarchy,
   valuesEqual,
 } from "./cel";
-import type { ComparisonOperator } from "./cel";
+import type { CelMap, CelValue, ComparisonOperator } from "./cel";
 import { UnsupportedOperatorError } from "./errors";
 import { compileRegex } from "./regex";
+import { isBigint, isBoolean, isNumber, isString, lookup, pair, single, triple } from "./narrowing";
 
 /**
  * The post-filter: the part of a plan Chroma's `Where` grammar cannot hold, compiled into a
@@ -47,7 +48,7 @@ import { compileRegex } from "./regex";
 
 /** A record's metadata as Chroma returns it. `null` for a record stored without any. */
 export type PostFilter = (
-  metadata: Readonly<Record<string, unknown>> | null | undefined,
+  metadata: Readonly<CelMap> | null | undefined,
 ) => boolean;
 
 /** What the post-filter needs from the caller's mapper. */
@@ -117,14 +118,14 @@ type StaticType =
 // -- the compiled form ---------------------------------------------------------------------------
 
 interface Env {
-  metadata: Readonly<Record<string, unknown>>;
+  metadata: Readonly<CelMap>;
   /** Lambda variables in scope, by name. */
-  bindings: Record<string, unknown>;
+  bindings: CelMap;
 }
 
 interface Compiled {
   type: StaticType;
-  run: (env: Env) => unknown;
+  run: (env: Env) => CelValue;
 }
 
 interface Context {
@@ -150,7 +151,7 @@ const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
 const isVariable = (e: PlanExpressionOperand): e is PlanExpressionVariable =>
   "name" in e;
 
-const constant = (type: StaticType, value: unknown): Compiled => ({
+const constant = (type: StaticType, value: CelValue): Compiled => ({
   type,
   run: () => value,
 });
@@ -170,7 +171,7 @@ function compile(operand: PlanExpressionOperand, ctx: Context): Compiled {
     OPERATORS,
     operand.operator,
   )
-    ? OPERATORS[operand.operator]
+    ? lookup(OPERATORS, operand.operator)
     : undefined;
 
   if (!compiler) {
@@ -228,8 +229,8 @@ function compileCondition(
   return compile(operand, ctx);
 }
 
-function compileValue(value: unknown): Compiled {
-  if (typeof value === "number") {
+function compileValue(value: CelValue): Compiled {
+  if (isNumber(value)) {
     return constant(Number.isInteger(value) ? "ambiguous" : "double", value);
   }
 
@@ -358,18 +359,18 @@ function compilePresence(name: string, ctx: Context): Compiled {
  * JSON, and a path the document does not hold are each the missing-attribute error.
  */
 function readJsonMetadata(
-  metadata: Readonly<Record<string, unknown>>,
+  metadata: Readonly<CelMap>,
   key: string,
   path: readonly string[],
-): unknown {
+): CelValue {
   if (!Object.prototype.hasOwnProperty.call(metadata, key)) {
     return EVALUATION_ERROR;
   }
 
   const text = metadata[key];
 
-  if (typeof text !== "string") return EVALUATION_ERROR;
-  let document: unknown;
+  if (!isString(text)) return EVALUATION_ERROR;
+  let document: CelValue;
 
   try {
     document = JSON.parse(text);
@@ -388,9 +389,9 @@ function readJsonMetadata(
  * (cerbos/query-plan-adapters#475).
  */
 function readMetadata(
-  metadata: Readonly<Record<string, unknown>>,
+  metadata: Readonly<CelMap>,
   key: string,
-): unknown {
+): CelValue {
   if (!Object.prototype.hasOwnProperty.call(metadata, key)) {
     return EVALUATION_ERROR;
   }
@@ -398,9 +399,9 @@ function readMetadata(
   const value = metadata[key];
 
   if (
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
+    isString(value) ||
+    isBoolean(value) ||
+    (isNumber(value) && Number.isFinite(value))
   ) {
     return value;
   }
@@ -440,8 +441,8 @@ function compileAll(
 function runAll(
   compiled: Compiled[],
   env: Env,
-): unknown[] | typeof EVALUATION_ERROR {
-  const values: unknown[] = [];
+): CelValue[] | typeof EVALUATION_ERROR {
+  const values: CelValue[] = [];
 
   for (const operand of compiled) {
     const value = operand.run(env);
@@ -460,7 +461,7 @@ const strict =
   (
     count: number,
     type: StaticType,
-    apply: (values: unknown[]) => unknown,
+    apply: (values: CelValue[]) => CelValue,
   ): Compiler =>
   (operands, ctx) => {
     const compiled = compileAll(operands, count, ctx);
@@ -509,7 +510,7 @@ const stringTest = (
   test: (receiver: string, argument: string) => boolean,
 ): Compiler =>
   strict(2, "other", ([receiver, argument]) =>
-    typeof receiver === "string" && typeof argument === "string"
+    isString(receiver) && isString(argument)
       ? test(receiver, argument)
       : EVALUATION_ERROR,
   );
@@ -601,20 +602,20 @@ function temporalType(
     type === "timestamp" || type === "duration";
 
   if (!temporal(left) && !temporal(right)) return undefined;
-  const pair = `${left} ${right}`;
+  const types = `${left} ${right}`;
 
   if (operator === "add") {
-    if (pair === "timestamp duration" || pair === "duration timestamp") {
+    if (types === "timestamp duration" || types === "duration timestamp") {
       return "timestamp";
     }
 
-    if (pair === "duration duration") return "duration";
+    if (types === "duration duration") return "duration";
   }
 
   if (operator === "sub") {
-    if (pair === "timestamp duration") return "timestamp";
+    if (types === "timestamp duration") return "timestamp";
 
-    if (pair === "timestamp timestamp" || pair === "duration duration") {
+    if (types === "timestamp timestamp" || types === "duration duration") {
       return "duration";
     }
   }
@@ -650,10 +651,10 @@ function readsMetadata(operand: PlanExpressionOperand, ctx: Context): boolean {
 
 const dynamicArithmetic = (
   operator: ArithmeticOperator,
-  left: unknown,
-  right: unknown,
-): unknown => {
-  if (typeof left === "number" && typeof right === "number") {
+  left: CelValue,
+  right: CelValue,
+): CelValue => {
+  if (isNumber(left) && isNumber(right)) {
     switch (operator) {
       case "add":
         return left + right;
@@ -670,7 +671,7 @@ const dynamicArithmetic = (
   }
 
   if (operator === "add") {
-    if (typeof left === "string" && typeof right === "string") {
+    if (isString(left) && isString(right)) {
       return left + right;
     }
 
@@ -683,10 +684,10 @@ const dynamicArithmetic = (
 const arithmetic =
   (operator: ArithmeticOperator): Compiler =>
   (operands, ctx) => {
-    const [left, right] = compileAll(operands, 2, ctx) as [Compiled, Compiled];
+    const [left, right] = pair(compileAll(operands, 2, ctx));
     const temporal = temporalType(operator, left.type, right.type);
 
-    if (temporal !== undefined) {
+    if (temporal !== undefined && (operator === "add" || operator === "sub")) {
       return {
         type: temporal,
         run: (env) => {
@@ -694,11 +695,7 @@ const arithmetic =
 
           if (isEvaluationError(values)) return values;
 
-          return temporalArithmetic(
-            operator as "add" | "sub",
-            values[0],
-            values[1],
-          );
+          return temporalArithmetic(operator, values[0], values[1]);
         },
       };
     }
@@ -746,12 +743,14 @@ const arithmetic =
 
 // -- collections and lambdas ---------------------------------------------------------------------
 
-/** The planner does not fix the order of a lambda's operands: the variable is the bare name. */
-function lambdaComponents(lambda: PlanExpressionOperand | undefined): {
+type LambdaComponents = {
   body: PlanExpressionOperand;
   /** The lambda's variables in CEL order: the element alone, or the index (or key) then the value. */
   variables: string[];
-} {
+};
+
+/** The planner does not fix the order of a lambda's operands: the variable is the bare name. */
+function lambdaComponents(lambda: PlanExpressionOperand | undefined): LambdaComponents {
   if (!lambda || !isExpression(lambda) || lambda.operator !== "lambda") {
     throw Error("Expected a lambda operand");
   }
@@ -782,7 +781,7 @@ function elementType(collection: PlanExpressionOperand): StaticType {
     return "unknown";
   }
 
-  const numbers = collection.value.filter((v) => typeof v === "number");
+  const numbers = collection.value.filter((v) => isNumber(v));
 
   if (numbers.length === 0) return "other";
 
@@ -796,10 +795,7 @@ type Macro = "exists" | "exists_one" | "all" | "filter" | "map";
 const macro =
   (operator: Macro): Compiler =>
   (operands, ctx) => {
-    const [collectionOperand, lambda] = exactly(operands, 2, operator) as [
-      PlanExpressionOperand,
-      PlanExpressionOperand,
-    ];
+    const [collectionOperand, lambda] = pair(exactly(operands, 2, operator));
 
     const collection = compile(collectionOperand, ctx);
     const { body, variables } = lambdaComponents(lambda);
@@ -823,7 +819,7 @@ const macro =
         ? compile(body, bodyCtx)
         : compileCondition(body, bodyCtx);
 
-    const each = (env: Env, item: unknown, position: unknown): unknown =>
+    const each = (env: Env, item: CelValue, position: CelValue): CelValue =>
       compiledBody.run({
         ...env,
         bindings:
@@ -840,7 +836,7 @@ const macro =
         if (!Array.isArray(iterated) && !isRecord(iterated)) return EVALUATION_ERROR;
 
         // A CEL macro over a map ranges over its keys; with two variables, over its entries.
-        const entries: [unknown, unknown][] = Array.isArray(iterated)
+        const entries: [CelValue, CelValue][] = Array.isArray(iterated)
           ? iterated.map((item, index) => [item, index])
           : second === undefined
             ? Object.keys(iterated).map((k) => [k, k])
@@ -849,7 +845,7 @@ const macro =
         switch (operator) {
           case "filter":
           case "map": {
-            const out: unknown[] = [];
+            const out: CelValue[] = [];
 
             for (const [item, position] of entries) {
               const value = each(env, item, position);
@@ -927,10 +923,10 @@ const conversion =
     operator: string,
     type: StaticType,
     refused: StaticType[],
-    convert: (value: unknown) => unknown,
+    convert: (value: CelValue) => CelValue,
   ): Compiler =>
   (operands, ctx) => {
-    const [operand] = compileAll(operands, 1, ctx) as [Compiled];
+    const [operand] = single(compileAll(operands, 1, ctx));
 
     if (refused.includes(operand.type)) {
       throw new UnsupportedOperatorError(
@@ -972,12 +968,12 @@ const hierarchyRelation = (
 // -- index ---------------------------------------------------------------------------------------
 
 /** CEL's `[]`: a list by an integral position, a map by a key it holds; anything else is an error. */
-function indexValue(collection: unknown, index: unknown): unknown {
+function indexValue(collection: CelValue, index: CelValue): CelValue {
   if (Array.isArray(collection)) {
     const position =
-      typeof index === "bigint"
+      isBigint(index)
         ? Number(index)
-        : typeof index === "number" && Number.isInteger(index)
+        : isNumber(index) && Number.isInteger(index)
           ? index
           : undefined;
 
@@ -988,7 +984,7 @@ function indexValue(collection: unknown, index: unknown): unknown {
       : EVALUATION_ERROR;
   }
 
-  if (isRecord(collection) && typeof index === "string") {
+  if (isRecord(collection) && isString(index)) {
     return Object.prototype.hasOwnProperty.call(collection, index)
       ? collection[index]
       : EVALUATION_ERROR;
@@ -1028,12 +1024,9 @@ function compileMapLiteral(
       );
     }
 
-    const [key, value] = exactly(entry.operands, 2, "set-field") as [
-      PlanExpressionOperand,
-      PlanExpressionOperand,
-    ];
+    const [key, value] = pair(exactly(entry.operands, 2, "set-field"));
 
-    if (!isValue(key) || typeof key.value !== "string" || keys.has(key.value)) {
+    if (!isValue(key) || !isString(key.value) || keys.has(key.value)) {
       throw new UnsupportedOperatorError(
         "struct",
         "a map literal is evaluated only with distinct string literal keys: a JavaScript record cannot tell the CEL key 1 from \"1\"",
@@ -1066,11 +1059,11 @@ function compileMapLiteral(
  * Every operator the post-filter evaluates. An operator with no entry is refused at compile time,
  * so adding one is adding an entry.
  */
-const OPERATORS: Record<string, Compiler> = {
+const OPERATORS = {
   and: junction(false),
   or: junction(true),
   not: (operands, ctx) => {
-    const [operand] = exactly(operands, 1, "not") as [PlanExpressionOperand];
+    const [operand] = single(exactly(operands, 1, "not"));
     const compiled = compileCondition(operand, ctx);
 
     return {
@@ -1098,7 +1091,7 @@ const OPERATORS: Record<string, Compiler> = {
     // A map's `in` tests its keys, which a JSON map literal only ever has as strings.
     if (isRecord(haystack)) {
       return (
-        typeof needle === "string" &&
+        isString(needle) &&
         Object.prototype.hasOwnProperty.call(haystack, needle)
       );
     }
@@ -1111,22 +1104,19 @@ const OPERATORS: Record<string, Compiler> = {
   endsWith: stringTest((receiver, suffix) => receiver.endsWith(suffix)),
   // cel-go's strings extension: only the 26 ASCII letters are folded, every other code point kept.
   upperAscii: strict(1, "other", ([receiver]) =>
-    typeof receiver === "string"
+    isString(receiver)
       ? receiver.replace(/[a-z]+/g, (letters) => letters.toUpperCase())
       : EVALUATION_ERROR,
   ),
   matches: (operands, ctx) => {
-    const [receiver, pattern] = exactly(operands, 2, "matches") as [
-      PlanExpressionOperand,
-      PlanExpressionOperand,
-    ];
+    const [receiver, pattern] = pair(exactly(operands, 2, "matches"));
 
     const compiledReceiver = compile(receiver, ctx);
 
     // A literal pattern is compiled once; one the plan computes is compiled per record. A pattern
     // RE2 rejects is an evaluation error, as it is in Cerbos.
     const constant =
-      isValue(pattern) && typeof pattern.value === "string"
+      isValue(pattern) && isString(pattern.value)
         ? compileRegex(pattern.value)
         : undefined;
 
@@ -1139,7 +1129,7 @@ const OPERATORS: Record<string, Compiler> = {
 
         if (isEvaluationError(value)) return value;
 
-        if (typeof value !== "string") return EVALUATION_ERROR;
+        if (!isString(value)) return EVALUATION_ERROR;
         let regex = constant;
 
         if (regex === undefined) {
@@ -1147,7 +1137,7 @@ const OPERATORS: Record<string, Compiler> = {
 
           if (isEvaluationError(text)) return text;
 
-          if (typeof text !== "string") return EVALUATION_ERROR;
+          if (!isString(text)) return EVALUATION_ERROR;
           regex = compileRegex(text);
         }
 
@@ -1157,7 +1147,7 @@ const OPERATORS: Record<string, Compiler> = {
   },
 
   has: (operands, ctx) => {
-    const [operand] = exactly(operands, 1, "has") as [PlanExpressionOperand];
+    const [operand] = single(exactly(operands, 1, "has"));
 
     if (!isVariable(operand)) {
       throw new UnsupportedOperatorError("has", "has requires an attribute reference");
@@ -1212,23 +1202,17 @@ const OPERATORS: Record<string, Compiler> = {
   },
 
   index: (operands, ctx) => {
-    const [target, key] = exactly(operands, 2, "index") as [
-      PlanExpressionOperand,
-      PlanExpressionOperand,
-    ];
+    const [target, key] = pair(exactly(operands, 2, "index"));
 
     return indexInto(compile(target, ctx), compile(key, ctx));
   },
   struct: (operands, ctx) => compileMapLiteral(operands, ctx),
   "get-field": (operands, ctx) => {
-    const [targetOperand, fieldOperand] = exactly(operands, 2, "get-field") as [
-      PlanExpressionOperand,
-      PlanExpressionOperand,
-    ];
+    const [targetOperand, fieldOperand] = pair(exactly(operands, 2, "get-field"));
 
     const field = isVariable(fieldOperand)
       ? fieldOperand.name
-      : isValue(fieldOperand) && typeof fieldOperand.value === "string"
+      : isValue(fieldOperand) && isString(fieldOperand.value)
         ? fieldOperand.value
         : undefined;
 
@@ -1250,7 +1234,7 @@ const OPERATORS: Record<string, Compiler> = {
     };
   },
   size: strict(1, "int", ([value]) => {
-    if (typeof value === "string") return Array.from(value).length;
+    if (isString(value)) return Array.from(value).length;
 
     if (Array.isArray(value)) return value.length;
 
@@ -1262,7 +1246,7 @@ const OPERATORS: Record<string, Compiler> = {
   }),
 
   string: (operands, ctx) => {
-    const [operand] = compileAll(operands, 1, ctx) as [Compiled];
+    const [operand] = single(compileAll(operands, 1, ctx));
 
     if (operand.type === "timestamp" || operand.type === "duration") {
       throw new UnsupportedOperatorError(
@@ -1296,7 +1280,7 @@ const OPERATORS: Record<string, Compiler> = {
       run: (env) => {
         const value = operand.run(env);
 
-        if (isInt && (typeof value === "number" || typeof value === "bigint")) {
+        if (isInt && (isNumber(value) || isBigint(value))) {
           return BigInt(value).toString();
         }
 
@@ -1321,7 +1305,7 @@ const OPERATORS: Record<string, Compiler> = {
     "timestamp",
     ["int", "ambiguous", "duration", "unknown"],
     (value) =>
-      typeof value === "string"
+      isString(value)
         ? parseRfc3339Timestamp(value)
         : EVALUATION_ERROR,
   ),
@@ -1330,10 +1314,10 @@ const OPERATORS: Record<string, Compiler> = {
     "duration",
     ["int", "ambiguous", "timestamp", "unknown"],
     (value) =>
-      typeof value === "string" ? parseGoDuration(value) : EVALUATION_ERROR,
+      isString(value) ? parseGoDuration(value) : EVALUATION_ERROR,
   ),
   timeSince: (operands, ctx) => {
-    const [operand] = compileAll(operands, 1, ctx) as [Compiled];
+    const [operand] = single(compileAll(operands, 1, ctx));
     // Cerbos evaluates `timeSince` against one clock reading per request. The plan carries none, so
     // the post-filter takes its own when the plan is translated, and holds it for every record.
     const now = new CelTimestamp(BigInt(Date.now()) * 1_000_000n);
@@ -1349,9 +1333,9 @@ const OPERATORS: Record<string, Compiler> = {
   },
 
   if: (operands, ctx) => {
-    const [condition, then, otherwise] = exactly(operands, 3, "if").map((op) =>
-      compile(op, ctx),
-    ) as [Compiled, Compiled, Compiled];
+    const [condition, then, otherwise] = triple(
+      exactly(operands, 3, "if").map((op) => compile(op, ctx)),
+    );
 
     return {
       type: joinTypes(then.type, otherwise.type),
@@ -1370,10 +1354,9 @@ const OPERATORS: Record<string, Compiler> = {
       throw Error("Expected one or two operands for hierarchy");
     }
 
-    const [value, delimiter] = operands.map((op) => compile(op, ctx)) as [
-      Compiled,
-      Compiled | undefined,
-    ];
+    const compiled = operands.map((op) => compile(op, ctx));
+    const [value] = single(compiled);
+    const delimiter = compiled[1];
 
     return {
       type: "other",
@@ -1394,7 +1377,7 @@ const OPERATORS: Record<string, Compiler> = {
   ancestorOf: hierarchyRelation("ancestorOf"),
   descendentOf: hierarchyRelation("descendentOf"),
   overlaps: hierarchyRelation("overlaps"),
-};
+} satisfies Record<string, Compiler>;
 
 /** The static type of a ternary: its branches' when they agree, and a number only when certain. */
 function joinTypes(a: StaticType, b: StaticType): StaticType {

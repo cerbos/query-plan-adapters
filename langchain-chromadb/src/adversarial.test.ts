@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
+import type { Value } from "@cerbos/core";
 import {
   ChromaClient,
   ChromaNotFoundError,
@@ -23,6 +24,7 @@ import {
   writeFuzzResults,
 } from "./corpus";
 import type { FuzzVerdict, Golden } from "./corpus";
+import { isString } from "./narrowing";
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -45,6 +47,10 @@ const COLLECTION_NAME = "adapter-conformance";
 const BASE_EMBEDDING = [0.1, 0.2, 0.3, 0.4];
 
 // -- the dataset: conformance/seeds.json + derived-fields.json ----------------------------------
+
+interface Attributes {
+  [key: string]: Value;
+}
 
 interface Seed {
   id: string;
@@ -69,12 +75,12 @@ interface DerivedEntry {
   labels: (string | null)[];
 }
 
-const SEEDS = (readCorpusJson("seeds.json") as { seeds: Seed[] }).seeds;
+const SEEDS = (readCorpusJson<{ seeds: Seed[] }>("seeds.json")).seeds;
 
 const DERIVED = (
-  readCorpusJson("derived-fields.json") as {
+  readCorpusJson<{
     derived: Record<string, DerivedEntry>;
-  }
+  }>("derived-fields.json")
 ).derived;
 
 const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
@@ -193,11 +199,10 @@ function metadataFor(seed: Seed): Metadata {
   }
 
   // The to-one chain whole, for the shapes that read `parent` itself (its keys, its presence).
-  const relationAttr = (level: Seed): Record<string, unknown> =>
+  const relationAttr = (level: Seed): Attributes =>
     Object.fromEntries(
       (["aBool", "aString", "aNumber", "aOptionalString"] as const)
-        .filter((key) => level[key] !== null)
-        .map((key) => [key, level[key]]),
+        .flatMap((key) => (level[key] === null ? [] : [[key, level[key]]])),
     );
 
   if (parent !== undefined) {
@@ -212,16 +217,12 @@ function metadataFor(seed: Seed): Metadata {
 
   for (const [key, value] of json) metadata[key] = JSON.stringify(value);
 
-  const lists: [string, (string | number | null)[] | null][] = [
-    ["tagNames.elements", seed.tags.map(({ name }) => name)],
-    ["aNumberList.elements", seed.aNumberList],
-  ];
+  const tagNames = seed.tags.flatMap(({ name }) => (name === null ? [] : [name]));
+  const numbers = (seed.aNumberList ?? []).flatMap((n) => (n === null ? [] : [n]));
 
-  for (const [key, list] of lists) {
-    const elements = (list ?? []).filter((element) => element !== null);
+  if (tagNames.length > 0) metadata["tagNames.elements"] = tagNames;
 
-    if (elements.length > 0) metadata[key] = elements as Metadata[string];
-  }
+  if (numbers.length > 0) metadata["aNumberList.elements"] = numbers;
 
   return metadata;
 }
@@ -236,6 +237,7 @@ interface LedgerEntry {
 }
 
 const LEDGER = (
+  // SAFETY: validate-corpus.sh checks every conformance-ledger.json against its schema.
   JSON.parse(
     fs.readFileSync(
       path.join(__dirname, "..", "conformance-ledger.json"),
@@ -382,7 +384,7 @@ describe("conformance (chromadb)", () => {
         problems.push(`unknown status ${JSON.stringify(entry.status)}`);
       }
 
-      if (typeof entry.reason !== "string" || entry.reason.trim() === "") {
+      if (!isString(entry.reason) || entry.reason.trim() === "") {
         problems.push("no reason");
       }
 

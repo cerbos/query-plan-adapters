@@ -51,7 +51,7 @@ interface Seeds {
   }[];
 }
 
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
+// SAFETY: demo/seeds.json is a repository-controlled corpus file, checked structurally by
 // demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
 const seeds = JSON.parse(
   readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
@@ -248,12 +248,12 @@ async function findIds(
   return [...(results.ids[0] ?? [])].sort();
 }
 
-interface ShapeResult {
+interface UsageResult {
   kind: PlanKind;
   ids: string[];
 }
 
-interface PaginatedShapeResult extends ShapeResult {
+interface PaginatedUsageResult extends UsageResult {
   pageSize: number;
   pageSizes: number[];
 }
@@ -267,7 +267,7 @@ async function filtered(
   collection: Collection,
   principalId: string,
   action: string
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const result = await translate(principalId, action);
 
   return { kind: result.kind, ids: await findIds(collection, toFilter(result)) };
@@ -298,7 +298,7 @@ async function paginated(
   principalId: string,
   action: string,
   pageSize: number
-): Promise<PaginatedShapeResult> {
+): Promise<PaginatedUsageResult> {
   const result = await translate(principalId, action);
   const filter = toFilter(result);
 
@@ -333,7 +333,7 @@ async function composed(
   collection: Collection,
   principalId: string,
   action: string
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const result = await translate(principalId, action);
   const filter = toFilter(result);
 
@@ -389,7 +389,7 @@ async function main(): Promise<void> {
   const collection = await seed();
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
+  const usages = {
     filtered: {
       "alice/view": await filtered(collection, "alice", "view"),
       "bob/view": await filtered(collection, "bob", "view"),
@@ -413,7 +413,7 @@ async function main(): Promise<void> {
   };
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "langchain-chromadb", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "langchain-chromadb", shapes: usages }, null, 2)}\n`
   );
 }
 

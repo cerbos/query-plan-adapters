@@ -7,6 +7,7 @@ import {
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
+  Value,
 } from "@cerbos/core";
 import type { Where } from "chromadb";
 
@@ -26,6 +27,11 @@ import {
   requiredMetadataKeys,
 } from "./corpus";
 import type { Golden } from "./corpus";
+import { isBoolean, isNumber, isObject, isString } from "./narrowing";
+
+/** `response` with `field` replaced by a value its type rules out: a plan the SDK never decodes. */
+const overwritten = (response: PlanResourcesResponse, field: string, value: Value): PlanResourcesResponse =>
+  Object.defineProperty({ ...response }, field, { value, enumerable: true });
 
 /**
  * Offline unit tests: the refusal type, the rules every emitted filter obeys, what a caller can
@@ -57,11 +63,11 @@ function postFilterOf(
 }
 
 /** Whatever `run` throws or rejects with, or `undefined` if it returns. */
-async function thrownBy(run: () => unknown): Promise<unknown> {
+async function thrownBy(run: () => void): Promise<Error | string | undefined> {
   try {
     await run();
   } catch (error) {
-    return error;
+    return error instanceof Error ? error : String(error);
   }
 
   return undefined;
@@ -107,7 +113,7 @@ const PRESENT_EVERYWHERE: Record<string, FieldNameMapperConfig> =
   Object.fromEntries(
     Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => [
       reference,
-      typeof entry === "string"
+      isString(entry)
         ? { field: entry, required: true }
         : { ...entry, required: true },
     ]),
@@ -135,10 +141,7 @@ describe("the refusal type", () => {
 
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
     expect(raised).toBeInstanceOf(Error);
-    expect((raised as UnsupportedOperatorError).name).toBe(
-      "UnsupportedOperatorError",
-    );
-    expect((raised as UnsupportedOperatorError).operator).toBe("matches");
+    expect(raised).toMatchObject({ name: "UnsupportedOperatorError", operator: "matches" });
   });
 
   // A collection macro reports itself, never `lambda`, which names nothing a caller wrote.
@@ -185,11 +188,11 @@ function literalsOf(where: Where | undefined, path = "filters"): Comparison[] {
       }
 
       return value.flatMap((child, index) =>
-        literalsOf(child as Where, `${path}.${key}[${index}]`),
+        literalsOf(child, `${path}.${key}[${index}]`),
       );
     }
 
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    if (!isObject(value) || Array.isArray(value)) {
       throw Error(`${path}.${key} is not a Chroma comparison object`);
     }
 
@@ -255,7 +258,7 @@ describe("what an emitted filter may contain", () => {
       Object.fromEntries(
         Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => [
           reference,
-          typeof entry === "string"
+          isString(entry)
             ? { field: entry, required: false }
             : { ...entry, required: false },
         ]),
@@ -291,7 +294,7 @@ describe("what an emitted filter may contain", () => {
   test("clearing the type declarations refuses inequalities, and nothing else changes", async () => {
     const untyped: Record<string, FieldNameMapperConfig> = Object.fromEntries(
       Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => {
-        if (typeof entry === "string") return [reference, { field: entry }];
+        if (isString(entry)) return [reference, { field: entry }];
         const { valueType, numericType: _n, ...rest } = entry;
 
         return [reference, valueType === "json" ? { ...rest, valueType } : rest];
@@ -313,7 +316,7 @@ describe("what an emitted filter may contain", () => {
 
       return translated.has(id) === (raised === undefined)
         ? []
-        : [{ id, operator: (raised as UnsupportedOperatorError)?.operator }];
+        : [{ id, operator: raised instanceof UnsupportedOperatorError ? raised.operator : undefined }];
     });
 
     expect(changed.length).toBeGreaterThan(0);
@@ -332,7 +335,7 @@ describe("what an emitted filter may contain", () => {
   test("clearing listElements refuses exactly the actions that emit $contains", async () => {
     const withoutLists: Record<string, FieldNameMapperConfig> = Object.fromEntries(
       Object.entries(FIELD_NAME_MAPPER).map(([reference, entry]) => {
-        if (typeof entry === "string") return [reference, { field: entry }];
+        if (isString(entry)) return [reference, { field: entry }];
         const { listElements: _l, ...rest } = entry;
 
         return [reference, rest];
@@ -370,7 +373,7 @@ describe("what an emitted filter may contain", () => {
     const fractional = ALL_COMPARISONS.filter(
       ({ operator, value }) =>
         ["$lt", "$lte", "$gt", "$gte"].includes(operator) &&
-        typeof value === "number" &&
+        isNumber(value) &&
         !Number.isInteger(value),
     ).map(({ action, field }) => `${action}: ${field}`);
 
@@ -538,10 +541,10 @@ describe("allowPostFilter", () => {
     POST_FILTERED = OUTCOMES.filter(({ on }) => postFilterOf(on.result));
   });
 
-  const describeError = (error: unknown): string =>
-    error instanceof UnsupportedOperatorError
-      ? `UnsupportedOperatorError(${error.operator}): ${error.message}`
-      : String(error);
+  const describeError = (cause: unknown): string =>
+    cause instanceof UnsupportedOperatorError
+      ? `UnsupportedOperatorError(${cause.operator}): ${cause.message}`
+      : String(cause);
 
   test("left off, every plan that needs a post-filter still throws UnsupportedOperatorError", () => {
     expect(POST_FILTERED.length).toBeGreaterThan(0);
@@ -576,12 +579,12 @@ describe("allowPostFilter", () => {
     const keys = [
       ...new Set(
         Object.values(FIELD_NAME_MAPPER).map((entry) =>
-          typeof entry === "string" ? entry : entry.field,
+          isString(entry) ? entry : entry.field,
         ),
       ),
     ];
 
-    const shapes: (Record<string, unknown> | null | undefined)[] = [
+    const metadatas: Parameters<PostFilter>[0][] = [
       null,
       undefined,
       {},
@@ -593,8 +596,8 @@ describe("allowPostFilter", () => {
     ];
 
     for (const { on } of POST_FILTERED) {
-      for (const metadata of shapes) {
-        expect(typeof postFilterOf(on.result)!(metadata)).toBe("boolean");
+      for (const metadata of metadatas) {
+        expect(isBoolean(postFilterOf(on.result)!(metadata))).toBe(true);
       }
     }
   });
@@ -627,6 +630,7 @@ describe("allowPostFilter", () => {
     ],
     [
       "a function mapper that returns nothing for it",
+      // SAFETY: returns undefined, which FieldMapper rules out, as an untyped caller's mapper can.
       ((reference: string) =>
         reference === "request.resource.attr.aOptionalString"
           ? undefined
@@ -637,7 +641,7 @@ describe("allowPostFilter", () => {
     expect(postFilterOf(await allowing(id))).toBeDefined();
     const raised = await thrownBy(() => allowing(id, mapper));
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
-    expect((raised as UnsupportedOperatorError).operator).toBe("contains");
+    expect(raised).toMatchObject({ operator: "contains" });
   });
 
   // A stored -0.0 reads back as 0 (the client writes metadata as JSON), so `string()` over a stored
@@ -654,7 +658,7 @@ describe("allowPostFilter", () => {
 
     const raised = await thrownBy(() => allowing(id, undeclared));
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
-    expect((raised as UnsupportedOperatorError).operator).toBe("string");
+    expect(raised).toMatchObject({ operator: "string" });
   });
 });
 
@@ -683,6 +687,7 @@ describe("type declarations a mapper cannot combine", () => {
       translate("logic/not/bare-boolean-attribute", {
         fieldNameMapper: {
           ...FIELD_NAME_MAPPER,
+          // SAFETY: each entry is malformed on purpose, as an untyped caller's mapping can be.
           "request.resource.attr.aBool": entry as FieldNameMapperConfig,
         },
       }),
@@ -703,20 +708,19 @@ describe("plans the planner cannot produce", () => {
   // A shape CEL *can* express does not belong here, whatever its plan looks like: it belongs in
   // the corpus, where every adapter is asked about it.
 
-  const plan = (condition: PlanExpressionOperand): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
+  const plan = (condition: PlanExpressionOperand): PlanResourcesResponse => ({
+    kind: PlanKind.CONDITIONAL,
+    condition,
+    cerbosCallId: "",
+    requestId: "",
+    validationErrors: [],
+    metadata: undefined,
+  });
 
   // A malformed plan is the caller's bug, not a policy shape Chroma cannot hold, so it stays a
   // plain `Error`: a caller that routes `UnsupportedOperatorError` to a fallback must not route a
   // half-decoded plan there with it (#228).
-  const expectPlainError = async (run: () => unknown): Promise<void> => {
+  const expectPlainError = async (run: () => void): Promise<void> => {
     const raised = await thrownBy(run);
     expect(raised).toBeInstanceOf(Error);
     expect(raised).not.toBeInstanceOf(UnsupportedOperatorError);
@@ -725,7 +729,11 @@ describe("plans the planner cannot produce", () => {
   test("an unrecognised plan kind", async () => {
     const run = () =>
       queryPlanToChromaDB({
-        queryPlan: { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse,
+        queryPlan: overwritten(
+          { kind: PlanKind.ALWAYS_ALLOWED, cerbosCallId: "", requestId: "", validationErrors: [], metadata: undefined },
+          "kind",
+          "INVALID_KIND",
+        ),
         fieldNameMapper: FIELD_NAME_MAPPER,
       });
 
@@ -769,7 +777,7 @@ describe("plans the planner cannot produce", () => {
     );
     const raised = await thrownBy(run);
     expect(raised).toBeInstanceOf(UnsupportedOperatorError);
-    expect((raised as UnsupportedOperatorError).operator).toBe("eq");
+    expect(raised).toMatchObject({ operator: "eq" });
   });
 
   test("a condition that is not an expression at all", async () => {
