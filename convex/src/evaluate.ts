@@ -370,8 +370,7 @@ const arithmetic = (call: Call): unknown => {
   ) {
     return left + right;
   }
-  // `+` over two lists concatenates them, in order (cerbos/query-plan-adapters#668 ports the
-  // shapes: a literal list beside a resource list, and a ternary choosing a list branch).
+  // `+` over two lists concatenates them, in order.
   if (operator === "add" && Array.isArray(left) && Array.isArray(right)) {
     return [...left, ...right];
   }

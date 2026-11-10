@@ -411,6 +411,12 @@ class TestTimestampLiterals:
 
 #: A zero divisor recorded as the integer ``0``, whose sign JSON has lost.
 INTEGER_ZERO_DIVISOR = "comparison/greater-than/infinity-from-ternary"
+INTEGER_ZERO_DIVISORS = {
+    INTEGER_ZERO_DIVISOR,
+    "comparison/greater-or-equal/infinity-from-ternary",
+    "comparison/less-or-equal/infinity-from-ternary",
+    "comparison/less-than/infinity-on-both-sides",
+}
 
 
 class TestTransportDecoding:
@@ -418,7 +424,7 @@ class TestTransportDecoding:
 
     @pytest.mark.parametrize(
         "case",
-        [c for c in CURRENT if c["id"] != INTEGER_ZERO_DIVISOR],
+        [c for c in CURRENT if c["id"] not in INTEGER_ZERO_DIVISORS],
         ids=lambda c: c["id"],
     )
     def test_the_protobuf_decoding_emits_the_same_sql(self, case):

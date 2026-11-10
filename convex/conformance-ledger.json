@@ -33,9 +33,21 @@
       "status": "unsupported",
       "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: `aDouble / 0.0` divides by a constant zero, and the plan reaches the Convex function as JSON, which has no -0, so the adapter cannot tell +Infinity from -Infinity."
     },
+    "comparison/greater-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: the 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator, which survives the JSON hop as an unsigned 0"
+    },
     "comparison/greater-than/infinity-from-ternary": {
       "status": "unsupported",
       "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: the 1.0/0.0 and -1.0/0.0 branches also carry a constant zero denominator, which survives the JSON hop as an unsigned 0"
+    },
+    "comparison/less-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: the 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator, which survives the JSON hop as an unsigned 0"
+    },
+    "comparison/less-than/infinity-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: the 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator, which survives the JSON hop as an unsigned 0"
     }
   }
 }

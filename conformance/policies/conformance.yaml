@@ -1281,6 +1281,42 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber >= 1.5
+    # comparison/greater-or-equal/infinity-from-ternary
+    - actions:
+        - comparison/greater-or-equal/infinity-from-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? 1.0/0.0 : -1.0/0.0) >= 0.5) && now() == now()'
+    # comparison/greater-or-equal/nan-from-ternary
+    - actions:
+        - comparison/greater-or-equal/nan-from-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) >= 0.5) && now() == now()'
+    # comparison/greater-or-equal/nan-from-ternary-on-both-sides
+    - actions:
+        - comparison/greater-or-equal/nan-from-ternary-on-both-sides
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) >= (R.attr.aBool ? 0.5 : 0.0/0.0)) && now() == now()'
+    # comparison/greater-or-equal/negative-zero-from-ternary
+    - actions:
+        - comparison/greater-or-equal/negative-zero-from-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? -1.0 * 0.0 : -1.0) >= 0.0) && now() == now()'
     # comparison/greater-or-equal/value-first
     - actions:
         - comparison/greater-or-equal/value-first
@@ -1326,6 +1362,15 @@ resourcePolicy:
       condition:
         match:
           expr: '((R.attr.aBool ? 1.0 : 0.0/0.0) > 0.5) && now() == now()'
+    # comparison/greater-than/nan-from-ternary-on-both-sides
+    - actions:
+        - comparison/greater-than/nan-from-ternary-on-both-sides
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) > (R.attr.aBool ? 0.5 : 0.0/0.0)) && now() == now()'
     # comparison/greater-than/string-code-point-order
     - actions:
         - comparison/greater-than/string-code-point-order
@@ -1344,6 +1389,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber <= 2
+    # comparison/less-or-equal/infinity-from-ternary
+    - actions:
+        - comparison/less-or-equal/infinity-from-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? 1.0/0.0 : -1.0/0.0) <= 0.5) && now() == now()'
+    # comparison/less-or-equal/nan-from-ternary
+    - actions:
+        - comparison/less-or-equal/nan-from-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? 0.0 : 0.0/0.0) <= 0.5) && now() == now()'
     # comparison/less-or-equal/nan-from-ternary-on-both-sides
     - actions:
         - comparison/less-or-equal/nan-from-ternary-on-both-sides
@@ -1407,6 +1470,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aDouble < -1e19
+    # comparison/less-than/infinity-on-both-sides
+    - actions:
+        - comparison/less-than/infinity-on-both-sides
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? -1.0/0.0 : 1.0/0.0) < (R.attr.aBool ? 1.0/0.0 : -1.0/0.0)) && now() == now()'
+    # comparison/less-than/nan-from-ternary
+    - actions:
+        - comparison/less-than/nan-from-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? 0.0 : 0.0/0.0) < 0.5) && now() == now()'
+    # comparison/less-than/nan-from-ternary-on-both-sides
+    - actions:
+        - comparison/less-than/nan-from-ternary-on-both-sides
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? 1.0/1.0 : 1.0/2.0) < (R.attr.aBool ? 2.0 : 0.0/0.0)) && now() == now()'
     # comparison/less-than/nan-from-ternary-value-first
     - actions:
         - comparison/less-than/nan-from-ternary-value-first
@@ -1452,6 +1542,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aDouble < 0.0
+    # comparison/less-than/negative-zero-from-ternary
+    - actions:
+        - comparison/less-than/negative-zero-from-ternary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? -1.0 * 0.0 : -1.0) < 0.0) && now() == now()'
     # comparison/less-than/value-first
     - actions:
         - comparison/less-than/value-first
@@ -1461,15 +1560,6 @@ resourcePolicy:
       condition:
         match:
           expr: 1 < R.attr.aNumber
-    # comparison/not-equals/value-first
-    - actions:
-        - comparison/not-equals/value-first
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: '"one" != R.attr.aString'
     # comparison/not-equals/negative-zero-against-zero
     - actions:
         - comparison/not-equals/negative-zero-against-zero
@@ -1479,6 +1569,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aDouble != 0.0
+    # comparison/not-equals/value-first
+    - actions:
+        - comparison/not-equals/value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"one" != R.attr.aString'
     # comparison/not-equals/whole-list-literal
     - actions:
         - comparison/not-equals/whole-list-literal
@@ -1701,6 +1800,15 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0'
+    # conditional/ternary/boolean-missing-attribute-condition
+    - actions:
+        - conditional/ternary/boolean-missing-attribute-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'R.attr.aOptionalString != "x" ? R.attr.aNumber > 1 : R.attr.aBool'
     # conditional/ternary/compared-to-literal
     - actions:
         - conditional/ternary/compared-to-literal
@@ -1710,6 +1818,60 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? R.attr.aNumber : 0) > 1'
+    # conditional/ternary/comparison-under-and
+    - actions:
+        - conditional/ternary/comparison-under-and
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? R.attr.aNumber : 0) > 1) && R.attr.aString != "one"'
+    # conditional/ternary/comparison-under-or
+    - actions:
+        - conditional/ternary/comparison-under-or
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '((R.attr.aBool ? R.attr.aNumber : 0) > 1) || R.attr.aString == "mirror"'
+    # conditional/ternary/constant-branches
+    - actions:
+        - conditional/ternary/constant-branches
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1 : 0) > 0'
+    # conditional/ternary/constant-branches-beyond-long-range
+    - actions:
+        - conditional/ternary/constant-branches-beyond-long-range
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? 1.0e19 : -1.0e19) > 9.3e18'
+    # conditional/ternary/constant-false-branch
+    - actions:
+        - conditional/ternary/constant-false-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'R.attr.aBool ? false : R.attr.aNumber > 5'
+    # conditional/ternary/constant-true-branch
+    - actions:
+        - conditional/ternary/constant-true-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 'R.attr.aBool ? true : R.attr.aNumber > 5'
     # conditional/ternary/expression-condition
     - actions:
         - conditional/ternary/expression-condition
@@ -1719,6 +1881,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aString.startsWith("100") ? R.attr.aNumber : -1) >= 0'
+    # conditional/ternary/index-in-untaken-branch
+    - actions:
+        - conditional/ternary/index-in-untaken-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(size(R.attr.tags) >= 1) ? (R.attr.aBoolList[0] != true) : (R.attr.aNumber < 21)'
     # conditional/ternary/inside-all
     - actions:
         - conditional/ternary/inside-all
@@ -1737,15 +1908,6 @@ resourcePolicy:
       condition:
         match:
           expr: 'R.attr.tags.exists(t, (R.attr.aBool ? t.name : "zz") == "public")'
-    # conditional/ternary/index-in-untaken-branch
-    - actions:
-        - conditional/ternary/index-in-untaken-branch
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: '(size(R.attr.tags) >= 1) ? (R.attr.aBoolList[0] != true) : (R.attr.aNumber < 21)'
     # conditional/ternary/missing-attribute-condition
     - actions:
         - conditional/ternary/missing-attribute-condition
@@ -1782,6 +1944,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aBool ? R.attr.aNumber : 0) > 1)'
+    # conditional/ternary/negated-boolean-missing-attribute-condition
+    - actions:
+        - conditional/ternary/negated-boolean-missing-attribute-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aOptionalString != "x" ? R.attr.aNumber > 1 : R.attr.aBool)'
     # conditional/ternary/negated-branch-on-relation
     - actions:
         - conditional/ternary/negated-branch-on-relation
@@ -1809,15 +1980,6 @@ resourcePolicy:
       condition:
         match:
           expr: '!((R.attr.aOptionalString != "x" ? R.attr.aNumber : 0.0) > 1.0)'
-    # conditional/ternary/nested-in-condition
-    - actions:
-        - conditional/ternary/nested-in-condition
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: '(R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0) ? R.attr.aNumber > 100 : R.attr.aNumber > 0'
     # conditional/ternary/nested-in-both-branches
     - actions:
         - conditional/ternary/nested-in-both-branches
@@ -1827,6 +1989,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0.0 : R.attr.aNumber) : (R.attr.aNumber < 0.0 ? -1.0 : 5.0)) > 1.0'
+    # conditional/ternary/nested-in-condition
+    - actions:
+        - conditional/ternary/nested-in-condition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? R.attr.aString == "one" : R.attr.aNumber < 0) ? R.attr.aNumber > 100 : R.attr.aNumber > 0'
     # conditional/ternary/nested-in-then-branch
     - actions:
         - conditional/ternary/nested-in-then-branch
@@ -1845,6 +2016,33 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? R.attr.aNumber : 0.0) > (R.attr.aString == "" ? 1.0 : 2.0)'
+    # conditional/ternary/string-branch-equals
+    - actions:
+        - conditional/ternary/string-branch-equals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? R.attr.aString : "same") == "same"'
+    # conditional/ternary/string-branch-not-equals
+    - actions:
+        - conditional/ternary/string-branch-not-equals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? R.attr.aString : "none") != "one"'
+    # conditional/ternary/string-match-receiver
+    - actions:
+        - conditional/ternary/string-match-receiver
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aBool ? R.attr.aString : "none").contains("n")'
     # conditional/ternary/value-first
     - actions:
         - conditional/ternary/value-first

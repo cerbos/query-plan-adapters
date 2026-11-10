@@ -110,8 +110,14 @@ module Cerbos
             "A map constant inside an expression is unsupported: MongoDB compares embedded documents in stored field order, CEL's maps ignore it"
         end
         return {"$literal" => value} if value.is_a?(Array) || (value.is_a?(String) && value.start_with?("$"))
+        return {"$toDouble" => value.to_s} if beyond_int64?(value)
 
         value
+      end
+
+      # An integral Float outside int64, which Mongoid narrows to an Integer BSON cannot encode.
+      def beyond_int64?(value)
+        value.is_a?(Float) && value.finite? && value == value.floor && !Plan::INT64_RANGE.cover?(value.to_i)
       end
 
       def build_expression(expression, mapper)
