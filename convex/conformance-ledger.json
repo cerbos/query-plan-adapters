@@ -48,6 +48,10 @@
     "comparison/less-than/infinity-on-both-sides": {
       "status": "unsupported",
       "reason": "Same indeterminate-signed-zero rejection as `arithmetic/divide/negative-zero-divisor`: the 1.0/0.0 and -1.0/0.0 branches carry a constant zero denominator, which survives the JSON hop as an unsigned 0"
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "The post-filter compiles a matches() pattern with re2js once, at translation, so a pattern read from each row is refused."
     }
   }
 }

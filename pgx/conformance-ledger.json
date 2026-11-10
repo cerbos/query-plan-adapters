@@ -168,6 +168,38 @@
       "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
       "status": "unsupported"
     },
+    "regex/matches/dot-all-flag": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering does not read (?s), under which . also matches a newline; the store's regex dialect is not RE2, so the pattern is refused rather than passed through."
+    },
+    "regex/matches/end-anchor-mid-pattern": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering reads ^ and $ only at the ends of the pattern or of a top-level branch; an anchor followed by more pattern is refused."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "matches() is lowered only for a constant pattern, which is parsed as RE2 before translation; a pattern read from a row would reach the store's own regex dialect, which is not RE2."
+    },
+    "regex/matches/negated-class": {
+      "status": "unsupported",
+      "reason": "A negated character class is too wide to enumerate as literals, and the store's regex dialect is not RE2, so the pattern is refused."
+    },
+    "regex/matches/non-digit-class": {
+      "status": "unsupported",
+      "reason": "\\D is too wide a class to enumerate as literals, and the store's regex dialect is not RE2, so the pattern is refused."
+    },
+    "regex/matches/two-dot-star-gaps": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering handles one non-newline gap between a prefix and a suffix; two gaps are not a finite set of literals or a single LIKE, so the pattern is refused."
+    },
+    "regex/matches/unanchored-dot": {
+      "status": "unsupported",
+      "reason": "A . between two literals is not a finite set of literals, and LIKE's _ would match a newline that RE2's . does not, so the pattern is refused."
+    },
+    "regex/matches/word-boundary": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering does not read \\b, which has no LIKE equivalent and which PostgreSQL's regex dialect reads as a backspace, so the pattern is refused."
+    },
     "size/greater-than/map-projection": {
       "status": "unsupported",
       "reason": "size() over map() is refused: the projection's body is evaluated per element, and one erroring element (b6's unnamed tag) makes the count an error, which only filter() lowers (as its UNKNOWN guard before the COUNT)."

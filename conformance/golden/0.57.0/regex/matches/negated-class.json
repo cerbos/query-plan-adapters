@@ -1,0 +1,76 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a6",
+    "b1",
+    "b2",
+    "b4",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h4",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "j2",
+    "j3",
+    "j4",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/negated-class",
+  "intent": "matches(\"^[^a]+$\"): one or more characters, none of them a.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^[^a]+$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/negated-class",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^[^a]+$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A negated class needs a character, so a8 \"\" is denied while h4 \"0\" matches; lowering it to \"does not contain a\" over-grants a8."
+}

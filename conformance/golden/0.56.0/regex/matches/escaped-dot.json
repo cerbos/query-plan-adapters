@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "h3"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/escaped-dot",
+  "intent": "matches(\"^(?:ab|100\\\\.done)$\"): an escaped dot inside an anchored alternation.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^(?:ab|100\\.done)$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/escaped-dot",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^(?:ab|100\\\\.done)$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "\\. is a literal dot, so a3 \"100xdone\" is denied and only h3 \"ab\" matches; dropping the escape turns it into any character and over-grants a3."
+}

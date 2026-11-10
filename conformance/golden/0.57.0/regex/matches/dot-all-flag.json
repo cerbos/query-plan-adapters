@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "h2"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/dot-all-flag",
+  "intent": "matches(\"(?s)^a.b$\"): the (?s) flag, under which . also matches a newline.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "(?s)^a.b$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/dot-all-flag",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"(?s)^a.b$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "With (?s), h2 \"a\\nb\" matches and h3 \"ab\" does not; ignoring the flag keeps . off the newline and under-grants h2."
+}

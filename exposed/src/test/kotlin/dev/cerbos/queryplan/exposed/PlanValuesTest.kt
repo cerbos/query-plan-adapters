@@ -75,14 +75,13 @@ class PlanValuesTest {
     @Test
     fun `foldAdd reports TYPES, never the operand values`() {
         // A plan constant can carry a folded principal attribute, and an exception message is
-        // logged. `null + x` and `true + x` are CEL no-overload errors whatever x is, so a planner
-        // folding constants never emits them: malformed, not unsupported.
-        val error = assertThrows<MalformedPlanException> { PlanValues.foldAdd(null, "s3cret") }
+        // logged.
+        val error = assertThrows<UnsupportedPlanShapeException> { PlanValues.foldAdd(null, "s3cret") }
         assertEquals("add requires non-null operands, got null + String", error.message)
         assertFalse(error.message!!.contains("s3cret"))
 
-        val typed = assertThrows<MalformedPlanException> { PlanValues.foldAdd(true, 1L) }
-        assertEquals("add requires string or numeric operands, got Boolean + Long", typed.message)
+        val typed = assertThrows<UnsupportedPlanShapeException> { PlanValues.foldAdd(true, 1L) }
+        assertEquals("add requires two strings or two numbers, got Boolean + Long", typed.message)
     }
 
     @Test

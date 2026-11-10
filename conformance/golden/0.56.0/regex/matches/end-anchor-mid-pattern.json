@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/end-anchor-mid-pattern",
+  "intent": "matches(\"a$b|^one$\"): an end anchor followed by more pattern, beside an anchored literal.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "a$b|^one$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/end-anchor-mid-pattern",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"a$b|^one$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Nothing follows the absolute end, so a$b never matches and only a1 \"one\" is allowed; dropping the $ or reading it literally over-grants h3 \"ab\" and h5 \"ab\\n\"."
+}

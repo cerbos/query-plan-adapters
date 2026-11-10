@@ -1587,6 +1587,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tagNames != ["public"]
+    # comparison/less-than/field-to-field
+    - actions:
+        - comparison/less-than/field-to-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aOptionalString < R.attr.aString
     # composition/allow-and-deny/conditional-deny
     - actions:
         - composition/allow-and-deny/conditional-deny
@@ -3419,6 +3428,132 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^\\s*$")
+    # regex/matches/anchored-prefix-dot-star
+    - actions:
+        - regex/matches/anchored-prefix-dot-star
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^a.*")
+    # regex/matches/non-capturing-group-optional-suffix
+    - actions:
+        - regex/matches/non-capturing-group-optional-suffix
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^(?:ab|on)e?$")
+    # regex/matches/escaped-dot
+    - actions:
+        - regex/matches/escaped-dot
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^(?:ab|100\\.done)$")
+    # regex/matches/empty-alternative
+    - actions:
+        - regex/matches/empty-alternative
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("a|")
+    # regex/matches/negated-malformed-patterns-from-principal
+    - actions:
+        - regex/matches/negated-malformed-patterns-from-principal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "*a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{2,1}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a\\" : "^h") || R.attr.aNumber == 5'
+    # regex/matches/negated-class
+    - actions:
+        - regex/matches/negated-class
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^[^a]+$")
+    # regex/matches/non-digit-class
+    - actions:
+        - regex/matches/non-digit-class
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^\\D+$")
+    # regex/matches/unanchored-dot
+    - actions:
+        - regex/matches/unanchored-dot
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("a.b")
+    # regex/matches/two-dot-star-gaps
+    - actions:
+        - regex/matches/two-dot-star-gaps
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^x.*a.*y$")
+    # regex/matches/case-insensitive-non-ascii
+    - actions:
+        - regex/matches/case-insensitive-non-ascii
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("(?i)^É-X-É$")
+    # regex/matches/dot-all-flag
+    - actions:
+        - regex/matches/dot-all-flag
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("(?s)^a.b$")
+    # regex/matches/word-boundary
+    - actions:
+        - regex/matches/word-boundary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("ne\\b")
+    # regex/matches/end-anchor-mid-pattern
+    - actions:
+        - regex/matches/end-anchor-mid-pattern
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("a$b|^one$")
+    # regex/matches/field-to-field
+    - actions:
+        - regex/matches/field-to-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches(R.attr.aOptionalString)
     # relation/all/negated-to-one-chain
     - actions:
         - relation/all/negated-to-one-chain
@@ -4634,6 +4769,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.upperAscii() == "é-X-é" || R.attr.aString.upperAscii() == "ONE" || R.attr.aString.upperAscii() == "É-X-É"
+    # string/concatenate/suffix-value-first
+    - actions:
+        - string/concatenate/suffix-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '"one-end" == R.attr.aString + "-end"'
+    # string/concatenate/negated-null-principal-attribute
+    - actions:
+        - string/concatenate/negated-null-principal-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.aString == P.attr.nullString + "canary") || R.attr.aNumber == 5'
     # timestamp/equals/field-to-field-without-conversion
     - actions:
         - timestamp/equals/field-to-field-without-conversion

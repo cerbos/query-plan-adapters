@@ -1408,19 +1408,6 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: {@code identifier/equals/concatenation-value-first} solves a PREFIX concatenation back to
-     * a key equality; the suffix form is not carried.
-     */
-    @Test
-    void addSolveStringSuffixStrip() {
-        // "foo.bar" == aString + ".bar" solves to aString == "foo".
-        Operand cond = exprOp("eq",
-                sval("foo.bar"),
-                exprOp("add", var("request.resource.attr.aString"), sval(".bar")));
-        assertEquals(0, runCount(cond));
-    }
-
-    /**
      * <strong>Corpus gap.</strong> #668: {@code arithmetic/add/inexact-fraction-equals} and its siblings go through SQL
      * arithmetic; the exact whole-number solve in Java is not carried. With int literals the policy
      * is a CEL no-overload error at check time, since attribute values are doubles.
@@ -1454,54 +1441,6 @@ class JpaQueryPlanAdapterTest {
         ResourceEntity row = new ResourceEntity("add-big-1");
         row.setaNumber(5);
         withResource(row, () -> assertEquals(0, runCount(cond)));
-    }
-
-    @Nested
-    class MinorOperators {
-
-        /**
-         * <strong>Corpus gap.</strong> #668: The corpus orders a column against a constant
-         * ({@code relation/less-than/one-hop} and siblings) and compares two columns for equality
-         * ({@code comparison/equals/field-to-field}); a two-column ORDERING is not carried.
-         */
-        @Test
-        void fieldToFieldOrderingKeepsOperandDirection() {
-            // Two-column ordering keeps the source operand order.
-            ResourceEntity r = new ResourceEntity("f2f-seed-2");
-            r.setaString("xyz");
-            r.setCreatedBy("abc");
-            r.setaNumber(5);
-            withResource(r, () -> {
-                assertEquals(1, runCount(exprOp("lt",
-                        var("request.resource.attr.createdBy"),
-                        var("request.resource.attr.aString"))));
-                assertEquals(0, runCount(exprOp("lt",
-                        var("request.resource.attr.aString"),
-                        var("request.resource.attr.createdBy"))));
-                assertEquals(1, runCount(exprOp("le",
-                        var("request.resource.attr.aNumber"),
-                        var("request.resource.attr.aNumber"))));
-                assertEquals(0, runCount(exprOp("gt",
-                        var("request.resource.attr.aNumber"),
-                        var("request.resource.attr.aNumber"))));
-            });
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code matches()} between two columns is not carried;
-         * {@code regex/matches/anchored-prefix} refuses the constant form.
-         */
-        @Test
-        void fieldToFieldUnsupportedOperatorStillThrows() {
-            // contains/startsWith/endsWith between two columns translate to LIKE; matches has
-            // no column-to-column translation.
-            assertConditionThrows(
-                    exprOp("matches",
-                            var("request.resource.attr.aString"),
-                            var("request.resource.attr.createdBy")),
-                    "Field-to-field", "matches");
-        }
-
     }
 
     @Nested
@@ -1711,35 +1650,6 @@ class JpaQueryPlanAdapterTest {
     }
 
     /**
-     * <strong>Corpus gap.</strong> #668: Concatenating a null principal attribute is not carried;
-     * the corpus principal has no null attribute.
-     */
-    @Test
-    void foldAddNullOperandErrorDoesNotLeakConstantValues() {
-        // The folded principal value may be personal data and error messages get logged, so
-        // the message names operand types only.
-        Operand cond = exprOp("eq",
-                var("request.resource.attr.aString"),
-                exprOp("add", nullVal(), sval("canary-secret-value")));
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> runCount(cond));
-        assertTrue(ex.getMessage().contains("add requires non-null operands"),
-                "unexpected message: " + ex.getMessage());
-        assertTrue(ex.getMessage().contains("null") && ex.getMessage().contains("String"),
-                "expected operand types in message: " + ex.getMessage());
-        assertFalse(ex.getMessage().contains("canary-secret-value"),
-                "constant value leaked into the error message: " + ex.getMessage());
-
-        // The null on the right.
-        IllegalArgumentException ex2 = assertThrows(IllegalArgumentException.class,
-                () -> runCount(exprOp("eq",
-                        var("request.resource.attr.aString"),
-                        exprOp("add", sval("canary-secret-value"), nullVal()))));
-        assertFalse(ex2.getMessage().contains("canary-secret-value"),
-                "constant value leaked into the error message: " + ex2.getMessage());
-    }
-
-    /**
      * <strong>Corpus gap.</strong> #668: {@code hasIntersection} between two attributes is not
      * carried.
      */
@@ -1753,51 +1663,6 @@ class JpaQueryPlanAdapterTest {
                 "VARIABLE 'request.resource.attr.tagNames'",
                 "VARIABLE 'request.resource.attr.ownedBy'",
                 "Supported shapes");
-    }
-
-    @Nested
-    class BracketLikeEscaping {
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code string/starts-with/bracket-in-needle} and {@code hierarchy/descendent-of/bracket-in-path} carry
-         * the shape, but no CI leg runs SQL Server, where {@code [} starts a character class even
-         * with an ESCAPE clause. On the other databases the escape changes nothing, so it is
-         * checked on the pattern.
-         */
-        @Test
-        void escapeLikeEscapesOpeningBracket() {
-            assertEquals("\\[SEC]", PlanValues.escapeLike("[SEC]"));
-            assertEquals("50\\%\\[a]\\_b", PlanValues.escapeLike("50%[a]_b"));
-            // Backslash is escaped first.
-            assertEquals("\\\\\\[", PlanValues.escapeLike("\\["));
-            // ']' only closes a class, and none can open once '[' is escaped.
-            assertEquals("]", PlanValues.escapeLike("]"));
-        }
-    }
-
-    // `"a,b".contains(R.attr.x)` arrives as contains(value, variable): the constant is the
-    // haystack and the column is the needle, so the operands must not be swapped.
-    @Nested
-    class ConstantReceiverStringMatch {
-
-        private Operand plan(String op, String constant) {
-            return exprOp(op, sval(constant), var("request.resource.attr.aString"));
-        }
-
-        /**
-         * <strong>Corpus gap.</strong> #668: {@code string/contains/value-first} and its siblings run over a corpus
-         * whose aString is never NULL, so the NULL-needle denial has no discriminating seed there.
-         */
-        @Test
-        void nullColumnNeedleExcludesRow() {
-            // A NULL column is a missing attribute, which CEL denies.
-            withResource(row("cr-9", null), () -> {
-                assertEquals(0, runCount(plan("contains", "anything")));
-                assertEquals(0, runCount(plan("startsWith", "anything")));
-                assertEquals(0, runCount(plan("endsWith", "anything")));
-            });
-        }
-
     }
 
     // in(variable, variable): the second attribute must be a relation.

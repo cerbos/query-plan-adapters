@@ -213,3 +213,17 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.upperAscii() == "é-X-é" || R.attr.aString.upperAscii() == "ONE" || R.attr.aString.upperAscii() == "É-X-É"'
+- id: 'string/concatenate/suffix-value-first'
+  tier: adversarial
+  intent: 'A literal compared == a concatenation that appends a literal suffix to the attribute ("one-end" == aString + "-end").'
+  trap: 'Solving it back to an equality must strip the suffix, so only a1 "one" is allowed; stripping a prefix, or comparing the whole literal to the column, denies a1.'
+  condition:
+    match:
+      expr: '"one-end" == R.attr.aString + "-end"'
+- id: 'string/concatenate/negated-null-principal-attribute'
+  tier: adversarial
+  intent: 'Negated equality with a null principal attribute concatenated to a literal (!(aString == P.attr.nullString + "canary")), OR''d with aNumber == 5.'
+  trap: 'The planner keeps add(null, "canary"), which has no overload in CEL, so the negated disjunct is an error and only a1 is allowed. A store whose concatenation skips or stringifies a null builds "canary" or "nullcanary", and the negation over-grants every other row.'
+  condition:
+    match:
+      expr: '!(R.attr.aString == P.attr.nullString + "canary") || R.attr.aNumber == 5'

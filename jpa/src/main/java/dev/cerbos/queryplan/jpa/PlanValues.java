@@ -50,14 +50,14 @@ final class PlanValues {
     /** Folds {@code add} over two constants: strings concatenate, numbers add. */
     static Object foldAdd(Object left, Object right) {
         if (left == null || right == null) {
-            // `null + x` is a CEL no-overload error, so the planner never emits it. Messages
-            // report types only: constants can carry principal attribute values.
-            throw Refusals.malformed(
+            // A null principal attribute reaches the plan as a constant. Messages report types
+            // only: constants can carry principal attribute values.
+            throw Refusals.unsupported(
                     "add requires non-null operands, got " + typeName(left) + " + "
                             + typeName(right));
         }
-        if (left instanceof String || right instanceof String) {
-            return String.valueOf(left) + String.valueOf(right);
+        if (left instanceof String ls && right instanceof String rs) {
+            return ls + rs;
         }
         if (left instanceof Number ln && right instanceof Number rn) {
             if (left instanceof Long && right instanceof Long) {
@@ -65,8 +65,8 @@ final class PlanValues {
             }
             return ln.doubleValue() + rn.doubleValue();
         }
-        throw Refusals.malformed(
-                "add requires string or numeric operands, got " + typeName(left) + " + "
+        throw Refusals.unsupported(
+                "add requires two strings or two numbers, got " + typeName(left) + " + "
                         + typeName(right));
     }
 

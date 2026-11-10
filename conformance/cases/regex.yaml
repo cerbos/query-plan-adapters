@@ -178,3 +178,101 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^\\s*$")'
+- id: 'regex/matches/anchored-prefix-dot-star'
+  tier: adversarial
+  intent: 'matches("^a.*"): an anchored prefix followed by a trailing .* with no end anchor.'
+  trap: 'The .* can match nothing, so this is "starts with a" whatever follows: h2 "a\nb" and h5 "ab\n" match. Reading .* as "no newline up to the end" under-grants them.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^a.*")'
+- id: 'regex/matches/non-capturing-group-optional-suffix'
+  tier: adversarial
+  intent: 'matches("^(?:ab|on)e?$"): a non-capturing alternation followed by an optional character, anchored.'
+  trap: 'It accepts exactly "ab", "abe", "on" and "one", so h3 and a1 match while h5 "ab\n" and c1 "One" do not. Reading (?: as a literal or a flag group, or ? as a literal, under-grants.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^(?:ab|on)e?$")'
+- id: 'regex/matches/escaped-dot'
+  tier: adversarial
+  intent: 'matches("^(?:ab|100\\.done)$"): an escaped dot inside an anchored alternation.'
+  trap: '\. is a literal dot, so a3 "100xdone" is denied and only h3 "ab" matches; dropping the escape turns it into any character and over-grants a3.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^(?:ab|100\\.done)$")'
+- id: 'regex/matches/empty-alternative'
+  tier: adversarial
+  intent: 'matches("a|"): an alternation whose second branch is empty.'
+  trap: 'The empty branch matches every string, so every row with an aString matches and only j1, which lacks it, is denied. Dropping the empty branch reads it as "contains a" and under-grants.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("a|")'
+- id: 'regex/matches/negated-malformed-patterns-from-principal'
+  tier: adversarial
+  intent: 'Four malformed patterns, each chosen by a principal-attribute ternary and negated, OR''d with aNumber == 5: a leading repetition operator, a reversed count, an unclosed group and a trailing backslash.'
+  trap: 'Go''s regexp rejects each, so every matches() is a CEL error and only a1 is allowed. An engine that reads *a, a{2,1} or a\ leniently, or closes the group, makes a negated disjunct true and over-grants every row; the pattern must be refused.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches(P.attr.context == "projects:f1" ? "*a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a{2,1}" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "(a" : "^h") || !R.attr.aString.matches(P.attr.context == "projects:f1" ? "a\\" : "^h") || R.attr.aNumber == 5'
+- id: 'regex/matches/negated-class'
+  tier: adversarial
+  intent: 'matches("^[^a]+$"): one or more characters, none of them a.'
+  trap: 'A negated class needs a character, so a8 "" is denied while h4 "0" matches; lowering it to "does not contain a" over-grants a8.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^[^a]+$")'
+- id: 'regex/matches/non-digit-class'
+  tier: adversarial
+  intent: 'matches("^\\D+$"): one or more characters, none of them a digit.'
+  trap: 'a1 "one" matches and a2 "100%_done" and a8 "" do not; a dialect without \D reads it as a literal D, and lowering it to "contains no digit" over-grants a8.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^\\D+$")'
+- id: 'regex/matches/unanchored-dot'
+  tier: adversarial
+  intent: 'matches("a.b"), unanchored: a and b with exactly one character between them.'
+  trap: 'The . never matches a newline, so a4 "xa_by" and a5 "xaXby" match and h2 "a\nb" does not; lowering it to LIKE ''%a_b%'' lets _ match the newline and over-grants h2.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("a.b")'
+- id: 'regex/matches/two-dot-star-gaps'
+  tier: adversarial
+  intent: 'matches("^x.*a.*y$"): an anchored pattern with two .* gaps.'
+  trap: 'a4 "xa_by" and a5 "xaXby" match and c2 "xA_by" does not; a case-insensitive lowering over-grants c2, and one that keeps only the outer anchors drops the inner a.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^x.*a.*y$")'
+- id: 'regex/matches/case-insensitive-non-ascii'
+  tier: adversarial
+  intent: 'matches("(?i)^É-X-É$"): the (?i) flag over a pattern with non-ASCII letters.'
+  trap: 'RE2 folds É to é, so h7 "é-x-é" matches; folding ASCII letters only, or a store lower() that leaves É alone, under-grants it.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("(?i)^É-X-É$")'
+- id: 'regex/matches/dot-all-flag'
+  tier: adversarial
+  intent: 'matches("(?s)^a.b$"): the (?s) flag, under which . also matches a newline.'
+  trap: 'With (?s), h2 "a\nb" matches and h3 "ab" does not; ignoring the flag keeps . off the newline and under-grants h2.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("(?s)^a.b$")'
+- id: 'regex/matches/word-boundary'
+  tier: adversarial
+  intent: 'matches("ne\\b"): ne followed by an ASCII word boundary.'
+  trap: 'a1 "one" and c1 "One" match and b1 "oneXtwo" does not; dropping \b over-grants b1, and PostgreSQL reads \b as a backspace and under-grants a1.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("ne\\b")'
+- id: 'regex/matches/end-anchor-mid-pattern'
+  tier: adversarial
+  intent: 'matches("a$b|^one$"): an end anchor followed by more pattern, beside an anchored literal.'
+  trap: 'Nothing follows the absolute end, so a$b never matches and only a1 "one" is allowed; dropping the $ or reading it literally over-grants h3 "ab" and h5 "ab\n".'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("a$b|^one$")'
+- id: 'regex/matches/field-to-field'
+  tier: adversarial
+  intent: 'matches() whose pattern is another string attribute (aString.matches(aOptionalString)).'
+  trap: 'The pattern is a column, so a store must compile each row''s value as RE2: b3 "back\slash" does not match "k\s" (k then whitespace) and d1 "[SEC]ret" matches the class [SEC]. A substring test over-grants b3; a missing or null pattern is a CEL error that denies.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches(R.attr.aOptionalString)'
