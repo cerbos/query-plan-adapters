@@ -1203,7 +1203,6 @@ RSpec.describe Cerbos::Sequel do
   # KIND 3: a policy can reach these, and the corpus does not carry them yet. Each is a corpus
   # gap tracked by #668; delete it when its corpus action lands.
   describe "an operand of no type the operator takes" do
-
     # Corpus gap. Each would hand a list or a held collection to SQL, which cannot quote it.
     it "refuses a list, a filtered list or a raw timestamp where SQL needs a scalar" do
       with_timestamp = ATTRS.merge("request.resource.attr.createdAt" => field("created_at"))
