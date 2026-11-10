@@ -76,9 +76,33 @@ _MEMBERSHIP_OPERATORS = frozenset({"in", "hasIntersection"})
 # IS NULL test.
 _NULL_FREE_OPERATORS = frozenset(
     {
-        "add", "sub", "mult", "div", "mod", "size", "int", "double", "string", "not",
-        "and", "or", "eq", "ne", "lt", "le", "gt", "ge", "in", "contains", "startsWith",
-        "endsWith", "matches", "exists", "exists_one", "all", "hasIntersection",
+        "add",
+        "sub",
+        "mult",
+        "div",
+        "mod",
+        "size",
+        "int",
+        "double",
+        "string",
+        "not",
+        "and",
+        "or",
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge",
+        "in",
+        "contains",
+        "startsWith",
+        "endsWith",
+        "matches",
+        "exists",
+        "exists_one",
+        "all",
+        "hasIntersection",
     }
 )
 
@@ -91,6 +115,8 @@ def _never_null(operand: Operand | None) -> bool:
     if operand.operator == "if" and len(operand.operands) == 3:
         return _never_null(operand.operands[1]) and _never_null(operand.operands[2])
     return operand.operator in _NULL_FREE_OPERATORS
+
+
 _ORDERING_AND_EQUALITY = frozenset({"eq", "ne", "lt", "le", "gt", "ge"})
 
 _BARE_TEMPORAL_REFUSAL = (

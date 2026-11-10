@@ -370,15 +370,7 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 	if operator == "in" && neverNull(left) {
 		var emptied bool
 		if right, emptied = withoutNullMembers(right); emptied {
-			lv, err := b.value(left, m)
-			if err != nil {
-				return nil, err
-			}
-			x, err := asExpr(lv)
-			if err != nil {
-				return nil, err
-			}
-			return negate(Case{Whens: []When{{Cond: IsNull{X: x, Negate: true}, Then: BoolConst{V: false}}}}, negated), nil
+			return b.inNoMembers(left, m, negated)
 		}
 	}
 
@@ -409,6 +401,20 @@ func (b *builder) binaryPredicate(n *node, m Mapper, negated bool) (Expr, error)
 	}
 
 	return negate(out, negated), nil
+}
+
+// inNoMembers lowers a never-null needle tested against a list of only nulls: FALSE where the
+// needle evaluates, UNKNOWN where it errors.
+func (b *builder) inNoMembers(left *node, m Mapper, negated bool) (Expr, error) {
+	lv, err := b.value(left, m)
+	if err != nil {
+		return nil, err
+	}
+	x, err := asExpr(lv)
+	if err != nil {
+		return nil, err
+	}
+	return negate(Case{Whens: []When{{Cond: IsNull{X: x, Negate: true}, Then: BoolConst{V: false}}}}, negated), nil
 }
 
 // nullFreeOperators yield a CEL value that is never null: an error, which SQL holds as NULL,
