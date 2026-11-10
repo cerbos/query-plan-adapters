@@ -427,7 +427,7 @@ func writeCall(b *sql.Builder, c queryplan.Call) error {
 // Each is case-sensitive, as CEL is, whatever case_sensitive_like says, and propagates NULL.
 func writeSQLiteLike(b *sql.Builder, t queryplan.Like) error {
 	return wrap(b, func(b *sql.Builder) error {
-		operands := func(open, sep, close string) error {
+		operands := func(open, sep, end string) error {
 			b.WriteString(open)
 			if err := write(b, t.Receiver); err != nil {
 				return err
@@ -436,7 +436,7 @@ func writeSQLiteLike(b *sql.Builder, t queryplan.Like) error {
 			if err := write(b, t.Needle); err != nil {
 				return err
 			}
-			b.WriteString(close)
+			b.WriteString(end)
 			return nil
 		}
 		switch t.Anchor {
