@@ -274,18 +274,22 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   - Materialise a *separate* parent row per resource.
   - An absent level is a missing attribute, so it is UNKNOWN under negation, never false. See
     [ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
-- **Store configuration is part of conformance.** CEL string comparison is byte-exact, and CEL
-  orders strings by code point:
-  - MySQL must use `utf8mb4_0900_bin`.
+- **The store's default collation is part of conformance.** CEL string comparison is byte-exact,
+  and CEL orders strings by code point, so a SQL adapter collates its own strings rather than
+  trusting the column's:
+  - MySQL legs run under the server default `utf8mb4_0900_ai_ci`, which folds case and accents
+    ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
+  - PostgreSQL legs initialise their database under ICU's linguistic `en-US`
+    (`--locale-provider=icu --icu-locale=en-US`), as a managed service would
+    ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)).
   - SQLite needs `PRAGMA case_sensitive_like = ON`, or string matching lowered to something other than
     `LIKE`.
-  - PostgreSQL must order by byte: every PostgreSQL leg initialises its database with
-    `--lc-collate=C` rather than inheriting the image's libc order, and
-    `ADAPTER_TEST_POSTGRES_INITDB_ARGS` overrides it to reproduce a linguistic collation's
-    over-grant ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)).
+  - Prisma's filter API cannot spell a collation, so its legs keep `utf8mb4_0900_bin` and
+    `--lc-collate=C`, the configuration its README requires.
 
-  The `string/*/case-sensitive`, soft-hyphen and `comparison/*/string-code-point-order` cases
-  witness this.
+  Where a harness reads them, `ADAPTER_TEST_MYSQL_COLLATION` and `ADAPTER_TEST_POSTGRES_INITDB_ARGS`
+  override a leg's store. The `string/*/case-sensitive`, soft-hyphen and
+  `comparison/*/string-code-point-order` cases witness this.
 
 ## Mapping hazards
 
