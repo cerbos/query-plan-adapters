@@ -47,6 +47,7 @@ from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - re-exported f
     require_index_position,
 )
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
+from cerbos_sqlalchemy.relations import Relation
 
 try:  # SQLAlchemy >= 2.0
     from sqlalchemy.orm import DeclarativeBase
@@ -70,6 +71,7 @@ _ORMModel = TypeVar("_ORMModel", bound=_MappedClass)
 # A 2.0-style model's metaclass is not a DeclarativeMeta, hence DeclarativeBase.
 GenericTable = Table | DeclarativeMeta | type[DeclarativeBase]
 GenericColumn = Column | InstrumentedAttribute
+AttrMapValue = GenericColumn | ColumnElement | Relation
 GenericExpression = BinaryExpression | ColumnOperators
 OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
@@ -164,7 +166,7 @@ def _variables_outside_overrides(
 
 def _require_table_mapping(
     table: GenericTable,
-    attr_map: dict[str, GenericColumn],
+    attr_map: dict[str, AttrMapValue],
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None,
     overrides: dict[str, Any] | None,
     condition: Operand,
@@ -228,7 +230,7 @@ def _require_table_mapping(
 def get_query(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: type[_ORMModel],
-    attr_map: dict[str, GenericColumn],
+    attr_map: dict[str, AttrMapValue],
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = ...,
     operator_override_fns: OperatorFnMap | None = ...,
     null_attribute_representation: NullAttributeRepresentation = ...,
@@ -242,7 +244,7 @@ def get_query(
 def get_query(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
-    attr_map: dict[str, GenericColumn],
+    attr_map: dict[str, AttrMapValue],
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = ...,
     operator_override_fns: OperatorFnMap | None = ...,
     null_attribute_representation: NullAttributeRepresentation = ...,
@@ -254,7 +256,7 @@ def get_query(
 def get_query(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
-    attr_map: dict[str, GenericColumn],
+    attr_map: dict[str, AttrMapValue],
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = None,
     operator_override_fns: OperatorFnMap | None = None,
     null_attribute_representation: NullAttributeRepresentation = "omitted",
@@ -267,7 +269,8 @@ def get_query(
         query_plan: A plan response from the HTTP or gRPC Cerbos client.
         table: The ORM model or Core ``Table`` to select from.
         attr_map: Maps each plan attribute reference, e.g. ``request.resource.attr.x``,
-            to a column or SQL expression.
+            to a column or SQL expression, or a collection attribute to a
+            ``Relation`` translated by ``relation_overrides()``.
         table_mapping: ``(table, join_predicate)`` pairs for every other table the
             mapped columns live on.
         operator_override_fns: Per-call handlers that replace the default lowering

@@ -16,7 +16,7 @@ from sqlalchemy.orm import DeclarativeBase, declarative_base
 from sqlalchemy.sql import Select
 from typing_extensions import assert_type
 
-from cerbos_sqlalchemy import get_query
+from cerbos_sqlalchemy import Relation, get_query, relation_overrides
 
 LegacyBase = declarative_base()
 
@@ -53,3 +53,14 @@ assert_type(get_query(plan, core_table, {}), Select[Any])
 
 # An unmapped class is rejected.
 get_query(plan, str, {})  # pyright: ignore[reportCallIssue, reportArgumentType]
+
+# A collection in a related table maps to a `Relation` beside plain columns.
+get_query(
+    plan,
+    core_table,
+    {
+        "request.resource.attr.name": core_table.c.name,
+        "request.resource.attr.tags": Relation([core_table.c.id == 1]),
+    },
+    operator_override_fns=relation_overrides(),
+)

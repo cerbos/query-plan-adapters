@@ -37,24 +37,14 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
-    and_,
-    case,
-    exists,
-    false,
-    func,
     literal,
-    not_,
-    null,
-    or_,
     select,
-    true,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import declarative_base
 
-from cerbos_sqlalchemy import CollectionColumn, UnsupportedPlanError, require_hops
-from cerbos_sqlalchemy.query import OPERATOR_FNS
+from cerbos_sqlalchemy import CollectionColumn, Relation, relation_overrides
 
 CONFORMANCE_DIR = os.path.realpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "conformance")
@@ -453,121 +443,63 @@ class AdvInner(AdvBase):
     )
 
 
-# -- relation markers and operator overrides --------------------------------
-# ATTR_MAP points relation attributes at markers; the overrides turn collection
-# macros over them into correlated subqueries. An element whose body is SQL NULL
-# is a CEL error: exists/all absorb it only given a true/false witness, and
-# exists_one/map/filter never do.
+# -- relations -----------------------------------------------------------------
+# ATTR_MAP points relation attributes at the shipped `Relation`, and the shipped
+# `relation_overrides()` translate macros over them, so the corpus proves the code
+# the README hands consumers (#527).
 
-
-class _Relation:
-    """Marker standing in for a relation path in the attribute map."""
-
-    def __init__(
-        self,
-        description: str,
-        correlation: list[Any],
-        correlate_targets: list[Any],
-        member_field=None,
-        hop_correlation: list[Any] | None = None,
-    ):
-        self.description = description
-        self.correlation = correlation
-        # Auto-correlation only reaches the immediate enclosing SELECT. Without
-        # explicit targets, a nested subquery would cross-join every resource row.
-        self.correlate_targets = correlate_targets
-        # The column compared by `in` over a string list (relation/in/to-one-chain).
-        self.member_field = member_field
-        # Predicates for the intermediate to-one hops. An absent parent is a CEL
-        # error (deny), but a plain subquery sees it as empty, so `all` and
-        # `!exists` would over-grant (#309). `require_hops` uses these to tell
-        # the two apart.
-        self.hop_correlation = hop_correlation or []
-
-    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
-        return f"_Relation({self.description})"
-
-
-TAGS = _Relation(
-    "tags",
+TAGS = Relation(
     [AdvTag.resource_id == AdvResource.id],
     # The resource may be several lambdas up: collection/exists/outer-collection-inside-lambda
     # nests tags in categories.
-    correlate_targets=[AdvResource],
+    correlate=[AdvResource],
 )
-TAG_NAMES = _Relation(
-    "tagNames",
+TAG_NAMES = Relation(
     [AdvTag.resource_id == AdvResource.id],
-    correlate_targets=[AdvResource],
-    member_field=AdvTag.name,
+    correlate=[AdvResource],
+    member=AdvTag.name,
 )
-CATEGORIES = _Relation(
-    "categories",
+CATEGORIES = Relation(
     [AdvCategory.resource_id == AdvResource.id],
-    correlate_targets=[AdvResource],
+    correlate=[AdvResource],
 )
 # Correlates to the enclosing category, but the body may read resource columns
 # (collection/exists/nested-with-outer-attribute), so the resource correlates too.
-SUB_OF_CATEGORY = _Relation(
-    "c.subCategories",
+SUB_OF_CATEGORY = Relation(
     [AdvSubCategory.category_id == AdvCategory.id],
-    correlate_targets=[AdvCategory, AdvResource],
+    correlate=[AdvCategory, AdvResource],
 )
-LABELS_OF_SUB = _Relation(
-    "s.labels",
+LABELS_OF_SUB = Relation(
     [AdvLabel.sub_category_id == AdvSubCategory.id],
-    correlate_targets=[AdvSubCategory, AdvCategory, AdvResource],
+    correlate=[AdvSubCategory, AdvCategory, AdvResource],
 )
 # The same two-hop chain from the root. The category hop stays in the subquery's
 # FROM; only the resource correlates.
-MAIN_SUB = _Relation(
-    "mainCategory.subCategories",
+MAIN_SUB = Relation(
     [
         AdvSubCategory.category_id == AdvCategory.id,
         AdvCategory.resource_id == AdvResource.id,
     ],
-    correlate_targets=[AdvResource],
+    correlate=[AdvResource],
     hop_correlation=[AdvCategory.resource_id == AdvResource.id],
 )
-MAIN_SUBNAMES = _Relation(
-    "mainCategory.subNames",
+MAIN_SUBNAMES = Relation(
     [
         AdvSubCategory.category_id == AdvCategory.id,
         AdvCategory.resource_id == AdvResource.id,
     ],
-    correlate_targets=[AdvResource],
-    member_field=AdvSubCategory.name,
+    correlate=[AdvResource],
+    member=AdvSubCategory.name,
     hop_correlation=[AdvCategory.resource_id == AdvResource.id],
 )
-
-
-def _exists_where(rel: _Relation, *conds: Any):
-    q = select(literal(1))
-    for pred in rel.correlation:
-        q = q.where(pred)
-    for cond in conds:
-        q = q.where(cond)
-    return exists(q.correlate(*rel.correlate_targets))
-
-
-def _count_subquery(rel: _Relation, *conds: Any):
-    q = select(func.count())
-    for pred in rel.correlation:
-        q = q.where(pred)
-    for cond in conds:
-        q = q.where(cond)
-    return q.correlate(*rel.correlate_targets).scalar_subquery()
-
-
-def _require_hops(rel: _Relation, expr: Any):
-    """Make ``expr`` UNKNOWN unless every intermediate to-one hop exists."""
-    # Calls the shipped helper, so the chained corpus cases test it. `size()` chains
-    # skip it: a NULL declared column already yields UNKNOWN.
-    return require_hops(expr, rel.hop_correlation, rel.correlate_targets)
 
 
 class _ToOneRow:
-    """The to-one `parent` read whole: a map-valued attribute, stored as a row."""
+    """The to-one `parent` read whole: a map-valued attribute, stored as a row.
+
+    A macro or `in` over it ranges over the keys of a map, and SQL cannot read which
+    of a row's columns are non-NULL as those keys, so the overrides refuse it.
+    """
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics only
         return "_ToOneRow(parent)"
@@ -575,212 +507,7 @@ class _ToOneRow:
 
 PARENT = _ToOneRow()
 
-
-def _require_relation(op: str, coll: Any) -> _Relation:
-    if isinstance(coll, _ToOneRow):
-        raise UnsupportedPlanError(
-            f"{op} over the to-one parent ranges over the keys of a map, and the "
-            "parent is a row: SQL has no way to enumerate which of its columns are "
-            "non-NULL as the attribute's keys"
-        )
-    if not isinstance(coll, _Relation):
-        raise UnsupportedPlanError(
-            f"{op} over unsupported collection operand: {coll!r}"
-        )
-    return coll
-
-
-def _exists_fn(coll: Any, body: Any):
-    # True on any true witness, else NULL if any element errors, else false.
-    rel = _require_relation("exists", coll)
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, body), true()),
-            (_exists_where(rel, body.is_(None)), null()),
-            else_=false(),
-        ),
-    )
-
-
-def _all_fn(coll: Any, body: Any):
-    # False on any false witness, else NULL if any element errors, else true.
-    rel = _require_relation("all", coll)
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, not_(body)), false()),
-            (_exists_where(rel, body.is_(None)), null()),
-            else_=true(),
-        ),
-    )
-
-
-def _exists_one_fn(coll: Any, body: Any):
-    # Any erroring element makes it NULL, even beside a true witness.
-    rel = _require_relation("exists_one", coll)
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, body.is_(None)), null()),
-            else_=(_count_subquery(rel, body) == 1),
-        ),
-    )
-
-
-def _filter_fn(coll: Any, body: Any):
-    # Deferred: consumed by the `size` override.
-    return ("filter", _require_relation("filter", coll), body)
-
-
-def _map_fn(coll: Any, projected: Any):
-    # Deferred: consumed by the `hasIntersection` override.
-    return ("map", _require_relation("map", coll), projected)
-
-
-def _size_fn(target: Any, _: Any):
-    if isinstance(target, _Relation):
-        # size() never evaluates elements, so no error guard. An absent parent
-        # must still be UNKNOWN, not 0 (#309).
-        return _require_hops(target, _count_subquery(target))
-    if isinstance(target, tuple) and target[0] == "filter":
-        # filter never absorbs errors: any NULL body makes the count NULL.
-        _, rel, body = target
-        return _require_hops(
-            rel,
-            case(
-                (_exists_where(rel, body.is_(None)), null()),
-                else_=_count_subquery(rel, body),
-            ),
-        )
-    return OPERATOR_FNS["size"](target, None)
-
-
-def _has_intersection_fn(mapped: Any, values: Any):
-    if isinstance(mapped, list):
-        mapped, values = values, mapped
-    if not isinstance(values, list):
-        raise UnsupportedPlanError(
-            "hasIntersection is translated only against a literal list"
-        )
-    if not isinstance(mapped, _Relation) and not (
-        isinstance(mapped, tuple) and mapped[0] == "map"
-    ):
-        raise UnsupportedPlanError(
-            "hasIntersection is translated only over a relation or its map() projection"
-        )
-    if not values:
-        rel = mapped if isinstance(mapped, _Relation) else mapped[1]
-        return _require_hops(rel, false())
-    if isinstance(mapped, _Relation):
-        if mapped.member_field is None:
-            raise UnsupportedPlanError(
-                f"hasIntersection over relation without member field: {mapped!r}"
-            )
-        return _require_hops(
-            mapped,
-            _exists_where(mapped, _scalar_membership(mapped.member_field, values)),
-        )
-
-    # map never absorbs errors, so the error check comes first.
-    _, rel, projected = mapped
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, projected.is_(None)), null()),
-            (_exists_where(rel, _scalar_membership(projected, values)), true()),
-            else_=false(),
-        ),
-    )
-
-
-def _scalar_membership(column: Any, values: Any):
-    # Reuse the adapter's lowering: it drops members of the wrong type, which
-    # SQLite would otherwise coerce ('5' = 5).
-    return OPERATOR_FNS["in"](column, values)
-
-
-def _relation_membership(relation: _Relation, value: Any):
-    if isinstance(value, (list, dict)):
-        raise UnsupportedPlanError(
-            "Membership with a structured element has no scalar SQL lowering"
-        )
-    if relation.member_field is None:
-        raise UnsupportedPlanError(
-            f"in over relation without member field: {relation!r}"
-        )
-    member = relation.member_field
-    if value is None:
-        predicate = member.is_(None)
-    elif hasattr(value, "is_"):
-        predicate = or_(
-            member == value,
-            and_(member.is_(None), value.is_(None)),
-        )
-    else:
-        predicate = member == value
-    return _require_hops(relation, _exists_where(relation, predicate))
-
-
-def _in_deferred(needle: Any, deferred: tuple):
-    """``needle in map(...)`` or ``needle in filter(...)``, for a literal needle."""
-    kind, rel, body = deferred
-    if needle is None or not isinstance(needle, (str, int, float, bool)):
-        raise UnsupportedPlanError(
-            f"in over {kind}() is lowered for a scalar literal needle only"
-        )
-    if kind == "map":
-        # Same as hasIntersection(map(...), [needle]): map never absorbs errors.
-        return _has_intersection_fn(deferred, [needle])
-    if rel.member_field is None:
-        raise UnsupportedPlanError(
-            f"in over filter() needs the relation's member field: {rel!r}"
-        )
-    # filter never absorbs errors either: any NULL body makes the list, and `in`, error.
-    return _require_hops(
-        rel,
-        case(
-            (_exists_where(rel, body.is_(None)), null()),
-            (
-                _exists_where(
-                    rel, body, _scalar_membership(rel.member_field, [needle])
-                ),
-                true(),
-            ),
-            else_=false(),
-        ),
-    )
-
-
-def _in_fn(column: Any, value: Any):
-    if isinstance(value, tuple) and value and value[0] in ("map", "filter"):
-        return _in_deferred(column, value)
-    if isinstance(column, _ToOneRow) or isinstance(value, _ToOneRow):
-        raise UnsupportedPlanError(
-            "in over the to-one parent tests the keys of a map, and the parent is a "
-            "row: SQL has no way to read which of its columns are non-NULL as the "
-            "attribute's keys"
-        )
-    if isinstance(column, _Relation):
-        # Rows with an empty chain are excluded, matching CEL's missing-attribute deny.
-        return _relation_membership(column, value)
-    if isinstance(value, _Relation):
-        return _relation_membership(value, column)
-    return _scalar_membership(column, value)
-
-
-OPERATOR_OVERRIDES = {
-    # Keep the body; the iterator variable is already resolved via ATTR_MAP.
-    "lambda": lambda body, _var: body,
-    "exists": _exists_fn,
-    "all": _all_fn,
-    "exists_one": _exists_one_fn,
-    "filter": _filter_fn,
-    "map": _map_fn,
-    "size": _size_fn,
-    "hasIntersection": _has_intersection_fn,
-    "in": _in_fn,
-}
+OPERATOR_OVERRIDES = relation_overrides()
 
 # Collection storage, read only by `size()` and `index` (#227). Collections with a relation
 # keep their ATTR_MAP marker too, since the macros still use the relation.
