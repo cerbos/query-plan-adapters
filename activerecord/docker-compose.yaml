@@ -30,13 +30,9 @@ services:
     environment:
       POSTGRES_PASSWORD: conformance
       POSTGRES_DB: conformance
-      # A byte-order collation, stated rather than inherited. CEL orders strings by code point,
-      # and <, <=, > and >= on a text column follow the column's collation: under glibc's
-      # en_US.utf8 'One' > 'a' is TRUE (#489). The Alpine image reports en_US.utf8 and orders by
-      # byte only because musl's strcoll does. ADAPTER_TEST_POSTGRES_INITDB_ARGS overrides it to
-      # reproduce the over-grant, for example "--locale-provider=icu --icu-locale=en-US"; a
-      # measurement, not a CI leg.
-      POSTGRES_INITDB_ARGS: ${ADAPTER_TEST_POSTGRES_INITDB_ARGS:---lc-collate=C}
+      # ICU's linguistic en-US order, as a managed service's default, so the corpus proves the
+      # adapter orders strings by code point itself (#489).
+      POSTGRES_INITDB_ARGS: ${ADAPTER_TEST_POSTGRES_INITDB_ARGS:---locale-provider=icu --icu-locale=en-US}
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "conformance"]
       interval: 2s
@@ -46,10 +42,8 @@ services:
   mysql:
     profiles: ["mysql"]
     image: ${MYSQL_IMAGE:-}
-    # Byte-exact and NO PAD. MySQL's default collation makes `=` case-insensitive, and
-    # utf8mb4_0900_as_cs still ignores a soft hyphen (#474). The connection sets it too
-    # (spec/support/database.rb): a literal takes the connection's collation, not the column's.
-    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_bin"]
+    # The server's default collation, utf8mb4_0900_ai_ci, which folds case and accents, so the
+    # corpus proves the adapter compares strings byte for byte itself (#474).
     environment:
       MYSQL_ROOT_PASSWORD: conformance
       MYSQL_DATABASE: conformance

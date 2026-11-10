@@ -323,31 +323,27 @@ conventions answer each as its own convention says, as `eq` does
 > access to `x`, as in `has(R.attr.x) && R.attr.x == "a"`, because that access already denies a row
 > without `x`.
 
-## The collation is part of the contract
+## Collations
 
-CEL string comparison is byte-exact. A case-insensitive or otherwise lenient collation makes
-`==`, `contains`, `startsWith` and `endsWith` match more rows than the policy allows. CEL also
-orders strings by code point, and `<`, `<=`, `>` and `>=` follow the collation.
+CEL compares strings byte for byte and orders them by code point. The adapter does not trust the
+column's collation for that:
 
+- **MySQL:** every string literal is quoted as `CONVERT('…' USING utf8mb4) COLLATE
+  utf8mb4_0900_bin`, and a `string` or `text` column compared with another column is read under
+  the same collation, so `==`, `in`, `contains`, `startsWith`, `endsWith` and ordering are
+  byte-exact and NO PAD even under the default `utf8mb4_0900_ai_ci`, on the columns or on the
+  connection. String columns must use the `utf8mb4` character set, and a comparison over a
+  column whose own collation differs cannot use that column's index.
+- **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
+  ordering over a string runs under `COLLATE "C"`, since a linguistic collation such as
+  `en_US.UTF-8` sorts `"One"` after `"a"`
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Avoid nondeterministic ICU
+  collations and `citext`.
 - **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
   point.
-- **PostgreSQL:** every collation is deterministic, so equality is exact, but string ordering needs
-  a byte-order collation, `"C"`. A linguistic one such as glibc's `en_US.UTF-8` (the usual default
-  on Debian images and managed services) or ICU's `en-US` sorts `"One"` after `"a"`, so
-  `R.attr.name > "a"` over-grants it
-  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Create the database with
-  `LC_COLLATE 'C'`, or declare `COLLATE "C"` on each column a policy orders.
-- **MySQL:** use `utf8mb4_0900_bin` (MySQL 8.0.17+) on every column your policies read. `_cs` is
-  not enough — `utf8mb4_0900_as_cs` ignores a soft hyphen (U+00AD), and `utf8mb4_bin` is PAD
-  SPACE (`'a' = 'a '` is TRUE) ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-  `utf8mb4_0900_bin` orders by code point. Make the **connection** collation byte-exact too
-  (`collation: utf8mb4_0900_bin` in the mysql2 config, which ActiveRecord applies with
-  `SET NAMES`): `string()` of a column is a `CAST` or a `CASE` over literals, so it takes the
-  connection collation, and under the default `utf8mb4_0900_ai_ci` `string(R.attr.owner) == "set"`
-  also matches `Set`.
 
-The conformance suite runs on SQLite, PostgreSQL (initialised with `--lc-collate=C`) and MySQL
-(`utf8mb4_0900_bin` on the columns and the connection). The other suites run on SQLite.
+The conformance suite runs on SQLite, PostgreSQL (initialised under ICU's `en-US`) and MySQL (on
+the server's default collation). The other suites run on SQLite.
 
 ## How the adapter keeps the three-valued logic
 

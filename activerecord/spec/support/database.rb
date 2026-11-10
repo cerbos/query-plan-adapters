@@ -10,9 +10,9 @@ module Database
     raise ArgumentError, "ADAPTER_TEST_DB must be one of #{STORES.join(", ")}, not #{STORE.inspect}"
   end
 
-  # Byte-exact and NO PAD, as CEL compares strings. MySQL's default collation makes `=`
-  # case-insensitive, and utf8mb4_0900_as_cs still ignores a soft hyphen (#474).
-  MYSQL_COLLATION = "utf8mb4_0900_bin"
+  # MySQL's default, which folds case and accents (#474): the adapter compares strings byte for
+  # byte itself.
+  MYSQL_COLLATION = "utf8mb4_0900_ai_ci"
 
   module_function
 
@@ -28,9 +28,7 @@ module Database
         database: "conformance"
       )
     when "mysql"
-      # The server creates every column in MYSQL_COLLATION (docker-compose.yaml). The session
-      # needs it too, since a literal takes the connection's collation, not the column's; the
-      # mysql2 adapter sets it with SET NAMES.
+      # The server's columns and this session both run on MYSQL_COLLATION.
       ActiveRecord::Base.establish_connection(
         adapter: "mysql2", host: "mysql", username: "root", password: "conformance",
         database: "conformance", encoding: "utf8mb4", collation: MYSQL_COLLATION

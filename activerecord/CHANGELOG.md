@@ -2,6 +2,7 @@
 
 ### Changed
 
+- Fixed over-grants on a default-configured database: every MySQL string comparison runs under `utf8mb4_0900_bin` and every PostgreSQL string ordering under `"C"`, so MySQL's `utf8mb4_0900_ai_ci` no longer matches `"Finance"` for `== "finance"`, and a linguistic PostgreSQL collation no longer orders strings out of code-point order. A MySQL string comparison over a column with another collation can no longer use that column's index.
 - Fixed over-grants: a string, number or temporal column read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was read as a number; and a ternary whose arms are an `int()` and a double is kept as branches, so arithmetic over it is CEL's int-beside-double error on the rows that select the double arm.
 - **Breaking:** `null_attribute_representation:` defaults to `:omitted`, where it defaulted to `:explicit`. A caller that sends explicit nulls and set nothing now gets `col == null` matching no row where it rendered `IS NULL`, and a refusal for the other null constants; pass `null_attribute_representation: :explicit` to keep the old output ([#499](https://github.com/cerbos/query-plan-adapters/issues/499), [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
 

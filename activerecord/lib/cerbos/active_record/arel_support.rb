@@ -30,8 +30,70 @@ module Cerbos
         return value if value.nil? || arel_node?(value)
 
         Timestamps.assert_bindable(value) if value.is_a?(::Time)
-        Arel::Nodes.build_quoted(value)
+        quoted = Arel::Nodes.build_quoted(value)
+        return quoted unless value.is_a?(::String) && current_dialect&.mysql?
+
+        converted = Arel::Nodes::InfixOperation.new("USING", quoted, Arel.sql("utf8mb4"))
+        exact_mysql(Arel::Nodes::NamedFunction.new("CONVERT", [converted]))
       end
+
+      # The dialect of the translation in progress, so every string literal and string ordering
+      # is built for it: CEL compares strings byte for byte and orders them by code point, which
+      # MySQL's default collation and PostgreSQL's linguistic ones do not.
+      def with_dialect(dialect, column_type)
+        previous = Thread.current[:cerbos_active_record_dialect]
+        Thread.current[:cerbos_active_record_dialect] = [dialect, column_type]
+        yield
+      ensure
+        Thread.current[:cerbos_active_record_dialect] = previous
+      end
+
+      def current_dialect
+        Thread.current[:cerbos_active_record_dialect]&.first
+      end
+
+      MYSQL_EXACT_COLLATION = Arel.sql("utf8mb4_0900_bin")
+      CODE_POINT_COLLATION = Arel.sql('"C"')
+
+      def exact_mysql(node)
+        collate(node, MYSQL_EXACT_COLLATION)
+      end
+
+      def collate(node, collation)
+        Arel::Nodes::Grouping.new(Arel::Nodes::InfixOperation.new("COLLATE", node, collation))
+      end
+
+      def collated?(node)
+        node.is_a?(Arel::Nodes::Grouping) && node.expr.is_a?(Arel::Nodes::InfixOperation) &&
+          node.expr.operator == "COLLATE"
+      end
+
+      def string_operand?(node)
+        return true if collated?(node)
+        return true if node.is_a?(Arel::Nodes::Quoted) && node.value.is_a?(::String)
+
+        column_type = Thread.current[:cerbos_active_record_dialect]&.last
+        %i[string text].include?(column_type&.call(node))
+      end
+
+      # A string comparison under one explicit collation: MySQL's byte-exact one on a string
+      # column when no literal already carries it, and "C" on PostgreSQL for an ordering.
+      def exact_operands(operator, left, right)
+        dialect = current_dialect
+        sides = [left, right]
+        return sides unless dialect && sides.any? { |side| string_operand?(side) }
+
+        if dialect.mysql?
+          return sides if sides.any? { |side| collated?(side) }
+
+          return sides.map { |side| string_operand?(side) ? exact_mysql(side) : side }
+        end
+        return sides unless dialect.postgres? && ORDERING_OPERATORS.include?(operator)
+
+        sides.map { |side| string_operand?(side) ? collate(side, CODE_POINT_COLLATION) : side }
+      end
+
+      ORDERING_OPERATORS = %w[lt gt le ge].freeze
 
       def arel_node?(value)
         value.is_a?(Arel::Nodes::Node) ||
@@ -102,7 +164,7 @@ module Cerbos
         node_class = COMPARISON_NODES.fetch(operator) do
           raise UnsupportedOperatorError, "Unsupported comparison operator: #{operator}"
         end
-        node_class.new(quote(left), quote(right))
+        node_class.new(*exact_operands(operator, quote(left), quote(right)))
       end
 
       def infix(operator, left, right)
