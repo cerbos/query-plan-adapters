@@ -1,7 +1,7 @@
 // `cond ? a : b`, in boolean position and as an operand of a comparison. Both lower to the same
 // guarded disjunction, which keeps CEL's error semantics when the condition is UNKNOWN.
 
-import type { PlanExpressionOperand } from "@cerbos/core";
+import type { PlanExpressionOperand, Value } from "@cerbos/core";
 
 import { handleRelationalOperator } from "./comparison";
 import { evaluateConstantComparison } from "./evaluate";
@@ -19,6 +19,7 @@ import {
   buildNegatedFilter,
   buildPrismaFilterFromCerbosExpression,
 } from "./translate";
+import { normalizeRfc3339Milliseconds } from "./timestamp";
 import { UnsupportedQueryPlanError } from "./errors";
 
 /** What one ternary branch contributes: a known constant, or a filter to be guarded. */
@@ -172,6 +173,25 @@ export function handleBooleanTernaryOperator(
 }
 
 /** The comparison with its ternary operand replaced by `branch`, as a branch predicate. */
+// A timestamp() literal compares as its canonical instant, never against a bare string.
+function constantOf(
+  operand: PlanExpressionOperand | undefined
+): { value: Value; timestamp: boolean } | undefined {
+  if (operand === undefined) return undefined;
+  if (isValueOperand(operand)) return { value: operand.value, timestamp: false };
+  if (
+    isOperatorOperand(operand) &&
+    operand.operator === "timestamp" &&
+    operand.operands.length === 1
+  ) {
+    const literal = operand.operands[0];
+    if (literal !== undefined && isValueOperand(literal) && typeof literal.value === "string") {
+      return { value: normalizeRfc3339Milliseconds(literal.value), timestamp: true };
+    }
+  }
+  return undefined;
+}
+
 function buildTernaryComparisonBranch(
   operator: string,
   operands: PlanExpressionOperand[],
@@ -193,20 +213,21 @@ function buildTernaryComparisonBranch(
       : normalizeBinaryOperands(operator, substitutedOperands);
 
   const [normalizedFirst, normalizedSecond] = normalized.operands;
+  const first = constantOf(normalizedFirst);
+  const second = constantOf(normalizedSecond);
   if (
     normalized.operands.length === 2 &&
-    normalizedFirst !== undefined &&
-    normalizedSecond !== undefined &&
-    isValueOperand(normalizedFirst) &&
-    isValueOperand(normalizedSecond)
+    first !== undefined &&
+    second !== undefined &&
+    first.timestamp === second.timestamp
   ) {
     return {
       kind: "constant",
       value:
         evaluateConstantComparison(
           normalized.operator,
-          normalizedFirst.value,
-          normalizedSecond.value
+          first.value,
+          second.value
         ) !== negated,
     };
   }
