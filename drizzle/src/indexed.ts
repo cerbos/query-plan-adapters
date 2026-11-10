@@ -71,6 +71,30 @@ export function indexedEquality({
   throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
 }
 
+function listShape(column: AnyColumn, indexable: Indexable): { isArray: SQL; length: SQL } {
+  if (indexable === "pgArray" || is(column, PgColumn)) {
+    const source =
+      indexable === "pgArray"
+        ? (assertPgArrayColumn(column), sql`to_jsonb(${column})`)
+        : (assertPgJsonColumn(column as PgColumn), sql`cast(${column} as jsonb)`);
+    return { isArray: sql`jsonb_typeof(${source}) = 'array'`, length: sql`jsonb_array_length(${source})` };
+  }
+  if (is(column, MySqlColumn)) {
+    return { isArray: sql`json_type(${column}) = 'ARRAY'`, length: sql`json_length(${column})` };
+  }
+  if (is(column, SQLiteColumn)) {
+    assertSqliteJsonColumn(column);
+    return { isArray: sql`json_type(${column}) = 'array'`, length: sql`json_array_length(${column})` };
+  }
+  throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
+}
+
+/** `size(R.attr.list)` over declared ordered storage; a NULL or non-array column is UNKNOWN. */
+export function indexedListSize(column: AnyColumn, indexable: Indexable): SQL {
+  const { isArray, length } = listShape(column, indexable);
+  return sql`(case when ${isArray} then ${length} end)`;
+}
+
 /**
  * `R.attr.list == [v0, v1, …]` over declared ordered storage: CEL's list equality — the same
  * length, and each position equal under the typed element comparison `indexedEquality` makes. A
@@ -98,25 +122,7 @@ export function indexedListEquality({
     }
     return value;
   });
-  let isArray: SQL;
-  let length: SQL;
-  if (indexable === "pgArray" || is(column, PgColumn)) {
-    const source =
-      indexable === "pgArray"
-        ? (assertPgArrayColumn(column), sql`to_jsonb(${column})`)
-        : (assertPgJsonColumn(column as PgColumn), sql`cast(${column} as jsonb)`);
-    isArray = sql`jsonb_typeof(${source}) = 'array'`;
-    length = sql`jsonb_array_length(${source})`;
-  } else if (is(column, MySqlColumn)) {
-    isArray = sql`json_type(${column}) = 'ARRAY'`;
-    length = sql`json_length(${column})`;
-  } else if (is(column, SQLiteColumn)) {
-    assertSqliteJsonColumn(column);
-    isArray = sql`json_type(${column}) = 'array'`;
-    length = sql`json_array_length(${column})`;
-  } else {
-    throw new Error("Indexed JSON columns require PostgreSQL, SQLite or MySQL");
-  }
+  const { isArray, length } = listShape(column, indexable);
   const elements = scalars.map((value, index) =>
     indexedEquality({ column, indexable, index, value }),
   );
