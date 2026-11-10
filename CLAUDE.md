@@ -1,7 +1,8 @@
 # CLAUDE.md
 
 Adapters that translate a Cerbos query plan into a database-native filter, each an independent
-package in a directory holding a `conformance-ledger.json`.
+package in a directory holding a `conformance-ledger.json`, except spring-data, which wraps jpa
+([ADR 0013](docs/adr/0013-spring-data-wraps-the-jpa-core.md)).
 
 **The invariant: a shape an adapter cannot express throws the adapter's refusal type.** Every filter
 an adapter emits returns exactly the rows the PDP allows. A best-effort filter can *over-grant*,
@@ -33,7 +34,8 @@ may still pin.
 
 - Never write unit tests after you write code.
 - Highly prefer E2E or integration tests as the sole testing mechanism. Use them to verify complex
-  features work. At the end of those tests, produce a verifiable and repeatable artifact.
+  features work. At the end of those tests, produce a verifiable and repeatable artifact: the
+  golden diff and a passing `conformance/scripts/run-harness.sh`.
 - If you must test a system in isolation, first write down all the ways it could fail, then write
   the code.
 - A test that breaks under a behavior-preserving refactor is asserting implementation, not behavior.

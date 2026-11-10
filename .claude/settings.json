@@ -3,5 +3,74 @@
     "commit": "",
     "pr": "",
     "sessionUrl": false
+  },
+  "permissions": {
+    "deny": [
+      "Read(/**/.env)",
+      "Read(/**/.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.codex/auth.json)",
+      "Bash(*git push*--force)",
+      "Bash(*git push*--force *)",
+      "Bash(*git push* -f)",
+      "Bash(*git push* -f *)",
+      "Bash(*git reset --hard*)",
+      "Bash(*git clean -f*)",
+      "Bash(*git checkout -- .)",
+      "Bash(*git commit --no-verify*)",
+      "Bash(*gh pr merge*)",
+      "Bash(*gh release create*)",
+      "Bash(*gh repo delete*)",
+      "Bash(*rm -rf /)",
+      "Bash(*rm -rf ~)",
+      "Bash(*rm -rf ~/)",
+      "Bash(*rm -rf .)",
+      "Bash(*rm -rf ./)",
+      "Bash(*prisma migrate reset*)",
+      "Bash(*prisma db push*--force-reset*)",
+      "Bash(*prisma db push*--accept-data-loss*)",
+      "Bash(*DROP DATABASE*)",
+      "Bash(*git rm *.test.ts*)",
+      "Bash(*git rm *_test.go*)",
+      "Bash(*git rm *Test.java*)",
+      "Bash(*git rm *Test.kt*)",
+      "Bash(*git rm *Tests.cs*)",
+      "Bash(*git rm *_spec.rb*)",
+      "Bash(*git rm *tests/test_*)",
+      "Bash(*git rm *conformance/cases*)",
+      "Bash(*git mv .github/workflows/*-publish.yaml*)",
+      "Edit(/conformance/golden/**)",
+      "Edit(/conformance/resources.json)",
+      "Edit(/conformance/policies/conformance.yaml)",
+      "Edit(/conformance/pdp-versions.json)",
+      "Edit(/.claude/settings.json)",
+      "Edit(/.claude/hooks/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/secret-scan.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/tests-before-done.sh",
+            "timeout": 1800
+          }
+        ]
+      }
+    ]
   }
 }
