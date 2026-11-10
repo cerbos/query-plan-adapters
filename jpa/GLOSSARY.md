@@ -81,7 +81,7 @@ Terms used by this adapter's code, tests, and reviews, and by `spring-data`, whi
   attribute numbers are CEL doubles and the wire plan erases `1` vs `1.0`.
   Constants fold in Java; columns get a real `CAST(... AS DOUBLE)`. Owned by
   **ArithmeticTranslator**, including the zero-divisor story (`NULLIF` guard,
-  IEEE-arm rewrite) and the MySQL cast probe (**IeeeDoubleCast**).
+  IEEE-arm rewrite) and the MySQL cast probe (**RegisteredFunctions**).
 - **Options** — the one immutable record holding everything a caller tells the
   adapter: the mapping, the operator overrides, the call-level NULL convention,
   and the macro-depth bound. Collections are copied on construction and each

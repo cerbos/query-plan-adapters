@@ -18,6 +18,7 @@
   <ItemGroup>
     <PackageReference Include="Cerbos.Sdk" Version="1.11.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>
