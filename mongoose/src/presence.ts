@@ -23,27 +23,35 @@ export const translateHas = (
   negated: boolean,
 ): MongooseFilter => {
   const [operand] = operands;
+
   if (operands.length !== 1 || operand === undefined || !isVariable(operand)) {
     throw new UnsupportedQueryPlanError("has requires exactly one attribute reference");
   }
+
   const reference = operand.name;
   assertCollectionScopedReference(reference, ctx);
   const { path, relation } = resolveFieldReference(reference, ctx.mapper);
+
   if (relation?.type === "many") {
     throw new UnsupportedQueryPlanError(
       `Cannot translate has(${reference}): a presence test over a to-many relation is unsupported`,
     );
   }
+
   const field = path.join(".");
   const namesParent = relation?.type === "one" && field === relation.name;
+
   const presence =
     namesParent || isNullableReference(reference, ctx.mapper)
       ? { [field]: { $ne: null } }
       : { [field]: { $exists: true } };
+
   if (!negated) {
     return presence;
   }
+
   const absence = { $nor: [presence] };
+
   return relation?.type === "one" && !namesParent
     ? { $and: [{ [relation.name]: { $ne: null } }, absence] }
     : absence;

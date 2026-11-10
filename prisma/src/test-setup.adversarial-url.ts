@@ -8,6 +8,7 @@
  */
 export function adversarialDatabaseUrl(): string {
   const url = process.env["DATABASE_URL"];
+
   if (!url) {
     throw new Error(
       "DATABASE_URL is not set: a container-backed adversarial leg is started by " +
@@ -15,5 +16,6 @@ export function adversarialDatabaseUrl(): string {
         "`npm run test:adversarial:postgres` or `npm run test:adversarial:mysql`"
     );
   }
+
   return url;
 }

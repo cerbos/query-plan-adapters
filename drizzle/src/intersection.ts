@@ -61,19 +61,24 @@ const nullProjectionGuard = (
   const effective = relations.filter(
     (relation) => !options.skipRelations?.has(relation),
   );
+
   if (!effective.length) {
     return undefined;
   }
+
   const isPlainColumn =
     isColumn(mapping) ||
     (isMappingConfig(mapping) &&
       mapping.column !== undefined &&
       !mapping.relation &&
       !mapping.transform);
+
   if (!isPlainColumn) {
     return undefined;
   }
+
   const colExpr = buildColumnExpression(mapping, reference);
+
   return not(
     wrapWithRelations(relations, sql`${colExpr} is null`, reference, options),
   );
@@ -89,6 +94,7 @@ const buildChainMembership = (
 ): SQL => {
   const filter = applyComparison(element.mapping, "in", values, options);
   const wrapped = wrapRelationChain(element.relations, filter, reference, options);
+
   return conjoin(
     wrapped,
     guardNullProjection
@@ -107,17 +113,22 @@ const buildMappedIntersection = (
   if (mapOperand.operands.length !== 2) {
     throw new UnsupportedQueryPlanError("'map' operator within hasIntersection requires two operands");
   }
+
   const [collectionOperand, lambdaOperand] = mapOperand.operands;
+
   if (!collectionOperand || !lambdaOperand) {
     throw new UnsupportedQueryPlanError("Map expression is missing operands");
   }
+
   if (!isNameOperand(collectionOperand)) {
     throw new UnsupportedQueryPlanError("Map collection operand must be a field reference");
   }
+
   const { variable, expression: projectionOperand } = extractLambdaComponents(
     lambdaOperand,
     "Map lambda operand",
   );
+
   if (!isNameOperand(projectionOperand)) {
     throw new UnsupportedQueryPlanError("Invalid map lambda structure");
   }
@@ -127,16 +138,20 @@ const buildMappedIntersection = (
     variable.name,
     mapper,
   );
+
   if (scope.leadingRelations.length > 0) {
     throw new UnsupportedQueryPlanError(
       "'hasIntersection' over a map() whose collection lies behind another relation is not supported",
     );
   }
+
   const reference = projectionOperand.name;
+
   const projection = resolveRelationDefaultField(
     resolveFieldReference(reference, scope.mapper),
     reference,
   );
+
   const projectedFilter = buildChainMembership(
     projection,
     values,
@@ -144,6 +159,7 @@ const buildMappedIntersection = (
     { ...options, skipRelations: scope.skipRelations },
     true,
   );
+
   // Exclude rows whose projected element column is NULL (CEL map() errors on a missing
   // element attribute → deny). Only emit this guard when the projection is a direct column
   // of the primary relation's table (no relations beyond the primary one already skipped):
@@ -153,6 +169,7 @@ const buildMappedIntersection = (
   const projectionBeyondPrimary = projection.relations.filter(
     (relation) => !scope.skipRelations.has(relation),
   );
+
   return conjoin(
     wrapWithRelations([scope.primaryRelation], projectedFilter, reference),
     projectionBeyondPrimary.length === 0
@@ -174,10 +191,13 @@ export const buildHasIntersectionFilter = (
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError("'hasIntersection' operator requires exactly two operands");
   }
+
   const [firstOperand, secondOperand] = operands;
+
   if (!firstOperand || !secondOperand) {
     throw new UnsupportedQueryPlanError("'hasIntersection' requires exactly two operands");
   }
+
   // hasIntersection is commutative and the planner preserves source order, so the constant
   // list arrives FIRST when the policy spells it first. The two operands are not
   // interchangeable in the emitted SQL — one is a column the store can index, the other a
@@ -190,6 +210,7 @@ export const buildHasIntersectionFilter = (
   // value-first spelling into `FALSE`, returning no rows for a shape the adapter can express
   // — an emitted filter the corpus forbids, silent because it never threw (#387).
   const values = extractArrayValue(rightOperand);
+
   if (values === undefined) {
     throw new UnsupportedQueryPlanError(
       "'hasIntersection' requires a literal list as one of its operands",
@@ -198,9 +219,11 @@ export const buildHasIntersectionFilter = (
 
   if (isNameOperand(leftOperand)) {
     const indexed = resolveIndexedMembership(leftOperand.name, mapper, options);
+
     if (indexed) {
       return indexedMembership({ ...indexed, values });
     }
+
     // hasIntersection over a scalar column is a CEL no-overload error.
     if (isScalarColumnReference(leftOperand.name, mapper)) return UNKNOWN_CONDITION;
   }
@@ -208,6 +231,7 @@ export const buildHasIntersectionFilter = (
   if (values.length === 0) {
     if (isNameOperand(leftOperand)) {
       const resolved = resolveFieldReference(leftOperand.name, mapper);
+
       return requireLeadingHops(
         resolved.relations.slice(0, -1),
         sql`false`,
@@ -215,6 +239,7 @@ export const buildHasIntersectionFilter = (
         options,
       );
     }
+
     throw new UnsupportedQueryPlanError(
       "Empty intersection over a computed collection requires preserving its evaluation errors",
     );
@@ -223,11 +248,13 @@ export const buildHasIntersectionFilter = (
   if (isOperatorCall(leftOperand, "map")) {
     return buildMappedIntersection(leftOperand, values, mapper, options);
   }
+
   if (!isNameOperand(leftOperand)) {
     throw new UnsupportedQueryPlanError(
       "'hasIntersection' requires a field reference or map expression as the first operand",
     );
   }
+
   return buildChainMembership(
     resolveRelationDefaultField(
       resolveFieldReference(leftOperand.name, mapper),

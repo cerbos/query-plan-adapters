@@ -18,6 +18,7 @@ import type {
   ResolvedMapping,
   ScopedRelationEntry,
 } from "./types";
+import { isFunction } from "./narrowing";
 
 /**
  * Resolving a CEL attribute reference through the caller's mapper: which column, transform or
@@ -88,11 +89,12 @@ export const getMappingEntry = (
   reference: string,
   mapper: Mapper,
 ): MapperEntry | undefined =>
-  typeof mapper === "function" ? mapper(reference) : mapper[reference];
+  isFunction(mapper) ? mapper(reference) : mapper[reference];
 
 /** Every `[prefix, suffix]` split of a dotted reference, longest prefix first. */
 function* referencePrefixes(reference: string): Generator<[string, string[]]> {
   const parts = reference.split(".");
+
   for (let i = parts.length - 1; i > 0; i--) {
     yield [parts.slice(0, i).join("."), parts.slice(i)];
   }
@@ -111,20 +113,24 @@ const resolveRelationField = (
     if (!allowDefaultField) {
       return { relations, mapping: { kind: "relation", relation } };
     }
+
     if (!relation.field) {
       throw new Error(
         `Relation mapping for '${reference}' does not define a default field`,
       );
     }
+
     return { relations, mapping: toBaseMapperEntry(relation.field) };
   }
 
   const [segment, ...rest] = path;
+
   if (segment === undefined) {
     throw new UnsupportedQueryPlanError(
       `Invalid relation path for reference '${reference}': missing segment`,
     );
   }
+
   const fieldEntry = (relation.fields ?? {})[segment];
 
   if (fieldEntry !== undefined) {
@@ -136,17 +142,20 @@ const resolveRelationField = (
         relations,
       );
     }
+
     if (rest.length > 0) {
       throw new UnsupportedQueryPlanError(
         `Mapping for '${segment}' does not support further nesting in '${reference}'`,
       );
     }
+
     return { relations, mapping: toBaseMapperEntry(fieldEntry) };
   }
 
   // A segment the relation does not declare falls back to the table's own column of that name.
-  const inferredColumn =
-    segment in relation.table ? (relation.table as never)[segment] : undefined;
+  const inferredColumn: BaseMapperEntry | undefined = Object.entries(relation.table).find(
+    ([key]) => key === segment,
+  )?.[1];
 
   if (inferredColumn !== undefined) {
     if (rest.length > 0) {
@@ -154,6 +163,7 @@ const resolveRelationField = (
         `Unable to resolve nested path '${segment}.${rest.join(".")}' for relation '${reference}'`,
       );
     }
+
     return { relations, mapping: toBaseMapperEntry(inferredColumn) };
   }
 
@@ -171,21 +181,26 @@ export const resolveFieldReference = (
   mapper: Mapper,
 ): ResolvedMapping => {
   const direct = getMappingEntry(reference, mapper);
+
   if (direct !== undefined) {
     if (isScopedRelationEntry(direct)) {
       return direct.resolve();
     }
+
     if (isMappingConfig(direct) && direct.relation) {
       return resolveRelationField(direct.relation, [], reference, [], false);
     }
+
     return { relations: [], mapping: direct };
   }
 
   for (const [prefix, suffix] of referencePrefixes(reference)) {
     const entry = getMappingEntry(prefix, mapper);
+
     if (!entry || !isMappingConfig(entry) || !entry.relation) {
       continue;
     }
+
     return resolveRelationField(entry.relation, suffix, reference, []);
   }
 
@@ -198,10 +213,12 @@ const resolveRelationChain = (
   mapper: Mapper,
 ): RelationMapping[] => {
   const direct = getMappingEntry(reference, mapper);
+
   if (direct !== undefined) {
     if (isScopedRelationEntry(direct)) {
       return direct.resolve().relations;
     }
+
     if (isMappingConfig(direct) && direct.relation) {
       return [direct.relation];
     }
@@ -209,13 +226,16 @@ const resolveRelationChain = (
 
   for (const [prefix, suffix] of referencePrefixes(reference)) {
     const entry = getMappingEntry(prefix, mapper);
+
     if (!entry) {
       continue;
     }
+
     // A prefix inside an enclosing lambda scope carries the relations already joined to reach it.
     const { relations, mapping } = isScopedRelationEntry(entry)
       ? entry.resolve()
       : { relations: [], mapping: entry };
+
     if (isMappingConfig(mapping) && mapping.relation) {
       return resolveRelationField(mapping.relation, suffix, reference, relations)
         .relations;
@@ -233,12 +253,15 @@ export const resolveRelationDefaultField = (
   if (!isRelationValue(resolved.mapping)) {
     return resolved;
   }
+
   const defaultField = resolved.mapping.relation.field;
+
   if (!defaultField) {
     throw new Error(
       `Relation mapping for '${reference}' does not define a default field`,
     );
   }
+
   return {
     relations: resolved.relations,
     mapping: toBaseMapperEntry(defaultField),
@@ -286,23 +309,32 @@ const aliasElementMapping = (
         "subquery's alias",
     );
   };
+
   if (resolved.relations.length !== chainLength) refuse();
+
   const rebind = (column: AnyColumn): AnyColumn =>
     column.table === primaryRelation.table
       ? aliasedTableColumn(column, alias)
       : refuse();
+
   const { mapping } = resolved;
+
   if (isMappingConfig(mapping)) {
-    if (mapping.transform || mapping.relation || !mapping.column) refuse();
+    const { column } = mapping;
+
+    if (mapping.transform || mapping.relation || !column) return refuse();
+
     return {
       relations: resolved.relations,
-      mapping: { ...mapping, column: rebind(mapping.column as AnyColumn) },
+      mapping: { ...mapping, column: rebind(column) },
     };
   }
-  if (!isColumn(mapping)) refuse();
+
+  if (!isColumn(mapping)) return refuse();
+
   return {
     relations: resolved.relations,
-    mapping: rebind(mapping as AnyColumn),
+    mapping: rebind(mapping),
   };
 };
 
@@ -314,19 +346,23 @@ export const createCollectionScope = (
 ): CollectionScope => {
   const relationChain = resolveRelationChain(collectionReference, mapper);
   const primaryRelation = relationChain[relationChain.length - 1];
+
   if (!primaryRelation) {
     throw new Error(
       `No relation mapping found for reference: ${collectionReference}`,
     );
   }
+
   const leadingRelations = relationChain.slice(0, -1);
 
   // An enclosing macro already ranges over this table: take a fresh alias, numbered by how many
   // enclosing scopes hold the table, so the name is deterministic.
   const tableName = resolveTableName(primaryRelation.table, collectionReference);
   const occurrences = openTables.filter((name) => name === tableName).length;
+
   const alias =
     occurrences > 0 ? `cerbos_${tableName}_${occurrences}` : undefined;
+
   if (alias !== undefined && primaryRelation.subqueryFilter !== undefined) {
     throw new UnsupportedQueryPlanError(
       `Cannot nest a collection macro over '${collectionReference}' inside another over the ` +
@@ -334,6 +370,7 @@ export const createCollectionScope = (
         "narrow the enclosing subquery's rows instead of the inner one's",
     );
   }
+
   const scoped = (resolved: ResolvedMapping, reference: string) =>
     makeScopedRelationEntry(
       alias === undefined
@@ -355,6 +392,7 @@ export const createCollectionScope = (
         collectionReference,
         leadingRelations,
       );
+
       // An element of a scalar collection is a VALUE in CEL, so a NULL element is an explicit
       // null rather than a missing attribute.
       if (isScalarCollection(getMappingEntry(collectionReference, mapper))) {
@@ -370,11 +408,13 @@ export const createCollectionScope = (
           };
         }
       }
+
       return scoped(resolved, reference);
     }
 
     if (reference.startsWith(`${variableName}.`)) {
       const remainder = reference.slice(variableName.length + 1);
+
       return scoped(
         resolveRelationField(
           primaryRelation,
@@ -394,7 +434,7 @@ export const createCollectionScope = (
     primaryRelation,
     leadingRelations,
     skipRelations: new Set([primaryRelation, ...leadingRelations]),
-    ...(alias === undefined ? {} : { alias }),
+    alias,
   };
 };
 
@@ -408,10 +448,13 @@ export const columnForOperand = (
   if (!isNameOperand(operand)) {
     return undefined;
   }
+
   const { mapping } = resolveFieldReference(operand.name, mapper);
+
   if (isMappingConfig(mapping)) {
     return mapping.column;
   }
+
   return isColumn(mapping) ? mapping : undefined;
 };
 
@@ -425,27 +468,33 @@ export const buildColumnExpression = (
       `Cannot use relation '${reference}' as a scalar value expression`,
     );
   }
-  if (typeof mapping === "function") {
+
+  if (isFunction(mapping)) {
     throw new UnsupportedQueryPlanError(
       `Cannot use transform mapping for '${reference}' as a value expression`,
     );
   }
+
   if (isMappingConfig(mapping)) {
     if (mapping.relation) {
       throw new UnsupportedQueryPlanError(
         `Cannot use relation mapping for '${reference}' as a scalar value expression`,
       );
     }
+
     if (!mapping.column) {
       throw new Error(
         `Mapping for '${reference}' requires a column to be used as a value expression`,
       );
     }
+
     return exactString(mapping.column);
   }
+
   if (!isColumn(mapping)) {
     throw new Error(`Expected column mapping for '${reference}'`);
   }
+
   return exactString(mapping);
 };
 
@@ -454,5 +503,6 @@ export const isScalarColumnReference = (reference: string, mapper: Mapper): bool
   if (isScalarCollection(getMappingEntry(reference, mapper))) return false;
   const { relations, mapping } = resolveFieldReference(reference, mapper);
   const column = isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
+
   return relations.length === 0 && ["string", "number", "boolean"].includes(column?.dataType ?? "");
 };

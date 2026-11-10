@@ -6,11 +6,14 @@ import type {
 } from "@cerbos/core";
 
 import { UnsupportedQueryPlanError } from "./errors";
+import type { MongoValue } from "./expression";
 
 export const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
   "operator" in e;
+
 export const isValue = (e: PlanExpressionOperand): e is PlanExpressionValue =>
   "value" in e;
+
 export const isVariable = (
   e: PlanExpressionOperand,
 ): e is PlanExpressionVariable => "name" in e;
@@ -21,9 +24,11 @@ export const getOperandAt = (
   errorMessage: string,
 ): PlanExpressionOperand => {
   const operand = operands[index];
+
   if (!operand) {
     throw new UnsupportedQueryPlanError(errorMessage);
   }
+
   return operand;
 };
 
@@ -34,9 +39,11 @@ export const collectVariableNames = (
   if (isVariable(operand)) {
     return [operand.name];
   }
+
   if (isExpression(operand)) {
     return operand.operands.flatMap(collectVariableNames);
   }
+
   return [];
 };
 
@@ -46,5 +53,5 @@ export const collectVariableNames = (
  * `requireExists`: the two happen to coincide today, but `requireExists` means "the field must be
  * present", and a future caller setting it for that reason alone must not trip the null rejection.
  */
-export const carriesNullOperand = (value: unknown): boolean =>
+export const carriesNullOperand = (value: MongoValue): boolean =>
   value === null || (Array.isArray(value) && value.includes(null));

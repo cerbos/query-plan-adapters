@@ -12,6 +12,7 @@ import type { ResolvedFieldReference, TranslationContext } from "./mapping";
 import { CERBOS_TO_PRISMA_OPERATOR, assertDefined } from "./plan";
 import { wrapInRelations } from "./relations";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isBoolean, isNumber, isObject, lookup, typeofValue } from "./narrowing";
 
 /**
  * Prisma has no model-agnostic always-false `where` shape — empty logical arrays are ignored —
@@ -31,6 +32,7 @@ export function buildFieldFilter(
   value: Value
 ): PrismaFilter {
   const fieldName = getLeafField(fieldRef.path);
+
   return wrapInRelations(fieldRef.relations, {
     [fieldName]: { [prismaOp]: value },
   });
@@ -55,9 +57,11 @@ export function buildPrefixFilter(
   if (!LIKE_METACHARACTERS.test(prefix)) {
     return buildFieldFilter(fieldRef, "startsWith", strict ? `${prefix}_` : prefix);
   }
+
   const fieldName = getLeafField(fieldRef.path);
   const lower = { [fieldName]: { [strict ? "gt" : "gte"]: prefix } };
   const bound = firstStringPastPrefix(prefix);
+
   return wrapInRelations(
     fieldRef.relations,
     bound === undefined ? lower : { AND: [lower, { [fieldName]: { lt: bound } }] }
@@ -72,12 +76,16 @@ export function buildPrefixFilter(
  */
 function firstStringPastPrefix(prefix: string): string | undefined {
   const codePoints = Array.from(prefix, (character) => character.codePointAt(0)!);
+
   while (codePoints.length > 0) {
     const last = codePoints.pop()!;
+
     if (last >= 0x10ffff) continue;
     const next = last + 1 === 0xd800 ? 0xe000 : last + 1;
+
     return String.fromCodePoint(...codePoints, next);
   }
+
   return undefined;
 }
 
@@ -93,6 +101,7 @@ function buildDirectOrInLeaf(
   values: Value[]
 ): PrismaFilter {
   const fieldName = getLeafField(fieldRef.path);
+
   return values.length === 1
     ? { [fieldName]: values[0] }
     : { [fieldName]: { in: values } };
@@ -115,6 +124,7 @@ function guardedFieldFilter(
   leaf: PrismaFilter
 ): PrismaFilter {
   const fieldName = getLeafField(fieldRef.path);
+
   return wrapInRelations(fieldRef.relations, {
     AND: [{ [fieldName]: { not: null } }, leaf],
   });
@@ -125,16 +135,17 @@ function assertScalarValue(
   value: Value,
   operator: string
 ): void {
-  if (value !== null && typeof value === "object") {
+  if (isObject(value)) {
     throw new UnsupportedQueryPlanError(
       `${operator} requires scalar values: Prisma cannot compare list or map elements`
     );
   }
+
   if (
     value !== null &&
     fieldRef.valueType !== undefined &&
     fieldRef.valueType !== "dateTime" &&
-    typeof value !== fieldRef.valueType
+    typeofValue(value) !== fieldRef.valueType
   ) {
     throw new UnsupportedQueryPlanError(
       `${operator} value type does not match mapped ${fieldRef.valueType} field`
@@ -161,9 +172,11 @@ export function buildMembershipFilter(
 ): PrismaFilter {
   // A column declared NOT NULL never equals a null element, and Prisma rejects `{ field: null }` on one.
   const values = fieldRef.nullable === false ? listed.filter((value) => value !== null) : listed;
+
   for (const value of values) assertScalarValue(fieldRef, value, "in");
   const nonNullValues = values.filter((value) => value !== null);
   const carriesNull = nonNullValues.length !== values.length;
+
   if (carriesNull) {
     assertNullOperandTranslatable(
       context,
@@ -171,6 +184,7 @@ export function buildMembershipFilter(
       fieldRef.nullAttributeRepresentation
     );
   }
+
   const filters: PrismaFilter[] = [];
 
   if (nonNullValues.length > 0 || values.length === 0) {
@@ -185,6 +199,7 @@ export function buildMembershipFilter(
         : guardedFieldFilter(fieldRef, leaf)
     );
   }
+
   if (carriesNull) {
     filters.push(
       wrapInRelations(fieldRef.relations, buildDirectOrInLeaf(fieldRef, [null]))
@@ -209,6 +224,7 @@ function fractionalBracket(
 ): PrismaFilter | undefined {
   const lower = Math.floor(value);
   const upper = Math.ceil(value);
+
   const equalsBracket = {
     AND: [
       { [fieldName]: { equals: value } },
@@ -216,6 +232,7 @@ function fractionalBracket(
       { [fieldName]: { lt: upper } },
     ],
   };
+
   switch (operator) {
     case "gt":
       return {
@@ -257,6 +274,7 @@ function buildBooleanOrderingFilter(
 ): PrismaFilter {
   const satisfied = [false, true].filter((candidate) => {
     const [a, b] = [Number(candidate), Number(value)];
+
     switch (operator) {
       case "lt":
         return a < b;
@@ -270,9 +288,11 @@ function buildBooleanOrderingFilter(
         throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
     }
   });
+
   if (satisfied.length === 1) return buildFieldFilter(fieldRef, "equals", satisfied[0]!);
   const fieldName = getLeafField(fieldRef.path);
   const both = [{ [fieldName]: { equals: false } }, { [fieldName]: { equals: true } }];
+
   return wrapInRelations(
     fieldRef.relations,
     satisfied.length === 0 ? { AND: both } : { OR: both }
@@ -290,13 +310,13 @@ export function buildComparisonFilter(
   value: Value
 ): PrismaFilter {
   const prismaOperator = assertDefined(
-    CERBOS_TO_PRISMA_OPERATOR[operator],
+    lookup(CERBOS_TO_PRISMA_OPERATOR, operator),
     `Unsupported operator: ${operator}`
   );
 
   assertScalarValue(fieldRef, value, operator);
 
-  if (typeof value === "boolean" && operator !== "eq" && operator !== "ne") {
+  if (isBoolean(value) && operator !== "eq" && operator !== "ne") {
     return buildBooleanOrderingFilter(fieldRef, operator, value);
   }
 
@@ -320,18 +340,21 @@ export function buildComparisonFilter(
     (operator === "eq" || operator === "ne")
   ) {
     const fieldName = getLeafField(fieldRef.path);
+
     const equality = guardedFieldFilter(fieldRef, {
       [fieldName]: { equals: value },
     });
+
     return operator === "eq" ? equality : { NOT: equality };
   }
 
-  if (typeof value === "number" && !Number.isInteger(value)) {
+  if (isNumber(value) && !Number.isInteger(value)) {
     const bracket = fractionalBracket(
       getLeafField(fieldRef.path),
       operator,
       value
     );
+
     if (bracket) {
       return wrapInRelations(fieldRef.relations, bracket);
     }
@@ -345,5 +368,6 @@ export function buildNullWitnessFilter(
   nullableFields: Set<string>
 ): PrismaFilter {
   const checks = [...nullableFields].map((field) => ({ [field]: null }));
+
   return checks.length === 1 ? checks[0]! : { OR: checks };
 }

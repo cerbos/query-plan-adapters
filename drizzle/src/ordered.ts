@@ -18,6 +18,7 @@ import { extractLambdaComponents, isNameOperand, isOperatorCall, isValueOperand 
 import { constantCondition, UNKNOWN_CONDITION, withPolarity } from "./predicates";
 import { chainCorrelation, relationSource, requireLeadingHops } from "./relations";
 import type { BuildFilterOptions, Mapper } from "./types";
+import { isNumber, typeofValue } from "./narrowing";
 
 /**
  * Reads that need the ORDER of a to-many relation's rows — a constant positional access and an
@@ -56,14 +57,18 @@ const resolvePositionedScope = (
   const entry = getMappingEntry(reference, mapper);
   const resolved = resolveFieldReference(reference, mapper);
   const primary = resolved.relations[resolved.relations.length - 1];
+
   if (primary === undefined || primary.position === undefined || primary.type !== "many") {
     return undefined;
   }
+
   const scope = createCollectionScope(reference, ELEMENT, mapper, options.openTables);
+
   const position: AnyColumn =
     scope.alias === undefined
       ? primary.position
-      : aliasedTableColumn(primary.position as AnyColumn, scope.alias);
+      : aliasedTableColumn(primary.position, scope.alias);
+
   return {
     scope,
     reference,
@@ -93,21 +98,26 @@ const resolveElement = (
 ): Element => {
   const reference = field === undefined ? ELEMENT : `${ELEMENT}.${field}`;
   const resolved = resolveFieldReference(reference, positioned.scope.mapper);
+
   const unskipped = resolved.relations.filter(
     (relation) => !positioned.scope.skipRelations.has(relation),
   );
+
   const { mapping } = resolved;
+
   const column = isColumn(mapping)
     ? mapping
     : isMappingConfig(mapping) && !mapping.transform && !mapping.relation && !mapping.indexable
       ? mapping.column
       : undefined;
+
   if (unskipped.length > 0 || column === undefined) {
     throw new UnsupportedQueryPlanError(
       `Cannot read '${field ?? "the element"}' of '${positioned.reference}' by position: only a ` +
         "column of the relation's own table has a position, not a transform or a further relation",
     );
   }
+
   return {
     expr: buildColumnExpression(mapping, reference),
     column,
@@ -125,11 +135,12 @@ const bindElement = (value: Scalar, element: Element): Param => new Param(value,
 /** A list of scalars of the element column's type; anything else has no row to equal. */
 const typedList = (values: readonly Value[], element: Element, context: string): Scalar[] =>
   values.map((value) => {
-    if (!isScalar(value) || typeof value !== element.column.dataType) {
+    if (!isScalar(value) || typeofValue(value) !== element.column.dataType) {
       throw new UnsupportedQueryPlanError(
         `${context} supports only ${element.column.dataType} literals over '${element.column.name}'`,
       );
     }
+
     return value;
   });
 
@@ -141,33 +152,44 @@ const positionedRead = (
 ): { positioned: PositionedScope; index: number; field: string | undefined } | undefined => {
   let field: string | undefined;
   let indexed = operand;
+
   if (isOperatorCall(operand, "get-field")) {
     const [inner, name] = operand.operands;
+
     if (operand.operands.length !== 2 || inner === undefined || name === undefined) return undefined;
+
     if (!isNameOperand(name) || !isOperatorCall(inner, "index")) return undefined;
     field = name.name;
     indexed = inner;
   }
+
   if (!isOperatorCall(indexed, "index") || indexed.operands.length !== 2) return undefined;
   const [collection, position] = indexed.operands;
+
   if (
     collection === undefined || position === undefined || !isNameOperand(collection) ||
-    !isValueOperand(position) || typeof position.value !== "number"
+    !isValueOperand(position) || !isNumber(position.value)
   ) {
     return undefined;
   }
+
   const entry = getMappingEntry(collection.name, mapper);
+
   // A declared indexable column answers a bare positional read of a scalar list itself.
   if (field === undefined && entry !== undefined && isMappingConfig(entry) && entry.indexable) {
     return undefined;
   }
+
   const positioned = resolvePositionedScope(collection.name, mapper, options);
+
   if (positioned === undefined) return undefined;
+
   if (!Number.isSafeInteger(position.value) || position.value < 0) {
     throw new UnsupportedQueryPlanError(
       "Index access requires a constant non-negative integer position",
     );
   }
+
   return { positioned, index: position.value, field };
 };
 
@@ -189,30 +211,37 @@ export const buildPositionedComparison = (
 ): SQL | undefined => {
   const leftRead = positionedRead(left, mapper, options);
   const read = leftRead ?? positionedRead(right, mapper, options);
+
   if (read === undefined) return undefined;
   const other = leftRead === undefined ? left : right;
+
   const mirrored: Record<typeof operator, typeof operator> = {
     eq: "eq", ne: "ne", lt: "gt", le: "ge", gt: "lt", ge: "le",
   };
+
   const op = leftRead === undefined ? mirrored[operator] : operator;
+
   if (!isValueOperand(other) || !isScalar(other.value)) {
     throw new UnsupportedQueryPlanError(
       `Cannot compare '${read.positioned.reference}' read by position with anything but a ` +
         "string, number or boolean constant",
     );
   }
+
   const { positioned, index, field } = read;
   const element = resolveElement(positioned, field);
   const atPosition = sql`${positioned.correlation} and ${positioned.position} = ${index}`;
   const value = sql`(select ${element.expr} from ${positioned.source} where ${atPosition})`;
   const present = sql`exists (select 1 from ${positioned.source} where ${atPosition})`;
   let filter: SQL;
-  if (typeof other.value !== element.column.dataType) {
+
+  if (typeofValue(other.value) !== element.column.dataType) {
     if (op !== "eq" && op !== "ne") return UNKNOWN_CONDITION;
     const guard = element.explicitNull ? sql`not ${present}` : sql`${value} is null`;
     filter = sql`(case when ${guard} then null else ${constantCondition(op === "ne")} end)`;
   } else {
     const bound = bindElement(other.value, element);
+
     const comparison = {
       eq: sql`${value} = ${bound}`,
       ne: sql`${value} <> ${bound}`,
@@ -221,11 +250,13 @@ export const buildPositionedComparison = (
       gt: sql`${value} > ${bound}`,
       ge: sql`${value} >= ${bound}`,
     }[op];
+
     filter =
       element.explicitNull && (op === "eq" || op === "ne")
         ? sql`(case when not ${present} then null when ${value} is null then ${constantCondition(op === "ne")} else ${comparison} end)`
         : sql`(${comparison})`;
   }
+
   return withPolarity(filter, negated);
 };
 
@@ -239,51 +270,65 @@ const orderedProjection = (
   | undefined => {
   if (isOperatorCall(operand, "map") && operand.operands.length === 2) {
     const [collection, lambda] = operand.operands;
+
     if (collection === undefined || lambda === undefined || !isNameOperand(collection)) {
       return undefined;
     }
+
     const positioned = resolvePositionedScope(collection.name, mapper, options);
+
     if (positioned === undefined) return undefined;
     const { variable, expression } = extractLambdaComponents(lambda, "'map' lambda operand");
+
     if (!isNameOperand(expression)) {
       throw new UnsupportedQueryPlanError(
         "An ordered equality over map() supports only a projection of the element or one of its fields",
       );
     }
+
     const field =
       expression.name === variable.name
         ? undefined
         : expression.name.startsWith(`${variable.name}.`)
           ? expression.name.slice(variable.name.length + 1)
           : undefined;
+
     if (field === undefined && expression.name !== variable.name) {
       throw new UnsupportedQueryPlanError(
         "An ordered equality over map() supports only a projection of the element or one of its fields",
       );
     }
+
     return { positioned, element: resolveElement(positioned, field), survivors: undefined };
   }
+
   if (isOperatorCall(operand, "except") && operand.operands.length === 2) {
     const [collection, removed] = operand.operands;
+
     if (
       collection === undefined || removed === undefined || !isNameOperand(collection) ||
       !isValueOperand(removed) || !Array.isArray(removed.value)
     ) {
       return undefined;
     }
+
     const positioned = resolvePositionedScope(collection.name, mapper, options);
+
     if (positioned === undefined) return undefined;
     const element = resolveElement(positioned, undefined);
     // Cerbos's except() keeps an element exactly when the removed list does not contain it, so
     // a constant of another type removes nothing and a null removes the null elements.
     const removesNull = removed.value.includes(null);
+
     const kept = removed.value.filter(
       (value): value is Scalar => isScalar(value) && typeof value === element.column.dataType,
     );
+
     const notRemoved =
       kept.length === 0
         ? undefined
         : sql`${element.expr} not in (${sql.join(kept.map((value) => bindElement(value, element)), sql`, `)})`;
+
     const survivors = removesNull
       ? notRemoved === undefined
         ? sql`${element.expr} is not null`
@@ -291,8 +336,10 @@ const orderedProjection = (
       : notRemoved === undefined
         ? undefined
         : sql`(${element.expr} is null or ${notRemoved})`;
+
     return { positioned, element, survivors };
   }
+
   return undefined;
 };
 
@@ -316,46 +363,59 @@ export const buildOrderedListEquality = (
 ): SQL | undefined => {
   const leftProjection = orderedProjection(left, mapper, options);
   const projection = leftProjection ?? orderedProjection(right, mapper, options);
+
   if (projection === undefined) return undefined;
   const other = leftProjection === undefined ? left : right;
+
   if (!isValueOperand(other) || !Array.isArray(other.value)) {
     throw new UnsupportedQueryPlanError(
       "An ordered list equality over a positioned relation needs a literal list on the other side",
     );
   }
+
   const { positioned, element, survivors } = projection;
   const values = typedList(other.value, element, "An ordered list equality");
+
   const where =
     survivors === undefined
       ? positioned.correlation
       : sql`${positioned.correlation} and ${survivors}`;
+
   const count = sql`(select count(*) from ${positioned.source} where ${where})`;
   let equality: SQL;
+
   if (values.length === 0) {
     equality = sql`${count} = 0`;
   } else {
     const ranked = sql`(select ${element.expr} as v, row_number() over (order by ${positioned.position}) - 1 as rn from ${positioned.source} where ${where}) cerbos_ranked`;
+
     const matches = sql.join(
       values.map(
         (value, rank) => sql`(cerbos_ranked.rn = ${rank} and cerbos_ranked.v = ${bindElement(value, element)})`,
       ),
       sql` or `,
     );
+
     equality = sql`(${count} = ${values.length} and (select count(*) from ${ranked} where ${matches}) = ${values.length})`;
   }
+
   const guards: SQL[] = [];
+
   if (positioned.listColumn !== undefined) {
     guards.push(sql`when ${positioned.listColumn} is null then null`);
   }
+
   if (!element.explicitNull) {
     guards.push(
       sql`when exists (select 1 from ${positioned.source} where ${positioned.correlation} and ${element.expr} is null) then null`,
     );
   }
+
   const filter =
     guards.length === 0
       ? sql`(${equality})`
       : sql`(case ${sql.join(guards, sql` `)} else ${equality} end)`;
+
   return withPolarity(
     requireLeadingHops(positioned.scope.leadingRelations, filter, positioned.reference, options),
     (operator === "ne") !== negated,

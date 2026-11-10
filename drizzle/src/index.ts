@@ -23,6 +23,7 @@ import type {
  */
 
 export type { Indexable } from "./indexed";
+
 export type {
   DrizzleFilter,
   Mapper,
@@ -34,6 +35,7 @@ export type {
 } from "./types";
 
 export { PlanKind };
+
 export { UnsupportedQueryPlanError };
 
 export function queryPlanToDrizzle({
@@ -44,6 +46,7 @@ export function queryPlanToDrizzle({
   const options: BuildFilterOptions = {
     nullRepresentation: nullAttributeRepresentation,
   };
+
   switch (queryPlan.kind) {
     case PlanKind.ALWAYS_ALLOWED:
       return { kind: PlanKind.ALWAYS_ALLOWED };
@@ -51,6 +54,7 @@ export function queryPlanToDrizzle({
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL:
       rejectNullConstructors(queryPlan.condition, options);
+
       return {
         kind: PlanKind.CONDITIONAL,
         filter: buildFilterFromExpression(

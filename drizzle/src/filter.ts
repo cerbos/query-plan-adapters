@@ -51,6 +51,7 @@ import { compileRegex } from "./regex";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
 import type { BaseMapperEntry, BuildFilterOptions, Mapper } from "./types";
 import { resolveScalarOperand } from "./values";
+import { isBoolean, isFunction, isNumber, isString, pair, typeofValue } from "./narrowing";
 
 /**
  * Operands in CONDITION position: the plan's boolean structure, and the dispatch from each
@@ -72,7 +73,9 @@ const buildStringMatchFilter = (
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
   }
+
   const [receiverOperand, needleOperand] = operands;
+
   if (!receiverOperand || !needleOperand) {
     throw new UnsupportedQueryPlanError(
       `'${operator}' operator requires receiver and needle operands`,
@@ -84,8 +87,9 @@ const buildStringMatchFilter = (
   if (isNameOperand(receiverOperand) && isValueOperand(needleOperand)) {
     const resolved = resolveFieldReference(receiverOperand.name, mapper);
     const mapping = resolved.mapping;
+
     if (
-      typeof mapping === "function" ||
+      isFunction(mapping) ||
       isRelationValue(mapping) ||
       (isMappingConfig(mapping) && mapping.transform !== undefined)
     ) {
@@ -100,17 +104,21 @@ const buildStringMatchFilter = (
 
   if (
     isValueOperand(needleOperand) &&
-    typeof needleOperand.value !== "string"
+    !isString(needleOperand.value)
   ) {
     throw new UnsupportedQueryPlanError(`The '${operator}' operator requires a string value`);
   }
+
   // A string operator over a non-string column is a CEL no-overload error: UNKNOWN.
   for (const operand of [receiverOperand, needleOperand]) {
     const column = columnForOperand(operand, mapper);
+
     if (column && column.dataType !== "string") return sql`null`;
   }
+
   const receiver = resolveScalarOperand(receiverOperand, mapper, options);
   const needle = resolveScalarOperand(needleOperand, mapper, options);
+
   const filter = buildStringMatchCondition(
     operator,
     operandExpression(receiver.expr, receiverOperand),
@@ -120,11 +128,13 @@ const buildStringMatchFilter = (
       columnForOperand(needleOperand, mapper),
     ]),
   );
+
   const reference = isNameOperand(receiverOperand)
     ? receiverOperand.name
     : isNameOperand(needleOperand)
       ? needleOperand.name
       : `'${operator}' operand`;
+
   return wrapCombinedRelations(
     filter,
     receiver.relations,
@@ -143,7 +153,9 @@ const buildVariableMembershipFilter = (
   if (operands.length !== 2) {
     throw new UnsupportedQueryPlanError("'in' operator requires exactly two operands");
   }
+
   const [memberOperand, collectionOperand] = operands;
+
   if (
     !memberOperand ||
     !collectionOperand ||
@@ -156,6 +168,7 @@ const buildVariableMembershipFilter = (
   }
 
   const member = resolveFieldReference(memberOperand.name, mapper);
+
   if (
     member.relations.some((relation) => !options.skipRelations?.has(relation))
   ) {
@@ -163,13 +176,16 @@ const buildVariableMembershipFilter = (
       "Variable membership requires its first operand to resolve to a scalar field",
     );
   }
+
   if (!isScalarCollection(getMappingEntry(collectionOperand.name, mapper))) {
     throw new UnsupportedQueryPlanError("Variable membership requires a scalar collection mapping");
   }
+
   const collection = resolveRelationDefaultField(
     resolveFieldReference(collectionOperand.name, mapper),
     collectionOperand.name,
   );
+
   if (collection.relations.length === 0) {
     throw new UnsupportedQueryPlanError(
       "Variable membership requires its second operand to resolve to a collection",
@@ -184,6 +200,7 @@ const buildVariableMembershipFilter = (
     : isColumn(member.mapping)
       ? member.mapping
       : undefined;
+
   if (
     memberColumn !== undefined &&
     collection.relations.some(
@@ -200,24 +217,30 @@ const buildVariableMembershipFilter = (
   }
 
   const memberExpr = buildColumnExpression(member.mapping, memberOperand.name);
+
   const elementExpr = buildColumnExpression(
     collection.mapping,
     collectionOperand.name,
   );
+
   const nullMatch = and(
     sql`${memberExpr} is null`,
     sql`${elementExpr} is null`,
   );
+
   const match = or(sql`${memberExpr} = ${elementExpr}`, nullMatch);
+
   if (!match) {
     throw new UnsupportedQueryPlanError("Unable to combine variable membership conditions");
   }
+
   const membership = wrapRelationChain(
     collection.relations,
     match,
     collectionOperand.name,
     options,
   );
+
   return mappingNullRepresentation(member.mapping) === "explicit"
     ? membership
     : sql`(case when ${memberExpr} is null then null else ${membership} end)`;
@@ -251,9 +274,11 @@ const buildListConstructorMembership = (
   options: BuildFilterOptions,
 ): SQL => {
   if (members.length === 0) return FALSE_CONDITION;
+
   const equalities = members.map((member) =>
     buildComparisonFilter("eq", element, member, mapper, options, false),
   );
+
   return guardConstructorElements(members, or(...equalities)!, mapper, options);
 };
 
@@ -270,14 +295,17 @@ const guardConstructorElements = (
 ): SQL => {
   const errors = members.flatMap((member): SQL[] => {
     if (isValueOperand(member)) return [];
+
     if (
       isNameOperand(member) &&
       mappingNullRepresentation(resolveFieldReference(member.name, mapper).mapping) === "explicit"
     ) {
       return [];
     }
+
     return [sql`${resolveScalarOperand(member, mapper, options).expr} is null`];
   });
+
   return errors.length === 0
     ? filter
     : sql`(case when ${sql.join(errors, sql` or `)} then null else ${filter} end)`;
@@ -300,7 +328,9 @@ const buildConstructedListMacro = (
     lambdaOperand,
     `'${operator}' lambda operand`,
   );
+
   const combinesWithOr = (operator === "exists") !== negated;
+
   const filters = members.map((member) =>
     buildFilterFromExpression(
       substituteLambdaOperand(body, variable.name, member),
@@ -309,9 +339,11 @@ const buildConstructedListMacro = (
       negated,
     ),
   );
+
   const combined =
     (combinesWithOr ? or(...filters) : and(...filters)) ??
     constantCondition(!combinesWithOr);
+
   return guardConstructorElements(members, combined, mapper, options);
 };
 
@@ -330,21 +362,27 @@ const buildDerivedListMembership = (
   negated: boolean,
 ): SQL => {
   const [list, lambda] = derived.operands;
+
   if (derived.operands.length !== 2 || !list || !lambda) {
     throw new UnsupportedQueryPlanError(`'${derived.operator}' operator requires two operands`);
   }
+
   const { variable, expression } = extractLambdaComponents(
     lambda,
     `'${derived.operator}' lambda operand`,
   );
+
   const call = (operator: string, ...children: PlanExpressionOperand[]): PlanExpressionOperand => ({
     operator,
     operands: children,
   });
+
   const macro = (operator: "exists" | "all", body: PlanExpressionOperand) =>
     buildFilterFromExpression(call(operator, list, call("lambda", body, variable)), mapper, options);
+
   const evaluated = (condition: PlanExpressionOperand) =>
     call("or", condition, call("not", condition));
+
   const [match, guard] =
     derived.operator === "map"
       ? [
@@ -352,6 +390,7 @@ const buildDerivedListMembership = (
           evaluated(call("eq", expression, element)),
         ]
       : [call("and", call("eq", variable, element), expression), evaluated(expression)];
+
   return withPolarity(
     sql`(case when ${macro("all", guard)} then ${macro("exists", match)} end)`,
     negated,
@@ -372,29 +411,38 @@ const buildConstantMapIndexComparison = (
   negated: boolean,
 ): SQL | undefined => {
   const [index, constant] = isOperatorCall(left, "index") ? [left, right] : [right, left];
+
   if (!isOperatorCall(index, "index") || index.operands.length !== 2) return undefined;
+
   if (!isValueOperand(constant)) return undefined;
-  const [map, key] = index.operands as [PlanExpressionOperand, PlanExpressionOperand];
+  const [map, key] = pair(index.operands);
+
   if (!isValueOperand(map) || !isCompositeValue(map.value) || Array.isArray(map.value)) {
     return undefined;
   }
+
   if (!isNameOperand(key)) return undefined;
   const entries = Object.entries(map.value);
+
   const scalar = (candidate: Value) =>
-    typeof candidate === "string" || typeof candidate === "number" ||
-    typeof candidate === "boolean";
-  if (!scalar(constant.value) || entries.some(([, entry]) => typeof entry !== typeof constant.value)) {
+    isString(candidate) || isNumber(candidate) ||
+    isBoolean(candidate);
+
+  if (!scalar(constant.value) || entries.some(([, entry]) => typeofValue(entry) !== typeofValue(constant.value))) {
     throw new UnsupportedQueryPlanError(
       "A constant map indexed by an attribute is supported only when every entry and the " +
         "compared constant are strings, numbers or booleans of one type",
     );
   }
+
   const matching = entries
     .filter(([, entry]) => (entry === constant.value) === (operator === "eq"))
     .map(([mapKey]) => mapKey);
+
   const keys = entries.map(([mapKey]) => mapKey);
   const inKeys = buildMembershipFilter([key, { value: keys }], mapper, options);
   const inMatching = buildMembershipFilter([key, { value: matching }], mapper, options);
+
   return withPolarity(sql`(case when ${inKeys} then ${inMatching} end)`, negated);
 };
 
@@ -404,6 +452,7 @@ const buildMembershipFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   const [elementOperand, collectionOperand] = operands;
+
   if (
     operands.length === 2 && elementOperand !== undefined &&
     collectionOperand !== undefined && isOperatorCall(collectionOperand, "list")
@@ -415,8 +464,10 @@ const buildMembershipFilter = (
       options,
     );
   }
+
   if (collectionOperand !== undefined && isNameOperand(collectionOperand)) {
     const haystack = getMappingEntry(collectionOperand.name, mapper);
+
     if (
       haystack !== undefined && isMappingConfig(haystack) &&
       haystack.relation?.type === "one"
@@ -430,25 +481,34 @@ const buildMembershipFilter = (
       );
     }
   }
+
   if (operands.every(isNameOperand)) {
     return buildVariableMembershipFilter(operands, mapper, options);
   }
+
   const fieldOperand = operands.find(isNameOperand);
+
   if (!fieldOperand) {
     throw new UnsupportedQueryPlanError("Comparison operator missing field operand");
   }
+
   const valueOperand = operands.find(isValueOperand);
+
   if (!valueOperand) {
     throw new UnsupportedQueryPlanError("Comparison operator missing value operand");
   }
+
   const [element] = operands;
+
   if (isValueOperand(element!) && isCompositeValue(element.value)) {
     // A list or map element equals no string, number or boolean, so over a collection of those it
     // is never a member. Anything else — a JSON column that may hold lists — has no such answer.
     const unresolved = resolveFieldReference(fieldOperand.name, mapper);
+
     const elementColumn = isScalarCollection(getMappingEntry(fieldOperand.name, mapper))
       ? columnOfMapping(resolveRelationDefaultField(unresolved, fieldOperand.name).mapping)
       : undefined;
+
     if (
       elementColumn === undefined ||
       !SCALAR_ELEMENT_TYPES.has(elementColumn.dataType) ||
@@ -459,31 +519,38 @@ const buildMembershipFilter = (
           "booleans, which a list or map element can never equal",
       );
     }
+
     return FALSE_CONDITION;
   }
+
   // `x in {"a": 1}` tests the map's KEYS, as CEL's `in` over a map does.
   const collection =
     operands[1] === valueOperand && isCompositeValue(valueOperand.value) &&
     !Array.isArray(valueOperand.value)
       ? Object.keys(valueOperand.value)
       : valueOperand.value;
+
   // `"2" in R.attr.list` over a list held in one declared JSON or array column: the column is the
   // collection, not an element, so it is searched element by element rather than compared whole.
   const indexed = resolveIndexedMembership(fieldOperand.name, mapper, options);
+
   if (indexed) {
     return indexedMembership({ ...indexed, values: [valueOperand.value] });
   }
 
   const unresolved = resolveFieldReference(fieldOperand.name, mapper);
+
   // `in` over a scalar column is a CEL no-overload error.
   if (operands[1] === fieldOperand && isScalarColumnReference(fieldOperand.name, mapper)) {
     return UNKNOWN_CONDITION;
   }
+
   const resolved = isScalarCollection(
     getMappingEntry(fieldOperand.name, mapper),
   )
     ? resolveRelationDefaultField(unresolved, fieldOperand.name)
     : unresolved;
+
   return wrapRelationChain(
     resolved.relations,
     applyComparison(resolved.mapping, "in", collection, options),
@@ -505,20 +572,23 @@ const buildMatchesFilter = (
   options: BuildFilterOptions,
 ): SQL => {
   const [receiverOperand, patternOperand] = operands;
+
   if (
     operands.length !== 2 ||
     receiverOperand === undefined || !isNameOperand(receiverOperand) ||
     patternOperand === undefined || !isValueOperand(patternOperand) ||
-    typeof patternOperand.value !== "string"
+    !isString(patternOperand.value)
   ) {
     throw new UnsupportedQueryPlanError(
       "'matches' is supported only with a field receiver and a constant pattern",
     );
   }
+
   const resolved = resolveFieldReference(receiverOperand.name, mapper);
   const { mapping } = resolved;
+
   if (
-    typeof mapping === "function" ||
+    isFunction(mapping) ||
     isRelationValue(mapping) ||
     (isMappingConfig(mapping) && mapping.transform !== undefined)
   ) {
@@ -526,21 +596,28 @@ const buildMatchesFilter = (
       "'matches' cannot be delegated to a transform or function mapping",
     );
   }
+
   const column = columnForOperand(receiverOperand, mapper);
+
   // A non-string receiver is a CEL no-overload error: UNKNOWN.
   if (column && column.dataType !== "string") return sql`null`;
   const plans = compileRegex(patternOperand.value);
+
   if (plans === "error") return UNKNOWN_CONDITION;
 
   const expr = buildColumnExpression(mapping, receiverOperand.name);
   const receiver = columnExpression(expr);
   const length = characterLength([column]);
+
   const match = (operator: StringMatchOperator, literal: string): SQL =>
     buildStringMatchCondition(operator, receiver, constantExpression(sql`${literal}`), length);
+
   const anyOf = (conditions: SQL[]): SQL =>
     conditions.length === 0 ? FALSE_CONDITION : or(...conditions)!;
+
   const atLeast = (characters: number): SQL | undefined =>
     characters > 0 ? sql`${length(expr)} >= ${characters}` : undefined;
+
   const noNewline = (): SQL => not(match("contains", "\n"));
 
   const conditions = plans.map((plan): SQL => {
@@ -559,8 +636,10 @@ const buildMatchesFilter = (
           (current, character) => sql`replace(${current}, ${character}, '')`,
           expr,
         );
+
         return and(sql`${rest} = ''`, atLeast(plan.min))!;
       }
+
       case "noNewline":
         return and(noNewline(), atLeast(plan.min))!;
       case "prefixSuffix":
@@ -578,7 +657,9 @@ const buildMatchesFilter = (
         )!;
     }
   });
+
   const filter = sql`(case when ${expr} is null then null else ${anyOf(conditions)} end)`;
+
   return wrapRelationChain(resolved.relations, filter, receiverOperand.name, options);
 };
 
@@ -592,23 +673,29 @@ const buildTernaryFilter = (
   if (operands.length !== 3) {
     throw new UnsupportedQueryPlanError("'if' operator requires exactly three operands");
   }
+
   const [condOperand, thenOperand, elseOperand] = operands;
+
   if (!condOperand || !thenOperand || !elseOperand) {
     throw new UnsupportedQueryPlanError("'if' operator is missing operands");
   }
+
   const cond = buildFilterFromExpression(condOperand, mapper, options);
+
   const thenFilter = buildFilterFromExpression(
     thenOperand,
     mapper,
     options,
     negated,
   );
+
   const elseFilter = buildFilterFromExpression(
     elseOperand,
     mapper,
     options,
     negated,
   );
+
   return guardedCase(cond, thenFilter, elseFilter);
 };
 
@@ -644,16 +731,20 @@ export const buildFilterFromExpression = (
     if (NON_BOOLEAN_DATA_TYPES.has(columnForOperand(expression, mapper)?.dataType ?? "")) {
       return constantCondition(false);
     }
+
     const resolved = resolveFieldReference(expression.name, mapper);
     const filter = applyComparison(resolved.mapping, "eq", true, options);
+
     return withPolarity(
       wrapRelationChain(resolved.relations, filter, expression.name, options),
       negated,
     );
   }
+
   if (isValueOperand(expression)) {
     return constantCondition(Boolean(expression.value) !== negated);
   }
+
   if (!isExpressionOperand(expression)) {
     throw new UnsupportedQueryPlanError("Invalid expression operand");
   }
@@ -666,27 +757,36 @@ export const buildFilterFromExpression = (
       if (operands.length === 0) {
         throw new UnsupportedQueryPlanError(`'${operator}' operator requires at least one operand`);
       }
+
       const filters = operands.map((operand) =>
         buildFilterFromExpression(operand, mapper, options, negated),
       );
+
       // De Morgan under negation: !(a AND b) = !a OR !b (and vice versa).
       const combineWithAnd = (operator === "and") !== negated;
       const combined = combineWithAnd ? and(...filters) : or(...filters);
+
       if (!combined) {
         throw new UnsupportedQueryPlanError(`'${operator}' operator produced an empty filter`);
       }
+
       return combined;
     }
+
     case "not": {
       if (operands.length !== 1) {
         throw new UnsupportedQueryPlanError("'not' operator requires exactly one operand");
       }
+
       const operand = operands[0];
+
       if (!operand) {
         throw new UnsupportedQueryPlanError("'not' operator is missing operand");
       }
+
       return buildFilterFromExpression(operand, mapper, options, !negated);
     }
+
     case "if":
       return buildTernaryFilter(operands, mapper, options, negated);
     case "eq":
@@ -698,10 +798,13 @@ export const buildFilterFromExpression = (
       if (operands.length !== 2) {
         throw new UnsupportedQueryPlanError(`'${operator}' operator requires exactly two operands`);
       }
+
       const [left, right] = operands;
+
       if (!left || !right) {
         throw new UnsupportedQueryPlanError("Comparison operator requires two operands");
       }
+
       if (operator === "eq" || operator === "ne") {
         const mapIndex = buildConstantMapIndexComparison(
           operator,
@@ -711,8 +814,10 @@ export const buildFilterFromExpression = (
           options,
           negated,
         );
+
         if (mapIndex) return mapIndex;
       }
+
       return buildComparisonFilter(
         operator,
         left,
@@ -722,6 +827,7 @@ export const buildFilterFromExpression = (
         negated,
       );
     }
+
     case "contains":
     case "startsWith":
     case "endsWith":
@@ -729,24 +835,31 @@ export const buildFilterFromExpression = (
         buildStringMatchFilter(operator, operands, mapper, options),
         negated,
       );
-    case "in":
-      if (
-        operands.length === 2 &&
-        isValueOperand(operands[0]!) &&
-        (isOperatorCall(operands[1]!, "map") || isOperatorCall(operands[1]!, "filter"))
-      ) {
-        return buildDerivedListMembership(
-          operands[0]!,
-          operands[1] as { operator: string; operands: PlanExpressionOperand[] },
-          mapper,
-          options,
+    case "in": {
+        const [member, derived] = operands;
+
+        if (
+          operands.length === 2 &&
+          member !== undefined &&
+          isValueOperand(member) &&
+          derived !== undefined &&
+          (isOperatorCall(derived, "map") || isOperatorCall(derived, "filter"))
+        ) {
+          return buildDerivedListMembership(
+            member,
+            derived,
+            mapper,
+            options,
+            negated,
+          );
+        }
+
+        return withPolarity(
+          buildMembershipFilter(operands, mapper, options),
           negated,
         );
-      }
-      return withPolarity(
-        buildMembershipFilter(operands, mapper, options),
-        negated,
-      );
+    }
+
     case "map":
       // map() returns a list, and a list where CEL needs a boolean is a no-overload error at
       // evaluation, denied under both polarities — which UNKNOWN spells exactly. The same
@@ -756,6 +869,7 @@ export const buildFilterFromExpression = (
       if (operands.length === 2 && !isOperatorCall(operands[1]!, "lambda")) {
         return UNKNOWN_CONDITION;
       }
+
       return buildCollectionOperatorFilter(operator, operands, mapper, negated, options);
     case "matches":
       return withPolarity(buildMatchesFilter(operands, mapper, options), negated);
@@ -779,17 +893,18 @@ export const buildFilterFromExpression = (
     default:
       if (
         (operator === "exists" || operator === "all") && operands.length === 2 &&
-        isOperatorCall(operands[0]!, "list")
+        operands[0] !== undefined && isOperatorCall(operands[0], "list")
       ) {
         return buildConstructedListMacro(
           operator,
-          (operands[0] as { operands: PlanExpressionOperand[] }).operands,
+          operands[0].operands,
           operands[1]!,
           mapper,
           options,
           negated,
         );
       }
+
       if (isCollectionOperator(operator)) {
         return buildCollectionOperatorFilter(
           operator,
@@ -799,6 +914,7 @@ export const buildFilterFromExpression = (
           options,
         );
       }
+
       throw new UnsupportedQueryPlanError(`Unsupported operator: ${operator}`);
   }
 };
@@ -828,6 +944,7 @@ export const rejectNullConstructors = (
     const nested =
       inConstructor ||
       ["list", "struct", "set-field"].includes(operand.operator);
+
     operand.operands.forEach((child) =>
       rejectNullConstructors(child, options, nested),
     );

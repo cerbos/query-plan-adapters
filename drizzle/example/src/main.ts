@@ -56,7 +56,7 @@ interface Seeds {
   }[];
 }
 
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
+// SAFETY: demo/seeds.json is a repository-controlled corpus file, checked structurally by
 // demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
 const seeds = JSON.parse(
   readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
@@ -89,6 +89,7 @@ const APPLICATION_FILTER = and(
  * Checked before anything is opened or deleted, so a misinvocation costs nothing.
  */
 const cerbosHost = process.env["CERBOS_HOST"];
+
 if (!cerbosHost) {
   throw new Error(
     "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh drizzle"
@@ -96,6 +97,7 @@ if (!cerbosHost) {
 }
 
 rmSync(DB_PATH, { force: true });
+
 const sqlite = new Database(DB_PATH);
 const db = drizzle(sqlite);
 
@@ -106,7 +108,9 @@ type QueryPlan = Awaited<ReturnType<Cerbos["planResources"]>>;
 
 function principal(id: string): { id: string; roles: string[] } {
   const found = seeds.principals.find((p) => p.id === id);
+
   if (!found) throw new Error(`demo/seeds.json declares no principal '${id}'`);
+
   return found;
 }
 
@@ -139,6 +143,7 @@ function toWhere(result: QueryPlanToDrizzleResult): Where {
 
 function findIds(where: Where): string[] {
   if (where === "denied") return [];
+
   return db
     .select({ id: documents.id })
     .from(documents)
@@ -148,12 +153,12 @@ function findIds(where: Where): string[] {
     .sort();
 }
 
-interface ShapeResult {
+interface UsageResult {
   kind: PlanKind;
   ids: string[];
 }
 
-interface PaginatedShapeResult extends ShapeResult {
+interface PaginatedUsageResult extends UsageResult {
   pageSize: number;
   pageSizes: number[];
 }
@@ -166,9 +171,10 @@ interface PaginatedShapeResult extends ShapeResult {
 async function filtered(
   principalId: string,
   action: string
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
+
   return { kind: result.kind, ids: findIds(toWhere(result)) };
 }
 
@@ -181,13 +187,14 @@ async function paginated(
   principalId: string,
   action: string,
   pageSize: number
-): Promise<PaginatedShapeResult> {
+): Promise<PaginatedUsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
 
   const pageSizes: number[] = [];
   const ids: string[] = [];
+
   if (where !== "denied") {
     for (let offset = 0; ; offset += pageSize) {
       const page = db
@@ -201,9 +208,11 @@ async function paginated(
         .limit(pageSize)
         .offset(offset)
         .all();
+
       if (page.length === 0) break;
       pageSizes.push(page.length);
       ids.push(...page.map((row) => row.id));
+
       if (page.length < pageSize) break;
     }
   }
@@ -223,13 +232,15 @@ async function paginated(
 async function composed(
   principalId: string,
   action: string
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToDrizzle({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
+
   if (where === "denied") {
     return { kind: result.kind, ids: [] };
   }
+
   return { kind: result.kind, ids: findIds(and(where, APPLICATION_FILTER)) };
 }
 
@@ -242,7 +253,7 @@ async function main(): Promise<void> {
   seed();
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
+  const usages = {
     filtered: {
       "alice/view": await filtered("alice", "view"),
       "bob/view": await filtered("bob", "view"),
@@ -266,7 +277,7 @@ async function main(): Promise<void> {
   };
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "drizzle", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "drizzle", shapes: usages }, null, 2)}\n`
   );
 }
 

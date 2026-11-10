@@ -15,10 +15,12 @@ export interface CompiledRegex {
 
 export const compileRegex = (pattern: string): CompiledRegex | EvaluationError => {
   let compiled: RE2JS;
+
   try {
     compiled = RE2JS.compile(pattern);
   } catch {
     return EVALUATION_ERROR;
   }
+
   return { matches: (input) => compiled.matcher(input).find() };
 };

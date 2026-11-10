@@ -1,7 +1,9 @@
 import { describe, expect, test } from "@jest/globals";
+import type { JsonValue } from "@bufbuild/protobuf";
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
+  Value,
 } from "@cerbos/core";
 
 import { queryPlanToPrisma, PlanKind, UnsupportedQueryPlanError } from ".";
@@ -13,6 +15,13 @@ import type {
   QueryPlanToPrismaResult,
 } from ".";
 import { MAPPER, MODEL, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
+import { isObject } from "./narrowing";
+
+type Relation = NonNullable<MapperConfig["relation"]>;
+
+/** `response` with `field` replaced by a value its type rules out: a plan the SDK never decodes. */
+const overwritten = (response: PlanResourcesResponse, field: string, value: Value): PlanResourcesResponse =>
+  Object.defineProperty({ ...response }, field, { value, enumerable: true });
 
 /**
  * Offline unit tests: what a caller can pass that the conformance corpus cannot vary (mapper forms,
@@ -50,27 +59,31 @@ async function translate(
 describe("the refusal type", () => {
   test("an untranslatable shape raises UnsupportedQueryPlanError, which is an Error", async () => {
     let raised: unknown;
+
     try {
       await translate("collection/index/first-element-of-string-list");
     } catch (error) {
       raised = error;
     }
+
     expect(raised).toBeInstanceOf(UnsupportedQueryPlanError);
     expect(raised).toBeInstanceOf(Error);
-    expect((raised as Error).name).toBe("UnsupportedQueryPlanError");
+    expect(raised).toMatchObject({ name: "UnsupportedQueryPlanError" });
   });
 
   test("mapper misconfiguration is a plain Error, not a refusal", async () => {
     const queryPlan = await planFor("comparison/equals/field-to-field");
     let raised: unknown;
+
     try {
       queryPlanToPrisma({ queryPlan, mapper: MAPPER });
     } catch (error) {
       raised = error;
     }
+
     expect(raised).toBeInstanceOf(Error);
     expect(raised).not.toBeInstanceOf(UnsupportedQueryPlanError);
-    expect((raised as Error).message).toContain("requires the `model` option");
+    expect(raised).toHaveProperty("message", expect.stringContaining("requires the `model` option"));
   });
 });
 
@@ -91,18 +104,24 @@ describe("declared scalar types", () => {
 const UNDECLARED: Record<string, MapperConfig> = Object.fromEntries(
   Object.entries(MAPPER).map(([reference, config]) => {
     const { nullAttributeRepresentation: _stripped, ...rest } = config;
+
     return [reference, rest];
   })
 );
 
 /** Whether any operand anywhere in the wire plan is a literal null, or a list containing one. */
-function carriesNullLiteral(node: unknown): boolean {
-  if (typeof node !== "object" || node === null) return false;
-  const record = node as Record<string, unknown>;
+function carriesNullLiteral(node: JsonValue | undefined): boolean {
+  if (Array.isArray(node)) return node.some(carriesNullLiteral);
+
+  if (!isObject(node)) return false;
+  const record = node;
+
   if ("value" in record) {
     const value = record["value"];
+
     return value === null || (Array.isArray(value) && value.includes(null));
   }
+
   return Object.values(record).some((child) =>
     Array.isArray(child) ? child.some(carriesNullLiteral) : carriesNullLiteral(child)
   );
@@ -168,6 +187,7 @@ describe("nullAttributeRepresentation", () => {
     expect(ids).toContain("null/has-intersection/literal-list-with-null-element");
 
     const plans = await Promise.all(carrying.map((golden) => planOf(golden)));
+
     const notRejected = carrying.flatMap((golden, index) => {
       try {
         const result = queryPlanToPrisma({
@@ -176,6 +196,7 @@ describe("nullAttributeRepresentation", () => {
           model: MODEL,
           nullAttributeRepresentation: "omitted",
         });
+
         return result.kind === PlanKind.CONDITIONAL && JSON.stringify(result.filters).includes("null")
           ? [golden.id]
           : [];
@@ -186,6 +207,7 @@ describe("nullAttributeRepresentation", () => {
         // is an `in` over a computed member. A null arithmetic operand has no CEL overload, so its
         // fold is refused under either.
         const message = String(error);
+
         return message.includes("missing-attribute error") ||
           message.includes("Unsupported operator: index") ||
           message.includes("in requires a field member and literal list") ||
@@ -196,6 +218,7 @@ describe("nullAttributeRepresentation", () => {
           : [`${golden.id} (${message})`];
       }
     });
+
     expect(notRejected).toEqual([]);
   });
 });
@@ -210,6 +233,7 @@ describe("reentrant function mappers", () => {
     const expected = await translate(action, { mapper: UNDECLARED });
     const nested = await planFor("arithmetic/add/field-plus-constant");
     let calls = 0;
+
     const mapper: Mapper = (key) => {
       calls++;
       queryPlanToPrisma({
@@ -218,8 +242,10 @@ describe("reentrant function mappers", () => {
         model: "NestedModel",
         nullAttributeRepresentation: "omitted",
       });
+
       return UNDECLARED[key] ?? { field: key };
     };
+
     expect(await translate(action, { mapper })).toStrictEqual(expected);
     expect(calls).toBeGreaterThan(0);
   });
@@ -253,11 +279,13 @@ test("an unplannable nested map does not register nullable fields on the outer l
       },
     ],
   };
+
   const result = queryPlanToPrisma({
     queryPlan: { ...(await planFor("collection/all/empty-collection")), kind: PlanKind.CONDITIONAL, condition },
     mapper: MAPPER,
     model: MODEL,
   });
+
   expect(result).toStrictEqual({
     kind: PlanKind.CONDITIONAL,
     filters: { tags: { none: {} } },
@@ -317,24 +345,27 @@ describe("relation subqueryFilter", () => {
    */
   const VISIBLE_ONLY: PrismaFilter = { name: { not: "hidden" } };
 
-  const mapperFor = (subqueryFilter?: PrismaFilter): Mapper => ({
-    "request.resource.attr.tags": {
-      relation: {
-        name: "tags",
-        type: "many",
-        // `nullable: false` keeps the element NULL guard (see "relation element nullability"
-        // below) out of these filters, so they isolate what the declaration changes.
-        fields: { name: { field: "name", nullable: false } },
-        ...(subqueryFilter ? { subqueryFilter } : {}),
-      },
-    },
-  });
+  const mapperFor = (subqueryFilter?: PrismaFilter): Mapper => {
+    const relation: Relation = {
+      name: "tags",
+      type: "many",
+      // `nullable: false` keeps the element NULL guard (see "relation element nullability"
+      // below) out of these filters, so they isolate what the declaration changes.
+      fields: { name: { field: "name", nullable: false } },
+    };
+
+    if (subqueryFilter) relation.subqueryFilter = subqueryFilter;
+
+    return { "request.resource.attr.tags": { relation } };
+  };
 
   const filtersFor = async (action: string, subqueryFilter?: PrismaFilter) => {
     const result = await translate(action, { mapper: mapperFor(subqueryFilter) });
+
     if (result.kind !== PlanKind.CONDITIONAL) {
       throw new Error(`Expected CONDITIONAL result for ${action}`);
     }
+
     return result.filters;
   };
 
@@ -381,6 +412,7 @@ describe("the mapper contract", () => {
       const result = await translate("hierarchy/overlaps/path-built-from-list-value-first", {
         mapper: { "request.resource.attr.scope": { field: "scope", nullable } },
       });
+
       expect(result).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters:
@@ -412,9 +444,11 @@ describe("the mapper contract", () => {
     "%s resolves a projection supplied through a prefix mapper",
     async (action) => {
       const direct = await translate(action);
+
       if (direct.kind !== PlanKind.CONDITIONAL) {
         throw new Error("Expected a conditional projection plan");
       }
+
       const mapper: Mapper = {
         "request.resource.attr": {
           relation: {
@@ -428,6 +462,7 @@ describe("the mapper contract", () => {
           },
         },
       };
+
       expect(await translate(action, { mapper })).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters: { categories: { some: direct.filters } },
@@ -441,9 +476,11 @@ describe("the mapper contract", () => {
     // negation would match every row where CEL's `!true` matches none; the adapter has no
     // field-free false condition to emit instead (cerbos/query-plan-adapters#495).
     const fixture = await planFor("hierarchy/overlaps/path-built-from-list-value-first");
+
     if (fixture.kind !== PlanKind.CONDITIONAL) {
       throw new Error("Expected a conditional hierarchy plan");
     }
+
     expect(() =>
       queryPlanToPrisma({
         queryPlan: {
@@ -467,23 +504,26 @@ describe("the mapper contract", () => {
         { tags: { none: { name: null } } },
       ],
     };
-    const unguarded = { tags: { every: { name: { equals: "public" } } } };
-    const allFor = (fields?: Record<string, MapperConfig>) =>
-      translate("collection/all/empty-collection", {
-        mapper: {
-          "request.resource.attr.tags": {
-            relation: { name: "tags", type: "many", ...(fields ? { fields } : {}) },
-          },
-        },
-      });
 
-    test.each([
+    const unguarded = { tags: { every: { name: { equals: "public" } } } };
+
+    const allFor = (fields?: Relation["fields"]) => {
+      const relation: Relation = { name: "tags", type: "many" };
+
+      if (fields) relation.fields = fields;
+
+      return translate("collection/all/empty-collection", {
+        mapper: { "request.resource.attr.tags": { relation } },
+      });
+    };
+
+    test.each<[string, Relation["fields"], PrismaFilter]>([
       ["undeclared", { name: { field: "name" } }, guarded],
       ["nullable: true", { name: { field: "name", nullable: true } }, guarded],
       ["nullable: false", { name: { field: "name", nullable: false } }, unguarded],
       ["an element with no field mapping at all", undefined, guarded],
-    ] as const)("%s", async (_label, fields, filters) => {
-      expect(await allFor(fields as Record<string, MapperConfig> | undefined)).toStrictEqual({
+    ])("%s", async (_label, fields, filters) => {
+      expect(await allFor(fields)).toStrictEqual({
         kind: PlanKind.CONDITIONAL,
         filters,
       });
@@ -506,24 +546,26 @@ describe("which patterns RE2 rejects", () => {
   // backslash is a backreference to RE2 only on its own, and an octal escape when another octal
   // digit follows, so `\11` is a tab.
   const matches = (pattern: string, sibling = false): PlanResourcesResponse => {
-    const test = {
+    const test: PlanExpressionOperand = {
       operator: "matches",
       operands: [{ name: "request.resource.attr.aString" }, { value: pattern }],
     };
-    const condition = sibling
+
+    const condition: PlanExpressionOperand = sibling
       ? {
           operator: "or",
           operands: [test, { operator: "eq", operands: [{ name: "request.resource.attr.aNumber" }, { value: 5 }] }],
         }
       : test;
+
     return {
       kind: PlanKind.CONDITIONAL,
-      condition: condition as PlanExpressionOperand,
+      condition,
       cerbosCallId: "",
       requestId: "",
       validationErrors: [],
       metadata: undefined,
-    } as PlanResourcesResponse;
+    };
   };
 
   test("an octal escape is the character it names, not a backreference", () => {
@@ -537,6 +579,7 @@ describe("which patterns RE2 rejects", () => {
       mapper: MAPPER,
       model: MODEL,
     });
+
     expect(result).toEqual({ kind: PlanKind.CONDITIONAL, filters: { aNumber: { equals: 5 } } });
     expect(queryPlanToPrisma({ queryPlan: matches("\\8"), mapper: MAPPER, model: MODEL })).toEqual({
       kind: PlanKind.ALWAYS_DENIED,
@@ -556,20 +599,28 @@ describe("plans the planner cannot produce", () => {
   // pinned here by hand-built plan before #377 and are now
   // [#394](https://github.com/cerbos/query-plan-adapters/issues/394).
 
-  const plan = (condition: unknown): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition: condition as PlanExpressionOperand,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
+  const plan = (condition: Value): PlanResourcesResponse =>
+    overwritten(
+      {
+        kind: PlanKind.CONDITIONAL,
+        condition: { value: true },
+        cerbosCallId: "",
+        requestId: "",
+        validationErrors: [],
+        metadata: undefined,
+      },
+      "condition",
+      condition,
+    );
 
   test("an unrecognised plan kind", () => {
     expect(() =>
       queryPlanToPrisma({
-        queryPlan: { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse,
+        queryPlan: overwritten(
+          { kind: PlanKind.ALWAYS_ALLOWED, cerbosCallId: "", requestId: "", validationErrors: [], metadata: undefined },
+          "kind",
+          "INVALID_KIND"
+        ),
         mapper: {},
       })
     ).toThrow("Invalid query plan.");
@@ -679,7 +730,7 @@ describe("plans the planner cannot produce", () => {
   // folder would otherwise reduce it to `true` before the translator saw it
   // (cerbos/query-plan-adapters#495). The empty disjunction is refused alongside it: neither is
   // something the planner emits.
-  test.each([
+  test.each<[string, Value, string]>([
     ["an empty and", { operator: "and", operands: [] }, "and requires at least one operand"],
     ["an empty or", { operator: "or", operands: [] }, "or requires at least one operand"],
     [

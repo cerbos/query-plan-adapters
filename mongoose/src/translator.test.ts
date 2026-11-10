@@ -2,9 +2,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { describe, expect, test } from "@jest/globals";
+import type { JsonValue } from "@bufbuild/protobuf";
 import type {
   PlanExpressionOperand,
   PlanResourcesResponse,
+  Value,
 } from "@cerbos/core";
 import { Types } from "mongoose";
 
@@ -13,10 +15,14 @@ import type {
   Mapper,
   MapperConfig,
   MongooseFilter,
+  MongoValue,
   NullAttributeRepresentation,
   QueryPlanToMongooseResult,
 } from ".";
 import { MAPPER, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
+import type { ConformanceMapper } from "./corpus";
+import { isMongoDocument } from "./expression";
+import { isFunction, isObject } from "./narrowing";
 
 /**
  * Offline unit tests: what a caller can pass that the conformance corpus cannot vary (mapper forms,
@@ -60,6 +66,7 @@ function filtersOf(result: QueryPlanToMongooseResult): MongooseFilter {
   if (result.kind !== PlanKind.CONDITIONAL) {
     throw new Error(`translated to ${result.kind}, not a filter`);
   }
+
   return result.filters;
 }
 
@@ -79,6 +86,7 @@ async function translate(
 // (cerbos/query-plan-adapters#323).
 test("the adapter source emits no $lookup and reaches no second collection", () => {
   const forbidden = /\$lookup|\$graphLookup|\bpopulate\s*\(|\baggregate\s*\(/;
+
   const sourceFiles = fs
     .readdirSync(__dirname)
     .filter(
@@ -88,14 +96,17 @@ test("the adapter source emits no $lookup and reaches no second collection", () 
         file !== "corpus.ts",
     )
     .sort();
+
   // Guard the guard: a scan that found no files, or lost the entry point, would pass vacuously.
   expect(sourceFiles).toContain("index.ts");
   expect(sourceFiles).toContain("filter.ts");
+
   // Prose about the guard is not a violation of it, so comments come off first.
   const stripComments = (line: string): string =>
     /^(\/\/|\/\*|\*)/.test(line.trimStart())
       ? ""
       : line.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "");
+
   const offendingLines = sourceFiles.flatMap((file) =>
     fs
       .readFileSync(path.join(__dirname, file), "utf8")
@@ -105,6 +116,7 @@ test("the adapter source emits no $lookup and reaches no second collection", () 
       )
       .filter(([, code]) => forbidden.test(code)),
   );
+
   expect(offendingLines).toEqual([]);
 });
 
@@ -122,6 +134,7 @@ describe("nullAttributeRepresentation", () => {
     const queryPlan = await planFor(
       "null/equals/null-literal-on-missing-attribute",
     );
+
     expect(() => queryPlanToMongoose({ queryPlan, mapper: MAPPER })).toThrow(
       'the default is "omitted"',
     );
@@ -142,25 +155,30 @@ describe("nullAttributeRepresentation", () => {
     async (nullAttributeRepresentation) => {
       const nestedRepresentation =
         nullAttributeRepresentation === "explicit" ? "omitted" : "explicit";
+
       const nested = await planFor("string/equals/case-sensitive");
+
       const outerPlan = await planFor(
         "null/equals/null-literal-on-missing-attribute",
       );
+
       let nestedCalls = 0;
+
       const mapper: Mapper = (key) => {
         translatePlan(nested, {
           nullAttributeRepresentation: nestedRepresentation,
         });
         nestedCalls += 1;
-        return typeof MAPPER === "function"
-          ? MAPPER(key)
-          : (MAPPER[key] ?? { field: key });
+
+        return MAPPER[key] ?? { field: key };
       };
+
       const outer = () =>
         translatePlan(outerPlan, {
           mapper,
           nullAttributeRepresentation,
         });
+
       if (nullAttributeRepresentation === "explicit") {
         expect(outer()).toStrictEqual(
           await translate("null/equals/null-literal-on-missing-attribute"),
@@ -168,6 +186,7 @@ describe("nullAttributeRepresentation", () => {
       } else {
         expect(outer).toThrow("missing-attribute error");
       }
+
       expect(nestedCalls).toBeGreaterThan(0);
     },
   );
@@ -188,31 +207,40 @@ describe("nullAttributeRepresentation", () => {
   // negated shape may be refused for the negation over a field the option makes nullable before
   // its null operand is reached, so the refusal type is what counts.
   test("omitted: every golden plan carrying a null literal is refused", async () => {
-    const carriesNull = (node: unknown): boolean => {
-      if (typeof node !== "object" || node === null) return false;
-      const record = node as Record<string, unknown>;
+    const carriesNull = (node: JsonValue | undefined): boolean => {
+      if (!isObject(node) || Array.isArray(node)) return false;
+      const record = node;
+
       if ("value" in record) {
         const value = record["value"];
+
         return value === null || (Array.isArray(value) && value.includes(null));
       }
-      const expression = record["expression"] as
-        | { operands?: unknown[] }
-        | undefined;
-      return (expression?.operands ?? []).some(carriesNull);
+
+      const expression = record["expression"];
+
+      if (!isObject(expression) || Array.isArray(expression)) return false;
+      const operands = expression["operands"];
+
+      return Array.isArray(operands) && operands.some(carriesNull);
     };
+
     const indexedNull =
       "collection/index/first-element-of-string-list-equals-null";
+
     const nullCarrying = readGoldens(CURRENT)
       .filter(
         (g) =>
-          g.plan.kind === PlanKind.CONDITIONAL && carriesNull(g.plan.condition),
+          g.plan["kind"] === PlanKind.CONDITIONAL && carriesNull(g.plan["condition"]),
       )
       .map((g) => g.id);
+
     // Guard the guard: if the walk stopped finding null operands the loop below is vacuous.
     expect(nullCarrying).toContain(
       "null/equals/null-literal-on-missing-attribute",
     );
     expect(nullCarrying).toContain(indexedNull);
+
     const plans = new Map(
       await Promise.all(
         nullCarrying.map(async (id) => [id, await planFor(id)] as const),
@@ -224,20 +252,25 @@ describe("nullAttributeRepresentation", () => {
     const refusedRegardless = (id: string): boolean => {
       try {
         translatePlan(plans.get(id)!);
+
         return false;
       } catch (error) {
         return error instanceof UnsupportedQueryPlanError;
       }
     };
+
     const notRejected = nullCarrying.filter((id) => {
       if (id === indexedNull || refusedRegardless(id)) return false;
+
       try {
         translatePlan(plans.get(id)!, { nullAttributeRepresentation: "omitted" });
+
         return true;
       } catch (error) {
         return !(error instanceof UnsupportedQueryPlanError);
       }
     });
+
     expect(notRejected).toEqual([]);
     expect(() =>
       translatePlan(plans.get(indexedNull)!, {
@@ -252,7 +285,7 @@ describe("nullAttributeRepresentation", () => {
   // entry declaring its own `nullable`, nothing is left for the default to decide, so every
   // null-free plan translates exactly as it does under "explicit".
   test("omitted: with every entry declared, a null-free plan is untouched", async () => {
-    const outcome = (build: () => QueryPlanToMongooseResult): unknown => {
+    const outcome = (build: () => QueryPlanToMongooseResult): QueryPlanToMongooseResult | string => {
       try {
         return build();
       } catch (error) {
@@ -261,12 +294,15 @@ describe("nullAttributeRepresentation", () => {
           : String(error);
       }
     };
+
     const nullFree = readGoldens(CURRENT).filter(
       (g) => !/\bnull\b/.test(JSON.stringify(g.plan)),
     );
+
     // Guard the guard: the loop below must cover real plans.
     expect(nullFree.map((g) => g.id)).toContain("string/equals/case-sensitive");
     const plans = await Promise.all(nullFree.map((g) => planOf(g)));
+
     const differing = nullFree
       .filter(
         (_g, index) =>
@@ -281,34 +317,31 @@ describe("nullAttributeRepresentation", () => {
           ),
       )
       .map((g) => g.id);
+
     expect(differing).toEqual([]);
   });
 });
 
 /** `mapper` with `nullable` set to `value` on every entry and relation field that declares none. */
 function declaringNullable(mapper: Mapper, value: boolean): Mapper {
-  const declare = (config: MapperConfig): MapperConfig => ({
-    ...config,
-    nullable: config.nullable ?? value,
-    ...(config.relation
-      ? {
-          relation: {
-            ...config.relation,
-            ...(config.relation.fields
-              ? {
-                  fields: Object.fromEntries(
-                    Object.entries(config.relation.fields).map(([key, field]) => [
-                      key,
-                      declare(field),
-                    ]),
-                  ),
-                }
-              : {}),
-          },
-        }
-      : {}),
-  });
-  if (typeof mapper === "function") return (key) => declare(mapper(key));
+  const declare = (config: MapperConfig): MapperConfig => {
+    const declared: MapperConfig = { ...config, nullable: config.nullable ?? value };
+
+    if (config.relation) {
+      declared.relation = { ...config.relation };
+
+      if (config.relation.fields) {
+        declared.relation.fields = Object.fromEntries(
+          Object.entries(config.relation.fields).map(([key, field]) => [key, declare(field)]),
+        );
+      }
+    }
+
+    return declared;
+  };
+
+  if (isFunction(mapper)) return (key) => declare(mapper(key));
+
   return Object.fromEntries(
     Object.entries(mapper).map(([key, config]) => [key, declare(config)]),
   );
@@ -322,27 +355,29 @@ function declaringNullable(mapper: Mapper, value: boolean): Mapper {
 describe("omitted: an undeclared entry is nullable", () => {
   const omitted = (id: string, mapper: Mapper = MAPPER) =>
     translate(id, { mapper, nullAttributeRepresentation: "omitted" });
-  const topLevelConjuncts = (filter: unknown): unknown[] => {
-    const record = filter as Record<string, unknown>;
-    return Array.isArray(record["$and"])
-      ? record["$and"].flatMap(topLevelConjuncts)
-      : [filter];
+
+  const topLevelConjuncts = (filter: MongoValue): MongoValue[] => {
+    const conjuncts = isMongoDocument(filter) ? filter["$and"] : undefined;
+
+    return Array.isArray(conjuncts) ? conjuncts.flatMap(topLevelConjuncts) : [filter];
   };
 
   // The corpus mapping declares the scalars it seeds as missing (`aString`, `aNumber`, `aBool`)
   // nullable, so each test strips the declaration from the field it reads, leaving the entry for
   // the call-level default to decide. `owner` maps the nullable `aOptionalString` column without
   // declaring it, as a caller on the explicit convention would.
-  const undeclared = (field: string): Mapper =>
+  const undeclared = (field: string): ConformanceMapper =>
     Object.fromEntries(
-      Object.entries(MAPPER as Record<string, MapperConfig>).map(
+      Object.entries(MAPPER).map(
         ([key, config]) => {
           if (config.field !== field) return [key, config];
           const { nullable: _nullable, ...rest } = config;
+
           return [key, rest];
         },
       ),
     );
+
   const guard = (field: string) => JSON.stringify({ [field]: { $ne: null } });
 
   test.each([
@@ -384,8 +419,9 @@ describe("omitted: an undeclared entry is nullable", () => {
   });
 
   test("a function mapper takes the default too", async () => {
-    const mapper = undeclared("aString") as Record<string, MapperConfig>;
+    const mapper = undeclared("aString");
     const asFunction: Mapper = (key) => mapper[key]!;
+
     for (const id of ["string/equals/case-sensitive", "logic/not/over-and"]) {
       expect(await omitted(id, asFunction)).toStrictEqual(
         await omitted(id, mapper),
@@ -501,7 +537,7 @@ describe("the mapper contract", () => {
         mapper: {
           "request.resource.attr.aOptionalString": {
             field: "aOptionalString",
-            valueParser: (value: unknown) => String(value).toUpperCase(),
+            valueParser: (value: Value) => String(value).toUpperCase(),
           },
         },
       }),
@@ -521,7 +557,7 @@ describe("the mapper contract", () => {
         mapper: {
           "request.resource.id": {
             field: "_id",
-            valueParser: (value: unknown) =>
+            valueParser: (value: Value) =>
               new Types.ObjectId(String(value).padEnd(24, "0")),
           },
         },
@@ -533,20 +569,17 @@ describe("the mapper contract", () => {
   });
 
   test("a valueParser declared on a relation field applies through the hop", async () => {
-    const relation = (valueParser?: (value: unknown) => unknown): Mapper => ({
-      "request.resource.attr.parent": {
-        relation: {
-          name: "parent",
-          type: "one",
-          fields: {
-            aString: {
-              field: "aString",
-              ...(valueParser ? { valueParser } : {}),
-            },
-          },
+    const relation = (valueParser?: (value: Value) => MongoValue): Mapper => {
+      const aString: MapperConfig = { field: "aString" };
+
+      if (valueParser) aString.valueParser = valueParser;
+
+      return {
+        "request.resource.attr.parent": {
+          relation: { name: "parent", type: "one", fields: { aString } },
         },
-      },
-    });
+      };
+    };
 
     expect(
       await translate("relation/equals/one-hop-string", {
@@ -574,7 +607,7 @@ describe("an unmapped reference", () => {
   // document path, and `$ne`/`$nor` over a path no document stores matched every document.
   const without = (reference: string): Mapper =>
     Object.fromEntries(
-      Object.entries(MAPPER as Record<string, MapperConfig>).filter(
+      Object.entries(MAPPER).filter(
         ([key]) => key !== reference,
       ),
     );
@@ -592,10 +625,10 @@ describe("an unmapped reference", () => {
   });
 
   test("is refused when a function mapper returns no entry for it", async () => {
+    // SAFETY: returns undefined, which Mapper rules out, as an untyped caller's mapper can.
     const mapper = ((key: string) =>
-      key === "request.resource.attr.aOptionalString"
-        ? undefined
-        : (MAPPER as Record<string, MapperConfig>)[key]) as Mapper;
+      key === "request.resource.attr.aOptionalString" ? undefined : MAPPER[key]) as Mapper;
+
     await expect(
       translate("null/not-equals/missing-attribute-against-literal", {
         mapper,
@@ -607,18 +640,22 @@ describe("an unmapped reference", () => {
     const queryPlan = await planFor(
       "null/not-equals/missing-attribute-against-literal",
     );
+
     let thrown: unknown;
+
     try {
       queryPlanToMongoose({ queryPlan });
     } catch (error) {
       thrown = error;
     }
+
     // A mapping mistake is a bug in the caller's mapping, not a refusal: as a refusal, an
     // `unsupported` ledger entry could hide it.
     expect(thrown).toBeInstanceOf(Error);
     expect(thrown).not.toBeInstanceOf(UnsupportedQueryPlanError);
-    expect((thrown as Error).message).toContain(
-      "No mapper entry for request.resource.attr.aOptionalString",
+    expect(thrown).toHaveProperty(
+      "message",
+      expect.stringContaining("No mapper entry for request.resource.attr.aOptionalString"),
     );
   });
 
@@ -649,20 +686,22 @@ describe("plans the planner cannot produce", () => {
   // [#394](https://github.com/cerbos/query-plan-adapters/issues/394) and
   // [#396](https://github.com/cerbos/query-plan-adapters/issues/396).
 
-  const plan = (condition: unknown): PlanResourcesResponse =>
-    ({
-      kind: PlanKind.CONDITIONAL,
-      condition: condition as PlanExpressionOperand,
-      cerbosCallId: "",
-      requestId: "",
-      validationErrors: [],
-      metadata: undefined,
-    }) as PlanResourcesResponse;
+  const plan = (condition: PlanExpressionOperand): PlanResourcesResponse => ({
+    kind: PlanKind.CONDITIONAL,
+    condition,
+    cerbosCallId: "",
+    requestId: "",
+    validationErrors: [],
+    metadata: undefined,
+  });
+
+  const overwritten = (response: PlanResourcesResponse, field: string, value: Value): PlanResourcesResponse =>
+    Object.defineProperty({ ...response }, field, { value, enumerable: true });
 
   test("an unrecognised plan kind", () => {
     expect(() =>
       queryPlanToMongoose({
-        queryPlan: { kind: "INVALID_KIND" } as unknown as PlanResourcesResponse,
+        queryPlan: overwritten({ kind: PlanKind.ALWAYS_ALLOWED, cerbosCallId: "", requestId: "", validationErrors: [], metadata: undefined }, "kind", "INVALID_KIND"),
         mapper: {},
       }),
     ).toThrow("Invalid query plan.");
@@ -670,7 +709,7 @@ describe("plans the planner cannot produce", () => {
 
   test("a condition with neither operator nor operands", () => {
     expect(() =>
-      queryPlanToMongoose({ queryPlan: plan({}), mapper: {} }),
+      queryPlanToMongoose({ queryPlan: overwritten(plan({ name: "request.resource.attr.aString" }), "condition", {}), mapper: {} }),
     ).toThrow("Invalid Cerbos expression structure");
   });
 

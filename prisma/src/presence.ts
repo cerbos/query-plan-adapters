@@ -30,12 +30,14 @@ export function handleHasOperator(
   negated: boolean
 ): PrismaFilter {
   const [operand] = operands;
+
   if (operands.length !== 1 || operand === undefined || !isNamedOperand(operand)) {
     throw new UnsupportedQueryPlanError("has requires exactly one attribute reference");
   }
 
   const fieldRef = resolveFieldReference(operand.name, context);
   const relations = fieldRef.relations ?? [];
+
   if (relations.some((relation) => relation.type === "many")) {
     throw new UnsupportedQueryPlanError(
       `Cannot translate has(${operand.name}): a presence test over a to-many relation has no ` +
@@ -45,6 +47,7 @@ export function handleHasOperator(
 
   let presence: PrismaFilter;
   let hops = relations;
+
   if (namesToOneRelation(context.mapper, operand.name)) {
     presence = wrapInRelations(relations, {});
     hops = relations.slice(0, -1);
@@ -58,6 +61,7 @@ export function handleHasOperator(
 
   if (!negated) return presence;
   const absence = negateFilter(presence);
+
   return hops.length === 0 ? absence : { AND: [wrapInRelations(hops, {}), absence] };
 }
 
@@ -71,6 +75,7 @@ export function constantPresence(
   context: TranslationContext
 ): PlanExpressionOperand | undefined {
   const [operand] = node.operands;
+
   if (
     node.operator !== "has" ||
     node.operands.length !== 1 ||
@@ -81,8 +86,11 @@ export function constantPresence(
   ) {
     return undefined;
   }
+
   const fieldRef = resolveFieldReference(operand.name, context);
+
   if ((fieldRef.relations ?? []).length > 0) return undefined;
+
   return presenceFollowsColumn(operand.name, fieldRef, context) ? undefined : { value: true };
 }
 
@@ -95,9 +103,11 @@ function presenceFollowsColumn(
   const element = context.scopes.some((scope) =>
     reference.startsWith(scope.variableName + ".")
   );
+
   if (element && fieldRef.nullAttributeRepresentation === undefined) {
     return fieldRef.nullable !== false;
   }
+
   return (
     (fieldRef.nullAttributeRepresentation ?? context.nullRepresentation) === "omitted"
   );

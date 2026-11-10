@@ -41,6 +41,7 @@ import { handleStringOperator } from "./strings";
 import { handleBooleanTernaryOperator, tryHandleTernaryComparison } from "./ternary";
 import { normalizeRfc3339Milliseconds, parseRfc3339Instant } from "./timestamp";
 import { UnsupportedQueryPlanError } from "./errors";
+import { isString, lookup, triple } from "./narrowing";
 
 /**
  * Builds a Prisma filter from a Cerbos expression.
@@ -66,6 +67,7 @@ export function buildPrismaFilterFromCerbosExpression(
   // anything else is refused as unsupported.
   const { operator, operands } = expression;
   assertLogicalOperands(operator, operands);
+
   switch (operator) {
     case "and":
       return {
@@ -81,11 +83,14 @@ export function buildPrismaFilterFromCerbosExpression(
       };
     case "not": {
       const operand = operands[0];
+
       if (!operand) {
         throw new UnsupportedQueryPlanError("not operator requires an operand");
       }
+
       return buildNegatedFilter(operand, context);
     }
+
     case "if":
       return handleBooleanTernaryOperator(operands, context);
     case "eq":
@@ -149,11 +154,13 @@ export function buildPrismaFilterFromCerbosExpression(
  */
 function booleanFieldReference(name: string, context: TranslationContext) {
   const fieldRef = resolveFieldReference(name, context);
+
   if (fieldRef.valueType !== undefined && fieldRef.valueType !== "boolean") {
     throw new UnsupportedQueryPlanError(
       `A ${fieldRef.valueType} field in boolean position is a CEL type error`
     );
   }
+
   return fieldRef;
 }
 
@@ -168,29 +175,37 @@ export function buildNegatedFilter(
         context
       );
     }
+
     if (operand.operator === "has") {
       return handleHasOperator(operand.operands, context, true);
     }
+
     const ternary = tryHandleTernaryComparison(
       operand.operator,
       operand.operands,
       context,
       true
     );
+
     if (ternary !== null) return ternary;
+
     const lookup = tryHandleMapLiteralLookup(
       operand.operator,
       operand.operands,
       context,
       true
     );
+
     if (lookup !== null) return lookup;
   }
+
   if (isNamedOperand(operand)) {
     const { relations, ...fieldRef } = booleanFieldReference(operand.name, context);
+
     if (!relations || relations.length === 0) {
       return buildFieldFilter(fieldRef, "equals", false);
     }
+
     return negateRequiringHops(
       operand,
       buildPrismaFilterFromCerbosExpression(operand, context),
@@ -225,11 +240,8 @@ export function buildNegatedFilter(
       // condition is UNKNOWN, which neither guarded branch matched.
       case "if":
         if (operand.operands.length === 3) {
-          const [condition, thenBranch, elseBranch] = operand.operands as [
-            PlanExpressionOperand,
-            PlanExpressionOperand,
-            PlanExpressionOperand,
-          ];
+          const [condition, thenBranch, elseBranch] = triple(operand.operands);
+
           return handleBooleanTernaryOperator(
             [
               condition,
@@ -239,6 +251,7 @@ export function buildNegatedFilter(
             context
           );
         }
+
         break;
       case "exists":
       case "all":
@@ -251,6 +264,7 @@ export function buildNegatedFilter(
           context
         );
     }
+
     if (containsMapLiteralLookup(operand)) {
       // A missing key is an error under both polarities, which a NOT over the positive filter
       // would turn into a match; only and/or and the comparison itself push the negation down.
@@ -283,19 +297,26 @@ export function resolveOperand(
   if (isNamedOperand(operand)) {
     return resolveFieldReference(operand.name, context);
   }
+
   if (isValueOperand(operand)) {
     return { value: operand.value };
   }
+
   if (isOperatorOperand(operand)) {
     if (operand.operator === "timestamp") {
       return resolveTimestampOperand(operand, context, allowSubMillisecond);
     }
+
     const identity = resolveIdentityCast(operand, context);
+
     if (identity !== undefined) return identity;
     const folded = tryFoldValueExpression(operand, context);
+
     if (folded !== null) return { value: folded };
+
     return { value: buildPrismaFilterFromCerbosExpression(operand, context) };
   }
+
   throw new UnsupportedQueryPlanError("Operand must have name, value, or be an expression");
 }
 
@@ -308,8 +329,9 @@ function resolveIdentityCast(
   expression: OperatorOperand,
   context: TranslationContext
 ): ResolvedOperand | undefined {
-  const target = IDENTITY_CASTS[expression.operator];
+  const target = lookup(IDENTITY_CASTS, expression.operator);
   const [operand] = expression.operands;
+
   if (
     target === undefined ||
     expression.operands.length !== 1 ||
@@ -318,12 +340,15 @@ function resolveIdentityCast(
   ) {
     return undefined;
   }
+
   const fieldRef = resolveFieldReference(operand.name, context);
+
   if (fieldRef.valueType !== target) return undefined;
+
   return { ...fieldRef, nullAttributeRepresentation: "omitted" };
 }
 
-const IDENTITY_CASTS: Record<string, string> = { string: "string", double: "number" };
+const IDENTITY_CASTS = { string: "string", double: "number" } satisfies Record<string, string>;
 
 function resolveTimestampOperand(
   expression: OperatorOperand,
@@ -338,23 +363,29 @@ function resolveTimestampOperand(
     expression.operands[0],
     "timestamp() requires an operand"
   );
+
   if (isNamedOperand(operand)) {
     const fieldRef = resolveFieldReference(operand.name, context);
+
     if (fieldRef.valueType !== "dateTime") {
       throw new UnsupportedQueryPlanError(
         `timestamp() field ${operand.name} must be mapped with valueType: \"dateTime\"`
       );
     }
+
     return { ...fieldRef, timestampWrapped: true };
   }
 
-  if (!isValueOperand(operand) || typeof operand.value !== "string") {
+  if (!isValueOperand(operand) || !isString(operand.value)) {
     throw new UnsupportedQueryPlanError("timestamp() requires a field reference or RFC 3339 string");
   }
+
   if (!allowSubMillisecond) {
     return { value: normalizeRfc3339Milliseconds(operand.value) };
   }
+
   const { iso, subMillisecond } = parseRfc3339Instant(operand.value);
+
   return subMillisecond ? { value: iso, subMillisecond } : { value: iso };
 }
 
@@ -366,11 +397,14 @@ export function tryFoldValueExpression(
   if (!ARITHMETIC_OPERATORS.has(expr.operator)) return null;
   const leftOp = expr.operands[0];
   const rightOp = expr.operands[1];
+
   if (!leftOp || !rightOp) return null;
 
   const left = resolveOperand(leftOp, context);
+
   if (!isResolvedValue(left)) return null;
   const right = resolveOperand(rightOp, context);
+
   if (!isResolvedValue(right)) return null;
 
   try {

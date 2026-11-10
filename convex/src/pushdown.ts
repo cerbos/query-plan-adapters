@@ -13,6 +13,7 @@ import type {
 import { UnsupportedQueryPlanError } from "./errors";
 import type { Mapper } from "./index";
 import {
+  isComparisonOperator,
   isExpression,
   isNullableField,
   isValue,
@@ -21,6 +22,7 @@ import {
   resolveField,
 } from "./operands";
 import type { ComparisonOperator } from "./operands";
+import { isBoolean, lookup, typeofValue } from "./narrowing";
 
 /**
  * What Convex's filter engine can answer on its own, and the builder calls that answer it.
@@ -91,13 +93,17 @@ const fieldAndLiteral = (
     }
   | undefined => {
   const [left, right] = operands;
+
   if (!left || !right) return undefined;
+
   if (isVariable(left) && isValue(right)) {
     return { field: left, literal: right, swapped: false };
   }
+
   if (isValue(left) && isVariable(right)) {
     return { field: right, literal: left, swapped: true };
   }
+
   return undefined;
 };
 
@@ -106,7 +112,9 @@ const fieldInList = (
   operands: PlanExpressionOperand[],
 ): { field: PlanExpressionVariable; values: Value[] } | undefined => {
   const [needle, haystack] = operands;
+
   if (!needle || !haystack) return undefined;
+
   if (
     isVariable(needle) &&
     isValue(haystack) &&
@@ -114,6 +122,7 @@ const fieldInList = (
   ) {
     return { field: needle, values: haystack.value };
   }
+
   return undefined;
 };
 
@@ -138,7 +147,7 @@ const sameTypeAs = (
   q: AnyFilterBuilder,
   field: Field,
 ): Expression<boolean> | undefined => {
-  switch (typeof literal) {
+  switch (typeofValue(literal)) {
     case "number":
       return q.and(q.gt(field, INT64_MAX), q.lt(field, false));
     case "boolean":
@@ -158,15 +167,24 @@ const comparisonParts = (
   operator: string,
 ) => {
   const pair = fieldAndLiteral(operands);
+
   if (!pair) {
     throw new UnsupportedQueryPlanError(
       `${operator} operator requires one field and one value operand`,
     );
   }
-  const cel = operator as ComparisonOperator;
+
+  if (!isComparisonOperator(operator)) {
+    throw new UnsupportedQueryPlanError(`${operator} is not a comparison`);
+  }
+
+  const cel = operator;
+
   const compare =
     CONVEX_COMPARISON[pair.swapped ? MIRRORED_COMPARISON[cel] : cel];
+
   const field = q.field(resolveField(pair.field.name, mapper));
+
   return { field, literal: pair.literal.value, compare };
 };
 
@@ -174,6 +192,7 @@ const comparisonParts = (
 const equalityRule: PushdownRule = {
   accepts: (operands, mapper) => {
     const pair = fieldAndLiteral(operands);
+
     return pair !== undefined && !isNullableField(pair.field.name, mapper);
   },
   emit: (operands, q, mapper, operator, negated) => {
@@ -183,7 +202,9 @@ const equalityRule: PushdownRule = {
       mapper,
       operator,
     );
+
     const compared = compare(q, field, literal);
+
     return negated ? q.not(compared) : compared;
   },
 };
@@ -197,6 +218,7 @@ const equalityRule: PushdownRule = {
 const orderingRule: PushdownRule = {
   accepts: (operands, mapper) => {
     const pair = fieldAndLiteral(operands);
+
     return pair !== undefined && !isNullableField(pair.field.name, mapper);
   },
   emit: (operands, q, mapper, operator, negated) => {
@@ -206,15 +228,18 @@ const orderingRule: PushdownRule = {
       mapper,
       operator,
     );
+
     const guard = sameTypeAs(literal, q, field);
+
     // Ordering against null, a list or a map is an error for every document: false either way.
     if (guard === undefined) return q.eq(true, false);
     const compared = compare(q, field, literal);
+
     return q.and(guard, negated ? q.not(compared) : compared);
   },
 };
 
-const PUSHDOWN_RULES: Record<string, PushdownRule> = {
+const PUSHDOWN_RULES = {
   // Negation is pushed inward (De Morgan) rather than wrapped around the built predicate, so each
   // leaf sees its own polarity. That is sound under CEL's three-valued logic: `!(a && b)` is true
   // exactly when `!a` or `!b` is true, with an error in either counting as not true.
@@ -247,6 +272,7 @@ const PUSHDOWN_RULES: Record<string, PushdownRule> = {
   in: {
     accepts: (operands, mapper) => {
       const membership = fieldInList(operands);
+
       return (
         membership !== undefined &&
         !isNullableField(membership.field.name, mapper)
@@ -254,27 +280,31 @@ const PUSHDOWN_RULES: Record<string, PushdownRule> = {
     },
     emit: (operands, q, mapper, _operator, negated) => {
       const membership = fieldInList(operands);
+
       if (!membership) {
         throw new UnsupportedQueryPlanError(
           "in operator requires one field and one array value",
         );
       }
+
       const field = resolveField(membership.field.name, mapper);
       const { values } = membership;
+
       const built =
         values.length === 0
           ? q.eq(true, false)
           : values.length === 1
             ? q.eq(q.field(field), values[0])
             : q.or(...values.map((v) => q.eq(q.field(field), v)));
+
       return negated ? q.not(built) : built;
     },
   },
-};
+} satisfies Record<string, PushdownRule>;
 
 const ruleFor = (operator: string): PushdownRule | undefined =>
   Object.prototype.hasOwnProperty.call(PUSHDOWN_RULES, operator)
-    ? PUSHDOWN_RULES[operator]
+    ? lookup(PUSHDOWN_RULES, operator)
     : undefined;
 
 /** Whether Convex's filter engine answers `expression` exactly as CEL does. */
@@ -283,6 +313,7 @@ export const canPushToDb = (
   mapper: Mapper,
 ): boolean => {
   if (isValue(expression)) return true;
+
   // A BARE variable in boolean position is subject to the same nullability rule as one under a
   // comparison. It was exempt, which is only invisible while every bare boolean is a required
   // field: `R.attr.parent.aBool` is absent for a row with no parent, and Convex's engine cannot
@@ -290,8 +321,10 @@ export const canPushToDb = (
   // (cerbos/query-plan-adapters#375). Keeping it off the engine hands it to the adapter's own CEL
   // evaluator, which has the missing-attribute error the semantics need.
   if (isVariable(expression)) return !isNullableField(expression.name, mapper);
+
   if (!isExpression(expression)) return false;
   const rule = ruleFor(expression.operator);
+
   return rule !== undefined && rule.accepts(expression.operands, mapper);
 };
 
@@ -310,26 +343,33 @@ const emitExpression = (
 ): Expression<boolean> => {
   const polarised = (built: Expression<boolean>) =>
     negated ? q.not(built) : built;
+
   if (isValue(expression)) {
-    if (typeof expression.value === "boolean") {
+    if (isBoolean(expression.value)) {
       return polarised(q.eq(true, expression.value));
     }
+
     throw new UnsupportedQueryPlanError("Unexpected bare value in expression");
   }
+
   if (isVariable(expression)) {
     return polarised(
       q.eq(q.field(resolveField(expression.name, mapper)), true),
     );
   }
+
   if (!isExpression(expression)) {
     throw new UnsupportedQueryPlanError("Invalid Cerbos expression structure");
   }
+
   const rule = ruleFor(expression.operator);
+
   if (!rule) {
     throw new UnsupportedQueryPlanError(
       `Unsupported operator: ${expression.operator}`,
     );
   }
+
   return rule.emit(
     expression.operands,
     q,
@@ -350,6 +390,8 @@ const junction = (
   if (operands.length === 0) return q.eq(true, combine === "and");
   const emitted = operands.map((op) => emitExpression(op, q, mapper, negated));
   const [only] = emitted;
+
   if (emitted.length === 1 && only) return only;
+
   return q[combine](...emitted);
 };

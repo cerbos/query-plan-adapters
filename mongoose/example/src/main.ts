@@ -58,7 +58,7 @@ interface Seeds {
   }[];
 }
 
-// demo/seeds.json is a repository-controlled corpus file, checked structurally by
+// SAFETY: demo/seeds.json is a repository-controlled corpus file, checked structurally by
 // demo/scripts/validate-demo.sh before this ever runs — not untrusted input.
 const seeds = JSON.parse(
   readFileSync(resolve(DEMO_DIR, "seeds.json"), "utf8")
@@ -93,6 +93,7 @@ const APPLICATION_FILTER: MongooseFilter = {
  * Checked before anything connects, so a misinvocation costs nothing.
  */
 const cerbosHost = process.env["CERBOS_HOST"];
+
 if (!cerbosHost) {
   throw new Error(
     "CERBOS_HOST is not set — run this example through demo/scripts/run-example.sh mongoose"
@@ -106,7 +107,9 @@ type QueryPlan = Awaited<ReturnType<Cerbos["planResources"]>>;
 
 function principal(id: string): { id: string; roles: string[] } {
   const found = seeds.principals.find((p) => p.id === id);
+
   if (!found) throw new Error(`demo/seeds.json declares no principal '${id}'`);
+
   return found;
 }
 
@@ -138,6 +141,7 @@ function toWhere(result: QueryPlanToMongooseResult): Where {
       if (!result.filters) {
         throw new Error("KIND_CONDITIONAL plan carried no filters");
       }
+
       return result.filters;
     }
   }
@@ -146,15 +150,16 @@ function toWhere(result: QueryPlanToMongooseResult): Where {
 async function findIds(where: Where): Promise<string[]> {
   if (where === "denied") return [];
   const rows = await DocumentModel.find(where).select({ _id: 1 }).lean().exec();
+
   return rows.map((row) => row._id).sort();
 }
 
-interface ShapeResult {
+interface UsageResult {
   kind: PlanKind;
   ids: string[];
 }
 
-interface PaginatedShapeResult extends ShapeResult {
+interface PaginatedUsageResult extends UsageResult {
   pageSize: number;
   pageSizes: number[];
 }
@@ -167,9 +172,10 @@ interface PaginatedShapeResult extends ShapeResult {
 async function filtered(
   principalId: string,
   action: string
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToMongoose({ queryPlan, mapper: MAPPER });
+
   return { kind: result.kind, ids: await findIds(toWhere(result)) };
 }
 
@@ -182,13 +188,14 @@ async function paginated(
   principalId: string,
   action: string,
   pageSize: number
-): Promise<PaginatedShapeResult> {
+): Promise<PaginatedUsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToMongoose({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
 
   const pageSizes: number[] = [];
   const ids: string[] = [];
+
   if (where !== "denied") {
     for (let skip = 0; ; skip += pageSize) {
       const page = await DocumentModel.find(where)
@@ -201,9 +208,11 @@ async function paginated(
         .limit(pageSize)
         .lean()
         .exec();
+
       if (page.length === 0) break;
       pageSizes.push(page.length);
       ids.push(...page.map((row) => row._id));
+
       if (page.length < pageSize) break;
     }
   }
@@ -223,13 +232,15 @@ async function paginated(
 async function composed(
   principalId: string,
   action: string
-): Promise<ShapeResult> {
+): Promise<UsageResult> {
   const queryPlan = await plan(principalId, action);
   const result = queryPlanToMongoose({ queryPlan, mapper: MAPPER });
   const where = toWhere(result);
+
   if (where === "denied") {
     return { kind: result.kind, ids: [] };
   }
+
   return {
     kind: result.kind,
     ids: await findIds({ $and: [where, APPLICATION_FILTER] }),
@@ -254,7 +265,7 @@ async function main(): Promise<void> {
   await seed();
   console.error(`seeded ${seeds.documents.length} documents`);
 
-  const shapes = {
+  const usages = {
     filtered: {
       "alice/view": await filtered("alice", "view"),
       "bob/view": await filtered("bob", "view"),
@@ -278,7 +289,7 @@ async function main(): Promise<void> {
   };
 
   process.stdout.write(
-    `${JSON.stringify({ adapter: "mongoose", shapes }, null, 2)}\n`
+    `${JSON.stringify({ adapter: "mongoose", shapes: usages }, null, 2)}\n`
   );
 }
 
