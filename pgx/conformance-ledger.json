@@ -168,6 +168,10 @@
       "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
       "status": "unsupported"
     },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() over map() is refused: the projection's body is evaluated per element, and one erroring element (b6's unnamed tag) makes the count an error, which only filter() lowers (as its UNKNOWN guard before the COUNT)."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "reason": "Native timestamp storage discards the original RFC 3339 spelling, so instant equality cannot reproduce CEL string equality without timestamp() wrappers.",
       "status": "unsupported"

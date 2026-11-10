@@ -1201,10 +1201,10 @@ func (b *builder) size(n *node, m Mapper) (value, error) {
 		}
 		// CEL's filter never absorbs an erroring element: a single UNKNOWN body poisons the
 		// whole count, so the error guard comes before the count rather than after it.
-		return Case{
+		return b.requireHops(deferred.rel, deferred.parent, Case{
 			Whens: []When{{Cond: deferred.exists(TruthTest{X: deferred.body, Want: TruthUnknown}), Then: Lit{V: nil}}},
 			Else:  deferred.count(TruthTest{X: deferred.body, Want: TruthTrue}),
-		}, nil
+		}), nil
 	}
 	if s, ok := v.(string); ok {
 		// Fold a constant so the count is exact rather than dialect-dependent. CEL's size() over

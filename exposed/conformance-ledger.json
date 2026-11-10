@@ -252,6 +252,10 @@
       "status": "unsupported",
       "reason": "matches() is translated only where LIKE, = and REPLACE spell the RE2 pattern exactly; the unbounded run `.{8,}` is lowered only as `.*` or `.+` between finite parts, so it is refused when the pattern is compiled"
     },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() takes a mapped collection or a filter(); a map() projection is refused, since its body is evaluated per element and one erroring element (b6's unnamed tag) makes the count an error."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"

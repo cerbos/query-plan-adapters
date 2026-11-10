@@ -3851,6 +3851,51 @@ resourcePolicy:
       condition:
         match:
           expr: '!hierarchy(R.attr.parent.aString).overlaps(hierarchy("one"))'
+    # relation/size/fractional-not-equals-to-one-chain
+    - actions:
+        - relation/size/fractional-not-equals-to-one-chain
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.mainCategory.subCategories) != dyn(1.5)
+    # relation/size/less-than-two-to-one-chain
+    - actions:
+        - relation/size/less-than-two-to-one-chain
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.mainCategory.subCategories) < 2
+    # relation/size/negated-at-least-two-to-one-chain
+    - actions:
+        - relation/size/negated-at-least-two-to-one-chain
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(size(R.attr.mainCategory.subCategories) >= 2)'
+    # relation/size/negated-filtered-fractional-equals-to-one-chain
+    - actions:
+        - relation/size/negated-filtered-fractional-equals-to-one-chain
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(size(R.attr.mainCategory.subCategories.filter(s, s.name == "finance")) == dyn(1.5))'
+    # relation/size/negated-fractional-equals-to-one-chain
+    - actions:
+        - relation/size/negated-fractional-equals-to-one-chain
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(size(R.attr.mainCategory.subCategories) == dyn(1.5))'
     # relation/size/negated-non-empty-to-one-chain
     - actions:
         - relation/size/negated-non-empty-to-one-chain
@@ -3887,6 +3932,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) >= 0
+    # relation/size/not-equals-one-to-one-chain
+    - actions:
+        - relation/size/not-equals-one-to-one-chain
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.mainCategory.subCategories) != 1
     # relation/size/string-length-one-hop
     - actions:
         - relation/size/string-length-one-hop
@@ -3941,6 +3995,15 @@ resourcePolicy:
       condition:
         match:
           expr: '("finance" in R.attr.mainCategory.subNames) ? R.attr.aBool : !R.attr.aBool'
+    # size/equals/collection-two
+    - actions:
+        - size/equals/collection-two
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags) == 2
     # size/equals/filtered-collection
     - actions:
         - size/equals/filtered-collection
@@ -3950,6 +4013,24 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.tags.filter(t, t.name == "public")) == 1
+    # size/equals/fractional-threshold
+    - actions:
+        - size/equals/fractional-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags) == dyn(1.5) || R.attr.aNumber > 30
+    # size/equals/huge-threshold
+    - actions:
+        - size/equals/huge-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) == 4294967296 || R.attr.aNumber > 30
     # size/equals/negated-collection-zero
     - actions:
         - size/equals/negated-collection-zero
@@ -3968,6 +4049,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(size(R.attr.aOptionalString) == dyn(1.5)) || R.attr.aNumber > 10'
+    # size/equals/string-length
+    - actions:
+        - size/equals/string-length
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) == 6
     # size/equals/string-trailing-space
     - actions:
         - size/equals/string-trailing-space
@@ -4004,6 +4094,24 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) >= 1.5
+    # size/greater-or-equal/huge-threshold
+    - actions:
+        - size/greater-or-equal/huge-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) >= 2147483648 || R.attr.aNumber > 30
+    # size/greater-or-equal/list-attribute-two
+    - actions:
+        - size/greater-or-equal/list-attribute-two
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tagNames) >= 2
     # size/greater-than/collection-above-one
     - actions:
         - size/greater-than/collection-above-one
@@ -4013,6 +4121,24 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.tags) > 1
+    # size/greater-than/fractional-threshold
+    - actions:
+        - size/greater-than/fractional-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags) > 0.5
+    # size/greater-than/huge-negative-threshold
+    - actions:
+        - size/greater-than/huge-negative-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) > -4294967296
     # size/greater-than/huge-threshold
     - actions:
         - size/greater-than/huge-threshold
@@ -4022,6 +4148,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.aString) > 4294967296
+    # size/greater-than/map-projection
+    - actions:
+        - size/greater-than/map-projection
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags.map(t, t.name)) > 1
     # size/greater-than/negated-huge-negative-threshold-on-missing-attribute
     - actions:
         - size/greater-than/negated-huge-negative-threshold-on-missing-attribute
@@ -4058,6 +4193,24 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.aString) > 0
+    # size/greater-than/value-first-arbitrary
+    - actions:
+        - size/greater-than/value-first-arbitrary
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 2 > size(R.attr.tags)
+    # size/less-or-equal/fractional-huge-threshold
+    - actions:
+        - size/less-or-equal/fractional-huge-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) <= 4294967296.5
     # size/less-or-equal/fractional-threshold-on-relation
     - actions:
         - size/less-or-equal/fractional-threshold-on-relation
@@ -4067,6 +4220,42 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.mainCategory.subCategories) <= 1.5
+    # size/less-or-equal/huge-threshold
+    - actions:
+        - size/less-or-equal/huge-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) <= 2147483648
+    # size/less-or-equal/list-with-null
+    - actions:
+        - size/less-or-equal/list-with-null
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aNumberList) <= 1
+    # size/less-than/fractional-threshold
+    - actions:
+        - size/less-than/fractional-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags) < 1.5
+    # size/less-than/fractional-threshold-below-one
+    - actions:
+        - size/less-than/fractional-threshold-below-one
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags) < 0.5
     # size/less-than/huge-threshold
     - actions:
         - size/less-than/huge-threshold
@@ -4076,6 +4265,15 @@ resourcePolicy:
       condition:
         match:
           expr: size(R.attr.aString) < 4294967296
+    # size/less-than/int-max-threshold
+    - actions:
+        - size/less-than/int-max-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aString) < 2147483647
     # size/less-than/negated-huge-negative-threshold-on-missing-attribute
     - actions:
         - size/less-than/negated-huge-negative-threshold-on-missing-attribute
@@ -4094,6 +4292,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(size(R.attr.aOptionalString) < 5000000000) || R.attr.aNumber > 10'
+    # size/less-than/string-length-value-first
+    - actions:
+        - size/less-than/string-length-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: 5 < size(R.attr.aString)
     # size/less-than/value-first
     - actions:
         - size/less-than/value-first
@@ -4103,6 +4310,51 @@ resourcePolicy:
       condition:
         match:
           expr: 0 < size(R.attr.tags)
+    # size/not-equals/collection-zero
+    - actions:
+        - size/not-equals/collection-zero
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aNumberList) != 0
+    # size/not-equals/fractional-threshold
+    - actions:
+        - size/not-equals/fractional-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.tags) != dyn(1.5) && R.attr.aNumber < 10
+    # size/not-equals/fractional-threshold-on-missing-attribute
+    - actions:
+        - size/not-equals/fractional-threshold-on-missing-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aOptionalString) != dyn(1.5)
+    # size/not-equals/huge-threshold
+    - actions:
+        - size/not-equals/huge-threshold
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: size(R.attr.aOptionalString) != 4294967296
+    # size/not-equals/negated-collection-zero
+    - actions:
+        - size/not-equals/negated-collection-zero
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(size(R.attr.aNumberList) != 0)'
     # size/not-equals/negated-fractional-threshold-on-missing-attribute
     - actions:
         - size/not-equals/negated-fractional-threshold-on-missing-attribute

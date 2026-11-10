@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed: `size()` of a `filter()` over a to-one chain (`size(R.attr.mainCategory.subCategories.filter(...))`) is UNKNOWN where the chain's parent is absent, as the unfiltered count already was. A negated comparison over it returned every parentless row (`relation/size/negated-filtered-fractional-equals-to-one-chain`).
 - Fixed: a column declared `ValueString`, `ValueNumber` or `ValueTimestamp` read where CEL needs a boolean (`!R.attr.aString`) renders as one UNKNOWN, CEL's type error, where PostgreSQL rejected the query and SQLite and MySQL over-granted.
 - Newly translated, each proved by the corpus: `matches()` with a constant pattern. The pattern
   is parsed with Go's `regexp/syntax`, the parser CEL matches with, so what is valid and what it
