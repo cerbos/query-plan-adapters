@@ -1,0 +1,76 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/has-intersection/negated-scalar-field-against-literal-list",
+  "intent": "!hasIntersection(aString, [\"one\"]) OR aNumber == 5: hasIntersection over a string attribute, under negation.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aString"
+                      },
+                      {
+                        "value": [
+                          "one"
+                        ]
+                      }
+                    ],
+                    "operator": "hasIntersection"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/has-intersection/negated-scalar-field-against-literal-list",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!hasIntersection(R.attr.aString, [\"one\"]) || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "hasIntersection has no overload for a string, so the negation is an error that denies; reading the column as a one-element list grants every row whose aString is not \"one\"."
+}

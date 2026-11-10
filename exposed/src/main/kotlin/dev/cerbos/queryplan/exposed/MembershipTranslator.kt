@@ -59,7 +59,9 @@ internal class MembershipTranslator(private val translation: Translation) {
         val values = elementsOf(constant)
         return when (val resolved = scope.resolve(member.variable)) {
             is Resolution.Collection -> collectionContainsAny(resolved, values)
-            is Resolution.Scalar -> scalarIsAnyOf(resolved, values)
+            // `in` over a scalar, either operand order, is a CEL no-overload error.
+            is Resolution.Scalar ->
+                if (constant is List<*> || constant is Map<*, *>) scalarIsAnyOf(resolved, values) else TriLogic.unknown()
         }
     }
 
@@ -122,16 +124,16 @@ internal class MembershipTranslator(private val translation: Translation) {
             if (constant === PlanValues.NotConstant) {
                 throw RelationRefusals.membershipOperands("hasIntersection")
             }
-            return projectionIntersects(first.expression, elementsOf(constant), scope)
+            // hasIntersection over a scalar, or against one, is a CEL no-overload error.
+            if (constant !is List<*>) return TriLogic.unknown()
+            return projectionIntersects(first.expression, constant, scope)
         }
         if (first.nodeCase != Operand.NodeCase.VARIABLE || constant === PlanValues.NotConstant) {
             throw RelationRefusals.membershipOperands("hasIntersection")
         }
-        val values = elementsOf(constant)
-        return when (val resolved = scope.resolve(first.variable)) {
-            is Resolution.Collection -> collectionContainsAny(resolved, values)
-            is Resolution.Scalar -> scalarIsAnyOf(resolved, values)
-        }
+        val resolved = scope.resolve(first.variable)
+        if (constant !is List<*> || resolved !is Resolution.Collection) return TriLogic.unknown()
+        return collectionContainsAny(resolved, constant)
     }
 
     /**

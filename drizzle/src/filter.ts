@@ -21,6 +21,7 @@ import {
   isMappingConfig,
   isRelationValue,
   isScalarCollection,
+  isScalarColumnReference,
   mappingNullRepresentation,
   resolveFieldReference,
   resolveRelationDefaultField,
@@ -474,6 +475,10 @@ const buildMembershipFilter = (
   }
 
   const unresolved = resolveFieldReference(fieldOperand.name, mapper);
+  // `in` over a scalar column is a CEL no-overload error.
+  if (operands[1] === fieldOperand && isScalarColumnReference(fieldOperand.name, mapper)) {
+    return UNKNOWN_CONDITION;
+  }
   const resolved = isScalarCollection(
     getMappingEntry(fieldOperand.name, mapper),
   )

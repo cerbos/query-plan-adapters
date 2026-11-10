@@ -1,0 +1,123 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2"
+  ],
+  "degenerateReason": null,
+  "id": "size/greater-than/filtered-collection-value-first",
+  "intent": "A constant greater than the size of a filtered tag list (2 > size(tags.filter(t, t.name == \"public\"))).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": 2
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.tags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "t.name"
+                                  },
+                                  {
+                                    "value": "public"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            },
+                            {
+                              "variable": "t"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "filter"
+                  }
+                }
+              ],
+              "operator": "size"
+            }
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "size/greater-than/filtered-collection-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "2 > size(R.attr.tags.filter(t, t.name == \"public\"))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The comparison must be mirrored; reading it as size > 2 denies every row the PDP allows."
+}

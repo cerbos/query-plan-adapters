@@ -88,6 +88,10 @@
       "status": "unsupported",
       "reason": "Unsupported size() expression: size() argument must be a collection attribute or filter(...), got EXPRESSION if()."
     },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only against a literal list, not between a stored collection and a map() projection."
+    },
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
       "reason": "Cerbos's intersect() keeps duplicates from whichever list is shorter, so its size depends on comparing the two lengths row by row; the adapter translates intersect() only compared with an empty list (as hasIntersection) and refuses size(intersect(...))."
@@ -203,6 +207,10 @@
     "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
       "status": "unsupported",
       "reason": "hasIntersection over a String is a CEL no-overload error: it takes two lists."
+    },
+    "type-mismatch/in/string-field-in-string-field": {
+      "status": "unsupported",
+      "reason": "`in` with an attribute haystack needs a Relation mapping; aOptionalString is a scalar column, over which CEL raises a no-overload error."
     },
     "type-mismatch/multiply/string-times-zero": {
       "status": "unsupported",

@@ -42,6 +42,7 @@ from cerbos_sqlalchemy._operators import (
     SYMBOLIC_NUMBERS,
     UNARY_VALUE_OPERATORS,
     ConditionalValue,
+    _unknown,
     arith_over_conditional,
     cel_literal_equal,
     require_lowerable,
@@ -838,6 +839,8 @@ class Translator:
             return self._presence(operands)
         if operator == "if":
             return self.value(operand)
+        if operator == "dyn" and len(operands) == 1:
+            return self.predicate(operands[0])
         if operator == "index" or self._declared_collection(operand) is not None:
             return self.value(operand)
 
@@ -962,6 +965,8 @@ class Translator:
         """Compare two columns, e.g. ``R.attr.a == R.attr.b``."""
         left_column = self._resolve_variable(left.name)
         right_column = self._resolve_variable(right.name)
+        if operator == "in" and _is_plain_column(right_column):
+            return _unknown()
         if operator in _ORDERING_AND_EQUALITY and any(
             isinstance(getattr(column, "type", None), DateTime)
             for column in (left_column, right_column)
@@ -990,6 +995,9 @@ class Translator:
 
     def _value_first(self, operator: str, value: Value, variable: Variable) -> Any:
         column = self._resolve_variable(variable.name)
+        if operator == "in" and _is_plain_column(column):
+            # `in` over a scalar is a CEL no-overload error.
+            return _unknown()
         if operator in MIRRORED_OPERATORS:
             return self._apply(MIRRORED_OPERATORS[operator], column, value.value)
         if operator in ORDER_INSENSITIVE_OPERATORS:
@@ -1000,6 +1008,10 @@ class Translator:
     def _column_first(self, operator: str, variable: Variable, value: Value) -> Any:
         column = self._resolve_variable(variable.name)
         return self._leaf_comparison(operator, column, variable, value)
+
+
+def _is_plain_column(value: Any) -> bool:
+    return isinstance(value, (ColumnElement, InstrumentedAttribute))
 
 
 def _as_sql_boolean(predicate: Any) -> Any:

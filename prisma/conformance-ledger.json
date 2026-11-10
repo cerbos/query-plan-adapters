@@ -78,7 +78,7 @@
     },
     "arithmetic/modulo/negative-dividend": {
       "status": "unsupported",
-      "reason": "Prisma filters have no column arithmetic at all, and `mod` is not in the translator's operator set \u2014 the same gap the whole arithmetic/divide group hits, reached here through the modulo operator"
+      "reason": "Prisma filters have no column arithmetic at all, and `mod` is not in the translator's operator set — the same gap the whole arithmetic/divide group hits, reached here through the modulo operator"
     },
     "arithmetic/modulo/size-of-string": {
       "status": "unsupported",
@@ -138,7 +138,7 @@
     },
     "cast/string/negated-from-int-past-exponent-threshold": {
       "status": "unsupported",
-      "reason": "string(int(aDouble)) == \"1000000\" is solved as int(aDouble) == 1000000, and an int() equality is translated only outside a negation: under one, the rows where int() overflows int64 (g1) would have to stay UNKNOWN, which needs the \u00b12^63 bound spelled on the column, and an Int column rejects it."
+      "reason": "string(int(aDouble)) == \"1000000\" is solved as int(aDouble) == 1000000, and an int() equality is translated only outside a negation: under one, the rows where int() overflows int64 (g1) would have to stay UNKNOWN, which needs the ±2^63 bound spelled on the column, and an Int column rejects it."
     },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",
@@ -160,9 +160,21 @@
       "status": "unsupported",
       "reason": "Same as collection/exists/nested-over-same-collection, reached through all(): the inner some-filter would have to compare its id and name with the enclosing element's, and Prisma field references stay within one model"
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "The prisma adapter refuses this planner shape at its existing lowering boundary: Second operand of except must be a lambda expression."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "collection/exists-one/disjunctive-body": {
+      "status": "unsupported",
+      "reason": "exists_one counts the matching elements, which a Prisma where-filter cannot express."
     },
     "collection/exists-one/several-matches": {
       "status": "unsupported",
@@ -208,13 +220,25 @@
       "status": "unsupported",
       "reason": "size() of if(...) counts the elements of a derived list, and a Prisma relation filter can only test whether some, every or no related row matches, never count them."
     },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
+    },
+    "collection/has-intersection/scalar-field-against-empty-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection over a scalar attribute is a CEL no-overload error that denies under both polarities, and a Prisma filter has no unknown to express it."
+    },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only with a literal value list as its second operand."
+    },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
-      "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal \u2014 the same site as collection/index/first-element-of-string-list"
+      "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
     },
     "collection/index/first-element-of-number-list": {
       "status": "unsupported",
-      "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal \u2014 the same site as collection/index/first-element-of-string-list"
+      "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
     },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
@@ -234,11 +258,11 @@
     },
     "collection/index/negated-first-element-of-boolean-list": {
       "status": "unsupported",
-      "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal \u2014 the same site as collection/index/first-element-of-string-list"
+      "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
     },
     "collection/index/negated-first-element-of-number-list": {
       "status": "unsupported",
-      "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal \u2014 the same site as collection/index/first-element-of-string-list"
+      "reason": "A positional read of a number list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
     },
     "collection/index/negated-first-element-of-object-list": {
       "status": "unsupported",
@@ -262,7 +286,7 @@
     },
     "collection/map/equals-list-literal": {
       "status": "unsupported",
-      "reason": "Prisma can feed a map() projection into hasIntersection, which becomes a relation `some` filter, but list EQUALITY needs the whole ordered projection materialised and compared \u2014 there is no Prisma filter that compares a relation projection to a literal list"
+      "reason": "Prisma can feed a map() projection into hasIntersection, which becomes a relation `some` filter, but list EQUALITY needs the whole ordered projection materialised and compared — there is no Prisma filter that compares a relation projection to a literal list"
     },
     "comparison/equals/list-holding-nan": {
       "status": "unsupported",
@@ -363,6 +387,14 @@
     "null/in/ternary-with-error-branch-in-list-with-null": {
       "status": "unsupported",
       "reason": "in requires a field member and literal list, or a literal member and field collection."
+    },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped filter() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
     "principal/map/membership-in-mapped-list": {
       "status": "unsupported",
@@ -488,6 +520,14 @@
       "status": "unsupported",
       "reason": "Prisma where-filters cannot express relation-count thresholds (only empty/non-empty via none/some)"
     },
+    "size/greater-than/filtered-collection": {
+      "status": "unsupported",
+      "reason": "size() of a filter() counts the elements of a derived list; a Prisma relation filter tests whether some, every or no related row matches, never how many."
+    },
+    "size/greater-than/filtered-collection-value-first": {
+      "status": "unsupported",
+      "reason": "Same filtered-count refusal as size/greater-than/filtered-collection, value first."
+    },
     "size/greater-than/map-projection": {
       "status": "unsupported",
       "reason": "size() of map(...) counts the elements of a derived list, and a Prisma relation filter can only test whether some, every or no related row matches, never count them"
@@ -516,6 +556,10 @@
       "status": "unsupported",
       "reason": "A string length threshold past 1024 and short of 2^32: the LIKE pattern of '_' it needs exceeds the 1024-character limit, so it is refused rather than spelled out"
     },
+    "size/not-equals/filtered-collection": {
+      "status": "unsupported",
+      "reason": "Same filtered-count refusal as size/greater-than/filtered-collection, under !=."
+    },
     "size/not-equals/fractional-threshold": {
       "status": "unsupported",
       "reason": "Same relation-count limitation as size/greater-than/collection-above-one"
@@ -534,7 +578,7 @@
     },
     "string/contains/negated-field-to-field": {
       "status": "unsupported",
-      "reason": "The needle is a COLUMN, so its LIKE metacharacters would have to be escaped per row. Prisma's filters cannot do that, and the negation reaches the same refusal as the positive string/contains/field-to-field \u2014 the rejection is decided by the column needle before three-valued logic under the NOT is ever considered"
+      "reason": "The needle is a COLUMN, so its LIKE metacharacters would have to be escaped per row. Prisma's filters cannot do that, and the negation reaches the same refusal as the positive string/contains/field-to-field — the rejection is decided by the column needle before three-valued logic under the NOT is ever considered"
     },
     "string/contains/underscore-in-needle": {
       "status": "unsupported",
@@ -542,7 +586,7 @@
     },
     "string/ends-with/backslash-in-needle": {
       "status": "unsupported",
-      "reason": "A backslash is a LIKE metacharacter on some providers and not others, so the same needle cannot mean the same thing on all of them: SQLite's LIKE has no escape character and matches a backslash literally, while PostgreSQL and MySQL treat it as the DEFAULT escape character with no ESCAPE clause present. endsWith('\\\\') is then a pattern ending in an escape character, which PostgreSQL rejects outright (SQLSTATE 22025), and a backslash anywhere inside a needle silently escapes the next character so contains('a\\\\b') would match 'ab' \u2014 a row the PDP denies. Prisma emits no ESCAPE clause and cannot escape the backslash, so the adapter throws instead of filtering differently per provider"
+      "reason": "A backslash is a LIKE metacharacter on some providers and not others, so the same needle cannot mean the same thing on all of them: SQLite's LIKE has no escape character and matches a backslash literally, while PostgreSQL and MySQL treat it as the DEFAULT escape character with no ESCAPE clause present. endsWith('\\\\') is then a pattern ending in an escape character, which PostgreSQL rejects outright (SQLSTATE 22025), and a backslash anywhere inside a needle silently escapes the next character so contains('a\\\\b') would match 'ab' — a row the PDP denies. Prisma emits no ESCAPE clause and cannot escape the backslash, so the adapter throws instead of filtering differently per provider"
     },
     "string/ends-with/field-to-field": {
       "status": "unsupported",
@@ -576,6 +620,14 @@
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-number-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its number element meets the boolean literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
     },
+    "type-mismatch/has-intersection/negated-against-map-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
+    "type-mismatch/has-intersection/negated-against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
     "type-mismatch/has-intersection/negated-resource-list-against-map": {
       "status": "unsupported",
       "reason": "Second operand of hasIntersection must be a value."
@@ -583,6 +635,18 @@
     "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
       "status": "unsupported",
       "reason": "hasIntersection requires an array value."
+    },
+    "type-mismatch/has-intersection/negated-scalar-field-against-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection over a scalar attribute is a CEL no-overload error that denies under both polarities, and a Prisma filter has no unknown to express it."
+    },
+    "type-mismatch/in/null-literal-in-string-field": {
+      "status": "unsupported",
+      "reason": "`in` over a scalar is a CEL no-overload error that denies under both polarities, and a Prisma filter has no unknown to express it."
+    },
+    "type-mismatch/in/string-field-in-string-field": {
+      "status": "unsupported",
+      "reason": "Membership between two database attributes is not translated: Prisma cannot compare a related element column with an outer scalar column."
     },
     "type-mismatch/multiply/string-times-zero": {
       "status": "unsupported",

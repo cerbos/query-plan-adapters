@@ -64,9 +64,17 @@
       "status": "unsupported",
       "reason": "timestamp() over a string column has no translation: a malformed string must stay a CEL error, which no provider's cast reproduces. Map the column as a DateTime."
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "Comparing a whole list needs the position of each element, and a list filtered by except() keeps no positions: the rows that remain are not numbered from zero."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
     "collection/exists/map-keys": {
       "status": "unsupported",
@@ -79,6 +87,14 @@
     "collection/exists/two-variable-map-key-and-value": {
       "status": "unsupported",
       "reason": "A two-variable exists() over a map binds its keys, and `obj` is one joined row whose CEL keys are the columns that are not NULL. SQL has no form for that key set, so the attribute map maps only obj.inner and the bare variable is refused as unmapped."
+    },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
+    },
+    "collection/has-intersection/scalar-field-against-empty-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection over a scalar column is a CEL no-overload error, and the adapter has no translation for an operand that is neither a mapped collection nor a literal list."
     },
     "comparison/equals/list-holding-nan": {
       "status": "unsupported",
@@ -95,6 +111,14 @@
     "membership/in/negated-map-attribute-keys": {
       "status": "unsupported",
       "reason": "Same refusal as membership/in/map-attribute-keys, under negation."
+    },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped filter() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
     "regex/matches/case-insensitive-non-ascii": {
       "status": "unsupported",
@@ -136,6 +160,14 @@
       "status": "unsupported",
       "reason": "A timestamp column reaches CEL as an RFC 3339 string whose exact spelling the store does not keep, so comparing it as a string has no translation. Wrap it in timestamp()."
     },
+    "type-mismatch/has-intersection/negated-against-map-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter has no translation for a hasIntersection operand that is not a list."
+    },
+    "type-mismatch/has-intersection/negated-against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter has no translation for a hasIntersection operand that is not a list."
+    },
     "type-mismatch/has-intersection/negated-resource-list-against-map": {
       "status": "unsupported",
       "reason": "hasIntersection() over a list built by except(), intersect(), filter() or + has no translation."
@@ -143,6 +175,10 @@
     "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
       "status": "unsupported",
       "reason": "hasIntersection() over a list built by except(), intersect(), filter() or + has no translation."
+    },
+    "type-mismatch/has-intersection/negated-scalar-field-against-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection over a scalar column is a CEL no-overload error, and the adapter has no translation for an operand that is neither a mapped collection nor a literal list."
     },
     "type-mismatch/string/number-list-attribute": {
       "status": "unsupported",

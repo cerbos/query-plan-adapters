@@ -21,6 +21,14 @@
       "status": "unsupported",
       "reason": "Same untyped integral constant under string() as `cast/string/from-integral-ternary`, under negation"
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "The macro ranges over a to-one relation, which CEL reads as a map and iterates by KEY. The keys are the attribute names the application sends, which the stored subdocument does not carry: $objectToArray yields stored field names, which the mapping may rename, a null a nullable field stores is a key MongoDB keeps and CEL never sees, and a nested relation (parent.inner) is a separate mapper entry. No expression reads the key set without guessing it."
@@ -33,6 +41,10 @@
       "status": "unsupported",
       "reason": "A two-variable exists() over `obj`, a map: CEL binds each KEY and its value, and the keys are the attribute names the application sends, which no stored document carries (the mapping places `obj.inner` on the aString field, and a mapper entry may rename any key). A two-variable macro is iterated, by position, only over a reference the mapper declares a list or relation."
     },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`in` over a to-one relation tests the related map's KEYS, the attribute names the application sends, which the stored subdocument does not carry (see `collection/exists/map-keys`: renamed fields, stored nulls CEL never sees, nested relations mapped separately)."
@@ -44,6 +56,14 @@
     "null/in/exists-over-error-in-list-with-null": {
       "status": "unsupported",
       "reason": "in supports only field-in-value-list or value-in-mapped-collection shapes."
+    },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped filter() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
     "regex/matches/case-insensitive-non-ascii": {
       "status": "unsupported",
@@ -69,9 +89,17 @@
       "status": "unsupported",
       "reason": "A bare comparison of two date_time fields: CEL compares the strings the application sent, and a stored BSON date has discarded the lexical spelling (two spellings of one instant are equal dates and unequal strings). Refused in the filter and in the three-valued evaluation alike; compare timestamp(...) values instead."
     },
+    "type-mismatch/has-intersection/negated-against-map-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
     "type-mismatch/has-intersection/negated-resource-list-against-map": {
       "status": "unsupported",
       "reason": "hasIntersection requires an array value."
+    },
+    "type-mismatch/matches/list-literal-pattern": {
+      "status": "unsupported",
+      "reason": "matches() is translated only with a constant string pattern; a list pattern is a CEL no-overload error."
     }
   }
 }

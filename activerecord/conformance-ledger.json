@@ -68,6 +68,14 @@
       "status": "unsupported",
       "reason": "`==` with a list or map literal: only eq and ne against constants are translated."
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "except() is translated only over a list of constants, not over a relation's map() projection."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "exists() over the parent ranges over the keys of a map, and the parent is a to-one association, which the adapter refuses as a macro's collection: a subquery over it ranges over rows, and SQL has no way to enumerate which of a row's columns are non-NULL as the map's keys."
@@ -83,6 +91,22 @@
     "collection/filter/size-of-ternary-over-filtered-literals": {
       "status": "unsupported",
       "reason": "size() requires a string operand, got a ternary."
+    },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
+    },
+    "collection/has-intersection/empty-literal-list": {
+      "status": "unsupported",
+      "reason": "The harness maps tags as a relation of structs with no member field, so a bare hasIntersection over it has no column to compare, even against an empty list."
+    },
+    "collection/has-intersection/scalar-field-against-empty-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection over a scalar column is a CEL no-overload error; the adapter refuses a non-collection operand rather than answer the empty list's false."
+    },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only against a literal list, not between a stored collection and a map() projection."
     },
     "comparison/equals/list-holding-nan": {
       "status": "unsupported",
@@ -103,6 +127,14 @@
     "null/in/ternary-with-error-branch-in-list-with-null": {
       "status": "unsupported",
       "reason": "A ternary over a CEL type error (a string function or size() over a number or a boolean) cannot keep the error once its branches are folded into a CASE."
+    },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped filter() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
     "regex/matches/case-insensitive-non-ascii": {
       "status": "unsupported",
@@ -147,6 +179,26 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "reason": "SQL temporal columns preserve instants but discard the RFC-3339 spelling compared by bare CEL attributes; timestamp wrappers are required.",
       "status": "unsupported"
+    },
+    "type-mismatch/contains/list-literal-needle": {
+      "status": "unsupported",
+      "reason": "contains with a list needle is a CEL no-overload error; the adapter requires a string operand and refuses."
+    },
+    "type-mismatch/has-intersection/negated-scalar-field-against-literal-list": {
+      "status": "unsupported",
+      "reason": "hasIntersection over a scalar column is a CEL no-overload error that denies under both polarities; the adapter refuses an operand that is not a collection."
+    },
+    "type-mismatch/less-than/string-field-against-list-literal": {
+      "status": "unsupported",
+      "reason": "Ordering against a list literal is a CEL no-overload error; only eq and ne against list literals are translated."
+    },
+    "type-mismatch/matches/list-literal-pattern": {
+      "status": "unsupported",
+      "reason": "matches() is translated only with a constant string pattern; a list pattern is a CEL no-overload error."
+    },
+    "type-mismatch/starts-with/list-literal-needle": {
+      "status": "unsupported",
+      "reason": "startsWith with a list needle is a CEL no-overload error; the adapter requires a string operand and refuses."
     },
     "type-mismatch/string/number-list-attribute": {
       "status": "unsupported",

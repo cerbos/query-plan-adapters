@@ -277,6 +277,29 @@ class ElasticsearchQueryPlanAdapterTest {
         }
     }
 
+    /**
+     * The planner emits a map or a nested list literal as a {@code struct()} or {@code list()}
+     * expression and folds a map in an {@code in} to its keys, so a raw protobuf map value, or a
+     * list value holding a list or a map, never reaches the decoder.
+     */
+    @Test
+    void aRawMapOrNestedListValueIsRefused() {
+        Operand aString = variableOperand("request.resource.attr.aString");
+        Operand aMap = valueOperand(struct("a", number(1)));
+
+        assertTrue(refusal(expressionOperand("eq", aString, aMap)).getMessage()
+                .contains("eq against a map literal"));
+        assertTrue(refusal(expressionOperand("eq", aString, valueOperand(struct("a", NULL))))
+                .getMessage().contains("eq against a map literal"));
+        assertTrue(refusal(expressionOperand("in", aString, aMap)).getMessage()
+                .contains("CEL map membership tests the map's keys"));
+        assertTrue(refusal(expressionOperand("in", aString, valueOperand(list(list(string("a"))))))
+                .getMessage().contains("in over a list holding a list element"));
+        assertTrue(refusal(expressionOperand("hasIntersection",
+                variableOperand("request.resource.attr.tags"), valueOperand(list(struct("a", number(1))))))
+                .getMessage().contains("hasIntersection over a list holding a map element"));
+    }
+
     // ============================================================================================
     // KIND 2 — a caller-supplied argument the corpus structurally cannot vary
     // ============================================================================================
@@ -617,103 +640,5 @@ class ElasticsearchQueryPlanAdapterTest {
                 variableOperand("request.resource.attr.aNumber"),
                 valueOperand(list(number(1), number(Double.NaN)))));
         assertTrue(inList.getMessage().contains("non-finite numeric literal"), inList.getMessage());
-    }
-
-    // ============================================================================================
-    // KIND 3 — a policy can reach these, and the corpus does not carry them yet
-    //
-    // Each is tracked by cerbos/query-plan-adapters#668 and deleted when its corpus case lands.
-    // ============================================================================================
-
-    /**
-     * <strong>Corpus gap.</strong> Tracked by #668. Direct {@code filter}/{@code map} in boolean
-     * position over a principal value list.
-     */
-    @ParameterizedTest
-    @ValueSource(strings = {"filter", "map"})
-    void anUnfoldableMacroOverAValueListIsRefusedByName(String operator) {
-        IllegalArgumentException ex = refusal(valueListMacro(operator,
-                listValueOperand("string"),
-                expressionOperand("eq",
-                        variableOperand("request.resource.attr.aString"), variableOperand("t"))));
-        assertTrue(ex.getMessage()
-                        .contains(operator + " over a literal collection value is not supported"),
-                "unexpected message: " + ex.getMessage());
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> Tracked by #668. {@code except} under negation and inside a
-     * nested lambda; the corpus carries the root, size and comparison forms.
-     */
-    @Test
-    void exceptIsRefusedByNameWhereverItAppears() {
-        Operand except = expressionOperand("except",
-                variableOperand("request.resource.attr.tags"), listValueOperand("archived"));
-        List<Operand> positions = List.of(
-                expressionOperand("not", except),
-                expressionOperand("exists", variableOperand("request.resource.attr.tagObjects"),
-                        lambdaOperand("t", expressionOperand("except",
-                                variableOperand("t.labels"), listValueOperand("archived")))));
-        for (Operand condition : positions) {
-            IllegalArgumentException ex = refusal(condition);
-            assertTrue(ex.getMessage().contains(
-                    "except is not supported: Cerbos except(list, list) computes a list difference"),
-                    ex.getMessage());
-            assertTrue(ex.getMessage().contains("R.attr.tags.exists(t, !(t in [\"x\"]))"),
-                    ex.getMessage());
-            assertInstanceOf(UnsupportedPlanShapeException.class, ex);
-        }
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> Tracked by #668. A null-bearing {@code hasIntersection} inside a
-     * nested lambda.
-     */
-    @Test
-    void hasIntersectionWithANullElementIsRefusedWhicheverPositionCarriesIt() {
-        Operand withNull = valueOperand(list(string("public"), NULL));
-        List<Operand> positions = List.of(
-                expressionOperand("exists", variableOperand("request.resource.attr.tagObjects"),
-                        lambdaOperand("t", expressionOperand("hasIntersection",
-                                variableOperand("t.labels"), withNull))));
-        for (Operand condition : positions) {
-            IllegalArgumentException ex = refusal(condition);
-            assertTrue(ex.getMessage().contains(
-                    "hasIntersection with null requires an explicit null-value mapping"),
-                    ex.getMessage());
-        }
-    }
-
-    /**
-     * <strong>Corpus gap.</strong> Tracked by #668. Ordering and string operators against a list,
-     * plus decoder refusals for raw protobuf map and list values. Real plans carry
-     * {@code struct()}/{@code list()} expressions instead.
-     */
-    @Test
-    void aNonScalarLiteralWhereAScalarIsExpectedIsRefused() {
-        Operand aString = variableOperand("request.resource.attr.aString");
-        Operand aList = listValueOperand("a");
-        Operand aMap = valueOperand(struct("a", number(1)));
-
-        for (String operator : List.of("lt", "contains", "startsWith", "matches")) {
-            IllegalArgumentException ex = refusal(expressionOperand(operator, aString, aList));
-            assertTrue(ex.getMessage().contains(operator + " against a list literal"),
-                    operator + ": " + ex.getMessage());
-            assertInstanceOf(UnsupportedPlanShapeException.class, ex);
-        }
-        assertTrue(refusal(expressionOperand("eq", aString, aMap)).getMessage()
-                .contains("eq against a map literal"));
-        assertTrue(refusal(expressionOperand("eq", aString, valueOperand(struct("a", NULL))))
-                .getMessage().contains("eq against a map literal"));
-
-        assertTrue(refusal(expressionOperand("in", aString, aMap)).getMessage()
-                .contains("CEL map membership tests the map's keys"));
-        assertTrue(refusal(expressionOperand("in", aString, valueOperand(list(list(string("a"))))))
-                .getMessage().contains("in over a list holding a list element"));
-        assertTrue(refusal(expressionOperand("in", aList, variableOperand("request.resource.attr.tags")))
-                .getMessage().contains("in with a list element"));
-        assertTrue(refusal(expressionOperand("hasIntersection",
-                variableOperand("request.resource.attr.tags"), valueOperand(list(struct("a", number(1))))))
-                .getMessage().contains("hasIntersection over a list holding a map element"));
     }
 }

@@ -93,6 +93,14 @@
       "status": "unsupported",
       "reason": "A list built from a computed element has no SQL value to compare with a list literal."
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. A relation subquery iterates rows, not attribute names, so a macro over a to-one relation is refused."
@@ -112,6 +120,18 @@
     "collection/filter/size-of-ternary-over-filtered-literals": {
       "status": "unsupported",
       "reason": "'size' operator requires a field reference or filter expression."
+    },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
+    },
+    "collection/has-intersection/empty-literal-list-against-mapped-names": {
+      "status": "unsupported",
+      "reason": "An empty-list hasIntersection over a map() projection is refused: the projection can raise evaluation errors that answering false would hide."
+    },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only with a literal list as one of its operands."
     },
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
@@ -137,6 +157,10 @@
       "status": "unsupported",
       "reason": "Same refusal as `membership/in/map-attribute-keys`, under negation."
     },
+    "null/has-intersection/literal-list-with-null-element-in-lambda-body": {
+      "status": "unsupported",
+      "reason": "hasIntersection over a map() whose collection lies behind another relation (subCategories under categories) is not translated."
+    },
     "null/in/error-or-boolean-in-list-with-null": {
       "status": "unsupported",
       "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
@@ -160,6 +184,14 @@
     "null/in/ternary-with-error-branch-in-list-with-null": {
       "status": "unsupported",
       "reason": "`in` needs a column or field on one side; a computed needle (a list, a boolean expression, a macro or size()) has none, so the comparison is refused."
+    },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped filter() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
     "regex/matches/case-insensitive-non-ascii": {
       "status": "unsupported",
@@ -217,6 +249,18 @@
       "status": "unsupported",
       "reason": "Cannot translate 'add': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce."
     },
+    "type-mismatch/contains/list-literal-needle": {
+      "status": "unsupported",
+      "reason": "contains with a list needle is a CEL no-overload error; the adapter requires a string operand and refuses."
+    },
+    "type-mismatch/has-intersection/negated-against-map-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
+    "type-mismatch/has-intersection/negated-against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
     "type-mismatch/has-intersection/negated-resource-list-against-map": {
       "status": "unsupported",
       "reason": "'hasIntersection' requires a literal list as one of its operands."
@@ -225,9 +269,21 @@
       "status": "unsupported",
       "reason": "'hasIntersection' requires a literal list as one of its operands."
     },
+    "type-mismatch/in/string-field-in-string-field": {
+      "status": "unsupported",
+      "reason": "Membership of one column in another needs the haystack mapped as a scalar collection; aOptionalString is a scalar column, over which CEL raises a no-overload error."
+    },
+    "type-mismatch/matches/list-literal-pattern": {
+      "status": "unsupported",
+      "reason": "matches() is translated only with a constant string pattern; a list pattern is a CEL no-overload error."
+    },
     "type-mismatch/multiply/string-times-zero": {
       "status": "unsupported",
       "reason": "Cannot translate 'mult': CEL has no overload for a string, boolean or bare timestamp operand, which SQL would coerce."
+    },
+    "type-mismatch/starts-with/list-literal-needle": {
+      "status": "unsupported",
+      "reason": "startsWith with a list needle is a CEL no-overload error; the adapter requires a string operand and refuses."
     },
     "type-mismatch/string/number-list-attribute": {
       "status": "unsupported",

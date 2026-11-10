@@ -927,11 +927,8 @@ export function handleInOperator(
   );
 
   if (isNamedOperand(member) && isValueOperand(collection)) {
-    const fieldRef = resolveFieldReference(member.name, context);
-    const values = Array.isArray(collection.value)
-      ? collection.value
-      : [collection.value];
-    return buildMembershipFilter(context, fieldRef, values);
+    if (!Array.isArray(collection.value)) throw scalarMembership();
+    return buildMembershipFilter(context, resolveFieldReference(member.name, context), collection.value);
   }
 
   if (isValueOperand(member) && isNamedOperand(collection)) {
@@ -942,11 +939,9 @@ export function handleInOperator(
           "a Prisma relation filter tests rows, not attribute names"
       );
     }
-    return buildMembershipFilter(
-      context,
-      resolveFieldReference(collection.name, context),
-      [member.value]
-    );
+    const fieldRef = resolveFieldReference(collection.name, context);
+    if (!fieldRef.relations?.length && fieldRef.valueType !== undefined) throw scalarMembership();
+    return buildMembershipFilter(context, fieldRef, [member.value]);
   }
 
   if (isOperatorOperand(collection) && collection.operator === "list") {
@@ -970,6 +965,12 @@ export function handleInOperator(
 
   throw new UnsupportedQueryPlanError(
     "in requires a field member and literal list, or a literal member and field collection"
+  );
+}
+
+function scalarMembership(): UnsupportedQueryPlanError {
+  return new UnsupportedQueryPlanError(
+    "in over a scalar is a CEL error, which a Prisma filter cannot express"
   );
 }
 

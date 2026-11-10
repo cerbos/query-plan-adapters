@@ -349,6 +349,8 @@ def _string_match(receiver: Any, needle: Any, *, prefix: bool, suffix: bool) -> 
     """
     if any(scalar_kind(value) not in ("", "string") for value in (receiver, needle)):
         return null()
+    if any(isinstance(value, (list, dict)) for value in (receiver, needle)):
+        return null()
     if isinstance(receiver, str):
         receiver = literal(receiver, String)
     if isinstance(needle, str):

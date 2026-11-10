@@ -8,6 +8,7 @@ import {
   createCollectionScope,
   isColumn,
   isMappingConfig,
+  isScalarColumnReference,
   resolveFieldReference,
   resolveRelationDefaultField,
 } from "./mapper";
@@ -19,7 +20,7 @@ import {
   isOperatorCall,
 } from "./operands";
 import type { ExpressionOperand } from "./operands";
-import { FALSE_CONDITION, applyComparison } from "./predicates";
+import { applyComparison, UNKNOWN_CONDITION } from "./predicates";
 import {
   requireLeadingHops,
   wrapRelationChain,
@@ -127,7 +128,9 @@ const buildMappedIntersection = (
     mapper,
   );
   if (scope.leadingRelations.length > 0) {
-    return FALSE_CONDITION;
+    throw new UnsupportedQueryPlanError(
+      "'hasIntersection' over a map() whose collection lies behind another relation is not supported",
+    );
   }
   const reference = projectionOperand.name;
   const projection = resolveRelationDefaultField(
@@ -198,6 +201,8 @@ export const buildHasIntersectionFilter = (
     if (indexed) {
       return indexedMembership({ ...indexed, values });
     }
+    // hasIntersection over a scalar column is a CEL no-overload error.
+    if (isScalarColumnReference(leftOperand.name, mapper)) return UNKNOWN_CONDITION;
   }
 
   if (values.length === 0) {

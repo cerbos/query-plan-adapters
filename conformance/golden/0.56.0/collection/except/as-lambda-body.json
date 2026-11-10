@@ -1,0 +1,116 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/except/as-lambda-body",
+  "intent": "except() as the body of an exists() over an object list, a list where the macro needs a boolean, beside a discriminating disjunct.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.categories"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "c.subCategories"
+                                        },
+                                        {
+                                          "expression": {
+                                            "operands": [
+                                              {
+                                                "variable": "s.name"
+                                              },
+                                              {
+                                                "variable": "s"
+                                              }
+                                            ],
+                                            "operator": "lambda"
+                                          }
+                                        }
+                                      ],
+                                      "operator": "map"
+                                    }
+                                  },
+                                  {
+                                    "value": [
+                                      "legal"
+                                    ]
+                                  }
+                                ],
+                                "operator": "except"
+                              }
+                            }
+                          ],
+                          "operator": "dyn"
+                        }
+                      },
+                      {
+                        "variable": "c"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/except/as-lambda-body",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.categories.exists(c, dyn(c.subCategories.map(s, s.name).except([\"legal\"]))) || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A non-boolean body is a CEL error; treating a non-empty difference as a match grants every row with a category."
+}

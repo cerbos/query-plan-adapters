@@ -104,6 +104,13 @@ cases:
   condition:
     match:
       expr: 'hasIntersection(["public", null], R.attr.tags.map(t, t.name))'
+- id: 'null/has-intersection/literal-list-with-null-element-in-lambda-body'
+  tier: adversarial
+  intent: 'hasIntersection with a null-bearing literal list inside an exists() body over an object list.'
+  trap: 'The null element must keep the meaning it has at the root; an adapter that refuses it at the root must refuse it in a lambda too, not drop it.'
+  condition:
+    match:
+      expr: 'R.attr.categories.exists(c, hasIntersection(c.subCategories.map(s, s.name), ["finance", null]))'
 - id: 'null/has-intersection/literal-list-with-null-element-value-first'
   tier: adversarial
   intent: 'hasIntersection(["public", null], R.attr.tagNames): a literal list with null on the left, a list with null elements on the right.'

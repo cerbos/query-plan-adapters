@@ -190,6 +190,7 @@ describe("nullAttributeRepresentation", () => {
           message.includes("Unsupported operator: index") ||
           message.includes("in requires a field member and literal list") ||
           message.includes("Prisma cannot compare list or map elements") ||
+          message.includes("in over a scalar is a CEL error") ||
           message.includes("operator requires string or number operands")
           ? []
           : [`${golden.id} (${message})`];

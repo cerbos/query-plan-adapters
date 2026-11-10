@@ -156,6 +156,14 @@
       "status": "unsupported",
       "reason": "A list literal compares only against an operand with a declared scalar ValueType, which it never equals; SQL has no list operand to compare an undeclared column with."
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/exists/map-keys": {
       "reason": "A macro over a map-valued attribute ranges over its keys, and `parent` is a to-one relation: one joined row whose CEL keys are the columns that are not NULL. SQL has no form for that key set, so a macro over the hop is refused.",
       "status": "unsupported"
@@ -175,6 +183,14 @@
     "collection/filter/size-of-ternary-over-filtered-literals": {
       "status": "unsupported",
       "reason": "A list or map literal has no SQL representation as a plain value."
+    },
+    "collection/has-intersection/deprecated-snake-case": {
+      "status": "unsupported",
+      "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
+    },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection between two stored collections needs a set-valued join that no row filter expresses; one side must be a literal list."
     },
     "comparison/equals/list-holding-nan": {
       "status": "unsupported",
@@ -199,6 +215,14 @@
     "membership/in/negated-map-attribute-keys": {
       "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
       "status": "unsupported"
+    },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped filter() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
     "regex/matches/dot-all-flag": {
       "status": "unsupported",
@@ -248,6 +272,14 @@
       "status": "unsupported",
       "reason": "`+` between a string and a non-string operand is a CEL no-overload error."
     },
+    "type-mismatch/has-intersection/negated-against-map-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
+    "type-mismatch/has-intersection/negated-against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
     "type-mismatch/has-intersection/negated-resource-list-against-map": {
       "status": "unsupported",
       "reason": "hasIntersection between two stored collections requires a set-valued join that SQL cannot express as a row filter; one side must be a literal list."
@@ -255,6 +287,10 @@
     "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
       "status": "unsupported",
       "reason": "hasIntersection requires a list value."
+    },
+    "type-mismatch/matches/list-literal-pattern": {
+      "status": "unsupported",
+      "reason": "matches() is translated only with a constant string pattern; a list pattern is a CEL no-overload error."
     },
     "type-mismatch/multiply/string-times-zero": {
       "status": "unsupported",

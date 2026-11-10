@@ -136,6 +136,10 @@
       "status": "unsupported",
       "reason": "Cannot compare a column with a list() value: it builds a map or list, and a mapped column holds one scalar, which SQL equality cannot compare with either."
     },
+    "collection/except/as-lambda-body": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "collection/except/as-whole-condition": {
       "status": "unsupported",
       "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
@@ -143,6 +147,10 @@
     "collection/except/equals-list-literal": {
       "status": "unsupported",
       "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
+    },
+    "collection/except/negated-as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
     "collection/except/size-of-difference": {
       "status": "unsupported",
@@ -175,6 +183,14 @@
     "collection/filter/size-of-ternary-over-filtered-literals": {
       "status": "unsupported",
       "reason": "Size() is applied to a collection this adapter cannot reach as a table: its argument must be a mapped attribute or filter(collection, lambda)."
+    },
+    "collection/has-intersection/empty-literal-list": {
+      "status": "unsupported",
+      "reason": "The harness maps tags as a relation with no element column, so a bare hasIntersection over it is unmapped, even against an empty list."
+    },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection is translated only against a literal list, not between a stored collection and a map() projection."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
@@ -304,6 +320,14 @@
       "status": "unsupported",
       "reason": "except() computes a list difference, which has no row-filter form: the result is a list, and its consumers here — size(), equality with a non-empty list, a root boolean, a principal list — would need the difference materialised. Only a difference compared with an empty list translates, as every element of the relation being in the removed list"
     },
+    "principal/filter/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped filter() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "principal/map/as-whole-condition": {
+      "status": "unsupported",
+      "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
     "regex/matches/anchored-prefix-dot-star": {
       "status": "unsupported",
       "reason": "No SQL engine implements RE2, so matches() lowers to LIKE only where LIKE can spell the pattern exactly; a .* not followed by an end anchor is refused."
@@ -383,6 +407,10 @@
     "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
       "status": "unsupported",
       "reason": "Request.resource.attr.tags denotes the elements of adversarial_tags themselves, but the relation declares no element column; map it with element = <column>."
+    },
+    "type-mismatch/in/string-field-in-string-field": {
+      "status": "unsupported",
+      "reason": "`in` with an attribute haystack needs a relation mapping; aOptionalString is a scalar column, over which CEL raises a no-overload error."
     },
     "type-mismatch/less-than/negated-nan-against-string-field": {
       "status": "unsupported",

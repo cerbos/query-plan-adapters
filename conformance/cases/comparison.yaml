@@ -136,6 +136,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString > "a"'
+- id: 'comparison/greater-than/value-first'
+  tier: core
+  intent: 'A constant greater than a number attribute (3 > R.attr.aNumber).'
+  trap: 'The operands must be mirrored to aNumber < 3; keeping the operator grants the rows above 3.'
+  condition:
+    match:
+      expr: 3 > R.attr.aNumber
 - id: 'comparison/less-or-equal/field-against-literal'
   tier: core
   intent: 'Less-or-equal on a numeric attribute (aNumber <= 2).'

@@ -157,8 +157,10 @@ export function assertStringField(
 export function buildMembershipFilter(
   context: TranslationContext,
   fieldRef: ResolvedFieldReference,
-  values: Value[]
+  listed: Value[]
 ): PrismaFilter {
+  // A column declared NOT NULL never equals a null element, and Prisma rejects `{ field: null }` on one.
+  const values = fieldRef.nullable === false ? listed.filter((value) => value !== null) : listed;
   for (const value of values) assertScalarValue(fieldRef, value, "in");
   const nonNullValues = values.filter((value) => value !== null);
   const carriesNull = nonNullValues.length !== values.length;

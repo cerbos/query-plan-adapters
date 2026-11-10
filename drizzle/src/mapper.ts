@@ -447,3 +447,11 @@ export const buildColumnExpression = (
   }
   return sql`${mapping}`;
 };
+
+/** Whether `reference` reads one scalar column on this row, where CEL has no membership overload. */
+export const isScalarColumnReference = (reference: string, mapper: Mapper): boolean => {
+  if (isScalarCollection(getMappingEntry(reference, mapper))) return false;
+  const { relations, mapping } = resolveFieldReference(reference, mapper);
+  const column = isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
+  return relations.length === 0 && ["string", "number", "boolean"].includes(column?.dataType ?? "");
+};

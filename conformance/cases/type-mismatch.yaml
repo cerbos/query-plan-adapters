@@ -17,6 +17,13 @@ cases:
   condition:
     match:
       expr: '!(R.attr.aString + R.attr.aNumber == "one5") || R.attr.aNumber == 2'
+- id: 'type-mismatch/contains/list-literal-needle'
+  tier: adversarial
+  intent: 'contains() on a string attribute with a list literal as the needle, beside a discriminating disjunct.'
+  trap: 'A list needle is a CEL error; rendering the list into a LIKE pattern returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString.contains(dyn(["one"])) || R.attr.aNumber == 5'
 - id: 'type-mismatch/contains/number-field-needle'
   tier: adversarial
   intent: contains() on a string attribute with a numeric attribute as the needle (R.attr.aString.contains(R.attr.aNumber)).
@@ -81,6 +88,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aBoolList[0] == 1 || R.attr.aNumber == 5'
+- id: 'type-mismatch/equals/list-literal-against-string-field-value-first'
+  tier: adversarial
+  intent: 'A list literal equal to a string attribute, list first (["same"] == R.attr.aString), beside a discriminating disjunct.'
+  trap: 'CEL equality across types is false; unwrapping the one-element list grants a9.'
+  condition:
+    match:
+      expr: '["same"] == R.attr.aString || R.attr.aNumber == 5'
 - id: 'type-mismatch/equals/negated-on-missing-attribute'
   tier: adversarial
   intent: '!(aDouble == "x") || !(string(aDouble) == "zzz"): two comparisons settled by type or spelling, negated, over an attribute missing on a3.'
@@ -229,6 +243,20 @@ cases:
   condition:
     match:
       expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", 0])'
+- id: 'type-mismatch/has-intersection/negated-against-map-value'
+  tier: adversarial
+  intent: '!hasIntersection(tagNames, dyn({"public": 1})) OR aNumber == 5: hasIntersection with a map where CEL needs a list, under negation.'
+  trap: 'hasIntersection has no overload for a map, so the negation is an error that denies; reading the map as its keys, or the call as false, grants every row without "public".'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.tagNames, dyn({"public": 1})) || R.attr.aNumber == 5'
+- id: 'type-mismatch/has-intersection/negated-against-string-value'
+  tier: adversarial
+  intent: '!hasIntersection(tagNames, dyn("public")) OR aNumber == 5: hasIntersection with a string where CEL needs a list, under negation.'
+  trap: 'hasIntersection has no overload for a string, so the negation is an error that denies; reading the string as a one-element list, or the call as false, grants rows the PDP denies.'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.tagNames, dyn("public")) || R.attr.aNumber == 5'
 - id: 'type-mismatch/has-intersection/negated-resource-list-against-map'
   tier: adversarial
   intent: 'A negated hasIntersection of the tags relation with a map, OR''d with aNumber == 5.'
@@ -243,6 +271,13 @@ cases:
   condition:
     match:
       expr: '!hasIntersection(R.attr.tags, dyn("public")) || R.attr.aNumber == 5'
+- id: 'type-mismatch/has-intersection/negated-scalar-field-against-literal-list'
+  tier: adversarial
+  intent: '!hasIntersection(aString, ["one"]) OR aNumber == 5: hasIntersection over a string attribute, under negation.'
+  trap: 'hasIntersection has no overload for a string, so the negation is an error that denies; reading the column as a one-element list grants every row whose aString is not "one".'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.aString, ["one"]) || R.attr.aNumber == 5'
 - id: 'type-mismatch/has-intersection/resource-boolean-list-against-string-literal-list'
   tier: adversarial
   intent: 'hasIntersection(aBoolList, ["true"]) OR aNumber == 5: a boolean list against a string-only literal list.'
@@ -277,6 +312,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'The needle is a list and tagNames holds only strings, so CEL denies every seed.'
+- id: 'type-mismatch/in/null-literal-in-string-field'
+  tier: adversarial
+  intent: 'null in a string attribute on the explicit-null convention (null in R.attr.owner), beside a discriminating disjunct.'
+  trap: 'in over a scalar is a CEL error, not equality; reading it as owner IS NULL grants the rows whose owner is null.'
+  condition:
+    match:
+      expr: 'null in R.attr.owner || R.attr.aNumber == 5'
 - id: 'type-mismatch/in/number-field-in-mixed-literal-list'
   tier: adversarial
   intent: 'aNumber in ["5", 2]: a number attribute against a literal list mixing a string and a number.'
@@ -320,6 +362,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'The haystack holds only lists and aString is a string, so CEL denies every seed.'
+- id: 'type-mismatch/in/string-field-in-string-field'
+  tier: adversarial
+  intent: 'A string attribute in another string attribute (aString in aOptionalString), beside a discriminating disjunct.'
+  trap: 'in over a scalar is a CEL error, not equality; reading it as aString == aOptionalString grants a9.'
+  condition:
+    match:
+      expr: 'R.attr.aString in R.attr.aOptionalString || R.attr.aNumber == 5'
 - id: 'type-mismatch/in/string-literal-in-resource-boolean-list'
   tier: adversarial
   intent: '"true" in aBoolList OR aNumber == 5: the string "true" tested against a boolean list.'
@@ -418,6 +467,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString < R.attr.aNumber + 1.0 || R.attr.aNumber == 2'
+- id: 'type-mismatch/less-than/string-field-against-list-literal'
+  tier: adversarial
+  intent: 'A string attribute ordered against a list literal, beside a discriminating disjunct.'
+  trap: 'Ordering a string against a list is a CEL error; comparing against the element or the rendered list returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString < dyn(["one"]) || R.attr.aNumber == 5'
 - id: 'type-mismatch/less-than/string-field-against-timestamp'
   tier: adversarial
   intent: 'A string attribute compared directly with a timestamp, without a timestamp() conversion, beside an equality that discriminates.'
@@ -425,6 +481,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.createdAt < now() - duration("24h") || R.attr.aNumber == 2'
+- id: 'type-mismatch/matches/list-literal-pattern'
+  tier: adversarial
+  intent: 'matches() on a string attribute with a list literal as the pattern, beside a discriminating disjunct.'
+  trap: 'A list pattern is a CEL error; compiling the rendered list as a regex returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches(dyn(["one"])) || R.attr.aNumber == 5'
 - id: 'type-mismatch/multiply/string-times-zero'
   tier: adversarial
   intent: 'A string attribute times 0.0, OR''d with aNumber == 2 (aString * 0.0 == 0.0 || aNumber == 2).'
@@ -432,6 +495,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString * 0.0 == 0.0 || R.attr.aNumber == 2'
+- id: 'type-mismatch/not-equals/list-literal-against-string-field-value-first'
+  tier: adversarial
+  intent: 'A list literal not equal to a string attribute, list first (["one", "same"] != R.attr.aString).'
+  trap: 'CEL inequality across types is true wherever aString is present; reading it as NOT IN denies a1 and a9, and a missing aString still denies.'
+  condition:
+    match:
+      expr: '["one", "same"] != R.attr.aString'
 - id: 'type-mismatch/not-equals/number-field-against-string-literal'
   tier: adversarial
   intent: 'aNumber != "5" AND aNumber > 3: a number attribute compared not-equal with a numeric string.'
@@ -439,6 +509,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber != "5" && R.attr.aNumber > 3'
+- id: 'type-mismatch/not-equals/string-field-against-list-literal'
+  tier: adversarial
+  intent: 'A string attribute not equal to a list literal (R.attr.aString != ["one", "same"]).'
+  trap: 'CEL inequality across types is true wherever aString is present; reading it as NOT IN denies a1 and a9, and a missing aString still denies.'
+  condition:
+    match:
+      expr: 'R.attr.aString != ["one", "same"]'
 - id: 'type-mismatch/not-equals/string-field-against-map-literal'
   tier: adversarial
   intent: 'Inequality between a string attribute and a map literal (aString != {"a": 1}).'
@@ -466,6 +543,13 @@ cases:
   degenerate:
     oracle: empty
     reason: 'size() is not defined on numbers, so every seed is a CEL error and denies. A store that measures the stored value would return rows.'
+- id: 'type-mismatch/starts-with/list-literal-needle'
+  tier: adversarial
+  intent: 'startsWith() on a string attribute with a list literal as the prefix, beside a discriminating disjunct.'
+  trap: 'A list prefix is a CEL error; rendering the list into a LIKE pattern returns rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString.startsWith(dyn(["one"])) || R.attr.aNumber == 5'
 - id: 'type-mismatch/starts-with/number-field-needle'
   tier: adversarial
   intent: startsWith() on a string attribute with a numeric attribute as the prefix (R.attr.aString.startsWith(R.attr.aNumber)).

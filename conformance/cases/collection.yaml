@@ -3,6 +3,13 @@
 area: collection
 description: 'Macros over resource collections: exists, all, exists_one, filter, map, except, hasIntersection, indexing.'
 cases:
+- id: 'collection/all/conjunctive-body'
+  tier: adversarial
+  intent: 'all() whose body is a conjunction over two element fields (tags.all(t, t.name == "public" && t.id != "t3b")).'
+  trap: 'all() lowers to NOT EXISTS of the negated body; negating each conjunct without turning && into || keeps a3, whose t3b is public.'
+  condition:
+    match:
+      expr: 'R.attr.tags.all(t, t.name == "public" && t.id != "t3b")'
 - id: 'collection/all/empty-collection'
   tier: adversarial
   intent: all() over a tag list where some rows have an empty list.
@@ -52,6 +59,13 @@ cases:
   condition:
     match:
       expr: '["one"] + (R.attr.aBool ? ["three"] : []) + ["two"] == ["one", "three", "two"]'
+- id: 'collection/except/as-lambda-body'
+  tier: adversarial
+  intent: 'except() as the body of an exists() over an object list, a list where the macro needs a boolean, beside a discriminating disjunct.'
+  trap: 'A non-boolean body is a CEL error; treating a non-empty difference as a match grants every row with a category.'
+  condition:
+    match:
+      expr: 'R.attr.categories.exists(c, dyn(c.subCategories.map(s, s.name).except(["legal"]))) || R.attr.aNumber == 5'
 - id: 'collection/except/as-whole-condition'
   tier: adversarial
   intent: 'The two-list except() used as the whole condition, returning a list rather than a boolean.'
@@ -76,6 +90,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.tagNames.except(["public"]) == ["private"]'
+- id: 'collection/except/negated-as-whole-condition'
+  tier: adversarial
+  intent: 'The negation of a two-list except(), a list where CEL needs a boolean (!dyn(tagNames.except(["public"]))), beside a discriminating disjunct.'
+  trap: '! over a list is a CEL error that only the other disjunct can absorb; reading the difference as emptiness grants rows the PDP denies.'
+  condition:
+    match:
+      expr: '!dyn(R.attr.tagNames.except(["public"])) || R.attr.aNumber == 5'
 - id: 'collection/except/size-of-difference'
   tier: extended
   intent: 'size() of a resource list minus a literal list, compared > 0.'
@@ -83,6 +104,13 @@ cases:
   condition:
     match:
       expr: 'size(R.attr.tagNames.except(["public"])) > 0'
+- id: 'collection/exists-one/disjunctive-body'
+  tier: adversarial
+  intent: 'exists_one() whose body is a disjunction over two element fields (tags.exists_one(t, t.id == "t3a" || t.id == "t6a" || t.name == "private")).'
+  trap: 'Counting rows that satisfy any disjunct, or lowering to exists(), grants a6, where t6a and t6b both match.'
+  condition:
+    match:
+      expr: 'R.attr.tags.exists_one(t, t.id == "t3a" || t.id == "t6a" || t.name == "private")'
 - id: 'collection/exists-one/several-matches'
   tier: adversarial
   intent: exists_one() over a tag list where some rows have more than one matching element.
@@ -334,6 +362,27 @@ cases:
   condition:
     match:
       expr: '!("public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool))'
+- id: 'collection/has-intersection/deprecated-snake-case'
+  tier: extended
+  intent: 'The deprecated has_intersection spelling the PDP still accepts (has_intersection(tagNames, ["private", "other"])).'
+  trap: 'An adapter that only knows hasIntersection refuses or mistranslates the alias the planner may pass through.'
+  condition:
+    match:
+      expr: 'has_intersection(R.attr.tagNames, ["private", "other"])'
+- id: 'collection/has-intersection/empty-literal-list'
+  tier: adversarial
+  intent: 'hasIntersection of a resource list and an empty literal list, beside a discriminating disjunct.'
+  trap: 'An empty list intersects nothing; emitting IN () is a syntax error on some stores, and dropping the operand grants every row.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tags, []) || R.attr.aNumber == 5'
+- id: 'collection/has-intersection/empty-literal-list-against-mapped-names'
+  tier: adversarial
+  intent: 'hasIntersection of a map() projection and an empty literal list, beside a discriminating disjunct.'
+  trap: 'An empty list intersects nothing; emitting IN () is a syntax error on some stores, and dropping the operand grants every row.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tags.map(t, t.name), []) || R.attr.aNumber == 5'
 - id: 'collection/has-intersection/mapped-names-value-first'
   tier: adversarial
   intent: 'hasIntersection(["public", "other"], tags.map(t, t.name)): the literal list first, a projection second.'
@@ -348,6 +397,13 @@ cases:
   condition:
     match:
       expr: 'hasIntersection(R.attr.tags.map(t, t.name), ["public", "héllo🚀", "100%_x"])'
+- id: 'collection/has-intersection/negated-empty-literal-list'
+  tier: adversarial
+  intent: 'The negation of hasIntersection of a resource list and an empty literal list, beside a discriminating conjunct.'
+  trap: 'The intersection is false on every row, so its negation holds on every row; a translation that refuses the empty list as a whole condition, or folds it to UNKNOWN, denies rows the PDP allows.'
+  condition:
+    match:
+      expr: '!hasIntersection(R.attr.tagNames, []) && R.attr.aNumber < 5'
 - id: 'collection/has-intersection/negated-mapped-names'
   tier: adversarial
   intent: 'The negation of hasIntersection between a map() projection over an object list and a list literal.'
@@ -355,6 +411,20 @@ cases:
   condition:
     match:
       expr: '!hasIntersection(R.attr.tags.map(t, t.name), ["public"])'
+- id: 'collection/has-intersection/scalar-field-against-empty-literal-list'
+  tier: adversarial
+  intent: 'hasIntersection of a string attribute and an empty literal list, beside a discriminating disjunct.'
+  trap: 'hasIntersection over a string is a CEL error; folding it to false the way an empty list folds is right only when the other operand is a list.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.aString, []) || R.attr.aNumber == 5'
+- id: 'collection/has-intersection/two-resource-lists'
+  tier: adversarial
+  intent: 'hasIntersection of two resource lists (tagNames against the mapped tag ids).'
+  trap: 'Neither side is a constant; comparing either list against itself, or against a constant, grants rows whose ids and names never meet.'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tagNames, R.attr.tags.map(t, t.id))'
 - id: 'collection/has-intersection/value-first'
   tier: adversarial
   intent: hasIntersection with the literal list first and the resource list second.
