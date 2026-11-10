@@ -56,7 +56,7 @@ final class CollectionTranslator {
      *
      * <p>The body is translated twice per macro (three times for {@code exists_one}), so
      * nesting multiplies subqueries. {@link PlanWalker#enterMacro} bounds the depth
-     * ({@link JpaQueryPlanAdapter#MAX_MACRO_DEPTH_PROPERTY}, default
+     * ({@link JpaQueryPlanAdapter.Options#withMaxMacroDepth}, default
      * {@value JpaQueryPlanAdapter#DEFAULT_MAX_MACRO_DEPTH}).
      */
     Predicate handleCollectionOperator(String op, List<Operand> operands, Scope scope) {

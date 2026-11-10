@@ -209,7 +209,7 @@ QueryPlanFilter allowed = JpaQueryPlanAdapter.toFilter(plan, options);
 | mapping | — (required) | [Field mapping](#field-mapping) |
 | `withOperatorOverrides` | none | [Operator overrides](#operator-overrides) |
 | `withNullAttributeRepresentation` | `OMITTED` | [NULL attribute representation](#null-attribute-representation) |
-| `withMaxMacroDepth` | 5, or the `dev.cerbos.queryplan.jpa.maxMacroDepth` system property | [Nested collection macros](#nested-collection-macros-multiply-correlated-subqueries--depth-is-bounded) |
+| `withMaxMacroDepth` | 5 | [Nested collection macros](#nested-collection-macros-multiply-correlated-subqueries--depth-is-bounded) |
 
 Collections are copied on construction and each `with…` returns a new instance, so build an
 `Options` once and share it across threads.
@@ -639,12 +639,7 @@ folds count as levels too. The cap counts macro nesting, not expression size. To
 Options.of(MAPPING).withMaxMacroDepth(8)
 ```
 
-```
--Ddev.cerbos.queryplan.jpa.maxMacroDepth=8
-```
-
-`Options` wins over the property, which wins over the default. The property is read per translation
-and must be a positive integer (otherwise a plain `IllegalArgumentException`).
+A value below 1 throws a plain `IllegalArgumentException`.
 
 ### Division by a column: zero divisors compare as CEL's NaN and infinities
 
@@ -709,6 +704,12 @@ the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can ope
 
 ## Behaviour changes
 
+- **Breaking:** the `dev.cerbos.queryplan.jpa.maxMacroDepth` system property and
+  `JpaQueryPlanAdapter.MAX_MACRO_DEPTH_PROPERTY` are gone; set the bound with
+  `Options.withMaxMacroDepth`. `Options.maxMacroDepth()` is an `int`.
+- Fixed an over-grant: on MySQL the byte-exact string collation and the IEEE double cast were
+  skipped when Hibernate built its dialect without JDBC metadata access (it then reports 8.0.0), so
+  string comparisons ran under the column's case-insensitive collation.
 - Fixed an over-grant: an attribute whose Java type is not `Boolean` read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was compared with `true`.
 - New translations, where these used to throw: `has()`, `in` and `exists`/`all` (one- and
   two-variable) over a map-valued attribute mapped per field

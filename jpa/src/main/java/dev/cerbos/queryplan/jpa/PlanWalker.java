@@ -46,7 +46,7 @@ final class PlanWalker {
                boolean selectInvocation) {
         this.cb = cb;
         this.tri = new TriPredicate(cb);
-        this.maxMacroDepth = options.effectiveMaxMacroDepth();
+        this.maxMacroDepth = options.maxMacroDepth();
         this.leaf = new LeafTranslator(cb, tri, options.operatorOverrides());
         this.hierarchy = new HierarchyTranslator(cb, tri);
         this.regex = new RegexTranslator(cb, tri);
@@ -74,9 +74,8 @@ final class PlanWalker {
                         + "Nested relation macros and literal folds "
                         + "multiply translation work and correlated subqueries, so deeply "
                         + "nested macros degrade query latency "
-                        + "sharply. If the policy shape is intentional, raise the limit via "
-                        + "the '" + JpaQueryPlanAdapter.MAX_MACRO_DEPTH_PROPERTY
-                        + "' system property.");
+                        + "sharply. If the policy shape is intentional, raise the limit with "
+                        + "Options.withMaxMacroDepth.");
             }
             return body.get();
         } finally {

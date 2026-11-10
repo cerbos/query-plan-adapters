@@ -215,8 +215,8 @@ Fix it the usual JPA way: eager-fetch small collections, map to DTOs inside
   |---|---|
   | `dev.cerbos.queryplan.springdata.AttributeMapping` (and `NullAttributeRepresentation`, `OperatorFunction`, the three refusal exceptions) | `dev.cerbos.queryplan.jpa.…` |
   | `SpringDataQueryPlanAdapter.Options` | `JpaQueryPlanAdapter.Options` |
-  | `SpringDataQueryPlanAdapter.MAX_MACRO_DEPTH_PROPERTY`, `DEFAULT_MAX_MACRO_DEPTH` | `JpaQueryPlanAdapter.…` |
-  | `-Ddev.cerbos.queryplan.springdata.maxMacroDepth` | `-Ddev.cerbos.queryplan.jpa.maxMacroDepth` |
+  | `SpringDataQueryPlanAdapter.DEFAULT_MAX_MACRO_DEPTH` | `JpaQueryPlanAdapter.…` |
+  | `-Ddev.cerbos.queryplan.springdata.maxMacroDepth` | `Options.withMaxMacroDepth` |
 
 - **Breaking** — `toSpecification(...)` returns `Specification<T>` directly; the `Result<T>` wrapper
   is gone. Drop the second `.toSpecification()` call, and use `planResult.isAlwaysDenied()` to skip
