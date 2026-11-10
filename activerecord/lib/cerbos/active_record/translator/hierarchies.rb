@@ -109,6 +109,8 @@ module Cerbos
             parts = split_path(below, delimiter)
             first = delimiter.empty? ? 0 : 1
             prefixes = (first...parts.length).map { |i| parts[0, i].join(delimiter) }
+            return unknown_if_any([ArelSupport.is_null(above)], false) if prefixes.empty?
+
             return scalar_membership(above, prefixes)
           end
 

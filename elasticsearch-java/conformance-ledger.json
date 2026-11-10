@@ -565,6 +565,18 @@
       "status": "unsupported",
       "reason": "A ternary is hoisted into its branches only as an operand of a comparison; as the receiver of contains() it is refused"
     },
+    "hierarchy/ancestor-of/empty-path-negated": {
+      "status": "unsupported",
+      "reason": "Negated strict ancestry is refused: a bool.must_not over the terms query it lowers to matches documents with no scope, where CEL errors and denies."
+    },
+    "hierarchy/ancestor-of/single-segment-constant-negated": {
+      "status": "unsupported",
+      "reason": "Negated strict ancestry is refused: a bool.must_not over the terms query it lowers to matches documents with no scope, where CEL errors and denies."
+    },
+    "hierarchy/overlaps/field-to-field": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
     "hierarchy/overlaps/path-built-from-identifier": {
       "status": "unsupported",
       "reason": "The one hierarchy shape the term-level lowering cannot reach. Every other hierarchy/* case compares a field's whole stored path against an adapter-controlled constant, which prefix/terms/term express; here the descendant path is CONSTRUCTED by list() from a constant segment and the primary key, so matching it would mean concatenating a stored field value into a path first. The Query DSL has no computed operand to do that with — the same missing evaluation step that refuses arithmetic and casts here"

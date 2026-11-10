@@ -1004,6 +1004,8 @@ def _ancestor_of(left: Any, right: Any) -> Any:
     if isinstance(descendent_value, str):
         parts = descendent_value.split(delimiter)
         prefixes = [delimiter.join(parts[:i]) for i in range(1, len(parts))]
+        if not prefixes:
+            return case((ancestor_value.isnot(None), false()))
         return ancestor_value.in_(prefixes)
     if isinstance(ancestor_value, str):
         return _string_match(

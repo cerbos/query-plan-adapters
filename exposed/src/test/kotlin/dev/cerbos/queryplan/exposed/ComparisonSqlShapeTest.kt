@@ -55,7 +55,7 @@ class ComparisonSqlShapeTest {
         // The mirror property, and the one `3989257` retired with the stale list it was written
         // against. It is the same hazard read the other way: an `IS NULL` the plan never asked for
         // is an assumption about a column, and under a negation it hands back exactly the rows a
-        // missing attribute makes check() deny. Seven legitimate origins, and no eighth —
+        // missing attribute makes check() deny. Nine legitimate origins, and no tenth —
         //
         //  - a NULL OPERAND in the plan: the null-constant leaf, or a null list element;
         //  - an attribute DECLARED explicit-null, whose equality expands to a definite one and
@@ -74,6 +74,9 @@ class ComparisonSqlShapeTest {
         //  - an equality between values CEL knows to be of different types, answered FALSE from
         //    the types alone and carrying the missing-attribute witness of its column
         //    (`type-mismatch/equals/*`);
+        //  - strict ancestry against a constant with no strict prefix, FALSE for a present column
+        //    and carrying the missing-attribute witness of the column
+        //    (`hierarchy/ancestor-of/single-segment-constant-negated`);
         //  - `has(x)` over a column that declares no null convention, whose NULL row is UNKNOWN
         //    because nothing says which convention the caller uses
         //    (`collection/exists/has-in-lambda`).
@@ -89,6 +92,7 @@ class ComparisonSqlShapeTest {
                     hasAttributeInAttribute(plan.condition) ||
                     hasStringConcatenation(plan.condition) ||
                     hasTypeMismatchedEquality(plan.condition) ||
+                    hasPrefixlessAncestry(plan.condition) ||
                     "has" in operatorsOf(plan.condition),
                 "$action emits IS NULL with no null operand, no declared explicit-null attribute, " +
                     "no column LIKE needle, no has() and none of $SELF_GUARDING_OPERATORS",
@@ -145,6 +149,25 @@ class ComparisonSqlShapeTest {
             it.nodeCase == Operand.NodeCase.VALUE && it.value.kindCase == Value.KindCase.STRING_VALUE
         }
         return direct || expression.operandsList.any(::hasStringConcatenation)
+    }
+
+    /** Whether the subtree holds a strict ancestry whose constant descendant has at most one segment. */
+    private fun hasPrefixlessAncestry(operand: Operand): Boolean {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return false
+        val expression = operand.expression
+        val descendant = when (expression.operator) {
+            "ancestorOf" -> expression.operandsList.getOrNull(1)
+            "descendentOf" -> expression.operandsList.getOrNull(0)
+            else -> null
+        }
+        val direct = descendant?.takeIf {
+            it.nodeCase == Operand.NodeCase.EXPRESSION && it.expression.operator == "hierarchy"
+        }?.expression?.operandsList?.let { parts ->
+            val path = parts.firstOrNull()?.takeIf { it.nodeCase == Operand.NodeCase.VALUE }?.value?.stringValue
+            val delimiter = parts.getOrNull(1)?.value?.stringValue ?: "."
+            path != null && if (delimiter.isEmpty()) path.isEmpty() else !path.contains(delimiter)
+        } ?: false
+        return direct || expression.operandsList.any(::hasPrefixlessAncestry)
     }
 
     /**
