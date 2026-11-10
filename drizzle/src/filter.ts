@@ -82,6 +82,12 @@ const buildStringMatchFilter = (
     );
   }
 
+  if (isValueOperand(needleOperand) && isString(needleOperand.value) && needleOperand.value.includes("\u0000")) {
+    throw new UnsupportedQueryPlanError(
+      `'${operator}' with a needle holding a NUL character: PostgreSQL text cannot hold one, and MySQL matched every row against it`,
+    );
+  }
+
   // Column receiver with a constant needle: transform/function mappings own their own
   // match semantics, so keep routing those through applyComparison.
   if (isNameOperand(receiverOperand) && isValueOperand(needleOperand)) {

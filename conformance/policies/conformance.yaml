@@ -5300,6 +5300,33 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.aString == P.attr.nullString + "canary") || R.attr.aNumber == 5'
+    # string/ends-with/after-nul
+    - actions:
+        - string/ends-with/after-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.endsWith("a")
+    # string/contains/negated-after-nul
+    - actions:
+        - string/contains/negated-after-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.contains("x")'
+    # string/contains/nul-needle
+    - actions:
+        - string/contains/nul-needle
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.contains("\u0000")
     # timestamp/equals/field-to-field-without-conversion
     - actions:
         - timestamp/equals/field-to-field-without-conversion

@@ -256,6 +256,10 @@
       "status": "unsupported",
       "reason": "add(null, \"canary\") has no column operand to say which dialect spells concatenation (|| is logical OR on MySQL), so it is refused; CEL has no overload for it either."
     },
+    "string/contains/nul-needle": {
+      "status": "unsupported",
+      "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors, and MySQL's LIKE stops reading the pattern at it."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal field comparison cannot preserve CEL string equality: SQL timestamp columns discard the original lexical spelling; compare timestamp(...) values instead."

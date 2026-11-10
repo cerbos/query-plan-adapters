@@ -27,6 +27,10 @@ module Cerbos
         database_type == "postgres"
       end
 
+      def sqlite?
+        database_type == "sqlite"
+      end
+
       def self.for(model)
         new(model.db.database_type)
       end

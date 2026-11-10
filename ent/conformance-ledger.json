@@ -277,6 +277,10 @@
       "status": "unsupported",
       "reason": "size() over map() is refused: the projection's body is evaluated per element, and one erroring element (b6's unnamed tag) makes the count an error, which only filter() lowers (as its UNKNOWN guard before the COUNT)."
     },
+    "string/contains/nul-needle": {
+      "status": "unsupported",
+      "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors, and MySQL's LIKE stops reading the pattern at it."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "reason": "Native timestamp storage discards the original RFC 3339 spelling, so instant equality cannot reproduce CEL string equality without timestamp() wrappers.",
       "status": "unsupported"

@@ -85,6 +85,12 @@ export function handleStringOperator(
       throw new UnsupportedQueryPlanError(`${operator} operator requires string value`);
     }
 
+    if (value.includes("\u0000")) {
+      throw new UnsupportedQueryPlanError(
+        `${operator} with a needle holding a NUL character: PostgreSQL text cannot hold one, and SQLite's LIKE stops reading the pattern at it, so %NUL% matched every row`,
+      );
+    }
+
     // A prefix is matched by the range of strings it bounds, so startsWith needs no LIKE escaping
     // (see buildPrefixFilter). Prisma emits LIKE without an ESCAPE clause and does not escape
     // wildcard characters, so a contains or endsWith needle containing % or _ would match as a

@@ -609,6 +609,10 @@
       "status": "unsupported",
       "reason": "The needle is a COLUMN, so its LIKE metacharacters would have to be escaped per row. Prisma's filters cannot do that, and the negation reaches the same refusal as the positive string/contains/field-to-field — the rejection is decided by the column needle before three-valued logic under the NOT is ever considered"
     },
+    "string/contains/nul-needle": {
+      "status": "unsupported",
+      "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, and SQLite's LIKE, the only string filter Prisma emits, stops reading the pattern at it, so %NUL% matched every row."
+    },
     "string/contains/underscore-in-needle": {
       "status": "unsupported",
       "reason": "Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, so the `_` in the needle would match any one character; a substring, unlike a prefix, bounds no range of the column that could replace the LIKE."

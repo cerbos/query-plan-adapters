@@ -201,6 +201,10 @@
       "status": "unsupported",
       "reason": "A null principal attribute reaches the plan as a null constant beside add; CEL has no overload for it and the adapter does not model the error, so it refuses rather than fold the concatenation."
     },
+    "string/contains/nul-needle": {
+      "status": "unsupported",
+      "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors, and MySQL's LIKE stops reading the pattern at it."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"

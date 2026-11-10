@@ -471,11 +471,7 @@ func regexPredicate(receiver Expr, plans []regexPlan) (Expr, error) {
 		return Cmp{Op: OpGe, L: charLength, R: Lit{V: float64(n)}}
 	}
 	match := func(literal string, prefix, suffix bool) (Expr, error) {
-		pattern, err := likePattern(literal, prefix, suffix)
-		if err != nil {
-			return nil, err
-		}
-		return Like{Receiver: receiver, Pattern: pattern}, nil
+		return likeMatch(receiver, literal, prefix, suffix)
 	}
 	anyOf := func(literals []string, prefix, suffix bool) (Expr, error) {
 		conditions := make([]Expr, 0, len(literals))

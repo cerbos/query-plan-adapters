@@ -155,12 +155,41 @@ func stringMatch(receiver, needle value, prefix, suffix bool) (Expr, error) {
 		return nil, err
 	}
 
+	return likeMatch(recvExpr, needle, prefix, suffix)
+}
+
+// likeMatch is a Like of needle, with `%` before it when prefix and after it when suffix.
+//
+// A constant needle holding a NUL is refused: PostgreSQL text cannot hold one, and MySQL's LIKE
+// reads the pattern only up to it, so %NUL% matched every row.
+func likeMatch(receiver Expr, needle value, prefix, suffix bool) (Expr, error) {
+	if s, ok := needle.(string); ok && strings.ContainsRune(s, 0) {
+		return nil, fmt.Errorf("cannot translate a string match whose needle holds a NUL "+
+			"character: PostgreSQL text cannot hold one and MySQL's LIKE stops reading the "+
+			"pattern at it: %q", s)
+	}
+
 	pattern, err := likePattern(needle, prefix, suffix)
 	if err != nil {
 		return nil, err
 	}
 
-	return Like{Receiver: recvExpr, Pattern: pattern}, nil
+	needleExpr, err := asExpr(needle)
+	if err != nil {
+		return nil, err
+	}
+
+	anchor := LikeWhole
+	switch {
+	case prefix && suffix:
+		anchor = LikeContains
+	case prefix:
+		anchor = LikeEndsWith
+	case suffix:
+		anchor = LikeStartsWith
+	}
+
+	return Like{Receiver: receiver, Pattern: pattern, Needle: needleExpr, Anchor: anchor}, nil
 }
 
 // likePattern builds the escaped pattern for a needle that is either a constant or a column.

@@ -227,3 +227,24 @@ cases:
   condition:
     match:
       expr: '!(R.attr.aString == P.attr.nullString + "canary") || R.attr.aNumber == 5'
+- id: 'string/ends-with/after-nul'
+  tier: adversarial
+  intent: 'endsWith("a") over k3, whose aString is "a", NUL, "x".'
+  trap: 'k3 ends with x, so it is denied. SQLite''s LIKE reads a string as C text up to the first NUL, so %a matches k3.'
+  condition:
+    match:
+      expr: 'R.attr.aString.endsWith("a")'
+- id: 'string/contains/negated-after-nul'
+  tier: adversarial
+  intent: '!contains("x") over k3, whose aString is "a", NUL, "x".'
+  trap: 'k3 contains x, so it is denied. A store that stops reading at the NUL finds no x and the negation grants k3.'
+  condition:
+    match:
+      expr: '!R.attr.aString.contains("x")'
+- id: 'string/contains/nul-needle'
+  tier: adversarial
+  intent: 'contains() with a needle that is a single NUL.'
+  trap: 'Only k3 holds a NUL. A LIKE pattern read as C text truncates %NUL% to %, which matches every non-null row.'
+  condition:
+    match:
+      expr: 'R.attr.aString.contains("\u0000")'
