@@ -376,6 +376,10 @@
       "status": "unsupported",
       "reason": "One side is declared explicit-null and the other is omitted-when-NULL: the first needs a definite answer for its NULL and the second needs UNKNOWN, and no single SQL predicate gives both (#308)."
     },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "The literal-list fold accepts only exists/all; a principal-list difference with a resource-dependent second list has no SQL lowering."

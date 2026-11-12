@@ -54,8 +54,15 @@ final class Refusals {
                         + "difference means.");
     }
 
-    /** A plan variable the mapping does not name, or names only behind a relation chain. */
-    static UnmappedAttributeException unknownAttribute(String cerbosVar) {
+    /**
+     * A plan variable the mapping does not name, or names only behind a relation chain. A
+     * principal attribute the planner left unresolved is not a column, so it is a refusal.
+     */
+    static IllegalArgumentException unknownAttribute(String cerbosVar) {
+        if (cerbosVar.startsWith("request.principal.")) {
+            return unsupported("The plan leaves " + cerbosVar + " unresolved: the planner did not "
+                    + "fold it into a value, and a principal attribute is not a column");
+        }
         return unmapped("Unknown attribute: " + cerbosVar);
     }
 

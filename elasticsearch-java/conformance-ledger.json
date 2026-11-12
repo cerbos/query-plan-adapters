@@ -898,6 +898,10 @@
       "status": "unsupported",
       "reason": "all cannot distinguish a missing collection from an empty collection in Elasticsearch, so the macro is refused before its folded body is read"
     },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."

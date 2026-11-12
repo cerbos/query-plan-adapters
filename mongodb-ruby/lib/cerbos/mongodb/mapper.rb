@@ -180,9 +180,18 @@ module Cerbos
       # path opts in per reference with an entry that names no field (+{}+ or
       # <tt>{nullable: true}</tt>), or a callable mapper that returns one.
       #
-      # @raise [MapperError] if the mapper has no entry for +reference+
+      # @raise [UnsupportedError] if +reference+ is an unmapped +request.principal+ attribute
+      # @raise [MapperError] if the mapper has no entry for any other +reference+
       def resolve_field(reference)
-        lookup_field(reference) or raise MapperError,
+        found = lookup_field(reference)
+        return found if found
+        if reference.start_with?("request.principal.")
+          raise UnsupportedError,
+            "The plan leaves #{reference} unresolved: the planner did not fold it into a value, " \
+            "and a principal attribute is not a field of any document"
+        end
+
+        raise MapperError,
           "No mapper entry for #{reference}: an unmapped reference is not used verbatim as a " \
           "document path, because MongoDB's $ne and $nor match every document a path is absent " \
           "from. Map it to a field, or declare it with an entry to use the plan path as-is."

@@ -3464,6 +3464,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.all(t, t.name in P.attr.emptyTeams)
+    # principal/all/left-unresolved-in-ternary-branch
+    - actions:
+        - principal/all/left-unresolved-in-ternary-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.parent.aString < "XA_BY") ? (P.attr.allowedTags.all(t, R.attr.aString != t)) : (R.attr.tagNames.filter(t, t != "Public").size() == 0)'
     # principal/all/long-list
     - actions:
         - principal/all/long-list
