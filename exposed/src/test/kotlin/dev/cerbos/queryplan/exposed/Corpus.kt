@@ -163,7 +163,7 @@ internal object Corpus {
     fun fuzzVerdict(pdp: String, id: String, expected: List<String>, outcome: Result<List<String>>, refusal: (Throwable) -> Boolean): FuzzVerdict {
         val returned = outcome.getOrElse { e ->
             return if (refusal(e)) {
-                FuzzVerdict(pdp, id, "refused")
+                FuzzVerdict(pdp, id, "refused", detail = e.message)
             } else {
                 FuzzVerdict(pdp, id, "error", detail = "${e.javaClass.simpleName}: ${e.message}")
             }

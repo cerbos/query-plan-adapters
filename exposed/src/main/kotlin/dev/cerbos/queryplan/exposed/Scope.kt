@@ -3,6 +3,7 @@ package dev.cerbos.queryplan.exposed
 import org.jetbrains.exposed.v1.core.Alias
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.Expression
+import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.Table
 
 /**
@@ -52,6 +53,8 @@ internal sealed interface Resolution {
         val field: AttributeMapping.Field,
         val owner: Scope,
         val hops: List<AttributeMapping.Relation> = emptyList(),
+        /** Whether the value exists at all, where that is not [hops] existing: a list position in range. */
+        val presence: (() -> Op<Boolean>)? = null,
     ) : Resolution
 
     /**
@@ -85,10 +88,15 @@ internal class RootScope(private val translation: Translation) : Scope {
     override fun read(column: Column<*>): Column<*> = column
 
     override fun resolve(variable: String): Resolution =
-        resolved.getOrPut(variable) { path(variable).resolve(translation, variable) }
-            .also(translation.hopGuards::note)
+        resolved.getOrPut(variable) {
+            PositionalRead.parse(variable, translation.options.mapping)?.resolve(translation, this, variable)
+                ?: path(variable).resolve(translation, variable)
+        }.also(translation.hopGuards::note)
 
     override fun path(variable: String): AttributePath {
+        if (PositionalRead.parse(variable, translation.options.mapping) != null) {
+            throw Refusals.unsupported("$variable reads a list element by position, which has() cannot test")
+        }
         when (val direct = translation.options.mapping.resolve(variable)) {
             is AttributeMapping.Field -> return AttributePath(this, emptyList(), direct)
             is AttributeMapping.Relation -> return AttributePath(this, listOf(direct), null)

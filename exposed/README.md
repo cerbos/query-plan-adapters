@@ -216,8 +216,9 @@ val mapping = cerbosMapping {
     }
 
     // A to-many relation whose elements ARE values: `element` is the value each element stands for.
+    // `orderBy` is optional: the column whose ascending order is the list's order.
     "request.resource.attr.tagNames" to
-        many(Tags, from = Documents.id, to = Tags.documentId, element = Tags.name)
+        many(Tags, from = Documents.id, to = Tags.documentId, element = Tags.name, orderBy = Tags.position)
 
     // A to-one relation, and a chain through it.
     "request.resource.attr.parent" to one(Parents, from = Documents.id, to = Parents.documentId) {
@@ -238,8 +239,16 @@ val mapping = cerbosMapping {
 - **Cardinality is declared, not inferred.** `one` is read as a scalar through a correlated scalar
   subquery: no matching row yields NULL, which is already CEL's missing-attribute error, so both
   polarities deny. `many` is a collection.
+- **A list read by position needs `orderBy`.** Without it a relation's rows have no order, and
+  `tags[0]`, `tags[0].name`, `tagNames == ["a", "b"]` and `tags.map(t, t.id) == [...]` are refused.
+  With it, `tags[0]` is the row at `OFFSET 0` of the subquery in that order, and a comparison around
+  it is UNKNOWN where the position is past the end, negative or fractional, as CEL's error is.
+  Whole-list equality is the same length and each position equal, so order and repeats count. A
+  `map()` projection compares this way only over a non-null member column, since `map()` raises on
+  a missing member whatever the list's length. Rows with equal `orderBy` values have no defined
+  order.
 - **A relation is validated where it is built.** `to` must be a column of `table`, `element` must be
-  a column of `table`, and every nested entry must read `table` — each is an
+  a column of `table`, `orderBy` must be a column of `table`, and every nested entry must read `table` — each is an
   `IllegalArgumentException` at mapping-construction time, not a wrong join at query time.
 - **A top-level relation's `from` is the one key nothing can check.** The adapter is never told
   which table you select from: a mapping names columns, and the root scope reads them bare. So
@@ -264,7 +273,7 @@ val mapping = cerbosMapping {
 | A mapped column against a plan constant of another family | `==` is FALSE for a present value, `!=` TRUE, and anything else (an ordering) UNKNOWN. A NULL column is a missing attribute, which CEL denies, so `==` and `!=` are UNKNOWN for it, unless the attribute declares `EXPLICIT`, whose null is a value and compares FALSE. No constant is bound. A `null` constant is not a type mismatch: it renders `IS NULL` / `IS NOT NULL` |
 | Two mapped columns of different families | The same answer, UNKNOWN when either undeclared column is NULL |
 | The elements of an `in` or `hasIntersection` list, against a column or a relation's `element` column | An element of another family equals nothing, so it drops out of the disjunction; the rest compare as usual. A `null` element renders `IS NULL` |
-| A list or map — a constant, or one the planner builds with `list()` / `struct()` from constants alone — against a scalar column, or as the member of `in` over a relation | Never equal to a scalar, so answered as a type mismatch; `["a"] in tagNames` is FALSE. One built from an attribute is refused, since the attribute may be missing. Against a relation-mapped attribute it is whole-list equality, and refused |
+| A list or map — a constant, or one the planner builds with `list()` / `struct()` from constants alone — against a scalar column, or as the member of `in` over a relation | Never equal to a scalar, so answered as a type mismatch; `["a"] in tagNames` is FALSE. One built from an attribute is refused, since the attribute may be missing. Against a relation-mapped attribute it is whole-list equality, which needs `orderBy` |
 | A member column against a relation's `element` column | Same family, or refused |
 | `contains`, `startsWith`, `endsWith` (haystack **or** column needle) and `size()` over a number or boolean column | UNKNOWN: CEL has no overload, so the call raises and denies on every row, under either polarity |
 | Every hierarchy operator's path column (or `list()` segment) | A **text** column. A number or boolean one is UNKNOWN, since `hierarchy()` has no overload for it; any other kind is refused |
@@ -550,34 +559,40 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 32 / 32 |
-| extended | 98 / 110 |
-| adversarial | 432 / 545 |
+| extended | 104 / 110 |
+| adversarial | 469 / 545 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-65 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+68 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
 - a regex `matches()` pattern `LIKE`, `=` and `REPLACE` cannot spell exactly (an unbounded
   repetition of a literal, a lone `.`, a negated class, an inline flag other than a leading `(?i)`):
   CEL matches with RE2, which no SQL engine implements. See [Regular expressions](#regular-expressions);
-- a positional read of a list (`[i]`, `.member` of `[i]`): a to-many relation is a correlated
-  subquery over an association, and an association carries no element order to index into;
 - `except()`, `filter()` or `map()` used as a value rather than inside `size()`,
-  `hasIntersection()` or `in`, and whole-list equality against a relation. `rel.except([...]) == []`
+  `hasIntersection()` or `in`. `rel.except([...]) == []`
   translates, as every element of the relation being in the list, and so do `rel.isSubset([...])`
   and `intersect(a, b) == []` (as `!hasIntersection(a, b)`); `size(intersect(...))` is refused,
   since Cerbos's `intersect()` keeps duplicates from whichever list is shorter;
 - a two-variable comprehension (`list.exists(i, v, ...)`, `map.all(k, v, ...)`): its first
   variable is a list index or a map key, and no mapped column holds either;
-- `int()`, `double()` and `timestamp()` over a string, and `%`: SQL `CAST` reads a numeric prefix
-  where CEL requires the whole string, and rounds where CEL truncates. `int()` of a numeric column
-  compared with a constant translates, solved for the column: `int(x) >= 1` is `x >= 1`,
-  `int(x) == 0` is `-1 < x < 1`, UNKNOWN outside `±2^63`, where CEL raises. Arithmetic CEL has no
-  overload for on any row — `attr % n` (every attribute number is a double) or `int(...) + attr` —
-  is UNKNOWN. Integer arithmetic over `int()` (`int(x) / 2`, `int(x) % 2`) stays refused: whether
-  a whole literal beside it is an int or a double is not on the wire;
+- `double()` and `timestamp()` over a string: SQL `CAST` reads a numeric prefix where CEL
+  requires the whole string. `int()` of a column compared with a constant translates: over a
+  numeric column it is solved for the column (`int(x) >= 1` is `x >= 1`, `int(x) == 0` is
+  `-1 < x < 1`, UNKNOWN outside `±2^63`); over a text column it is the integer where the whole
+  string is an optional sign and 1 to 18 ASCII digits (checked with a regular expression, or with
+  `GLOB` on SQLite), and UNKNOWN otherwise, so a valid 19-digit string is an under-grant.
+  `string(int(x)) == "n"` is `int(x) == n`. int arithmetic over one `int()` and constants
+  (`int(x) / 2 == 1`, `int(x) * 2 > 0`, `int(s) + 1 > 50`) is solved for the column exactly: each
+  step is monotone, so the rows where no step overflows and the rows that satisfy the comparison
+  are intervals of `int(x)`, and a row outside the first is UNKNOWN. `int(x) % c` and
+  `size(s) % c` against a constant use SQL's remainder over an integer or text column. A principal
+  number beside `int()` arrives as the same whole constant and is read as an int, as the corpus
+  records under `plannerDivergence`. Arithmetic CEL has no overload for on any row is
+  UNKNOWN: `attr % n` (every attribute number is a double), `int(...) + attr`, a text or boolean
+  column under `+ - * /`, and `+` mixing a string with a number or null;
 - `string()` over a computed number (a conversion, a ternary of numbers) rather than a mapped
   column, and over a floating-point column compared with `"0"` or `"-0"`: SQL `CAST` prints numbers
   differently from CEL, and cannot read the sign of a stored `-0.0`. `string()` of a
