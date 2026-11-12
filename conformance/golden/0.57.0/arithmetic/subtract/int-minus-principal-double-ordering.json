@@ -1,0 +1,91 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/subtract/int-minus-principal-double-ordering",
+  "intent": "An int() conversion minus an integral principal attribute under an ordering, OR'd with aNumber == 5 (int(aNumber) - P.attr.zero > 0 || aNumber == 5).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aNumber"
+                            }
+                          ],
+                          "operator": "int"
+                        }
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "sub"
+                  }
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "gt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": {
+    "issue": "https://github.com/cerbos/query-plan-adapters/issues/567",
+    "pdp": [
+      "0.56.0",
+      "0.57.0"
+    ],
+    "reason": "The planner drops the double type of the substituted P.attr.zero: the plan is byte-identical to int(aNumber) - 0 > 0 || aNumber == 5, which allows rows, while check() has no int - double overload and allows only a1."
+  },
+  "request": {
+    "action": "arithmetic/subtract/int-minus-principal-double-ordering",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aNumber) - P.attr.zero > 0 || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "P.attr.zero is a CEL double, so int - double is an error on every row and only a1 is allowed; reading the bare 0 the plan carries as an int literal over-grants every row whose aNumber is above zero."
+}
