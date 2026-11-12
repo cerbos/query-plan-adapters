@@ -423,6 +423,43 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  # The database holds an enum's integer and a serialized attribute's encoded text, where the
+  # application sends the name and the decoded value. No ActiveRecord model in the corpus has one.
+  describe "attributes whose stored form is not the value the application sends" do
+    def decorated(condition, attributes)
+      described_class.query_plan_to_relation(
+        plan: conditional(condition), model: EdgeEnumDocument, attributes: attributes
+      )
+    end
+
+    it "raises for an enum column rather than comparing its integer with a name" do
+      expect { decorated(expression("ne", variable("s"), value("archived")), "s" => field("state")) }
+        .to raise_error(Cerbos::ActiveRecord::UnmappedAttributeError, /enum/)
+    end
+
+    it "raises for a serialized column" do
+      expect { decorated(expression("eq", variable("t"), value("x")), "t" => field("title")) }
+        .to raise_error(Cerbos::ActiveRecord::UnmappedAttributeError, /serialized/)
+    end
+
+    it "raises for an enum member of a relation, as a field and as the member" do
+      body = expression("lambda", expression("eq", variable("t.kind"), value("topic")), variable("t"))
+      expect do
+        decorated(expression("exists", variable("tags"), body),
+          "tags" => relation(:tags, fields: {"kind" => field("kind")}))
+      end.to raise_error(Cerbos::ActiveRecord::UnmappedAttributeError, /enum/)
+      expect do
+        decorated(expression("in", value("topic"), variable("tags")),
+          "tags" => relation(:tags, member_field: "kind"))
+      end.to raise_error(Cerbos::ActiveRecord::UnmappedAttributeError, /enum/)
+    end
+
+    it "raises for a column the table does not have" do
+      expect { decorated(expression("eq", variable("m"), value("x")), "m" => field("missing")) }
+        .to raise_error(Cerbos::ActiveRecord::UnmappedAttributeError, /no column/)
+    end
+  end
+
   describe "membership with a column inside the list" do
     # `null in [R.attr.x]` is true when the column is null. `NULL IN (x)` would always be
     # UNKNOWN.

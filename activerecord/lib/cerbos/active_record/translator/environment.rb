@@ -139,7 +139,7 @@ module Cerbos
         def resolve_field(mapping, owner_model, owner_table)
           *associations, column = mapping.segments
           if associations.empty?
-            node = owner_table[column]
+            node = Relations.column(owner_model, owner_table, column)
             model = owner_model
           else
             scope = Relations.build_path(
