@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Example application for cerbos-sqlalchemy, run against the shared demo domain"
 license = {text = "Apache-2.0"}
 # Matches the Python the `example` job installs.
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 # cerbos-sqlalchemy is absent: run.sh installs the freshly built wheel.
 # Exact pins so every Renovate bump opens a PR that the `example` job gates.

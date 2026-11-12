@@ -29,7 +29,7 @@ repositories {
 // An unknown value fails rather than falling back: a typo that quietly ran the baseline would
 // report the floor leg green without executing it.
 val ormVersionSets = mapOf(
-    "baseline" to mapOf("exposed" to "1.5.0"),
+    "baseline" to mapOf("exposed" to "1.6.1"),
     "floor" to mapOf("exposed" to "1.0.0"),
 )
 

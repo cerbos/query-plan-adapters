@@ -132,7 +132,7 @@ jobs:
       - uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37 # v4.6
         name: Setup PDM
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       # No `pdm install`: the example builds the adapter and installs its own pinned tree.
       # The runner starts the PDP from demo/docker-compose.yml (pinned in
