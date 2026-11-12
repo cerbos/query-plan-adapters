@@ -782,7 +782,10 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 IsNullOp(target.expression),
             )
         }
-        return translation.leaf.applyLeaf(operator, target, solved)
+        val leaf = translation.leaf.applyLeaf(operator, target, solved)
+        // null + c is a CEL error, where the definite equality would answer for the null.
+        if (!translation.leaf.isExplicitNull(target)) return leaf
+        return TriLogic.baseUnlessUnknown(leaf, IsNullOp(target.expression))
     }
 
     /**

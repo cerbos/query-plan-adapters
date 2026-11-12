@@ -18,6 +18,7 @@ module EdgeCaseModels
         t.integer :n
         # int() refuses an exact decimal: CEL truncates the nearest double, not the stored value.
         t.decimal :amount, precision: 20, scale: 4
+        t.integer :state
       end
 
       create_table :edge_comments, force: true do |t|
@@ -30,6 +31,7 @@ module EdgeCaseModels
       create_table :edge_tags, force: true do |t|
         t.string :name
         t.boolean :visible, default: true
+        t.integer :kind
         t.integer :document_id
       end
 
@@ -80,6 +82,20 @@ end
 
 class EdgeTag < ActiveRecord::Base
   self.table_name = "edge_tags"
+end
+
+# An enum reads and writes names where the column holds integers, and a serialized attribute
+# holds its encoded form: a filter compares the stored value, not the one the application sends.
+class EdgeEnumTag < ActiveRecord::Base
+  self.table_name = "edge_tags"
+  enum :kind, {label: 0, topic: 1}
+end
+
+class EdgeEnumDocument < ActiveRecord::Base
+  self.table_name = "edge_documents"
+  enum :state, {draft: 0, archived: 1}
+  serialize :title, coder: JSON
+  has_many :tags, class_name: "EdgeEnumTag", foreign_key: :document_id
 end
 
 class EdgeProfile < ActiveRecord::Base

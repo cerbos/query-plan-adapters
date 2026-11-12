@@ -8,9 +8,9 @@ module Cerbos
       #
       # Presence is a property of the NULL convention, not of the column. An attribute sent as an
       # explicit null is present on every row; one omitted when its column is NULL is present
-      # exactly when the column is not NULL. A relation member's field follows `:omitted` unless it
-      # declares otherwise, as the collection macros already assume. A to-one association is
-      # present when its row exists.
+      # exactly when the column is not NULL. A relation member's field follows its declaration, else
+      # the call's convention, as `==` over it does. A to-one association is present when its row
+      # exists.
       #
       # `has()` never errors on a missing value, so the predicate is two-valued and NOT over it is
       # exact. The one error it raises is selecting through a missing to-one parent
@@ -85,7 +85,7 @@ module Cerbos
               "has(#{name}) does not read a mapped field of #{head.inspect}"
           end
 
-          omitted = (member.null_representation || :omitted) == :omitted
+          omitted = (member.null_representation || null_attribute_representation) == :omitted
           column_presence(environment.resolve(name), omitted)
         end
 

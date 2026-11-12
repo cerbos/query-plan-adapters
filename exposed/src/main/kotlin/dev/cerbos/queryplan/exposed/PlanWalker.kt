@@ -15,11 +15,13 @@ internal class PlanWalker(private val translation: Translation) {
     fun traverse(operand: Operand, scope: Scope): Op<Boolean> = when (operand.nodeCase) {
         Operand.NodeCase.EXPRESSION -> traverseExpression(operand.expression, scope)
         // A bare boolean attribute in condition position: `R.attr.aBool`.
-        Operand.NodeCase.VARIABLE -> {
+        Operand.NodeCase.VARIABLE -> translation.hopGuards.guarded {
             val target = scope.scalar(operand.variable)
-            // A text or numeric column in condition position is CEL's no-overload error.
+            // A text or numeric column in condition position is CEL's no-overload error, and so is a
+            // null: the plain comparison keeps a NULL UNKNOWN under either null convention.
             when (ScalarColumnTypes.familyOf(target.column)) {
                 ScalarValueFamily.TEXT, ScalarValueFamily.NUMERIC -> TriLogic.unknown()
+                ScalarValueFamily.BOOLEAN -> translation.leaf.defaultLeaf("eq", target, true)
                 else -> translation.leaf.applyLeaf("eq", target, true)
             }
         }
@@ -47,6 +49,12 @@ internal class PlanWalker(private val translation: Translation) {
                 if (operands.size != 1) throw Refusals.malformed("not requires exactly 1 operand, got ${operands.size}")
                 TriLogic.not(traverse(operands[0], scope))
             }
+            else -> translation.hopGuards.guarded { traverseLeaf(operator, operands, scope) }
+        }
+    }
+
+    private fun traverseLeaf(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> {
+        return when (operator) {
             "exists", "exists_one", "all" -> translation.collections.translate(operator, operands, scope)
             // filter() and map() return a LIST, not a boolean. `filter(...)` in condition position is
             // not `size(filter(...)) > 0`, and lowering it as if it were over-grants.

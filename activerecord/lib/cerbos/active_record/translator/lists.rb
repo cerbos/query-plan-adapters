@@ -253,9 +253,10 @@ module Cerbos
               "position gives up only a column of its own row"
           end
 
-          element = scope.element_at(scope.table[mapping.path], container.position)
+          element = scope.element_at(Relations.column(scope.model, scope.table, mapping.path), container.position)
           register_column_type(element, scope.model, mapping.path)
           register_null_representation(element, mapping.null_representation)
+          register_attribute_field(element, mapping)
           @position_guards[element] = in_range(scope, container.position)
           element
         end

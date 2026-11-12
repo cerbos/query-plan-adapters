@@ -97,7 +97,7 @@ module Cerbos
               "Relation #{mapping&.association.inspect} is used as a collection of bare values " \
               "but declares no member_field"
           end
-          table[field]
+          Relations.column(model, table, field)
         end
 
         # Makes `SELECT 1 FROM ... WHERE <correlation> [AND <conditions>]` in an EXISTS node.
@@ -116,7 +116,9 @@ module Cerbos
         # Makes `(SELECT <column> FROM ... WHERE <correlation>)` as a scalar value, for dotted
         # to-one field paths. Unlike a JOIN, it cannot add rows.
         def scalar(column_name)
-          Arel::Nodes::Grouping.new(select_manager(hops, table[column_name], []).ast)
+          Arel::Nodes::Grouping.new(
+            select_manager(hops, Relations.column(model, table, column_name), []).ast
+          )
         end
 
         # Makes `CASE WHEN EXISTS (<the hops before the collection>) THEN <expression> END`.
@@ -210,6 +212,34 @@ module Cerbos
           guard_hops: outer_scope.hops,
           rebuild: -> { chain(outer_scope: outer_scope, mapping: mapping, aliaser: aliaser) }
         )
+      end
+
+      # The column a mapping names, read as the database stores it. An enum stores an integer
+      # where the application sends the name, and a serialized or encrypted attribute stores its
+      # encoded form, so a filter over either would compare the wrong value.
+      #
+      # @raise [UnmappedAttributeError] for a missing column or a decorated attribute.
+      def column(model, table, name)
+        unless model.columns_hash.key?(name.to_s)
+          raise UnmappedAttributeError, "#{model.name} has no column #{name.to_s.inspect} to map an attribute onto"
+        end
+
+        decoration = decoration_of(model, name.to_s)
+        return table[name] if decoration.nil?
+
+        raise UnmappedAttributeError,
+          "#{model.name}##{name} is #{decoration} attribute: the database holds its stored form, " \
+          "not the value the application sends to Cerbos, so a filter over the column would " \
+          "compare the wrong value"
+      end
+
+      def decoration_of(model, name)
+        return "an enum" if model.defined_enums.key?(name)
+
+        case model.type_for_attribute(name).class.name
+        when "ActiveRecord::Type::Serialized" then "a serialized"
+        when "ActiveRecord::Encryption::EncryptedAttributeType" then "an encrypted"
+        end
       end
 
       # Resolves the to-one chain of a dotted {AttributeMapping::Field} path.

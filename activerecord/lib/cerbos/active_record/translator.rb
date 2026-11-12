@@ -271,7 +271,7 @@ module Cerbos
         node
       end
 
-      # Records the column a top-level field attribute resolved to when its convention, declared
+      # Records the column a field attribute resolved to when its convention, declared
       # or inherited from the call, is `:omitted`. Only such a column may meet a null constant in
       # `eq` or `ne`; {#assert_no_null_operands} refuses every other null operand under `:omitted`.
       #
@@ -284,7 +284,19 @@ module Cerbos
         node
       end
 
-      # True if the node is a top-level field attribute under `:omitted`. See
+      # A field read through to-one hops is NULL both when its column is NULL and when a hop has
+      # no row. The second is CEL's missing-path error, so under `:explicit`, where a NULL is a
+      # value, every operator over the field is UNKNOWN on a row with a missing hop.
+      #
+      # @private
+      def register_hop_guard(node, scope, mapping)
+        if (mapping.null_representation || null_attribute_representation) == :explicit
+          @position_guards[node] = scope.exists
+        end
+        node
+      end
+
+      # True if the node is a field attribute under `:omitted`. See
       # {#register_attribute_field}.
       #
       # @private
