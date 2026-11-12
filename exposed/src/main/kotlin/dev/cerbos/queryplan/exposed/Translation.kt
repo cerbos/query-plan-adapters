@@ -3,6 +3,7 @@ package dev.cerbos.queryplan.exposed
 /** One translation: its options, alias numbering and collaborators. Built per `toFilter` call, never shared. */
 internal class Translation(val options: Options) {
     val aliases = AliasAllocator()
+    val hopGuards = HopGuards(this)
 
     val walker = PlanWalker(this)
 

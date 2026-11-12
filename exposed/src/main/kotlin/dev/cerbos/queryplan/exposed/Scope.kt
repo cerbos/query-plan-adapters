@@ -50,6 +50,8 @@ internal sealed interface Resolution {
         val expression: Expression<*>,
         val column: Column<*>,
         val field: AttributeMapping.Field,
+        val owner: Scope,
+        val hops: List<AttributeMapping.Relation> = emptyList(),
     ) : Resolution
 
     /**
@@ -84,6 +86,7 @@ internal class RootScope(private val translation: Translation) : Scope {
 
     override fun resolve(variable: String): Resolution =
         resolved.getOrPut(variable) { path(variable).resolve(translation, variable) }
+            .also(translation.hopGuards::note)
 
     override fun path(variable: String): AttributePath {
         when (val direct = translation.options.mapping.resolve(variable)) {
@@ -134,7 +137,7 @@ internal class LambdaScope(
 
     override fun resolve(variable: String): Resolution = resolved.getOrPut(variable) {
         if (owns(variable)) path(variable).resolve(translation, variable) else outer.resolve(variable)
-    }
+    }.also(translation.hopGuards::note)
 
     private fun owns(variable: String): Boolean =
         variable == lambdaVariable || variable.startsWith("$lambdaVariable.")
@@ -180,7 +183,7 @@ internal class AttributePath(
     fun resolve(translation: Translation, variable: String): Resolution {
         if (hops.isEmpty()) {
             val field = leaf ?: throw Refusals.internal("a path with no hop ends at a column")
-            return Resolution.Scalar(variable, owner.read(field.column), field.column, field)
+            return Resolution.Scalar(variable, owner.read(field.column), field.column, field, owner)
         }
         return ChainWalk(hops, leaf).resolveAt(translation, owner, variable)
     }
@@ -220,6 +223,8 @@ internal class ChainWalk(
         translation.subqueries.scalarThroughHops(owner, hops, field.column),
         field.column,
         field,
+        owner,
+        hops,
     )
 
     companion object {

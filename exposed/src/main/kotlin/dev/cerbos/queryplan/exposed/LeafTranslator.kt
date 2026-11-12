@@ -25,7 +25,7 @@ import org.jetbrains.exposed.v1.core.stringParam
  * The scalar leaf: one resolved value against one plan constant, under the normalised operator.
  * Owns the explicit-null rules: [isExplicitNull] and [definiteEquality].
  */
-internal class LeafTranslator(@Suppress("unused") private val translation: Translation) {
+internal class LeafTranslator(private val translation: Translation) {
 
     fun applyLeaf(operator: String, target: Resolution.Scalar, value: Any?): Op<Boolean> {
         // A list or map is never equal to the one scalar a mapped column holds: CEL answers from
@@ -37,6 +37,7 @@ internal class LeafTranslator(@Suppress("unused") private val translation: Trans
             if (target.field.nullAttributeRepresentation == NullAttributeRepresentation.OMITTED) {
                 return unknownWhenNull(operator, target)
             }
+            translation.hopGuards.require(target)
             return when (operator) {
                 // Under the EXPLICIT convention, or with nothing declared under a call-level
                 // EXPLICIT: the pre-walk scan refuses an undeclared null operand under a call-level

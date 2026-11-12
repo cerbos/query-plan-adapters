@@ -633,7 +633,10 @@ whose `has()` is not a guard: that planner folds `has()` on an omitted attribute
 Other guarantees:
 
 - CEL type errors and missing-attribute errors survive negation, and an absent `parent` hop stays
-  UNKNOWN under negation rather than becoming false.
+  UNKNOWN under negation rather than becoming false. That includes a field declared `EXPLICIT`: its
+  NULL column is a null value only where the parent row exists.
+- A null in condition position is a CEL error under either convention, so `!R.attr.flag` and
+  `list.exists(b, !b)` deny a row whose flag or element is NULL.
 - Constant NaN ordering follows Cerbos 0.55: an unordered comparison is false, so its negation is
   true (in 0.54 it was an error and stayed denied under negation).
 - `== null` and `!= null` against an attribute declared `field(column, nulls = OMITTED)` are
@@ -731,7 +734,7 @@ silence is not a warning.
 | Subtype discrimination | **Caller-owned**, reproducible with `visibleWhen` | A discriminator column (`kind`, `type`) where one table holds several row kinds, typically with a DAO `EntityClass` per kind narrowing on it. Declare the same predicate: `visibleWhen { t -> t[Tags.kind] eq "label" }` |
 | To-one relation used as a collection | **Caller-owned** | A `one(...)` relation whose `to` column carries no unique index. The mapping declares the cardinality; the **database** is what has to enforce it. Add the unique constraint. The failure is not uniform across stores: a scalar subquery returning several rows is a loud runtime error on PostgreSQL, MySQL and H2, but SQLite silently takes the first row — so a schema that passes your SQLite tests can raise in production, or, worse, keep answering from an arbitrary row |
 | Composite association key | **Rejected by the type system** | `from` and `to` are each one `Column<*>`, so a two-column association key cannot be expressed. That is a compile error, not a wrong join |
-| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain` and its siblings) | None — a to-one hop is read as a correlated **scalar subquery**, which is NULL when no row correlates, and NULL is already CEL's missing-attribute error, so the row is denied under both polarities with no separate hop guard ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
+| Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain` and its siblings) | None — a to-one hop is read as a correlated **scalar subquery**, which is NULL when no row correlates, and NULL is already CEL's missing-attribute error, so the row is denied under both polarities. A field declared `EXPLICIT`, whose NULL is a value, gets a separate guard that the parent row exists ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#375](https://github.com/cerbos/query-plan-adapters/issues/375)) |
 
 `visibleWhen` takes a **resolver lambda**, not a ready predicate, because every subquery instance
 reads through a fresh alias and the predicate has to be built against that alias:
