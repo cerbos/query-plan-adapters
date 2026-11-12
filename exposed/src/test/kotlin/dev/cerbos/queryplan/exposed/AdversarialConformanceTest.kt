@@ -95,6 +95,8 @@ class AdversarialConformanceTest {
         /** `<tag> <case id>` to what the adapter did, written to the run summary. */
         private val RESULTS = TreeMap<String, Map<String, Any?>>()
 
+        private val FUZZ_RESULTS = mutableListOf<Corpus.FuzzVerdict>()
+
         @BeforeAll
         @JvmStatic
         fun setUp() {
@@ -121,6 +123,9 @@ class AdversarialConformanceTest {
             TALLY.forEach { (key, count) -> println("conformance $key: $count") }
             runCatching { writeRunSummary() }
                 .onFailure { println("==> could not write the conformance run summary: $it") }
+            synchronized(FUZZ_RESULTS) {
+                Corpus.writeFuzzResults(System.getenv("QPA_HARNESS_STORE") ?: TestStore.selected(), FUZZ_RESULTS)
+            }
             testStore?.stop()
         }
 
@@ -293,6 +298,14 @@ class AdversarialConformanceTest {
         }
         val allowed = golden["allowed"].map { it.asText() }.filter { it !in unheld }.sorted()
 
+        if (Corpus.fuzzing()) {
+            val verdict = Corpus.fuzzVerdict(tag, id, allowed, runCatching { ids(golden) }) {
+                it is UnsupportedPlanShapeException || it is UnmappedAttributeException
+            }
+            synchronized(FUZZ_RESULTS) { FUZZ_RESULTS.add(verdict) }
+            assertTrue(verdict.isOk()) { verdict.toString() }
+            return
+        }
         val entry = LEDGER[id]
         val status = if (entry != null && entry.appliesTo(tag)) entry.status else "pass"
         val outcome = runCatching { ids(golden) }
@@ -324,6 +337,7 @@ class AdversarialConformanceTest {
 
     @Test
     fun everyLedgerEntryNamesAGoldenCase() {
+        Assumptions.assumeFalse(Corpus.fuzzing(), "a fuzz run is judged without the ledger")
         val tags = Corpus.pdpTags()
         val recorded = tags.flatMap { tag -> Corpus.goldens(tag).map { it["id"].asText() } }.toSet()
         assertEquals(emptySet<String>(), LEDGER.keys - recorded)

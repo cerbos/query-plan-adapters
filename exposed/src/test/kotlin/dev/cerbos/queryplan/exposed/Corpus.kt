@@ -1,5 +1,7 @@
 package dev.cerbos.queryplan.exposed
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -50,9 +52,9 @@ internal object Corpus {
     /** The current PDP's tag. */
     fun currentTag(): String = pdpTags()[0]
 
-    /** Every golden file recorded for [tag], sorted by case id. */
+    /** Every golden file recorded for [tag] (in fuzz mode, the run's), sorted by case id. */
     fun goldens(tag: String): List<JsonNode> =
-        Files.walk(conformanceDir().resolve("golden").resolve(tag)).use { files ->
+        Files.walk(if (fuzzing()) Path.of(FUZZ_DIR, tag) else conformanceDir().resolve("golden").resolve(tag)).use { files ->
             files.filter { it.toString().endsWith(".json") }.sorted().map(::readJson).toList()
         }
 
@@ -130,4 +132,64 @@ internal object Corpus {
      */
     fun lacks(store: String): Set<String> =
         readLedger().lacks.filterValues { it.stores == null || store in it.stores }.keys
+
+    // -- fuzz mode --------------------------------------------------------------------------------
+
+    /**
+     * The directory a fuzz run was recorded into (conformance/README.md, "Fuzzing"), or empty.
+     * When it is set, [goldens] reads the generated cases from it instead of the corpus, and the
+     * harness judges each case with [fuzzVerdict] instead of the ledger.
+     */
+    val FUZZ_DIR: String = System.getenv("QPA_FUZZ_DIR").orEmpty()
+
+    fun fuzzing(): Boolean = FUZZ_DIR.isNotEmpty()
+
+    /** One case's line in `<FUZZ_DIR>/results/<adapter>-<store>.json`, for fuzz-report. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    data class FuzzVerdict(
+        val pdp: String,
+        val id: String,
+        val verdict: String,
+        val expected: List<String>? = null,
+        val returned: List<String>? = null,
+        val detail: String? = null,
+    ) {
+        /** A match or a refusal, the two answers the invariant allows. */
+        @JsonIgnore
+        fun isOk(): Boolean = verdict == "match" || verdict == "refused"
+    }
+
+    /** Judges one fuzz case: [refusal] says which throws are the adapter refusing. */
+    fun fuzzVerdict(pdp: String, id: String, expected: List<String>, outcome: Result<List<String>>, refusal: (Throwable) -> Boolean): FuzzVerdict {
+        val returned = outcome.getOrElse { e ->
+            return if (refusal(e)) {
+                FuzzVerdict(pdp, id, "refused")
+            } else {
+                FuzzVerdict(pdp, id, "error", detail = "${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
+        if (returned == expected) return FuzzVerdict(pdp, id, "match")
+        val verdict = when {
+            !expected.containsAll(returned) -> "over-grant"
+            !returned.containsAll(expected) -> "under-grant"
+            else -> "error"
+        }
+        return FuzzVerdict(
+            pdp, id, verdict, expected, returned,
+            if (verdict == "error") "the right rows, but some of them repeated" else null,
+        )
+    }
+
+    /** Writes one store's verdicts; outside fuzz mode it does nothing. */
+    fun writeFuzzResults(store: String, results: List<FuzzVerdict>) {
+        if (!fuzzing()) return
+        val dir = Path.of(FUZZ_DIR, "results")
+        Files.createDirectories(dir)
+        val sorted = results.sortedWith(compareBy({ it.id }, { it.pdp }))
+        Files.writeString(
+            dir.resolve("$ADAPTER-$store.json"),
+            ObjectMapper().registerKotlinModule().writerWithDefaultPrettyPrinter()
+                .writeValueAsString(mapOf("adapter" to ADAPTER, "store" to store, "results" to sorted)) + "\n",
+        )
+    }
 }
