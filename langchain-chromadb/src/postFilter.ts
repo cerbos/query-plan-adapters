@@ -766,7 +766,10 @@ function lambdaComponents(lambda: PlanExpressionOperand | undefined): LambdaComp
   const variables = lambda.operands.filter(bare).map((op) => op.name);
 
   if (bodies.length !== 1 || bodies[0] === undefined) {
-    throw Error("Lambda requires a variable operand");
+    throw new UnsupportedOperatorError(
+      "lambda",
+      "A lambda needs exactly one body beside its variables; a body that is itself a bare variable cannot be told apart from them"
+    );
   }
 
   return { body: bodies[0], variables };
