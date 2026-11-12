@@ -36,7 +36,7 @@ You'll also need:
 - **The Cerbos Java SDK** (`dev.cerbos:cerbos-sdk-java`) to call the PDP.
 - **Exposed 1.0.0 or later**, which you bring yourself. `exposed-core` and `exposed-jdbc` are
   `compileOnly` here, so installing the adapter cannot move your ORM version. The published jar is
-  compiled against **1.0.0** and CI runs every suite against both **1.0.0** and **1.5.0** — the
+  compiled against **1.0.0** and CI runs every suite against both **1.0.0** and **1.6.1** — the
   floor legs including the conformance harness on every store, so the floor is proved against the
   PDP's recorded `check()` decisions rather than only against compilation. That direction is
   deliberate: JetBrains promises that code built against an older 1.x keeps working on a newer one
@@ -863,7 +863,7 @@ and MySQL:
 | Variable | Values | Selects |
 |---|---|---|
 | `ADAPTER_TEST_DB` | `h2` (default), `sqlite`, `postgres`, `mysql` | The store the conformance suite runs on. See [Dialects](#dialects) |
-| `ADAPTER_TEST_ORM` | `baseline` (default), `floor` | Exposed 1.5.0, the release `example/` pins, or 1.0.0, the release the published jar compiles against (declared in [`build.gradle.kts`](build.gradle.kts)) |
+| `ADAPTER_TEST_ORM` | `baseline` (default), `floor` | Exposed 1.6.1, the release `example/` pins, or 1.0.0, the release the published jar compiles against (declared in [`build.gradle.kts`](build.gradle.kts)) |
 | `ADAPTER_TEST_CONTAINER_SUITES` | `run` (default), `skip` | Whether the suites that start containers of their own run (below) |
 | `ADAPTER_TEST_MYSQL_COLLATION` | e.g. `utf8mb4_0900_as_cs` | Override the MySQL leg's server default `utf8mb4_0900_ai_ci` |
 | `ADAPTER_TEST_MYSQL_SERVER_PREP_STMTS` | `true` | Run the MySQL leg with server-side prepared statements |

@@ -34,6 +34,18 @@
         "^(?<depName>[a-z0-9][a-z0-9._/-]*):(?<currentValue>[A-Za-z0-9._-]+)@(?<currentDigest>sha256:[0-9a-f]{64})\\s*$"
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "The Exposed `baseline` in exposed/build.gradle.kts, which exposed/example/run.sh requires the example's exposed-* pins to equal. Renovate's Gradle manager cannot read a version inside a map, so without this an example bump fails the example job. The `floor` entry is deliberately not matched.",
+      "managerFilePatterns": [
+        "/^exposed/build\\.gradle\\.kts$/"
+      ],
+      "matchStrings": [
+        "\"baseline\" to mapOf\\(\"exposed\" to \"(?<currentValue>[^\"]+)\"\\)"
+      ],
+      "depNameTemplate": "org.jetbrains.exposed:exposed-core",
+      "datasourceTemplate": "maven"
     }
   ]
 }
