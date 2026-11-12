@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
@@ -368,7 +369,9 @@ async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
 }
 
 beforeAll(async () => {
-  await mongoose.connect(MONGO_URL);
+  // The driver loads `os` with a dynamic import(), which Jest rejects without
+  // --experimental-vm-modules, and then handshakes with empty client metadata.
+  await mongoose.connect(MONGO_URL, { runtimeAdapters: { os } });
   await AdversarialResource.deleteMany({});
   await AdversarialResource.create(SEEDS.map(toDocument));
 }, 30_000);
