@@ -153,6 +153,10 @@
       "status": "unsupported",
       "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (size()) has no SQL value to test against the list."
     },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",
       "reason": "matches() is lowered only where LIKE can spell the pattern exactly. Under (?i), \\W is every character but the word characters and their case folds U+017F and U+212A, and LIKE has no character class."

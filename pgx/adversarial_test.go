@@ -452,13 +452,14 @@ func filteredIDs(ctx context.Context, pool *pgxpool.Pool, mapper cerbospgx.Mappe
 
 	// Translate wraps every mapper miss in ErrUnsupported, so a resource attribute this harness
 	// forgot to map would satisfy an `unsupported` ledger entry vacuously. A miss on a
-	// `request.*` reference is therefore a harness defect, reported as such rather than as the
-	// adapter's refusal. (Lambda-local names such as `t.name` also reach the root mapper, as a
-	// probe before the element scope answers them, so only `request.*` is checked.)
+	// `request.resource.*` reference is therefore a harness defect, reported as such rather than as
+	// the adapter's refusal. (Lambda-local names such as `t.name` also reach the root mapper, as a
+	// probe before the element scope answers them, and a `request.principal.*` reference the
+	// planner left unresolved has no column to map, so only `request.resource.*` is checked.)
 	var unmapped []string
 	recording := cerbospgx.MapperFunc(func(reference string) (cerbospgx.Entry, bool) {
 		entry, ok := mapper.Resolve(reference)
-		if !ok && strings.HasPrefix(reference, "request.") {
+		if !ok && strings.HasPrefix(reference, "request.resource.") {
 			unmapped = append(unmapped, reference)
 		}
 		return entry, ok

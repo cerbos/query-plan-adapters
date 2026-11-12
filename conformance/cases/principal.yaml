@@ -20,6 +20,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.all(t, t.name in P.attr.emptyTeams)'
+- id: 'principal/all/left-unresolved-in-ternary-branch'
+  tier: adversarial
+  intent: 'all() over a principal list in one branch of a ternary, which the planner leaves as a request.principal.attr variable instead of a value.'
+  trap: 'The plan names request.principal.attr.allowedTags, which no store holds. An adapter must refuse it. Treating it as a document path or a missing column returns the wrong rows. Found by fuzzing (fuzz/s73/0122).'
+  condition:
+    match:
+      expr: '(R.attr.parent.aString < "XA_BY") ? (P.attr.allowedTags.all(t, R.attr.aString != t)) : (R.attr.tagNames.filter(t, t != "Public").size() == 0)'
 - id: 'principal/all/long-list'
   tier: adversarial
   intent: 'all() with != over an 11-element principal list, sent by the planner as a value list.'

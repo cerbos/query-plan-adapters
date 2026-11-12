@@ -100,6 +100,14 @@ function* referencePrefixes(reference: string): Generator<[string, string[]]> {
   }
 }
 
+/** A principal attribute left in the plan is a value the planner did not fold, not a mapping mistake. */
+const unmappedReference = (reference: string, message: string): Error =>
+  reference.startsWith("request.principal.")
+    ? new UnsupportedQueryPlanError(
+        `The plan leaves ${reference} unresolved: the planner did not fold it into a value, and a principal attribute is not a column`,
+      )
+    : new Error(message);
+
 const resolveRelationField = (
   relation: RelationMapping,
   path: string[],
@@ -204,7 +212,7 @@ export const resolveFieldReference = (
     return resolveRelationField(entry.relation, suffix, reference, []);
   }
 
-  throw new Error(`No mapping found for reference: ${reference}`);
+  throw unmappedReference(reference, `No mapping found for reference: ${reference}`);
 };
 
 /** The relation chain a collection reference iterates, root first. */
@@ -348,7 +356,8 @@ export const createCollectionScope = (
   const primaryRelation = relationChain[relationChain.length - 1];
 
   if (!primaryRelation) {
-    throw new Error(
+    throw unmappedReference(
+      collectionReference,
       `No relation mapping found for reference: ${collectionReference}`,
     );
   }

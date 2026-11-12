@@ -26,6 +26,10 @@ sealed interface Scope permits Scope.Root, Scope.Lambda {
         @Override
         public String field(String variable) {
             String field = fieldMap.get(variable);
+            if (field == null && variable.startsWith("request.principal.")) {
+                throw Refusals.unsupported("The plan leaves " + variable
+                        + " unresolved: the planner did not fold it into a value, and a principal attribute is not a field of any document");
+            }
             if (field == null) {
                 throw Refusals.unmapped("Unknown attribute: " + variable);
             }
