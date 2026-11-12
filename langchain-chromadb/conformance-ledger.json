@@ -145,10 +145,6 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `string()` reads a number from metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and `string()` renders -0.0 as \"-0\"."
     },
-    "collection/all/negated-bare-boolean-element": {
-      "status": "unsupported",
-      "reason": "A lambda whose body is the bare iteration variable (`all(b, b)`): the plan's lambda node then holds two identical variable operands, and the post-filter evaluator cannot tell the body from the variable, so it refuses the macro."
-    },
     "collection/except/as-lambda-body": {
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."

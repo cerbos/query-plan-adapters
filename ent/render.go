@@ -345,6 +345,10 @@ func writeTruthTest(b *sql.Builder, t queryplan.TruthTest) error {
 		return write(b, queryplan.IsNull{X: t.X})
 
 	case queryplan.TruthTrue, queryplan.TruthFalse:
+		// PostgreSQL types an untyped NULL beside a parameter as text, which a boolean cannot bind to.
+		if lit, ok := t.X.(queryplan.Lit); ok && lit.V == nil {
+			return write(b, queryplan.BoolConst{V: false})
+		}
 		return wrap(b, func(b *sql.Builder) error {
 			if err := write(b, t.X); err != nil {
 				return err

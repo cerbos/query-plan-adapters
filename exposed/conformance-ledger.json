@@ -285,6 +285,14 @@
       "status": "unsupported",
       "reason": "An and() whose result is compared with `==` as a value has no translation: the walker lowers and() only in condition position, and refuses it as an operand of eq."
     },
+    "logic/bare/list-attribute": {
+      "status": "unsupported",
+      "reason": "Request.resource.attr.aBoolList is mapped as a relation, but a condition needs a scalar column, so a list read as one is refused."
+    },
+    "logic/not/bare-list-attribute": {
+      "status": "unsupported",
+      "reason": "Request.resource.attr.aBoolList is mapped as a relation, but a condition needs a scalar column, so a list read as one is refused."
+    },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and `in` over a map tests its keys: the attribute names present on the related row. A related row has no key set SQL can test, and the mapping declares no element column to stand for one, so the membership is refused when its container is resolved"

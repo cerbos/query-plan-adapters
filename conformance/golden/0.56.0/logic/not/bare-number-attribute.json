@@ -1,0 +1,64 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "logic/not/bare-number-attribute",
+  "intent": "Negation of a bare number attribute, OR'd with aString == \"one\" (!aNumber || aString == \"one\").",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "one"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "logic/not/bare-number-attribute",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aNumber || R.attr.aString == \"one\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL's ! has no overload for a number, so only a1 is allowed. A store that reads false as 0 grants a7 and h4; a NOT over \"aNumber is true\" grants every row."
+}

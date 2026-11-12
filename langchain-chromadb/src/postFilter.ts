@@ -762,6 +762,13 @@ function lambdaComponents(lambda: PlanExpressionOperand | undefined): LambdaComp
   const bare = (op: PlanExpressionOperand): op is PlanExpressionVariable =>
     isVariable(op) && !op.name.includes(".");
 
+  const [first, second] = lambda.operands;
+
+  // A body that is itself the element (`exists(n, n)`) is bare too; the planner puts it first.
+  if (lambda.operands.length === 2 && first && second && bare(first) && bare(second)) {
+    return { body: first, variables: [second.name] };
+  }
+
   const bodies = lambda.operands.filter((op) => !bare(op));
   const variables = lambda.operands.filter(bare).map((op) => op.name);
 

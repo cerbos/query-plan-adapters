@@ -120,6 +120,14 @@
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."
     },
+    "logic/bare/list-attribute": {
+      "status": "unsupported",
+      "reason": "aBoolList is mapped as a Relation, a collection with no scalar path, so a list read as a condition is refused."
+    },
+    "logic/not/bare-list-attribute": {
+      "status": "unsupported",
+      "reason": "aBoolList is mapped as a Relation, a collection with no scalar path, so a list read as a condition is refused."
+    },
     "null/in/error-or-boolean-in-list-with-null": {
       "status": "unsupported",
       "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (or()) has no SQL value to test against the list."

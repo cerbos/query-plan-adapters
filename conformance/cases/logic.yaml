@@ -143,3 +143,31 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString || R.attr.aNumber == 5'
+- id: 'logic/bare/number-attribute'
+  tier: adversarial
+  intent: 'A bare number attribute in condition position, OR''d with aString == "one" (aNumber || aString == "one").'
+  trap: 'A number in condition position is a CEL error, so only a1 is allowed. A store that reads true as 1 grants a4, whose aNumber is 1.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber || R.attr.aString == "one"'
+- id: 'logic/not/bare-number-attribute'
+  tier: adversarial
+  intent: 'Negation of a bare number attribute, OR''d with aString == "one" (!aNumber || aString == "one").'
+  trap: 'CEL''s ! has no overload for a number, so only a1 is allowed. A store that reads false as 0 grants a7 and h4; a NOT over "aNumber is true" grants every row.'
+  condition:
+    match:
+      expr: '!R.attr.aNumber || R.attr.aString == "one"'
+- id: 'logic/bare/list-attribute'
+  tier: adversarial
+  intent: 'A bare list attribute in condition position, OR''d with aNumber == 5 (aBoolList || aNumber == 5).'
+  trap: 'A list in condition position is a CEL error, so only a1 is allowed. A document store whose equality matches an array element grants every row whose aBoolList holds true.'
+  condition:
+    match:
+      expr: 'R.attr.aBoolList || R.attr.aNumber == 5'
+- id: 'logic/not/bare-list-attribute'
+  tier: adversarial
+  intent: 'Negation of a bare list attribute, OR''d with aNumber == 5 (!aBoolList || aNumber == 5).'
+  trap: 'CEL''s ! has no overload for a list, so only a1 is allowed. A document store whose equality matches an array element grants every row whose aBoolList holds false.'
+  condition:
+    match:
+      expr: '!R.attr.aBoolList || R.attr.aNumber == 5'

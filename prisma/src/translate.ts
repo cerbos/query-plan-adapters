@@ -23,7 +23,7 @@ import {
   handleOverlapsOperator,
 } from "./hierarchy";
 import type { PrismaFilter } from "./index";
-import { isResolvedValue, resolveFieldReference } from "./mapping";
+import { isResolvedValue, lookupMapping, resolveFieldReference } from "./mapping";
 import type { ResolvedOperand, TranslationContext } from "./mapping";
 import {
   assertDefined,
@@ -153,6 +153,10 @@ export function buildPrismaFilterFromCerbosExpression(
  * which no Prisma filter keeps out under both polarities, so it is refused.
  */
 function booleanFieldReference(name: string, context: TranslationContext) {
+  if (lookupMapping(context.mapper, name)?.relation?.type === "many") {
+    throw new UnsupportedQueryPlanError("A list in boolean position is a CEL type error");
+  }
+
   const fieldRef = resolveFieldReference(name, context);
 
   if (fieldRef.valueType !== undefined && fieldRef.valueType !== "boolean") {

@@ -873,6 +873,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.exists(t, t.name == "public" && R.attr.aNumber + 1.0 > 2.0)
+    # collection/exists/bare-number-element
+    - actions:
+        - collection/exists/bare-number-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList.exists(n, n) || R.attr.aNumber == 5
+    # collection/exists/negated-bare-number-element
+    - actions:
+        - collection/exists/negated-bare-number-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList.exists(n, !n) || R.attr.aNumber == 5
     # collection/exists/element-contains-outer-attribute
     - actions:
         - collection/exists/element-contains-outer-attribute
@@ -2739,6 +2757,42 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString || R.attr.aNumber == 5
+    # logic/bare/number-attribute
+    - actions:
+        - logic/bare/number-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber || R.attr.aString == "one"
+    # logic/not/bare-number-attribute
+    - actions:
+        - logic/not/bare-number-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aNumber || R.attr.aString == "one"'
+    # logic/bare/list-attribute
+    - actions:
+        - logic/bare/list-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aBoolList || R.attr.aNumber == 5
+    # logic/not/bare-list-attribute
+    - actions:
+        - logic/not/bare-list-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aBoolList || R.attr.aNumber == 5'
     # membership/in/empty-list
     - actions:
         - membership/in/empty-list
