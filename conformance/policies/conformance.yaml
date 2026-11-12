@@ -4211,6 +4211,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.parent.aString == "One"
+    # relation/order/one-hop-string-code-point
+    - actions:
+        - relation/order/one-hop-string-code-point
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aString > "a"
     # relation/equals/two-hops-boolean
     - actions:
         - relation/equals/two-hops-boolean

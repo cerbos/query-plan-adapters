@@ -197,7 +197,7 @@ passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 105 / 110 |
 | adversarial | 476 / 533 |
 

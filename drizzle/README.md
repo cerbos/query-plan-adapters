@@ -457,7 +457,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 106 / 110 |
 | adversarial | 447 / 533 |
 

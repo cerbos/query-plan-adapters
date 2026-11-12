@@ -549,7 +549,7 @@ total but not as passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 98 / 110 |
 | adversarial | 425 / 533 |
 

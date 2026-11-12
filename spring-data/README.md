@@ -175,7 +175,7 @@ divergence is skipped, and counts toward the total but not as passed:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 106 / 110 |
 | adversarial | 468 / 533 |
 

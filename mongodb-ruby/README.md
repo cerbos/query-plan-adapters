@@ -213,7 +213,7 @@ case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 106 / 110 |
 | adversarial | 500 / 533 |
 

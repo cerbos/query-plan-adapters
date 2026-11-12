@@ -153,6 +153,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.parent.aString == "One"'
+- id: 'relation/order/one-hop-string-code-point'
+  tier: core
+  intent: 'String ordering on a field of the to-one parent against a literal (parent.aString > "a").'
+  trap: 'CEL orders strings by code point, so "One" and "Secret" sort before "a"; a linguistic collation on the joined table (ICU en-US) adds b1 and d1.'
+  condition:
+    match:
+      expr: 'R.attr.parent.aString > "a"'
 - id: 'relation/equals/two-hops-boolean'
   tier: extended
   intent: Boolean equality two levels out (parent.inner.aBool == true).

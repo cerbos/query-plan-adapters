@@ -430,7 +430,7 @@ current PDP, 0.57.0, identical on all six combinations, out of every golden case
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 84 / 110 |
 | adversarial | 375 / 533 |
 
