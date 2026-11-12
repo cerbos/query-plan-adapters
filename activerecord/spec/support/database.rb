@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 # The database the suites run on, chosen by ADAPTER_TEST_DB: `sqlite` (the default, in memory),
-# `postgres` or `mysql`. The latter two are the services scripts/test.sh starts from
+# `postgres`, `mysql` or `mariadb`. The others are the services scripts/test.sh starts from
 # docker-compose.yaml; only the conformance suite runs on them in CI.
 module Database
-  STORES = %w[sqlite postgres mysql].freeze
+  STORES = %w[sqlite postgres mysql mariadb].freeze
   STORE = ENV.fetch("ADAPTER_TEST_DB", "sqlite")
   unless STORES.include?(STORE)
     raise ArgumentError, "ADAPTER_TEST_DB must be one of #{STORES.join(", ")}, not #{STORE.inspect}"
@@ -13,6 +13,7 @@ module Database
   # MySQL's default, which folds case and accents (#474): the adapter compares strings byte for
   # byte itself.
   MYSQL_COLLATION = "utf8mb4_0900_ai_ci"
+  MARIADB_COLLATION = "utf8mb4_uca1400_ai_ci"
 
   module_function
 
@@ -32,6 +33,11 @@ module Database
       ActiveRecord::Base.establish_connection(
         adapter: "mysql2", host: "mysql", username: "root", password: "conformance",
         database: "conformance", encoding: "utf8mb4", collation: MYSQL_COLLATION
+      )
+    when "mariadb"
+      ActiveRecord::Base.establish_connection(
+        adapter: "mysql2", host: "mariadb", username: "root", password: "conformance",
+        database: "conformance", encoding: "utf8mb4", collation: MARIADB_COLLATION
       )
     end
   end

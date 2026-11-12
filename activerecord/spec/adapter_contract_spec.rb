@@ -460,6 +460,34 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  describe "the database it runs on" do
+    def connected_to(adapter_name, version: "8.0.36", mariadb: false)
+      connection = double(adapter_name: adapter_name, database_version: Gem::Version.new(version), mariadb?: mariadb)
+      allow(AdvResource).to receive(:connection).and_return(connection)
+    end
+
+    def plan = conditional(expression("eq", variable("request.resource.attr.aString"), value("a")))
+
+    %w[SQLServer OracleEnhanced].each do |name|
+      it "raises for #{name}" do
+        connected_to(name)
+        expect { translate(plan) }.to raise_error(Cerbos::ActiveRecord::UnsupportedDatabaseError, /#{name}/)
+      end
+    end
+
+    [["Mysql2", "11.4.4"], ["Trilogy", "10.11.9"]].each do |name, version|
+      it "raises for MariaDB #{version} behind #{name}, which has no utf8mb4_0900_bin" do
+        connected_to(name, version: version, mariadb: true)
+        expect { translate(plan) }.to raise_error(Cerbos::ActiveRecord::UnsupportedDatabaseError, /MariaDB #{version}/)
+      end
+    end
+
+    it "raises for MySQL before 8.0, which has no utf8mb4_0900_bin" do
+      connected_to("Mysql2", version: "5.7.44")
+      expect { translate(plan) }.to raise_error(Cerbos::ActiveRecord::UnsupportedDatabaseError, /5\.7\.44/)
+    end
+  end
+
   describe "membership with a column inside the list" do
     # `null in [R.attr.x]` is true when the column is null. `NULL IN (x)` would always be
     # UNKNOWN.
