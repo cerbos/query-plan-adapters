@@ -108,6 +108,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aString) + 1 > 50
+    # arithmetic/add/int-plus-principal-double
+    - actions:
+        - arithmetic/add/int-plus-principal-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) + P.attr.zero == 5) || R.attr.aNumber == 5'
     # arithmetic/add/negated-int-beside-double-field
     - actions:
         - arithmetic/add/negated-int-beside-double-field
@@ -369,6 +378,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber * 0.1 == 0.3 || R.attr.aDouble * 3.0 == 3.9
+    # arithmetic/multiply/int-times-principal-double
+    - actions:
+        - arithmetic/multiply/int-times-principal-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) * P.attr.zero == 1) || R.attr.aNumber == 5'
     # arithmetic/multiply/nan-times-zero-plus-column
     - actions:
         - arithmetic/multiply/nan-times-zero-plus-column
@@ -441,6 +459,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(int(R.attr.aNumber) - P.attr.zero == 5) || R.attr.aNumber == 5'
+    # arithmetic/subtract/int-minus-principal-double-ordering
+    - actions:
+        - arithmetic/subtract/int-minus-principal-double-ordering
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) - P.attr.zero > 0 || R.attr.aNumber == 5
     # cast/double/malformed-string
     - actions:
         - cast/double/malformed-string
