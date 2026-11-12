@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a3",
+    "a5",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/exists/negated-bare-boolean-element",
+  "intent": "exists over a boolean list whose body negates the bare element (aBoolList.exists(b, !b)).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aBoolList"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "b"
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "variable": "b"
+                }
+              ],
+              "operator": "lambda"
+            }
+          }
+        ],
+        "operator": "exists"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/exists/negated-bare-boolean-element",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aBoolList.exists(b, !b)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A null element is an error under !, not false: a4 [null, true] has no false element and must deny, where reading the null as \"not true\" grants it."
+}

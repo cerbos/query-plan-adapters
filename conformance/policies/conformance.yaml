@@ -702,6 +702,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.all(t, t.name == "public")
+    # collection/all/negated-bare-boolean-element
+    - actions:
+        - collection/all/negated-bare-boolean-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aBoolList.all(b, b)'
     # collection/all/negated-nested-exists-in-body
     - actions:
         - collection/all/negated-nested-exists-in-body
@@ -936,6 +945,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber == 33 || ["%_o", "X"].exists(t, R.attr.aString.contains(t))
+    # collection/exists/negated-bare-boolean-element
+    - actions:
+        - collection/exists/negated-bare-boolean-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aBoolList.exists(b, !b)
     # collection/exists/negated-element-in-literal-list
     - actions:
         - collection/exists/negated-element-in-literal-list
@@ -2883,6 +2901,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.all(t, t.name != "x")
+    # null/concat/explicit-null-plus-literal-not-equal
+    - actions:
+        - null/concat/explicit-null-plus-literal-not-equal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.owner + "z" != "setz"
     # null/equals/field-to-field-both-explicit-null
     - actions:
         - null/equals/field-to-field-both-explicit-null

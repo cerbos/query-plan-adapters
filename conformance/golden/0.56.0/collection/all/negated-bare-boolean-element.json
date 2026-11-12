@@ -1,0 +1,66 @@
+{
+  "allowed": [
+    "a3",
+    "a5",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/all/negated-bare-boolean-element",
+  "intent": "A negated all over a boolean list whose body is the bare element (!aBoolList.all(b, b)).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aBoolList"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "b"
+                      },
+                      {
+                        "variable": "b"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "all"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/all/negated-bare-boolean-element",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aBoolList.all(b, b)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A null element in condition position is an error, not false: a4 [null, true] errors and must deny, where reading the null as false makes all() false and the negation grants it."
+}

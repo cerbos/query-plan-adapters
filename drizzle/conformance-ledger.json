@@ -96,6 +96,10 @@
       "status": "unsupported",
       "reason": "A list built from a computed element has no SQL value to compare with a list literal."
     },
+    "collection/all/negated-bare-boolean-element": {
+      "status": "unsupported",
+      "reason": "`aBoolList` is a scalar list the mapping holds as an array or JSON column, read by position; a macro ranges over a mapped relation, and a list column has no relation to iterate, so the adapter refuses it."
+    },
     "collection/except/as-lambda-body": {
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
@@ -107,6 +111,10 @@
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. A relation subquery iterates rows, not attribute names, so a macro over a to-one relation is refused."
+    },
+    "collection/exists/negated-bare-boolean-element": {
+      "status": "unsupported",
+      "reason": "Same scalar list column as collection/all/negated-bare-boolean-element, under exists() with a negated body."
     },
     "collection/exists/negated-map-keys": {
       "status": "unsupported",

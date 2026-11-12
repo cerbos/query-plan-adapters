@@ -172,6 +172,10 @@
       "status": "unsupported",
       "reason": "A list constructed from attributes is lowered only as the range of exists()/all() or the right operand of in: SQL has no list value to concatenate or compare."
     },
+    "collection/all/negated-bare-boolean-element": {
+      "status": "unsupported",
+      "reason": "A macro over `aBoolList`, which the mapping declares only as a collection column (JSON or a PostgreSQL array): size(), an index and membership read that column, but a macro ranges over a relation, and the list has none."
+    },
     "collection/all/nested-exists-over-same-collection": {
       "status": "unsupported",
       "reason": "attr_map gives both macros' lambda scopes the same unaliased table, so the inner body comparing the inner element with the enclosing one would render as a column compared with itself; the translator refuses the nesting before building SQL (#509)."
@@ -203,6 +207,10 @@
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "exists() over the to-one parent ranges over the keys of a map, and the parent is a related row: SQL cannot enumerate which of its columns are non-NULL as the attribute's keys, so relation_overrides() refuses it: the attribute is not a Relation."
+    },
+    "collection/exists/negated-bare-boolean-element": {
+      "status": "unsupported",
+      "reason": "Same collection column without a relation as collection/all/negated-bare-boolean-element, under exists() with a negated body."
     },
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
