@@ -119,7 +119,10 @@ Cerbos::ActiveRecord.field("parent.inner.a_string")  # several hops, each to-one
 - A dotted path becomes a correlated scalar subquery, so it cannot multiply rows. A collection
   association anywhere in the path raises.
 - A missing hop gives NULL, so the row is excluded — matching Cerbos, which denies on the missing
-  path.
+  path. This holds under `:explicit` too: a NULL column of a parent that exists is a null value,
+  while a parent that does not exist denies the row under both polarities. An application that
+  sends `null` for a field whose parent is missing gets fewer rows than `check()` allows for it,
+  never more.
 - `R.id` is its own plan variable. Map it if a policy reads it:
   `"request.resource.id" => Cerbos::ActiveRecord.field("id")`.
 - `null_representation:` — see [Declare the convention on the attribute](#declare-the-convention-on-the-attribute).

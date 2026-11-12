@@ -256,6 +256,7 @@ module Cerbos
           element = scope.element_at(scope.table[mapping.path], container.position)
           register_column_type(element, scope.model, mapping.path)
           register_null_representation(element, mapping.null_representation)
+          register_attribute_field(element, mapping)
           @position_guards[element] = in_range(scope, container.position)
           element
         end

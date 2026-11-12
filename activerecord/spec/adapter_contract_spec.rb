@@ -332,6 +332,97 @@ RSpec.describe Cerbos::ActiveRecord do
     end
   end
 
+  # A dotted field path is NULL both when its column is NULL and when a to-one hop has no row. The
+  # corpus maps its to-one chain as `:omitted`, so only this suite can ask for the other reading.
+  describe "a to-one path under the explicit convention" do
+    let(:rows) do
+      [["x"], [nil], nil].map do |profile|
+        EdgeDocument.create!.tap do |document|
+          EdgeProfile.create!(name: profile.first, document_id: document.id) if profile
+        end
+      end
+    end
+
+    let(:equals_x) { expression("eq", variable("p"), value("x")) }
+    let(:is_null) { expression("eq", variable("p"), value(nil)) }
+
+    after do
+      EdgeProfile.where(document_id: rows.map(&:id)).delete_all
+      rows.each(&:destroy!)
+    end
+
+    def path_ids(condition, declared, call = :omitted)
+      described_class.query_plan_to_relation(
+        plan: conditional(condition), model: EdgeDocument,
+        attributes: {"p" => described_class.field("profile.name", null_representation: declared)},
+        null_attribute_representation: call
+      ).where(id: rows.map(&:id)).order(:id).pluck(:id)
+    end
+
+    def rows_at(*indexes) = indexes.map { |index| rows[index].id }
+
+    [[:explicit, :omitted], [nil, :explicit]].each do |declared, call|
+      context "when the field declares #{declared.inspect} and the call is #{call}" do
+        it "compares a null column as a value and denies a missing parent under both polarities" do
+          expect(path_ids(equals_x, declared, call)).to eq(rows_at(0))
+          expect(path_ids(expression("not", equals_x), declared, call)).to eq(rows_at(1))
+          expect(path_ids(expression("ne", variable("p"), value("x")), declared, call)).to eq(rows_at(1))
+        end
+
+        it "matches a null literal against a null column, never a missing parent" do
+          expect(path_ids(is_null, declared, call)).to eq(rows_at(1))
+          expect(path_ids(expression("not", is_null), declared, call)).to eq(rows_at(0))
+        end
+      end
+    end
+  end
+
+  # A relation member field takes its declaration, else the call's convention, in every operator.
+  describe "a relation member field under the call's convention" do
+    let(:rows) do
+      [["x"], [nil], []].map do |names|
+        EdgeDocument.create!.tap do |document|
+          names.each { |name| EdgeTag.create!(name: name, document_id: document.id) }
+        end
+      end
+    end
+
+    after do
+      EdgeTag.where(document_id: rows.map(&:id)).delete_all
+      rows.each(&:destroy!)
+    end
+
+    def exists(body)
+      expression("exists", variable("tags"), expression("lambda", body, variable("t")))
+    end
+
+    def member_ids(condition, declared, call)
+      described_class.query_plan_to_relation(
+        plan: conditional(condition), model: EdgeDocument,
+        attributes: {
+          "tags" => relation(:tags, fields: {
+            "name" => described_class.field("name", null_representation: declared)
+          })
+        },
+        null_attribute_representation: call
+      ).where(id: rows.map(&:id)).order(:id).pluck(:id)
+    end
+
+    def rows_at(*indexes) = indexes.map { |index| rows[index].id }
+
+    it "reads has() over an undeclared member as present under an explicit call" do
+      has_name = expression("has", variable("t.name"))
+      expect(member_ids(exists(has_name), nil, :explicit)).to eq(rows_at(0, 1))
+      expect(member_ids(exists(expression("not", has_name)), nil, :explicit)).to eq([])
+    end
+
+    it "keeps a member declared omitted UNKNOWN against a null literal under an explicit call" do
+      is_null = expression("eq", variable("t.name"), value(nil))
+      expect(member_ids(exists(is_null), :omitted, :explicit)).to eq([])
+      expect(member_ids(exists(is_null), nil, :explicit)).to eq(rows_at(1))
+    end
+  end
+
   describe "membership with a column inside the list" do
     # `null in [R.attr.x]` is true when the column is null. `NULL IN (x)` would always be
     # UNKNOWN.

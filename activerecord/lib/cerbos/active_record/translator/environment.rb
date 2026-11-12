@@ -58,7 +58,7 @@ module Cerbos
               "field #{rest.inspect} (referenced as #{name.inspect})"
           end
 
-          resolve_mapping(member, scope.model, scope.table)
+          translator.register_attribute_field(resolve_mapping(member, scope.model, scope.table), member)
         end
 
         private
@@ -138,18 +138,19 @@ module Cerbos
 
         def resolve_field(mapping, owner_model, owner_table)
           *associations, column = mapping.segments
-          node, model =
-            if associations.empty?
-              [owner_table[column], owner_model]
-            else
-              scope = Relations.build_path(
-                owner_model: owner_model,
-                owner_table: owner_table,
-                association_names: associations,
-                aliaser: translator.aliaser
-              )
-              [scope.scalar(column), scope.model]
-            end
+          if associations.empty?
+            node = owner_table[column]
+            model = owner_model
+          else
+            scope = Relations.build_path(
+              owner_model: owner_model,
+              owner_table: owner_table,
+              association_names: associations,
+              aliaser: translator.aliaser
+            )
+            node = translator.register_hop_guard(scope.scalar(column), scope, mapping)
+            model = scope.model
+          end
 
           translator.register_null_representation(
             translator.register_column_type(node, model, column), mapping.null_representation
