@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-prisma",
-  "version": "4.1.0",
+  "version": "5.0.0",
   "homepage": "https://cerbos.dev",
   "description": "Prisma adapter for Cerbos query plans",
   "repository": {
