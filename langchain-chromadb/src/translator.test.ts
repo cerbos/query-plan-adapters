@@ -240,7 +240,7 @@ describe("what an emitted filter may contain", () => {
    */
   test("a negated bare variable admits only false, whatever the key holds", () => {
     const negated = COMPARISONS_IF_PRESENT.filter(
-      ({ action, field }) => action.startsWith("logic/not/bare-") && field !== "aNumber",
+      ({ action, value }) => action.startsWith("logic/not/bare-") && (value === true || value === false),
     );
 
     expect(negated.map(({ action }) => action)).toEqual(

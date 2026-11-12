@@ -132,6 +132,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.exists(t, t.name == "public" && R.attr.aNumber + 1.0 > 2.0)'
+- id: 'collection/exists/bare-number-element'
+  tier: adversarial
+  intent: 'A bare number element as the exists() body, OR''d with aNumber == 5 (aNumberList.exists(n, n) || aNumber == 5).'
+  trap: 'A number in condition position is a CEL error, so exists() over a non-empty number list errors and only a1 is allowed. A store that reads true as 1 grants b4, whose list holds 1.'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList.exists(n, n) || R.attr.aNumber == 5'
+- id: 'collection/exists/negated-bare-number-element'
+  tier: adversarial
+  intent: 'A negated bare number element as the exists() body, OR''d with aNumber == 5 (aNumberList.exists(n, !n) || aNumber == 5).'
+  trap: 'CEL''s ! has no overload for a number, so only a1 is allowed. A store that reads false as 0 grants c1, whose list holds 0; a NOT over "n is true" grants every row with a non-empty list.'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList.exists(n, !n) || R.attr.aNumber == 5'
 - id: 'collection/exists/element-contains-outer-attribute'
   tier: adversarial
   intent: 'exists() whose body is element.contains(outer attribute), a substring match with a column needle across scopes.'

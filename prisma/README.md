@@ -432,7 +432,7 @@ current PDP, 0.57.0, identical on all six combinations, out of every golden case
 | --- | --- |
 | core | 32 / 32 |
 | extended | 84 / 110 |
-| adversarial | 378 / 539 |
+| adversarial | 378 / 545 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
 on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.

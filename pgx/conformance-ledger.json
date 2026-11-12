@@ -209,6 +209,14 @@
       "reason": "Same refusal as hierarchy/overlaps/path-built-from-identifier: hierarchy() over a list() of segments has no lowering.",
       "status": "unsupported"
     },
+    "logic/bare/list-attribute": {
+      "reason": "Attribute \"request.resource.attr.aBoolList\" maps to a collection and cannot be used as a scalar value.",
+      "status": "unsupported"
+    },
+    "logic/not/bare-list-attribute": {
+      "reason": "Attribute \"request.resource.attr.aBoolList\" maps to a collection and cannot be used as a scalar value.",
+      "status": "unsupported"
+    },
     "membership/in/map-attribute-keys": {
       "reason": "The to-one parent is one joined row, not a value: `in` over a CEL map tests its keys, the row's present columns, and SQL has no form for the set of a row's present columns.",
       "status": "unsupported"

@@ -49,7 +49,7 @@ RSpec.describe "adapter contract" do
       expect([allowed.kind, allowed.always_allowed?, allowed.filter]).to eq(["KIND_ALWAYS_ALLOWED", true, {}])
       expect([denied.kind, denied.always_denied?, denied.filter]).to eq(["KIND_ALWAYS_DENIED", true, {"$expr" => false}])
       expect([conditional.kind, conditional.conditional?]).to eq(["KIND_CONDITIONAL", true])
-      expect(conditional.filter).to eq({"aBool" => {"$eq" => true}})
+      expect(conditional.filter).to eq({"aBool" => {"$type" => "bool", "$not" => {"$type" => "array"}, "$eq" => true}})
     end
   end
 

@@ -285,7 +285,7 @@ total is every golden case in that tier:
 | --- | --- |
 | core | 32 / 32 |
 | extended | 106 / 110 |
-| adversarial | 506 / 539 |
+| adversarial | 512 / 545 |
 
 Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
 them, because the plan and `check()` disagree. On 0.57.0 there are seven, three extended and four

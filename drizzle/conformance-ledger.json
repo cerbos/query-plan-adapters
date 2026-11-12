@@ -108,6 +108,10 @@
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
     },
+    "collection/exists/bare-number-element": {
+      "status": "unsupported",
+      "reason": "Same scalar list column as collection/all/negated-bare-boolean-element, over `aNumberList`."
+    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "`parent` is a to-one relation, which CEL reads as a map, and a macro over a map ranges over its keys: the attribute names present on the related row. A relation subquery iterates rows, not attribute names, so a macro over a to-one relation is refused."
@@ -115,6 +119,10 @@
     "collection/exists/negated-bare-boolean-element": {
       "status": "unsupported",
       "reason": "Same scalar list column as collection/all/negated-bare-boolean-element, under exists() with a negated body."
+    },
+    "collection/exists/negated-bare-number-element": {
+      "status": "unsupported",
+      "reason": "Same scalar list column as collection/all/negated-bare-boolean-element, over `aNumberList`."
     },
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
@@ -159,6 +167,14 @@
     "logic/and/non-boolean-operand-in-value-negated": {
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: the SQL value-expression walk takes no logical connective as a comparison operand, so the adapter refuses it."
+    },
+    "logic/bare/list-attribute": {
+      "status": "unsupported",
+      "reason": "aBoolList is a column declared indexable, which holds the whole list: it can only be read by constant position, membership or hasIntersection, so a list read as a condition is refused."
+    },
+    "logic/not/bare-list-attribute": {
+      "status": "unsupported",
+      "reason": "aBoolList is a column declared indexable, which holds the whole list: it can only be read by constant position, membership or hasIntersection, so a list read as a condition is refused."
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",

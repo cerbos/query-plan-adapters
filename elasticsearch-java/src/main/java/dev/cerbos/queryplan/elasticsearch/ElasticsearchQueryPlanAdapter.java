@@ -48,7 +48,9 @@ public class ElasticsearchQueryPlanAdapter {
      * @param nestedPaths field paths mapped as {@code nested}, which collection macros walk
      * @param collectionFields field paths holding a flat array of scalars. {@code size()} over a
      *        field declared neither here nor in {@code nestedPaths} is refused, because the plan
-     *        does not say whether the field is a string or an array
+     *        does not say whether the field is a string or an array. Declare every flat array of
+     *        booleans here too: a term query matches an array holding the value, where CEL has no
+     *        overload for a list read as a condition
      * @param explicitNullAttributes plan variables the caller sends to {@code check()} as explicit
      *        nulls; see {@link ElasticsearchQueryPlanAdapter#toElasticsearchQuery(PlanResourcesResult, Options)}
      * @param scalarTypes the CEL scalar type of each compared field, keyed by Elasticsearch field

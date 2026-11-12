@@ -837,6 +837,9 @@ class Translator:
     def predicate(self, operand: Operand) -> Any:
         """Translate a node in a boolean position."""
         if isinstance(operand, Variable):
+            if operand.name in self._declared_names:
+                # A list where CEL needs a boolean is a type error too.
+                return null()
             column = self._resolve_variable(operand.name)
             if isinstance(getattr(column, "type", None), _NON_BOOLEAN_TYPES):
                 # A column of another type is a CEL type error: one UNKNOWN, which
