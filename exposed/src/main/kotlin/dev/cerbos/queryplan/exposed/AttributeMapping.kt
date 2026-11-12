@@ -65,6 +65,11 @@ public sealed interface AttributeMapping {
         /** The element's own attributes. An entry may itself be a [Relation], giving a chain. */
         public val fields: Map<String, AttributeMapping>,
         /**
+         * The column whose ascending order is the list's element order, or `null` when the rows have
+         * none. Positional reads (`tags[0]`, `tags == [...]`) need it.
+         */
+        public val orderBy: Column<*>?,
+        /**
          * The predicate the APPLICATION applies whenever it reads [table]: a soft-delete flag, a
          * tenant column, a subtype discriminator. The subquery reads the table bare and cannot see
          * any of those, so without this it examines rows the application never serialised into the
@@ -95,6 +100,11 @@ public sealed interface AttributeMapping {
                 require(it.column.table === table) {
                     "Relation element column ${it.column.table.tableName}.${it.column.name} " +
                         "is not a column of ${table.tableName}"
+                }
+            }
+            orderBy?.let {
+                require(it.table === table) {
+                    "Relation order column ${it.table.tableName}.${it.name} is not a column of ${table.tableName}"
                 }
             }
             fields.forEach { (name, mapping) ->
@@ -192,20 +202,23 @@ public open class MappingBuilder internal constructor() {
         to: Column<*>,
         block: RelationBuilder<T>.() -> Unit = {},
     ): AttributeMapping.Relation =
-        RelationBuilder<T>().apply(block).build(AttributeMapping.Relation.Cardinality.ONE, table, from, to, null)
+        RelationBuilder<T>().apply(block).build(AttributeMapping.Relation.Cardinality.ONE, table, from, to, null, null)
 
     /**
      * A to-many relation: `table.to = parent.from`. Pass [element] for a scalar collection, where
-     * each element IS a value (`tagNames`), or as the default member of an object collection.
+     * each element IS a value (`tagNames`), or as the default member of an object collection. Pass
+     * [orderBy] for the column whose ascending order is the list's order, so `tags[0]` translates.
      */
     public fun <T : Table> many(
         table: T,
         from: Column<*>,
         to: Column<*>,
         element: Column<*>? = null,
+        orderBy: Column<*>? = null,
         block: RelationBuilder<T>.() -> Unit = {},
     ): AttributeMapping.Relation =
-        RelationBuilder<T>().apply(block).build(AttributeMapping.Relation.Cardinality.MANY, table, from, to, element)
+        RelationBuilder<T>().apply(block)
+            .build(AttributeMapping.Relation.Cardinality.MANY, table, from, to, element, orderBy)
 
     private fun put(reference: String, mapping: AttributeMapping) {
         require(reference.isNotEmpty()) { "An attribute reference must not be empty" }
@@ -235,6 +248,7 @@ public class RelationBuilder<T : Table> internal constructor() : MappingBuilder(
         from: Column<*>,
         to: Column<*>,
         element: Column<*>?,
+        orderBy: Column<*>?,
     ): AttributeMapping.Relation {
         val predicate = visibleWhen
         return AttributeMapping.Relation(
@@ -244,6 +258,7 @@ public class RelationBuilder<T : Table> internal constructor() : MappingBuilder(
             to = to,
             element = element?.let { AttributeMapping.Field(it, null) },
             fields = LinkedHashMap(entries),
+            orderBy = orderBy,
             // The alias a subquery hands in is always an alias of `table`, so the narrowing is safe;
             // the type parameter only exists to give the caller `alias[Table.column]` with no cast.
             visibleWhen = predicate?.let { typed ->

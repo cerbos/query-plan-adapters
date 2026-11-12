@@ -11,11 +11,15 @@ internal class HopGuards(private val translation: Translation) {
     private val frames = ArrayDeque<MutableList<Resolution.Scalar>>()
 
     fun note(resolution: Resolution) {
-        if (resolution is Resolution.Scalar && translation.leaf.isExplicitNull(resolution)) require(resolution)
+        if (resolution is Resolution.Scalar &&
+            (resolution.presence != null || translation.leaf.isExplicitNull(resolution))
+        ) {
+            require(resolution)
+        }
     }
 
     fun require(scalar: Resolution.Scalar) {
-        if (scalar.hops.isEmpty()) return
+        if (scalar.hops.isEmpty() && scalar.presence == null) return
         val frame = frames.lastOrNull() ?: throw Refusals.internal("${scalar.variable} was read outside an operator")
         if (frame.none { it === scalar }) frame += scalar
     }
@@ -29,7 +33,9 @@ internal class HopGuards(private val translation: Translation) {
             frames.removeLast()
         }
         if (frame.isEmpty()) return built
-        val absent = frame.map { TriLogic.not(translation.subqueries.hopsExist(it.owner, it.hops)) }
+        val absent = frame.map {
+            TriLogic.not(it.presence?.invoke() ?: translation.subqueries.hopsExist(it.owner, it.hops))
+        }
         return TriLogic.baseUnlessUnknown(built, TriLogic.or(absent))
     }
 }

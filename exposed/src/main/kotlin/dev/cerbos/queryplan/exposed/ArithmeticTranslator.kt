@@ -5,6 +5,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
+import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
 import com.google.protobuf.Value
 import org.jetbrains.exposed.v1.core.Op
 
@@ -21,11 +22,35 @@ internal class ArithmeticTranslator(comparisons: ComparisonTranslator) {
      * algebraically is what makes multiplication or division by a negative constant need no
      * inequality flipping.
      */
-    fun numericComparison(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> = values.compare(
-        operator,
-        resolveNumericOperand(operands[0], scope),
-        resolveNumericOperand(operands[1], scope),
-    )
+    fun numericComparison(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> {
+        if (operands.any { readsTextOrBoolean(it, scope) }) return TriLogic.unknown()
+        return values.compare(
+            operator,
+            resolveNumericOperand(operands[0], scope),
+            resolveNumericOperand(operands[1], scope),
+        )
+    }
+
+    /**
+     * Whether arithmetic reads a text or boolean column: CEL has no `+`, `-`, `*` or `/` overload for
+     * a string or bool beside a number, so the comparison raises on every row. Concatenation is
+     * routed away before this.
+     */
+    private fun readsTextOrBoolean(operand: Operand, scope: Scope): Boolean {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operator !in ARITHMETIC_OPS) {
+            return false
+        }
+        return operand.expression.operandsList.any { inner ->
+            when (inner.nodeCase) {
+                Operand.NodeCase.VARIABLE -> {
+                    val family = ScalarColumnTypes.familyOf(scope.scalar(inner.variable).column)
+                    family == ScalarValueFamily.TEXT || family == ScalarValueFamily.BOOLEAN
+                }
+                Operand.NodeCase.EXPRESSION -> readsTextOrBoolean(inner, scope)
+                else -> false
+            }
+        }
+    }
 
     private fun resolveNumericOperand(operand: Operand, scope: Scope): ArithmeticValue = when (operand.nodeCase) {
         Operand.NodeCase.VARIABLE -> {

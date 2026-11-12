@@ -5,6 +5,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.ConcatExpression
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
+import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
 import org.jetbrains.exposed.v1.core.Expression
 
 /**
@@ -19,6 +20,24 @@ internal object ConcatTranslator {
             operand.expression.operator == "add" &&
             operand.expression.operandsCount == 2 &&
             hasTextOperand(operand, scope)
+
+    /**
+     * Whether a concatenation reads a number or boolean, from a column or a constant, or a null
+     * constant: CEL has no mixed-type `+`, so the comparison raises on every row.
+     */
+    fun mixesNonText(operand: Operand, scope: Scope): Boolean {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operator != "add") return false
+        return operand.expression.operandsList.any { inner ->
+            when (inner.nodeCase) {
+                Operand.NodeCase.VALUE -> PlanValues.toKotlin(inner.value).let { it == null || it is Number || it is Boolean }
+                Operand.NodeCase.VARIABLE -> ScalarColumnTypes.familyOf(scope.scalar(inner.variable).column).let {
+                    it == ScalarValueFamily.NUMERIC || it == ScalarValueFamily.BOOLEAN
+                }
+                Operand.NodeCase.EXPRESSION -> mixesNonText(inner, scope)
+                else -> false
+            }
+        }
+    }
 
     /** One side of a comparison as text: a bound string, a text column, or their NULL-propagating concatenation. */
     fun textExpression(operand: Operand, scope: Scope): Expression<*> = when (operand.nodeCase) {

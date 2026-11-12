@@ -244,12 +244,6 @@ class ArithmeticTranslatorTest {
     @Nested
     inner class Refusals {
         @Test
-        fun `mod is refused, because the cast that makes it satisfiable is itself unlowerable`() {
-            val error = assertThrows<UnsupportedPlanShapeException> { Scalars.ids("arithmetic/modulo/negative-dividend") }
-            assertTrue(error.message!!.startsWith("mod is not supported in comparisons"), error.message)
-        }
-
-        @Test
         fun `a non-finite arm meeting a COLUMN is refused rather than folded or bound`() {
             // Corpus gap. `R.attr.aNumber / R.attr.aNumber + R.attr.aDouble > 1.0` is
             // policy-reachable and no corpus action carries it, so the plan is hand-built here.

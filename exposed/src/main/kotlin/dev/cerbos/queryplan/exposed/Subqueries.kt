@@ -13,6 +13,7 @@ import org.jetbrains.exposed.v1.core.IColumnType
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.LongColumnType
 import org.jetbrains.exposed.v1.core.Op
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.core.exists
 import org.jetbrains.exposed.v1.core.intLiteral
@@ -124,6 +125,30 @@ internal class Subqueries(private val translation: Translation) {
         return TypedScalar(
             wrapAsExpression<Any>(chain.source.select(chain.tail[column]).where(chain.correlation)),
             column.columnType as IColumnType<Any>,
+        )
+    }
+
+    /** [column] of the row at [offset] in [order]'s ascending order, as a scalar; NULL past the end. */
+    fun elementAt(
+        owner: Scope,
+        hops: List<AttributeMapping.Relation>,
+        column: Column<*>,
+        order: Column<*>,
+        offset: Long,
+    ): Expression<*> {
+        val chain = chain(owner, hops)
+        val query = chain.source.select(chain.tail[column]).where(chain.correlation)
+            .orderBy(chain.tail[order] to SortOrder.ASC).limit(1).offset(offset)
+        @Suppress("UNCHECKED_CAST")
+        return TypedScalar(wrapAsExpression<Any>(query), column.columnType as IColumnType<Any>)
+    }
+
+    /** Whether the chain holds more than [offset] rows: the position [offset] is in range. */
+    fun countExceeds(owner: Scope, hops: List<AttributeMapping.Relation>, offset: Long): Op<Boolean> {
+        val chain = chain(owner, hops)
+        return GreaterOp(
+            wrapAsExpression<Long>(chain.source.select(countRows()).where(chain.correlation)),
+            longLiteral(offset),
         )
     }
 

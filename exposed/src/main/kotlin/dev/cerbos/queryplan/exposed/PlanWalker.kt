@@ -107,7 +107,33 @@ internal class PlanWalker(private val translation: Translation) {
             val elements = operands[1].expression.operandsList
             return overComputedList(elements, elements.map { PlanRewrites.expression("eq", operands[0], it) }, true, scope)
         }
+        computedNeedle(operands[0], haystack)?.let { return traverse(it, scope) }
         return translation.membership.translateIn(operands, scope)
+    }
+
+    /**
+     * `expr in [e1, e2]` for a computed needle against a constant list, as `expr == e1 || expr == e2`.
+     * A null or an element of another type is never equal; an erroring needle errors each term.
+     */
+    private fun computedNeedle(needle: Operand, haystack: Any?): Operand? {
+        if (needle.nodeCase != Operand.NodeCase.EXPRESSION || haystack !is List<*>) return null
+        val operator = needle.expression.operator
+        val boolean = operator in BOOLEAN_OPERATORS
+        if (!boolean && operator != "size" && operator != "if") return null
+        val terms = haystack.mapNotNull { element ->
+            when {
+                element == null -> null
+                boolean -> when (element) {
+                    true -> needle
+                    false -> PlanRewrites.expression("not", needle)
+                    else -> null
+                }
+                operator == "size" && element !is Number -> null
+                else -> PlanRewrites.expression("eq", needle, PlanRewrites.constant(PlanValues.toValue(element) ?: return null))
+            }
+        }.distinct()
+        if (terms.isEmpty()) return null
+        return if (terms.size == 1) terms[0] else PlanRewrites.expression("or", *terms.toTypedArray())
     }
 
     /**

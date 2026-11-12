@@ -71,6 +71,7 @@ internal object NullOperandScan {
             is AttributeMapping.Relation -> return null
             null -> Unit
         }
+        PositionalRead.parse(variable, mapping)?.let { return PositionalRead.declaredField(variable, mapping) }
         val parts = variable.split('.')
         for (length in parts.size - 1 downTo 1) {
             val head = mapping.resolve(parts.subList(0, length).joinToString(".")) as? AttributeMapping.Relation
