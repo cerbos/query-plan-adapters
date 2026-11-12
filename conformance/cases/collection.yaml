@@ -17,6 +17,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.all(t, t.name == "public")'
+- id: 'collection/all/negated-bare-boolean-element'
+  tier: adversarial
+  intent: 'A negated all over a boolean list whose body is the bare element (!aBoolList.all(b, b)).'
+  trap: 'A null element in condition position is an error, not false: a4 [null, true] errors and must deny, where reading the null as false makes all() false and the negation grants it.'
+  condition:
+    match:
+      expr: '!R.attr.aBoolList.all(b, b)'
 - id: 'collection/all/negated-nested-exists-in-body'
   tier: adversarial
   intent: 'all over an object list whose body negates a nested exists (categories.all(c, !c.subCategories.exists(s, s.name in ["finance", "legal"]))).'
@@ -213,6 +220,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber == 33 || ["%_o", "X"].exists(t, R.attr.aString.contains(t))'
+- id: 'collection/exists/negated-bare-boolean-element'
+  tier: adversarial
+  intent: 'exists over a boolean list whose body negates the bare element (aBoolList.exists(b, !b)).'
+  trap: 'A null element is an error under !, not false: a4 [null, true] has no false element and must deny, where reading the null as "not true" grants it.'
+  condition:
+    match:
+      expr: 'R.attr.aBoolList.exists(b, !b)'
 - id: 'collection/exists/negated-element-in-literal-list'
   tier: adversarial
   intent: Negated exists() over a resource string list whose body tests membership in a literal list.

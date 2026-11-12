@@ -1850,7 +1850,7 @@ function quantifier(operator: "exists" | "all"): FilterOperator {
     );
 
     if (!relation) {
-      throw new Error(`${operator} operator requires a relation mapping`);
+      throw new UnsupportedQueryPlanError(`${operator} operator requires a relation mapping`);
     }
 
     if (relation.type !== "many") {

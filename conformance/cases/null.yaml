@@ -24,6 +24,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.all(t, t.name != "x")'
+- id: 'null/concat/explicit-null-plus-literal-not-equal'
+  tier: adversarial
+  intent: 'An explicit-null attribute concatenated with a literal and compared with != (owner + "z" != "setz").'
+  trap: 'null + "z" is an error, not a value: solving the concatenation into owner != "set" and answering it as the definite null comparison grants every row whose owner is null.'
+  condition:
+    match:
+      expr: 'R.attr.owner + "z" != "setz"'
 - id: 'null/equals/field-to-field-both-explicit-null'
   tier: adversarial
   intent: 'Equality between two explicit-null attributes (owner == coOwner).'

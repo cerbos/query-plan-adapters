@@ -242,7 +242,7 @@ const resolveRelationChain = (
     }
   }
 
-  throw new Error(`No relation mapping found for reference: ${reference}`);
+  throw new UnsupportedQueryPlanError(`No relation mapping found for reference: ${reference}`);
 };
 
 /** A reference that resolved to a whole relation stands for that relation's default `field`. */

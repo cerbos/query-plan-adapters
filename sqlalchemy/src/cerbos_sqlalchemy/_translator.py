@@ -172,6 +172,12 @@ class Translator:
         try:
             return self._attr_map[variable]
         except KeyError:
+            if variable in self._declared_names:
+                raise UnsupportedPlanError(
+                    f"{variable} is declared as a collection column, which only size(), "
+                    "an index and membership read: this shape needs a relation for it in "
+                    "the attribute map"
+                )
             raise KeyError(
                 f"Attribute does not exist in the attribute column map: {variable}"
             )

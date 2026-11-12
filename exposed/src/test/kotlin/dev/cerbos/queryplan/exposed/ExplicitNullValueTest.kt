@@ -19,11 +19,11 @@ import org.junit.jupiter.api.Test
  * harness has one mapping. An explicit null is a value to `==` and `!=` only: in condition position
  * it is a CEL error, and a to-one row that is absent is a missing path, not a null.
  *
- * | id | flag  | owner | parent               | bools        |
- * |----|-------|-------|----------------------|--------------|
- * | d1 | true  | "a"   | name "x", flag true  | [true]       |
- * | d2 | NULL  | NULL  | none                 | [NULL, true] |
- * | d3 | false | "b"   | name NULL, flag NULL | [false]      |
+ * | id | flag  | parent               |
+ * |----|-------|----------------------|
+ * | d1 | true  | name "x", flag true  |
+ * | d2 | NULL  | none                 |
+ * | d3 | false | name NULL, flag NULL |
  */
 class ExplicitNullValueTest {
 
@@ -61,28 +61,7 @@ class ExplicitNullValueTest {
         assertEquals(listOf("d3"), ids(not(same), EXPLICIT))
     }
 
-    // KIND 3: corpus gaps, tracked by https://github.com/cerbos/query-plan-adapters/issues/668 and
-    // deleted when their cases land.
-
-    @Test
-    fun `a null list element in condition position is an error, not false`() {
-        // Corpus gap. `bools.exists(b, !b)` and `!bools.all(b, b)`.
-        val anyFalse = expression("exists", variable(BOOLS), lambda(not(variable("b"))))
-        val notAllTrue = not(expression("all", variable(BOOLS), lambda(variable("b"))))
-        assertEquals(listOf("d3"), ids(anyFalse, EXPLICIT))
-        assertEquals(listOf("d3"), ids(notAllTrue, EXPLICIT))
-    }
-
-    @Test
-    fun `an explicit null concatenated with a literal is an error, not a value`() {
-        // Corpus gap. `owner + "z" != "az"`.
-        val differs = expression("ne", expression("add", variable(OWNER), value("z")), value("az"))
-        assertEquals(listOf("d3"), ids(differs, EXPLICIT))
-    }
-
     companion object {
-        private const val OWNER = "request.resource.attr.owner"
-        private const val BOOLS = "request.resource.attr.bools"
         private const val FLAG = "request.resource.attr.flag"
         private const val PARENT_NAME = "request.resource.attr.parent.name"
         private const val PARENT_FLAG = "request.resource.attr.parent.flag"
@@ -90,13 +69,7 @@ class ExplicitNullValueTest {
         object Docs : Table("explicit_docs") {
             val id = varchar("id", 32)
             val flag = bool("flag").nullable()
-            val owner = varchar("owner", 64).nullable()
             override val primaryKey = PrimaryKey(id)
-        }
-
-        object DocBools : Table("explicit_bools") {
-            val docId = varchar("doc_id", 32)
-            val element = bool("element").nullable()
         }
 
         object DocParents : Table("explicit_parents") {
@@ -107,8 +80,6 @@ class ExplicitNullValueTest {
 
         private fun mapping(nulls: NullAttributeRepresentation?): AttributeMappings = cerbosMapping {
             FLAG to field(Docs.flag, nulls)
-            OWNER to field(Docs.owner, nulls)
-            BOOLS to many(DocBools, from = Docs.id, to = DocBools.docId, element = DocBools.element)
             "request.resource.attr.parent" to one(DocParents, from = Docs.id, to = DocParents.docId) {
                 "name" to field(DocParents.name, nulls)
                 "flag" to field(DocParents.flag, nulls)
@@ -124,19 +95,11 @@ class ExplicitNullValueTest {
         private val database by lazy {
             val db = Database.connect("jdbc:h2:mem:explicit_values;DB_CLOSE_DELAY=-1", driver = "org.h2.Driver")
             transaction(db) {
-                SchemaUtils.create(Docs, DocParents, DocBools)
-                listOf(Triple("d1", true, "a"), Triple("d2", null, null), Triple("d3", false, "b"))
-                    .forEach { (docId, value, ownerValue) ->
-                        Docs.insert {
-                            it[id] = docId
-                            it[flag] = value
-                            it[owner] = ownerValue
-                        }
-                    }
-                listOf("d1" to true, "d2" to null, "d2" to true, "d3" to false).forEach { (doc, value) ->
-                    DocBools.insert {
-                        it[docId] = doc
-                        it[element] = value
+                SchemaUtils.create(Docs, DocParents)
+                listOf("d1" to true, "d2" to null, "d3" to false).forEach { (docId, value) ->
+                    Docs.insert {
+                        it[id] = docId
+                        it[flag] = value
                     }
                 }
                 DocParents.insert {
@@ -170,8 +133,6 @@ class ExplicitNullValueTest {
         private fun expression(operator: String, vararg operands: Operand): Operand = Operand.newBuilder()
             .setExpression(Expression.newBuilder().setOperator(operator).addAllOperands(operands.toList()))
             .build()
-
-        private fun lambda(body: Operand): Operand = expression("lambda", body, variable("b"))
 
         private fun not(operand: Operand): Operand = expression("not", operand)
     }
