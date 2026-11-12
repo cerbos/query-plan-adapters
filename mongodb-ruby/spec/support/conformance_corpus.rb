@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "time"
 
 # Reads the shared conformance corpus: the dataset, the recorded goldens, and this adapter's
@@ -29,6 +30,12 @@ module ConformanceCorpus
   NOW_PLACEHOLDER = "__NOW_MINUS_24H__"
   NOW_MINUS_24H = Time.at(Time.now.to_i - 86_400, 123_456_789, :nsec).utc.iso8601(9).freeze
 
+  # The directory a fuzz run was recorded into (conformance/README.md, "Fuzzing"). When it is set,
+  # `goldens` reads the generated cases from it instead of the corpus, and the harness judges each
+  # case with `fuzz_verdict` instead of the ledger: a refusal is always acceptable, since the
+  # ledger has no entry for a shape nobody has written down yet.
+  FUZZ_DIR = ENV.fetch("QPA_FUZZ_DIR", "").then { |dir| dir.empty? ? nil : dir }.freeze
+
   module_function
 
   # The attributes of every resource check() saw, as dotted paths under `request.resource.attr`.
@@ -50,8 +57,9 @@ module ConformanceCorpus
   # @return [Array<Hash>] every golden file recorded against one PDP, sorted by case id.
   # Raises when the tag has no golden files, so a missing directory cannot pass as zero cases.
   def goldens(tag)
-    paths = Dir[File.join(DIR, "golden", tag, "**", "*.json")].sort
-    raise "no golden files for PDP #{tag} under #{File.join(DIR, "golden", tag)}" if paths.empty?
+    root = FUZZ_DIR ? File.join(FUZZ_DIR, tag) : File.join(DIR, "golden", tag)
+    paths = Dir[File.join(root, "**", "*.json")].sort
+    raise "no golden files for PDP #{tag} under #{root}" if paths.empty?
 
     paths.map { |path| read_golden(path) }
   end
@@ -74,6 +82,46 @@ module ConformanceCorpus
     entry if entry && (entry["pdp"].nil? || entry["pdp"].include?(tag))
   end
 
+  # Judges one fuzz case: the block translates and runs it, returning the ids it selected. A
+  # Cerbos::MongoDB::Error is the adapter refusing, as an `unsupported` ledger entry expects.
+  def fuzz_verdict(golden, expected)
+    base = {"pdp" => golden.fetch("pdp"), "id" => golden.fetch("id")}
+    begin
+      returned = yield
+    rescue Cerbos::MongoDB::MapperError => e
+      return base.merge("verdict" => "error", "detail" => "#{e.class}: #{e.message}")
+    rescue Cerbos::MongoDB::Error
+      return base.merge("verdict" => "refused")
+    rescue => e
+      return base.merge("verdict" => "error", "detail" => "#{e.class}: #{e.message}")
+    end
+    return base.merge("verdict" => "match") if returned == expected
+
+    verdict =
+      if (returned - expected).any? then "over-grant"
+      elsif (expected - returned).any? then "under-grant"
+      else "error"
+      end
+    out = base.merge("verdict" => verdict, "expected" => expected, "returned" => returned)
+    (verdict == "error") ? out.merge("detail" => "the right rows, but some of them repeated") : out
+  end
+
+  # The verdicts the conformance spec gathered, by store leg, written once the suite ends.
+  def fuzz_results = (@fuzz_results ||= Hash.new { |hash, store| hash[store] = [] })
+
+  # Writes <FUZZ_DIR>/results/mongodb-ruby-<store>.json for each leg, which `fuzz-report` reads.
+  def write_fuzz_results
+    return unless FUZZ_DIR
+
+    dir = File.join(FUZZ_DIR, "results")
+    FileUtils.mkdir_p(dir)
+    fuzz_results.each do |store, results|
+      sorted = results.sort_by { |r| [r.fetch("id"), r.fetch("pdp")] }
+      File.write(File.join(dir, "mongodb-ruby-#{store}.json"),
+        "#{JSON.pretty_generate("adapter" => "mongodb-ruby", "store" => store, "results" => sorted)}\n")
+    end
+  end
+
   # A plannerDivergence is a PDP bug no adapter can pass. The generator records it only in the
   # golden of a tag it applies to.
   def skipped?(golden, tag)
@@ -91,4 +139,8 @@ module ConformanceCorpus
     parent_id = seed&.fetch("parentSeedId")
     parent_id && SEEDS_BY_ID.fetch(parent_id)
   end
+end
+
+RSpec.configure do |config|
+  config.after(:suite) { ConformanceCorpus.write_fuzz_results }
 end

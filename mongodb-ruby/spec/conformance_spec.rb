@@ -85,6 +85,7 @@ RSpec.describe "conformance" do
   ConformanceCorpus::PDP_TAGS.each do |tag|
     describe "PDP #{tag}" do
       it "has a golden file for every case in the ledger" do
+        skip "a fuzz run is judged without the ledger" if ConformanceCorpus::FUZZ_DIR
         recorded = ConformanceCorpus.goldens(tag).map { |golden| golden.fetch("id") }
         expect(ConformanceCorpus::LEDGER.keys - recorded).to be_empty
       end
@@ -98,6 +99,14 @@ RSpec.describe "conformance" do
             skip "planner divergence" if ConformanceCorpus.skipped?(golden, tag)
 
             plan = ConformanceCorpus.sdk_plan(golden)
+
+            if ConformanceCorpus::FUZZ_DIR
+              verdict = ConformanceCorpus.fuzz_verdict(golden, allowed) { ids.call(translate(plan)) }
+              store = ENV.fetch("QPA_HARNESS_STORE", "mongo")
+              ConformanceCorpus.fuzz_results[(leg == "driver") ? store : "#{store}-#{leg}"] << verdict
+              expect(%w[match refused]).to include(verdict.fetch("verdict")), verdict.to_s
+              next
+            end
 
             case ConformanceCorpus.ledger_entry(id, tag)&.fetch("status")
             when nil then expect(ids.call(translate(plan))).to eq(allowed)
