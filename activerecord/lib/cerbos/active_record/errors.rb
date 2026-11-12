@@ -21,5 +21,9 @@ module Cerbos
 
     # An attribute maps to an association that cannot become a correlated subquery.
     class UnsupportedAssociationError < Error; end
+
+    # The model's connection is not SQLite, PostgreSQL, MySQL 8.0 or later, or MariaDB 11.4.5 or
+    # later, the stores the adapter's translation is proven on.
+    class UnsupportedDatabaseError < Error; end
   end
 end

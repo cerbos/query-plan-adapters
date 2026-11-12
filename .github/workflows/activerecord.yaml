@@ -37,7 +37,7 @@ jobs:
         ruby-version: ["3.3", "3.4", "4.0"]
         activerecord-version: ["8.0"]
         # The conformance suite's store (ADAPTER_TEST_DB). Every suite runs on SQLite; the
-        # PostgreSQL and MySQL legs run only the conformance suite.
+        # PostgreSQL, MySQL and MariaDB legs run only the conformance suite.
         database: [sqlite]
         include:
           # Low end of the gemspec's ActiveRecord range. The Gemfile pins each leg's minor.
@@ -59,6 +59,12 @@ jobs:
           - ruby-version: "3.3"
             activerecord-version: "7.1"
             database: mysql
+          - ruby-version: "4.0"
+            activerecord-version: "8.0"
+            database: mariadb
+          - ruby-version: "3.3"
+            activerecord-version: "7.1"
+            database: mariadb
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,7 +85,8 @@ jobs:
       # ActiveRecord renders and the store it runs on, not the Ruby version, so it runs on the
       # baseline leg and on the low end of the ActiveRecord range, once per store.
       # scripts/test.sh starts the store from docker-compose.yaml (images pinned in
-      # POSTGRES_IMAGE and MYSQL_IMAGE; PostgreSQL under ICU en-US, MySQL on its default collation).
+      # POSTGRES_IMAGE, MYSQL_IMAGE and MARIADB_IMAGE; PostgreSQL under ICU en-US, MySQL and MariaDB
+      # on their default collations).
       - name: Run the conformance suite (${{ matrix.database }})
         if: (matrix.ruby-version == '4.0' && matrix.activerecord-version == '8.0') || matrix.activerecord-version == '7.1'
         env:
