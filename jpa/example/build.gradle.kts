@@ -32,10 +32,10 @@ dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
 
     // Plain Hibernate ORM, bootstrapped from META-INF/persistence.xml: no Spring, no container.
-    implementation("org.hibernate.orm:hibernate-core:6.6.54.Final")
-    runtimeOnly("com.h2database:h2:2.4.240")
+    implementation("org.hibernate.orm:hibernate-core:6.6.59.Final")
+    runtimeOnly("com.h2database:h2:2.5.252")
 
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.23.0")
 
     // No protobuf-java here: the adapter's POM must supply it (see ADR 0002).
 }

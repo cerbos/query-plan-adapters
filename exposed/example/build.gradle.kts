@@ -5,7 +5,7 @@ plugins {
     // language or API level: this is the consuming application, so it is free to be written in
     // whatever Kotlin it likes, and the floor the ADAPTER promises is a property of the metadata
     // the adapter emits rather than of this build.
-    kotlin("jvm") version "2.3.20"
+    kotlin("jvm") version "2.4.21"
     // The program is launched by a generated start script, with no Gradle in the process. See the
     // `application` block below for why that matters to the output contract.
     application
@@ -75,25 +75,25 @@ dependencies {
     // adapter's published jar is compiled against the 1.0.0 floor, so a green run here is the
     // proof that the artifact a consumer installs works on the newest Exposed — through its real
     // packaging, which no suite under ../src/test can ask.
-    implementation("org.jetbrains.exposed:exposed-core:1.5.0")
-    implementation("org.jetbrains.exposed:exposed-jdbc:1.5.0")
+    implementation("org.jetbrains.exposed:exposed-core:1.6.1")
+    implementation("org.jetbrains.exposed:exposed-jdbc:1.6.1")
     // For the DAO half of usage shape 1. `EntityClass.find { }` takes the same `Op<Boolean>` the
     // DSL `where { }` does, which is a property of the adapter's return type worth demonstrating
     // rather than asserting in prose.
-    implementation("org.jetbrains.exposed:exposed-dao:1.5.0")
+    implementation("org.jetbrains.exposed:exposed-dao:1.6.1")
 
     // The store: H2, in memory, inside this program's own JVM, so run.sh has nothing to start.
-    runtimeOnly("com.h2database:h2:2.4.240")
+    runtimeOnly("com.h2database:h2:2.5.252")
 
     // Reads demo/seeds.json and writes the one JSON document on stdout. The Kotlin module is what
     // lets the seed records be ordinary data classes with no no-arg constructor.
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.22.1")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.23.0")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.23.0")
 
     // Exposed logs through SLF4J. Without a provider the facade prints a warning of its own on
     // stderr; with this one its output is on stderr too, which is where everything but the JSON
     // document belongs.
-    runtimeOnly("org.slf4j:slf4j-simple:2.0.18")
+    runtimeOnly("org.slf4j:slf4j-simple:2.0.20")
 }
 
 configurations.all {

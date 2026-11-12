@@ -5,7 +5,7 @@ plugins {
     // The compiler Exposed itself is built with. The LANGUAGE and API levels are pinned lower,
     // below: what a consumer has to be able to read is the metadata this build emits, and that
     // follows `languageVersion`, not the plugin.
-    kotlin("jvm") version "2.3.20"
+    kotlin("jvm") version "2.4.21"
     // For `publishToMavenLocal`. example/ resolves the adapter as a real Maven coordinate rather
     // than through a Gradle composite build, so it executes the POM and the module metadata a
     // consumer resolves (docs/adr/0002-examples-install-the-packed-artifact.md).
@@ -89,7 +89,7 @@ dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     // Must match the gencode version cerbos-sdk-java was generated against: an older runtime
     // throws ProtobufRuntimeVersionException.
-    implementation("com.google.protobuf:protobuf-java:4.35.1")
+    implementation("com.google.protobuf:protobuf-java:4.36.2")
 
     // Exposed is the consuming application's dependency, never this artifact's: `compileOnly`
     // keeps it out of the published POM so installing the adapter cannot move a consumer's ORM
@@ -112,10 +112,10 @@ dependencies {
     testImplementation("org.jetbrains.exposed:exposed-java-time:${orm["exposed"]}")
     testImplementation("org.jetbrains.exposed:exposed-kotlin-datetime:${orm["exposed"]}")
 
-    testImplementation(platform("org.junit:junit-bom:6.1.2"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.20")
 
     // The four stores the conformance harness replays the recorded goldens against (selected with
     // ADAPTER_TEST_DB / -Dadapter.test.db). H2 and SQLite run in
@@ -123,15 +123,15 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers:2.0.5")
     testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
     testImplementation("org.testcontainers:testcontainers-mysql:2.0.5")
-    testImplementation("com.h2database:h2:2.4.240")
-    testImplementation("org.xerial:sqlite-jdbc:3.53.4.0")
-    testRuntimeOnly("org.postgresql:postgresql:42.7.13")
+    testImplementation("com.h2database:h2:2.5.252")
+    testImplementation("org.xerial:sqlite-jdbc:3.54.1.0")
+    testRuntimeOnly("org.postgresql:postgresql:42.7.14")
     testRuntimeOnly("com.mysql:mysql-connector-j:9.7.0")
 
     // Reads the shared ../conformance/ corpus (golden plans are protobuf JSON).
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
-    testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.22.1")
-    testImplementation("com.google.protobuf:protobuf-java-util:4.35.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.23.0")
+    testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.23.0")
+    testImplementation("com.google.protobuf:protobuf-java-util:4.36.2")
 }
 
 tasks.test {
