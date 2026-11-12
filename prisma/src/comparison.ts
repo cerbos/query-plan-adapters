@@ -868,7 +868,11 @@ function handleArithmeticComparison(
         : { OR: [equality, inequality] };
     }
 
-    return buildComparisonFilter(context, fieldRef, effectiveOperator, solvedValue);
+    // null + "x" is a CEL error, so the solved comparison stays UNKNOWN for a NULL column even
+    // where the field is sent as an explicit null.
+    const erroring = { ...fieldRef, nullAttributeRepresentation: "omitted" as const };
+
+    return buildComparisonFilter(context, erroring, effectiveOperator, solvedValue);
   }
 
   if (!isNumber(constant) || !isNumber(other.value)) {
