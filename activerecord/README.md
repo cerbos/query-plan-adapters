@@ -433,7 +433,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 106 / 110 |
 | adversarial | 470 / 533 |
 

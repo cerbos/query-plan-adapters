@@ -273,7 +273,7 @@ adversarial cases.
 
 | Tier | Passed / total (PDP 0.57.0) |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 104 / 110 |
 | adversarial | 447 / 533 |
 

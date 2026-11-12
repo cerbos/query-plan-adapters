@@ -382,7 +382,7 @@ caller must. Passed cases on the current PDP, 0.57.0, out of every golden case i
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 96 / 110 |
 | adversarial | 469 / 533 |
 

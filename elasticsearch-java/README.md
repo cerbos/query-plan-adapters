@@ -507,7 +507,7 @@ the current PDP (0.57.0), where the total is every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 30 / 31 |
+| core | 31 / 32 |
 | extended | 51 / 110 |
 | adversarial | 208 / 533 |
 

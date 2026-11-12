@@ -334,7 +334,7 @@ queries over the corpus's 44 seed documents on MongoDB 7 and 9. Passed cases on 
 
 | Tier | Passed / total |
 | --- | --- |
-| core | 31 / 31 |
+| core | 32 / 32 |
 | extended | 106 / 110 |
 | adversarial | 499 / 533 |
 

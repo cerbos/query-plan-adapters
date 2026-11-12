@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.exposed
 
 import dev.cerbos.queryplan.exposed.sql.ScoreGuard
+import dev.cerbos.queryplan.exposed.sql.TypedScalar
 import org.jetbrains.exposed.v1.core.Alias
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ColumnSet
@@ -119,7 +120,11 @@ internal class Subqueries(private val translation: Translation) {
         column: Column<*>,
     ): Expression<*> {
         val chain = chain(owner, hops)
-        return wrapAsExpression<Any>(chain.source.select(chain.tail[column]).where(chain.correlation))
+        @Suppress("UNCHECKED_CAST")
+        return TypedScalar(
+            wrapAsExpression<Any>(chain.source.select(chain.tail[column]).where(chain.correlation)),
+            column.columnType as IColumnType<Any>,
+        )
     }
 
     /**
