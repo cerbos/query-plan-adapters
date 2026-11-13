@@ -23,6 +23,7 @@ from sqlalchemy import (
     true,
 )
 
+from cerbos_sqlalchemy._nullness import is_null
 from cerbos_sqlalchemy._operators import OPERATOR_FNS, exact_pair, require_lowerable
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
@@ -117,7 +118,7 @@ class Relation:
         return require_hops(expression, self.hop_correlation, self.correlate)
 
     def _errors(self, body: Any) -> Any:
-        return self._exists(body.is_(None))
+        return self._exists(is_null(body))
 
 
 class _Deferred:
@@ -241,10 +242,10 @@ def _relation_membership(relation: Relation, value: Any) -> Any:
         )
     member = _members(relation, "in")
     if value is None:
-        predicate = member.is_(None)
+        predicate = is_null(member)
     elif hasattr(value, "is_"):
         left, right = exact_pair(member, value)
-        predicate = or_(left == right, and_(member.is_(None), value.is_(None)))
+        predicate = or_(left == right, and_(is_null(member), is_null(value)))
     else:
         left, right = exact_pair(member, value)
         predicate = left == right
