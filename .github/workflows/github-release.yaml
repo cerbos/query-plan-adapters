@@ -1,0 +1,55 @@
+name: GitHub Release
+
+# Called by each publish workflow once its package is published, so every release tag gets a
+# GitHub release listing the commits that touched that adapter since its previous tag.
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: The adapter's directory, which scopes the commit list.
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADAPTER_PATH: ${{ inputs.path }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "release ${tag} already exists"
+            exit 0
+          fi
+
+          [[ "${tag}" =~ ^(.*[@/]v)[0-9][^@/]*$ ]] || { echo "unexpected tag ${tag}" >&2; exit 1; }
+          prefix="${BASH_REMATCH[1]}"
+          previous="$(git tag --list "${prefix}*" --sort=-v:refname | grep -vxF "${tag}" | head -n 1 || true)"
+          notes="${RUNNER_TEMP}/notes.md"
+          {
+            if [[ -n "${previous}" ]]; then
+              echo "## Changes to \`${ADAPTER_PATH}\` since ${previous}"
+              echo
+              git log --no-merges --format='- %s' "${previous}..${tag}" -- "${ADAPTER_PATH}"
+            else
+              echo "First release."
+            fi
+            echo
+            echo "See the [README](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${tag}/${ADAPTER_PATH}/README.md) at this tag for behaviour changes."
+          } > "${notes}"
+
+          prerelease=()
+          [[ "${tag#"${prefix}"}" == *-* ]] && prerelease=(--prerelease)
+          gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --verify-tag --title "${tag}" --notes-file "${notes}" --latest=false "${prerelease[@]}"

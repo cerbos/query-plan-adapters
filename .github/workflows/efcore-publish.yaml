@@ -65,3 +65,11 @@ jobs:
           --source https://api.nuget.org/v3/index.json
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+
+  github-release:
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/github-release.yaml
+    with:
+      path: efcore

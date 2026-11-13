@@ -48,3 +48,11 @@ jobs:
         with:
           await-release: false
           working-directory: activerecord
+
+  github-release:
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/github-release.yaml
+    with:
+      path: activerecord
