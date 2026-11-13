@@ -468,6 +468,9 @@ const emitValueComparison = (
   });
 };
 
+// `$type` matches an array by its elements, so a list holding a boolean needs excluding.
+const STORED_BOOLEAN = { $type: "bool", $not: { $type: "array" } } as const;
+
 const translateBareVariable = (
   name: string,
   ctx: TranslateContext,
@@ -487,7 +490,7 @@ const translateBareVariable = (
   // Mongoose casts true onto a String path as "true", which CEL would not accept as a condition.
   return buildGuardedFieldFilter(
     path,
-    { $type: "bool", $eq: true },
+    { ...STORED_BOOLEAN, $eq: true },
     isNullableReference(name, ctx.mapper),
   );
 };
@@ -640,7 +643,7 @@ const negateGenerally = (operand: PlanExpressionOperand, ctx: TranslateContext):
   // required outside the $nor, which would otherwise match every other value.
   if (isVariable(operand)) {
     const { path } = resolveFieldReference(operand.name, ctx.mapper);
-    negated = { $and: [buildFieldFilter(path, { $type: "bool" }), negated] };
+    negated = { $and: [buildFieldFilter(path, STORED_BOOLEAN), negated] };
   }
 
   const guarded = withEvaluationGuards(negated, [operand], ctx.mapper);

@@ -21,12 +21,31 @@ module Cerbos
         MYSQL_ADAPTERS.include?(adapter_name)
       end
 
+      # Another store's collations, types and functions are untested, and a case-folding
+      # default collation (SQL Server, Oracle) matches rows CEL does not. Every MySQL string
+      # comparison is quoted under utf8mb4_0900_bin, which MariaDB has from 11.4.5.
       def self.for(model)
-        new(model.connection.adapter_name)
+        connection = model.connection
+        dialect = new(connection.adapter_name)
+        dialect.check_supported(connection)
+        dialect
       end
 
-      # MySQL reads `||` as OR by default. Elsewhere use `||`: SQLite before 3.44 has no
-      # `CONCAT`.
+      SUPPORTED = "use SQLite, PostgreSQL, MySQL 8.0 or later, or MariaDB 11.4.5 or later"
+
+      def check_supported(connection)
+        return if sqlite? || postgres?
+
+        unless mysql?
+          raise UnsupportedDatabaseError,
+            "The #{connection.adapter_name} database adapter is not supported: #{SUPPORTED}"
+        end
+        server, minimum = connection.mariadb? ? ["MariaDB", "11.4.5"] : ["MySQL", "8.0"]
+        return if connection.database_version >= minimum
+
+        raise UnsupportedDatabaseError, "#{server} #{connection.database_version} is not supported: #{SUPPORTED}"
+      end
+
       def concat(left, right)
         if mysql?
           ArelSupport.function("CONCAT", [left, right])

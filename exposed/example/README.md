@@ -34,9 +34,9 @@ resolved by a build that brings its own copy, which is here:
 
 ```kotlin
 implementation("dev.cerbos:cerbos-exposed:0.1.0-alpha.1") { isChanging = true }
-implementation("org.jetbrains.exposed:exposed-core:1.5.0")
-implementation("org.jetbrains.exposed:exposed-jdbc:1.5.0")
-implementation("org.jetbrains.exposed:exposed-dao:1.5.0")
+implementation("org.jetbrains.exposed:exposed-core:1.6.1")
+implementation("org.jetbrains.exposed:exposed-jdbc:1.6.1")
+implementation("org.jetbrains.exposed:exposed-dao:1.6.1")
 ```
 
 **And the two Exposed versions are deliberately different.** The adapter's published jar is compiled
@@ -240,7 +240,7 @@ Three limits worth naming rather than leaving to be assumed:
 
 - **One store.** H2, in memory. SQLite, PostgreSQL and MySQL are the adapter's own CI matrix, where
   collation, LIKE escaping and cast targets actually differ; nothing about *packaging* does.
-- **One Exposed version.** 1.5.0. The 1.0.0 floor is proved by the `floor` leg of the adapter's own
+- **One Exposed version.** 1.6.1. The 1.0.0 floor is proved by the `floor` leg of the adapter's own
   workflow, which runs the offline suites and the H2 conformance harness against it.
 - **The composite-build check is a build-time artifact, not a runtime one.** It reads a file
   `writeResolvedClasspath` produced in the same invocation. A launcher that ran the program without

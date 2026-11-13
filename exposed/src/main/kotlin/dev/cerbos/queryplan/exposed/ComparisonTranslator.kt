@@ -11,6 +11,10 @@ import dev.cerbos.queryplan.exposed.sql.Params
 import dev.cerbos.queryplan.exposed.sql.ScalarCase
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnKind
 import dev.cerbos.queryplan.exposed.sql.ScalarColumnTypes
+import dev.cerbos.queryplan.exposed.sql.ScalarValueFamily
+import dev.cerbos.queryplan.exposed.sql.StringIntCast
+import dev.cerbos.queryplan.exposed.sql.IntRemainder
+import dev.cerbos.queryplan.exposed.sql.CountChars
 import dev.cerbos.queryplan.exposed.sql.TextCastExpression
 import dev.cerbos.queryplan.exposed.sql.TimestampBinder
 import org.jetbrains.exposed.v1.core.EqOp
@@ -24,6 +28,7 @@ import org.jetbrains.exposed.v1.core.LikeEscapeOp
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.booleanParam
+import org.jetbrains.exposed.v1.core.longParam
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -73,6 +78,14 @@ internal class ComparisonTranslator(private val translation: Translation) {
 
         /** `add(value, value)` — a pure-constant subtree, folded by [PlanValues.foldAdd]. */
         class ConstantAdd(val left: Operand, val right: Operand) : Resolved {
+            fun mixesScalarTypes(): Boolean {
+                val l = PlanValues.toKotlin(left.value)
+                val r = PlanValues.toKotlin(right.value)
+                fun scalar(v: Any?) = v == null || v is String || v is Number || v is Boolean
+                if (!scalar(l) || !scalar(r)) return false
+                return !((l is String && r is String) || (l is Number && r is Number))
+            }
+
             fun fold(): Any = PlanValues.foldAdd(
                 PlanValues.toKotlin(left.value),
                 PlanValues.toKotlin(right.value),
@@ -251,6 +264,8 @@ internal class ComparisonTranslator(private val translation: Translation) {
         if (operator in COMPARISON_OPERATORS && left is Resolved.Constant && right is Resolved.Constant) {
             return constantComparison(operator, left.value(), right.value())
         }
+        // `+` over a null or a string beside a number has no CEL overload: the comparison raises.
+        if (listOf(left, right).any { it is Resolved.ConstantAdd && it.mixesScalarTypes() }) return TriLogic.unknown()
 
         // Constant-receiver string matches: `"a,b".contains(R.attr.x)` arrives as
         // contains(value, variable) — the CONSTANT is the haystack and the COLUMN the needle, and
@@ -354,12 +369,16 @@ internal class ComparisonTranslator(private val translation: Translation) {
             ) {
                 return solveAddComparison(operator, left, right, scope)
             }
+            printedIntComparison(operator, operands, scope)?.let { return it }
+            intChainComparison(operator, operands, scope)?.let { return it }
+            remainderComparison(operator, operands, scope)?.let { return it }
             if (isArithmeticRooted(left) || isArithmeticRooted(right)) {
                 // CEL overloads `+` on strings, so an add-rooted operand is only arithmetic once
                 // the mapped column types say it is not a concatenation.
                 if (ConcatTranslator.isConcatenation(operands[0], scope) ||
                     ConcatTranslator.isConcatenation(operands[1], scope)
                 ) {
+                    if (operands.any { ConcatTranslator.mixesNonText(it, scope) }) return TriLogic.unknown()
                     return compare(
                         operator,
                         ConcatTranslator.textExpression(operands[0], scope),
@@ -555,6 +574,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
      */
     private fun intCastComparison(operator: String, variable: String, value: Any?, scope: Scope): Op<Boolean> {
         val target = scope.scalar(variable)
+        if (ScalarColumnTypes.familyOf(target.column) == ScalarValueFamily.TEXT) {
+            return stringIntComparison(operator, target, value)
+        }
         if (!ScalarColumnTypes.isNumeric(target.column)) throw ScalarRefusals.numericCastUnsupported("int")
         val constant = (value as? Number)?.toDouble() ?: throw ScalarRefusals.numericCastUnsupported("int")
         if (!constant.isFinite() || Math.abs(constant) > EXACT_DOUBLE_INTEGER) {
@@ -576,6 +598,143 @@ internal class ComparisonTranslator(private val translation: Translation) {
         }
         val inRange = TriLogic.and(GreaterOp(x, bound(-INT64_BOUND)), LessOp(x, bound(INT64_BOUND)))
         return TriLogic.baseUnlessUnknown(base, TriLogic.not(inRange))
+    }
+
+    /**
+     * `int(x) % c op k` over an integer or text column, or `size(s) % c op k` over a text column,
+     * for a constant `c` other than 0 and -1. A NULL or an unreadable `int()` stays UNKNOWN.
+     */
+    private fun remainderComparison(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
+        for (side in 0..1) {
+            val mod = operands[side]
+            val bound = operands[1 - side]
+            if (mod.nodeCase != Operand.NodeCase.EXPRESSION || mod.expression.operator != "mod" ||
+                mod.expression.operandsCount != 2 || bound.nodeCase != Operand.NodeCase.VALUE ||
+                bound.value.kindCase != com.google.protobuf.Value.KindCase.NUMBER_VALUE
+            ) {
+                continue
+            }
+            val (dividend, divisorOperand) = mod.expression.operandsList
+            if (divisorOperand.nodeCase != Operand.NodeCase.VALUE ||
+                divisorOperand.value.kindCase != com.google.protobuf.Value.KindCase.NUMBER_VALUE
+            ) {
+                continue
+            }
+            val divisor = divisorOperand.value.numberValue
+            if (divisor != Math.rint(divisor) || Math.abs(divisor) > EXACT_DOUBLE_INTEGER || divisor == 0.0 ||
+                divisor == -1.0 || dividend.nodeCase != Operand.NodeCase.EXPRESSION ||
+                dividend.expression.operandsCount != 1 ||
+                dividend.expression.getOperands(0).nodeCase != Operand.NodeCase.VARIABLE
+            ) {
+                continue
+            }
+            val target = scope.scalar(dividend.expression.getOperands(0).variable)
+            val family = ScalarColumnTypes.familyOf(target.column)
+            val integer: org.jetbrains.exposed.v1.core.Expression<*> = when (dividend.expression.operator) {
+                "int" -> when {
+                    family == ScalarValueFamily.TEXT -> StringIntCast(target.expression)
+                    ScalarColumnTypes.kindOf(target.column) == ScalarColumnKind.INTEGRAL -> target.expression
+                    else -> continue
+                }
+                "size" -> {
+                    if (translation.leaf.lacksTextOverload(target)) return TriLogic.unknown()
+                    if (family != ScalarValueFamily.TEXT) continue
+                    CountChars(target.expression)
+                }
+                else -> continue
+            }
+            val r = IntRemainder(integer, divisor.toLong())
+            val k = bound.value.numberValue
+            val fieldOperator = if (side == 0) operator else NormalizedBinary.mirror(operator)
+            if (k.isNaN() || Math.abs(k) > EXACT_DOUBLE_INTEGER) continue
+            fun at(m: Double) = longParam(m.toLong())
+            val whole = k == Math.rint(k)
+            val base: Op<Boolean> = when (fieldOperator) {
+                "eq" -> if (whole) EqOp(r, at(k)) else Op.FALSE
+                "ne" -> if (whole) NeqOp(r, at(k)) else Op.TRUE
+                "gt" -> GreaterEqOp(r, at(Math.floor(k) + 1))
+                "ge" -> GreaterEqOp(r, at(Math.ceil(k)))
+                "lt" -> LessEqOp(r, at(Math.ceil(k) - 1))
+                "le" -> LessEqOp(r, at(Math.floor(k)))
+                else -> continue
+            }
+            return TriLogic.baseUnlessUnknown(base, IsNullOp(r))
+        }
+        return null
+    }
+
+    /** An int chain (`int(x) / 2`, `int(x) * 2 + 1`) against a number. */
+    private fun intChainComparison(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
+        for (side in 0..1) {
+            val bound = operands[1 - side]
+            val chain = IntChain.of(operands[side]) ?: continue
+            if (operands[side].expression.operator == "int" || bound.nodeCase != Operand.NodeCase.VALUE ||
+                bound.value.kindCase != com.google.protobuf.Value.KindCase.NUMBER_VALUE ||
+                !bound.value.numberValue.isFinite()
+            ) {
+                continue
+            }
+            val fieldOperator = if (side == 0) operator else NormalizedBinary.mirror(operator)
+            return chain.compare(fieldOperator, java.math.BigDecimal(bound.value.numberValue), scope)
+        }
+        return null
+    }
+
+    /**
+     * `string(int(x)) == "n"`: CEL prints an int in plain decimal, so it is `int(x) == n`, and any
+     * other spelling is never equal.
+     */
+    private fun printedIntComparison(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
+        if (operator != "eq" && operator != "ne") return null
+        for (side in 0..1) {
+            val printed = operands[side]
+            val bound = operands[1 - side]
+            if (bound.nodeCase != Operand.NodeCase.VALUE ||
+                bound.value.kindCase != com.google.protobuf.Value.KindCase.STRING_VALUE ||
+                printed.nodeCase != Operand.NodeCase.EXPRESSION || printed.expression.operator != "string" ||
+                printed.expression.operandsCount != 1
+            ) {
+                continue
+            }
+            val cast = printed.expression.getOperands(0)
+            if (cast.nodeCase != Operand.NodeCase.EXPRESSION || cast.expression.operator != "int" ||
+                cast.expression.operandsCount != 1 ||
+                cast.expression.getOperands(0).nodeCase != Operand.NodeCase.VARIABLE
+            ) {
+                continue
+            }
+            val column = IntOfColumn(scope.scalar(cast.expression.getOperands(0).variable))
+            val text = bound.value.stringValue
+            val n = if (CANONICAL_INT.matches(text)) text.toBigIntegerOrNull() else null
+            val equal = if (n != null && n.bitLength() < 64) column.equalTo(n) else column.never()
+            return if (operator == "eq") equal else TriLogic.not(equal)
+        }
+        return null
+    }
+
+    /** `int(text column) op value`, compared as 64-bit integers; UNKNOWN where the string is not one. */
+    private fun stringIntComparison(operator: String, target: Resolution.Scalar, value: Any?): Op<Boolean> {
+        val constant = (value as? Number)?.toDouble() ?: throw ScalarRefusals.numericCastUnsupported("int")
+        val x = StringIntCast(target.expression)
+        fun bound(m: Double) = longParam(m.toLong())
+        val base: Op<Boolean> = when {
+            constant.isNaN() -> if (operator == "ne") Op.TRUE else Op.FALSE
+            constant >= INT64_BOUND -> if (operator in setOf("ne", "lt", "le")) Op.TRUE else Op.FALSE
+            constant < -INT64_BOUND -> if (operator in setOf("ne", "gt", "ge")) Op.TRUE else Op.FALSE
+            else -> {
+                val whole = constant == Math.rint(constant)
+                when (operator) {
+                    "eq" -> if (whole) EqOp(x, bound(constant)) else Op.FALSE
+                    "ne" -> if (whole) NeqOp(x, bound(constant)) else Op.TRUE
+                    "gt" -> GreaterEqOp(x, bound(Math.floor(constant) + 1))
+                    "ge" -> GreaterEqOp(x, bound(Math.ceil(constant)))
+                    "lt" -> LessEqOp(x, bound(Math.ceil(constant) - 1))
+                    "le" -> LessEqOp(x, bound(Math.floor(constant)))
+                    else -> throw Refusals.internal("Unsupported int() comparison operator: $operator")
+                }
+            }
+        }
+        return TriLogic.baseUnlessUnknown(base, IsNullOp(x))
     }
 
     /** `field op value`, or value-first for the operators normalisation leaves alone. */
@@ -1038,6 +1197,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
         private const val INT64_BOUND: Double = 9.223372036854775808E18
 
         /** 2^53: every whole double within it is exact, and so is its successor. */
+        private val CANONICAL_INT = Regex("0|-?[1-9][0-9]*")
         private const val EXACT_DOUBLE_INTEGER: Double = 9.007199254740992E15
 
         val COMPARISON_OPERATORS: Set<String> = setOf("eq", "ne", "lt", "le", "gt", "ge")

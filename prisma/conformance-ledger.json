@@ -181,6 +181,10 @@
       "status": "unsupported",
       "reason": "exists_one requires counting matching elements, which Prisma where-filters cannot express; the adapter throws instead of silently degrading to exists"
     },
+    "collection/exists/bare-number-element": {
+      "status": "unsupported",
+      "reason": "A number element in boolean position is a CEL type error that no Prisma filter keeps out under both polarities, so the exists() body is refused."
+    },
     "collection/exists/element-contains-outer-attribute": {
       "status": "unsupported",
       "reason": "Cross-model comparison plus the column-needle LIKE limitation"
@@ -192,6 +196,10 @@
     "collection/exists/literal-list-element-as-contains-needle": {
       "status": "unsupported",
       "reason": "The planner unrolls the exists over the literal list into one contains() per element, and the \"%_o\" needle carries LIKE metacharacters: Prisma emits LIKE without an ESCAPE clause and does not escape wildcards, and a substring, unlike a prefix, bounds no range of the column."
+    },
+    "collection/exists/negated-bare-number-element": {
+      "status": "unsupported",
+      "reason": "`!n` over a number element is a CEL no-overload error that no Prisma filter keeps out under both polarities, so the exists() body is refused."
     },
     "collection/exists/negated-nested-over-same-collection": {
       "status": "unsupported",
@@ -329,9 +337,25 @@
       "status": "unsupported",
       "reason": "`aString && aBool` reads a string field as a boolean, a CEL no-overload error under both polarities that no Prisma filter keeps out (a NOT over any filter selects it), so it is refused."
     },
+    "logic/bare/list-attribute": {
+      "status": "unsupported",
+      "reason": "A list attribute in boolean position is a CEL type error, while a relation filter on its elements matches a list holding true, so it is refused."
+    },
+    "logic/bare/number-attribute": {
+      "status": "unsupported",
+      "reason": "A number attribute in boolean position is a CEL type error, which denies under negation as well, and Prisma has no filter that answers UNKNOWN for it."
+    },
     "logic/bare/string-attribute": {
       "status": "unsupported",
       "reason": "A string attribute in boolean position is a CEL type error, which denies under negation as well, and Prisma has no filter that answers UNKNOWN for it."
+    },
+    "logic/not/bare-list-attribute": {
+      "status": "unsupported",
+      "reason": "`!R.attr.aBoolList` reads a list as a boolean, a CEL no-overload error under both polarities that no Prisma filter keeps out, so it is refused."
+    },
+    "logic/not/bare-number-attribute": {
+      "status": "unsupported",
+      "reason": "`!R.attr.aNumber` reads a number field as a boolean, a CEL no-overload error under both polarities that no Prisma filter keeps out (a NOT over any filter selects it), so it is refused."
     },
     "logic/not/bare-string-attribute": {
       "status": "unsupported",
@@ -392,6 +416,10 @@
     "null/in/ternary-with-error-branch-in-list-with-null": {
       "status": "unsupported",
       "reason": "in requires a field member and literal list, or a literal member and field collection."
+    },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",

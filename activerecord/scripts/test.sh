@@ -4,7 +4,7 @@
 #
 #   ./scripts/test.sh                                    # all the specs
 #   ./scripts/test.sh spec/conformance_spec.rb
-#   ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # or mysql
+#   ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # or mysql, mariadb
 #   RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 set -euo pipefail
 
@@ -15,13 +15,14 @@ export ACTIVERECORD_VERSION="${ACTIVERECORD_VERSION:-8.0}"
 export ADAPTER_TEST_DB="${ADAPTER_TEST_DB:-sqlite}"
 POSTGRES_IMAGE="$(<POSTGRES_IMAGE)"
 MYSQL_IMAGE="$(<MYSQL_IMAGE)"
-export POSTGRES_IMAGE MYSQL_IMAGE
+MARIADB_IMAGE="$(<MARIADB_IMAGE)"
+export POSTGRES_IMAGE MYSQL_IMAGE MARIADB_IMAGE
 
 case "${ADAPTER_TEST_DB}" in
   sqlite) ;;
-  postgres | mysql) export COMPOSE_PROFILES="${ADAPTER_TEST_DB}" ;;
+  postgres | mysql | mariadb) export COMPOSE_PROFILES="${ADAPTER_TEST_DB}" ;;
   *)
-    echo "ADAPTER_TEST_DB must be sqlite, postgres or mysql, not '${ADAPTER_TEST_DB}'" >&2
+    echo "ADAPTER_TEST_DB must be sqlite, postgres, mysql or mariadb, not '${ADAPTER_TEST_DB}'" >&2
     exit 1
     ;;
 esac

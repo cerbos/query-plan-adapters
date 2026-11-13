@@ -20,9 +20,7 @@ ADAPTER_DIR="$(cd "${EXAMPLE_DIR}/.." && pwd)"
 # The baseline server, read rather than restated. `npm run mongo` and the baseline leg of
 # .github/workflows/mongoose.yaml read the same file, so the server this example proves the
 # packaging against is the one the adapter is developed and tested against, and bumping it is one
-# edit. A literal here would be a third copy that conformance/scripts/validate-corpus.sh could
-# only hold to one digest per TAG — nothing holds two tags equal, so moving the adapter off 7.0
-# would leave the example behind, still pinned and still green.
+# edit.
 MONGO_IMAGE="$(cat "${ADAPTER_DIR}/MONGO_IMAGE")"
 MONGO_CONTAINER="cerbos-demo-mongoose"
 # 27117, not MongoDB's default 27017: that is the port `npm run mongo` and the adapter's own CI

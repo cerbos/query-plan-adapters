@@ -37,8 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         # The MongoDB server is a real one, started by scripts/test.sh from the pinned reference in
-        # the named file — tag AND digest, which conformance/scripts/validate-corpus.sh holds to one
-        # digest per tag repo-wide. MONGO_IMAGE is the baseline, the server the example also runs;
+        # the named file. MONGO_IMAGE is the baseline, the server the example also runs;
         # MONGO_NEXT_IMAGE is the forward-compatibility leg. Listed as FILENAMES so no image is
         # restated here, where a matrix value could drift from the file a local run reads.
         mongodb-image-file:
@@ -61,7 +60,7 @@ jobs:
 
       # `working-directory` here too: `defaults.run` applies only to `run` steps, and without it
       # the action looks for a Gemfile at the repository root, which has none.
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
         with:
           ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
@@ -107,7 +106,7 @@ jobs:
 
       # No `bundler-cache`: the example commits no Gemfile.lock, deliberately. It installs the
       # adapter from the artifact run.sh builds, which has no stable checksum.
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
         with:
           ruby-version: "3.4"
 

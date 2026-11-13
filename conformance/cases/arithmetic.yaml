@@ -101,6 +101,19 @@ cases:
   condition:
     match:
       expr: 'int(R.attr.aString) + 1 > 50'
+- id: 'arithmetic/add/int-plus-principal-double'
+  tier: adversarial
+  intent: 'A negated int() conversion plus an integral principal attribute, OR''d with aNumber == 5 (!(int(aNumber) + P.attr.zero == 5) || aNumber == 5).'
+  trap: 'P.attr.zero is a CEL double, so int + double is an error on every row and only a1 is allowed; reading the bare 0 the plan carries as an int literal over-grants every row whose aNumber is not 5.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aNumber) + P.attr.zero == 5) || R.attr.aNumber == 5'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/567
+    pdp:
+    - 0.56.0
+    - 0.57.0
+    reason: 'The planner drops the double type of the substituted P.attr.zero: the plan is byte-identical to !(int(aNumber) + 0 == 5) || aNumber == 5, which allows rows, while check() has no int + double overload and allows only a1.'
 - id: 'arithmetic/add/negated-int-beside-double-field'
   tier: adversarial
   intent: 'A negated int() + double sum, OR''d with aNumber == 5 (!(int(aNumber) + aDouble > 0.0) || aNumber == 5).'
@@ -307,6 +320,19 @@ cases:
   degenerate:
     oracle: empty
     reason: 'Neither product is exact in IEEE double, so neither equation holds for any seed. Exact-decimal arithmetic on the store would return the aNumber = 3 seeds, and an algebraic solve a4.'
+- id: 'arithmetic/multiply/int-times-principal-double'
+  tier: adversarial
+  intent: 'A negated int() conversion times an integral principal attribute, OR''d with aNumber == 5 (!(int(aNumber) * P.attr.zero == 1) || aNumber == 5).'
+  trap: 'P.attr.zero is a CEL double, so int * double is an error on every row and only a1 is allowed; reading the bare 0 the plan carries as an int literal over-grants every row, since int(aNumber) * 0 is never 1.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aNumber) * P.attr.zero == 1) || R.attr.aNumber == 5'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/567
+    pdp:
+    - 0.56.0
+    - 0.57.0
+    reason: 'The planner drops the double type of the substituted P.attr.zero: the plan is byte-identical to !(int(aNumber) * 0 == 1) || aNumber == 5, which allows every row, while check() has no int * double overload and allows only a1.'
 - id: 'arithmetic/multiply/nan-times-zero-plus-column'
   tier: adversarial
   intent: 'A self-division times zero, plus a column (aNumber / aNumber * 0.0 + aDouble > 0.2).'
@@ -369,3 +395,16 @@ cases:
     - 0.56.0
     - 0.57.0
     reason: 'The planner drops the double type of the substituted P.attr.zero: the plan is byte-identical to !(int(aNumber) - 0 == 5) || aNumber == 5, which allows rows, while check() has no int - double overload and allows only a1.'
+- id: 'arithmetic/subtract/int-minus-principal-double-ordering'
+  tier: adversarial
+  intent: 'An int() conversion minus an integral principal attribute under an ordering, OR''d with aNumber == 5 (int(aNumber) - P.attr.zero > 0 || aNumber == 5).'
+  trap: 'P.attr.zero is a CEL double, so int - double is an error on every row and only a1 is allowed; reading the bare 0 the plan carries as an int literal over-grants every row whose aNumber is above zero.'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) - P.attr.zero > 0 || R.attr.aNumber == 5'
+  plannerDivergence:
+    issue: https://github.com/cerbos/query-plan-adapters/issues/567
+    pdp:
+    - 0.56.0
+    - 0.57.0
+    reason: 'The planner drops the double type of the substituted P.attr.zero: the plan is byte-identical to int(aNumber) - 0 > 0 || aNumber == 5, which allows rows, while check() has no int - double overload and allows only a1.'

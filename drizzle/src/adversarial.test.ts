@@ -473,16 +473,8 @@ function sqliteStore(): AdversarialStore {
   };
 }
 
-/**
- * Mirrors the ent harness's PostgreSQL target so both adapters prove the same server.
- *
- * Pinned by tag AND digest: a tag is mutable, so a tag-only pin records an intent rather than a
- * build, and this leg exists to prove typed-column behaviour a re-pushed image could change under
- * it. `conformance/scripts/validate-corpus.sh` asserts every service image reference in the
- * repository carries both halves.
- */
-const POSTGRES_IMAGE =
-  "postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b";
+/** Mirrors the ent harness's PostgreSQL target so both adapters prove the same server. */
+const POSTGRES_IMAGE = "postgres:17-alpine";
 
 /**
  * The PostgreSQL leg runs under ICU's linguistic `en-US` order, as a managed service's default
@@ -672,10 +664,9 @@ function postgresStore(): AdversarialStore {
 
 /**
  * Mirrors the ent and spring-data harnesses' MySQL target so all three adapters prove the same
- * server, pinned by tag AND digest for the same reason the PostgreSQL image is.
+ * server.
  */
-const MYSQL_IMAGE =
-  "mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69";
+const MYSQL_IMAGE = "mysql:8.4";
 
 /**
  * The MySQL leg runs under the server's default collation, `utf8mb4_0900_ai_ci`, which folds case

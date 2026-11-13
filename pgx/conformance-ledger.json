@@ -209,6 +209,14 @@
       "reason": "Same refusal as hierarchy/overlaps/path-built-from-identifier: hierarchy() over a list() of segments has no lowering.",
       "status": "unsupported"
     },
+    "logic/bare/list-attribute": {
+      "reason": "Attribute \"request.resource.attr.aBoolList\" maps to a collection and cannot be used as a scalar value.",
+      "status": "unsupported"
+    },
+    "logic/not/bare-list-attribute": {
+      "reason": "Attribute \"request.resource.attr.aBoolList\" maps to a collection and cannot be used as a scalar value.",
+      "status": "unsupported"
+    },
     "membership/in/map-attribute-keys": {
       "reason": "The to-one parent is one joined row, not a value: `in` over a CEL map tests its keys, the row's present columns, and SQL has no form for the set of a row's present columns.",
       "status": "unsupported"
@@ -216,6 +224,10 @@
     "membership/in/negated-map-attribute-keys": {
       "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
       "status": "unsupported"
+    },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",

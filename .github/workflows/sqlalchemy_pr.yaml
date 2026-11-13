@@ -55,7 +55,7 @@ jobs:
             ./__pypackages__
           key: ${{ runner.os }}-python-${{ matrix.sqlalchemy.name }}-${{ hashFiles('**/pdm.lock') }}
 
-      - uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
+      - uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37 # v4.6
         name: Setup PDM
         with:
           python-version: "3.10"
@@ -85,7 +85,7 @@ jobs:
 
       - name: Check repo status
         if: matrix.sqlalchemy.constraint == ''
-        uses: cerbos/actions/check-repo-status@d175c743932636d403a72e9baf690c37da2963fa # main
+        uses: cerbos/actions/check-repo-status@4155ab4469b7f665dcec04a90af9e40a2234ba42 # main
 
       # Fail if the constraint did not take effect.
       - name: Assert SQLAlchemy version
@@ -129,10 +129,10 @@ jobs:
       - name: Validate demo domain
         run: ../demo/scripts/validate-demo.sh
 
-      - uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
+      - uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37 # v4.6
         name: Setup PDM
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       # No `pdm install`: the example builds the adapter and installs its own pinned tree.
       # The runner starts the PDP from demo/docker-compose.yml (pinned in

@@ -58,12 +58,15 @@ class RefusalTypesTest {
      * The corpus refusals the mapping raises before any Criteria limit is reached:
      * {@code createdBy} is a String column, which does not pin an instant, and
      * {@code aOptionalString} is a Field where {@code in} needs a Relation, and
-     * {@code aNumberList} is a Relation where {@code string()} needs a scalar. Every other corpus
+     * {@code aNumberList} is a Relation where {@code string()} needs a scalar, and {@code aBoolList}
+     * is a Relation where a condition needs a scalar. Every other corpus
      * refusal is an {@link UnsupportedPlanShapeException}.
      */
     private static final Set<String> UNMAPPED = Set.of(
             "cast/timestamp/malformed-string",
             "cast/timestamp/negated-malformed-string",
+            "logic/bare/list-attribute",
+            "logic/not/bare-list-attribute",
             "type-mismatch/in/string-field-in-string-field",
             "type-mismatch/string/number-list-attribute");
 

@@ -452,7 +452,7 @@ total but not as passed:
 | --- | --- |
 | core | 32 / 32 |
 | extended | 106 / 110 |
-| adversarial | 471 / 536 |
+| adversarial | 475 / 546 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 21 are `unsupported`, where the adapter
@@ -870,6 +870,5 @@ ADAPTER_TEST_DB=mysql ./gradlew test      # … on MySQL (see "Database collatio
 ADAPTER_TEST_ORM=next ./gradlew test      # every suite under Hibernate 7
 ```
 
-The PostgreSQL and MySQL images are pinned by tag and digest in [`POSTGRES_IMAGE`](POSTGRES_IMAGE)
-and [`MYSQL_IMAGE`](MYSQL_IMAGE) (files, so Renovate's custom manager can bump them;
-`conformance/scripts/validate-corpus.sh` checks them).
+The PostgreSQL and MySQL images are pinned by tag in [`POSTGRES_IMAGE`](POSTGRES_IMAGE)
+and [`MYSQL_IMAGE`](MYSQL_IMAGE) (files, so Renovate's custom manager can bump them).

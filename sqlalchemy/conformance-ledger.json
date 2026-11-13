@@ -204,6 +204,10 @@
       "status": "unsupported",
       "reason": "Two-list except has no operator override or built-in SQL list-difference lowering."
     },
+    "collection/exists/bare-number-element": {
+      "status": "unsupported",
+      "reason": "Same collection column without a relation as collection/all/negated-bare-boolean-element, over `aNumberList`."
+    },
     "collection/exists/map-keys": {
       "status": "unsupported",
       "reason": "exists() over the to-one parent ranges over the keys of a map, and the parent is a related row: SQL cannot enumerate which of its columns are non-NULL as the attribute's keys, so relation_overrides() refuses it: the attribute is not a Relation."
@@ -211,6 +215,10 @@
     "collection/exists/negated-bare-boolean-element": {
       "status": "unsupported",
       "reason": "Same collection column without a relation as collection/all/negated-bare-boolean-element, under exists() with a negated body."
+    },
+    "collection/exists/negated-bare-number-element": {
+      "status": "unsupported",
+      "reason": "Same collection column without a relation as collection/all/negated-bare-boolean-element, over `aNumberList`."
     },
     "collection/exists/negated-map-keys": {
       "status": "unsupported",
@@ -367,6 +375,10 @@
     "null/not-equals/field-to-field-mixed-null-conventions": {
       "status": "unsupported",
       "reason": "One side is declared explicit-null and the other is omitted-when-NULL: the first needs a definite answer for its NULL and the second needs UNKNOWN, and no single SQL predicate gives both (#308)."
+    },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
     },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",

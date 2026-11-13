@@ -145,10 +145,6 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `string()` reads a number from metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and `string()` renders -0.0 as \"-0\"."
     },
-    "collection/all/negated-bare-boolean-element": {
-      "status": "unsupported",
-      "reason": "A lambda whose body is the bare iteration variable (`all(b, b)`): the plan's lambda node then holds two identical variable operands, and the post-filter evaluator cannot tell the body from the variable, so it refuses the macro."
-    },
     "collection/except/as-lambda-body": {
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped except() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
@@ -236,6 +232,10 @@
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
+    },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",

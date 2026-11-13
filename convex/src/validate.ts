@@ -152,6 +152,13 @@ export const assertEveryReferenceMapped = (
     const root = expression.name.split(".")[0]!;
 
     if (bound.has(root) || isMappedReference(expression.name, mapper)) return;
+
+    if (expression.name.startsWith("request.principal.")) {
+      throw new UnsupportedQueryPlanError(
+        `The plan leaves ${expression.name} unresolved: the planner did not fold it into a value, and a principal attribute is not a field of any document`,
+      );
+    }
+
     throw new Error(
       `No mapper entry for ${expression.name}: an unmapped reference is not used verbatim as ` +
         "a document path, because a path absent from every document satisfies a negated " +

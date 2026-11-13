@@ -108,6 +108,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aString) + 1 > 50
+    # arithmetic/add/int-plus-principal-double
+    - actions:
+        - arithmetic/add/int-plus-principal-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) + P.attr.zero == 5) || R.attr.aNumber == 5'
     # arithmetic/add/negated-int-beside-double-field
     - actions:
         - arithmetic/add/negated-int-beside-double-field
@@ -369,6 +378,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber * 0.1 == 0.3 || R.attr.aDouble * 3.0 == 3.9
+    # arithmetic/multiply/int-times-principal-double
+    - actions:
+        - arithmetic/multiply/int-times-principal-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) * P.attr.zero == 1) || R.attr.aNumber == 5'
     # arithmetic/multiply/nan-times-zero-plus-column
     - actions:
         - arithmetic/multiply/nan-times-zero-plus-column
@@ -441,6 +459,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(int(R.attr.aNumber) - P.attr.zero == 5) || R.attr.aNumber == 5'
+    # arithmetic/subtract/int-minus-principal-double-ordering
+    - actions:
+        - arithmetic/subtract/int-minus-principal-double-ordering
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) - P.attr.zero > 0 || R.attr.aNumber == 5
     # cast/double/malformed-string
     - actions:
         - cast/double/malformed-string
@@ -846,6 +873,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.exists(t, t.name == "public" && R.attr.aNumber + 1.0 > 2.0)
+    # collection/exists/bare-number-element
+    - actions:
+        - collection/exists/bare-number-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList.exists(n, n) || R.attr.aNumber == 5
+    # collection/exists/negated-bare-number-element
+    - actions:
+        - collection/exists/negated-bare-number-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList.exists(n, !n) || R.attr.aNumber == 5
     # collection/exists/element-contains-outer-attribute
     - actions:
         - collection/exists/element-contains-outer-attribute
@@ -2712,6 +2757,42 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString || R.attr.aNumber == 5
+    # logic/bare/number-attribute
+    - actions:
+        - logic/bare/number-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber || R.attr.aString == "one"
+    # logic/not/bare-number-attribute
+    - actions:
+        - logic/not/bare-number-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aNumber || R.attr.aString == "one"'
+    # logic/bare/list-attribute
+    - actions:
+        - logic/bare/list-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aBoolList || R.attr.aNumber == 5
+    # logic/not/bare-list-attribute
+    - actions:
+        - logic/not/bare-list-attribute
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aBoolList || R.attr.aNumber == 5'
     # membership/in/empty-list
     - actions:
         - membership/in/empty-list
@@ -3383,6 +3464,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.all(t, t.name in P.attr.emptyTeams)
+    # principal/all/left-unresolved-in-ternary-branch
+    - actions:
+        - principal/all/left-unresolved-in-ternary-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.parent.aString < "XA_BY") ? (P.attr.allowedTags.all(t, R.attr.aString != t)) : (R.attr.tagNames.filter(t, t != "Public").size() == 0)'
     # principal/all/long-list
     - actions:
         - principal/all/long-list

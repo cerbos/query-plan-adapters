@@ -120,6 +120,14 @@
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."
     },
+    "logic/bare/list-attribute": {
+      "status": "unsupported",
+      "reason": "aBoolList is mapped as a Relation, a collection with no scalar path, so a list read as a condition is refused."
+    },
+    "logic/not/bare-list-attribute": {
+      "status": "unsupported",
+      "reason": "aBoolList is mapped as a Relation, a collection with no scalar path, so a list read as a condition is refused."
+    },
     "null/in/error-or-boolean-in-list-with-null": {
       "status": "unsupported",
       "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (or()) has no SQL value to test against the list."
@@ -143,6 +151,10 @@
     "null/in/ternary-with-error-branch-in-list-with-null": {
       "status": "unsupported",
       "reason": "`in` is lowered only with a mapped attribute as its needle; a computed needle (size()) has no SQL value to test against the list."
+    },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
     },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",

@@ -1,0 +1,145 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "a7",
+    "b1",
+    "b2",
+    "c1",
+    "d1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "principal/all/left-unresolved-in-ternary-branch",
+  "intent": "all() over a principal list in one branch of a ternary, which the planner leaves as a request.principal.attr variable instead of a value.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aString"
+                },
+                {
+                  "value": "XA_BY"
+                }
+              ],
+              "operator": "lt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.principal.attr.allowedTags"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aString"
+                            },
+                            {
+                              "variable": "t"
+                            }
+                          ],
+                          "operator": "ne"
+                        }
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "all"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.tagNames"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "t"
+                                        },
+                                        {
+                                          "value": "Public"
+                                        }
+                                      ],
+                                      "operator": "ne"
+                                    }
+                                  },
+                                  {
+                                    "variable": "t"
+                                  }
+                                ],
+                                "operator": "lambda"
+                              }
+                            }
+                          ],
+                          "operator": "filter"
+                        }
+                      }
+                    ],
+                    "operator": "size"
+                  }
+                },
+                {
+                  "value": 0
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "if"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/all/left-unresolved-in-ternary-branch",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.parent.aString < \"XA_BY\") ? (P.attr.allowedTags.all(t, R.attr.aString != t)) : (R.attr.tagNames.filter(t, t != \"Public\").size() == 0)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The plan names request.principal.attr.allowedTags, which no store holds. An adapter must refuse it. Treating it as a document path or a missing column returns the wrong rows. Found by fuzzing (fuzz/s73/0122)."
+}

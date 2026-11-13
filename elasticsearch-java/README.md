@@ -149,7 +149,7 @@ Options options = Options.of(fieldMap)
 | `fieldMap` | plan attribute → ES field | Always. An unmapped plan variable throws `UnmappedAttributeException` |
 | `scalarTypes` | ES field | A policy compares the field. See [Declaring scalar types](#declaring-scalar-types) |
 | `nestedPaths` | ES field | A policy runs `exists` / `all` / `hasIntersection(map(...))` over an array of objects |
-| `collectionFields` | ES field | A policy takes `size()` of a flat scalar array. See [Size checks](#size-checks) |
+| `collectionFields` | ES field | A policy takes `size()` of a flat scalar array, or the array holds booleans. See [Size checks](#size-checks) |
 | `operatorOverrides` | plan operator | You need a different lowering. See [Custom operator overrides](#custom-operator-overrides) |
 | `explicitNullAttributes` | plan attribute | You send NULL columns to `check()` as explicit `null`. See [Attributes you send as explicit nulls](#attributes-you-send-as-explicit-nulls) |
 
@@ -174,7 +174,9 @@ Include every attribute path your policies emit, resource (`request.resource.att
 Declare the CEL type of every compared field with `withScalarTypes(Map<String, ScalarType>)`, keyed
 by Elasticsearch field name: `STRING`, `NUMBER`, `BOOLEAN` or `TIMESTAMP`. A flat array
 (`collectionFields`) declares its element type; a sub-field of a `nested` path is declared by its
-full path (`tags.name`).
+full path (`tags.name`). Declare a flat array of booleans in `collectionFields` as well: a term query
+for `true` matches an array holding `true`, so the adapter can only deny a list read as a condition,
+as CEL does, when it knows the field is an array.
 
 **This is required.** Every comparison the adapter emits is a term-level query, and Elasticsearch
 coerces the query term onto the field's *mapped* type: `{"term": {"aNumber": {"value": "5"}}}`
@@ -509,7 +511,7 @@ the current PDP (0.57.0), where the total is every golden case in the tier:
 | --- | --- |
 | core | 31 / 32 |
 | extended | 51 / 110 |
-| adversarial | 209 / 536 |
+| adversarial | 213 / 546 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
@@ -672,7 +674,7 @@ JDK 17+; sources compile with `options.release = 17`. Gradle comes from the comm
 | `ElasticsearchSurfaceTest` | what a real server does with emitted clauses, and the store facts the corpus reasons cite — unindexed empty arrays (nested and flat), JSON nulls and null elements, an indexed empty string, analyzed fields, Lucene regex including whole-field alternation, wildcard escaping, `date` vs `date_nanos` precision | Elasticsearch (Testcontainers) |
 | `ElasticsearchQueryPlanAdapterTest` | shapes no policy can produce — malformed operands, caller-supplied arguments, literal validation — plus a few labelled shapes the corpus does not carry yet | nothing |
 
-The server is pinned in [`ELASTICSEARCH_IMAGE`](ELASTICSEARCH_IMAGE) (`repo:tag@sha256:...`), read
+The server is pinned in [`ELASTICSEARCH_IMAGE`](ELASTICSEARCH_IMAGE) (`repo:tag`), read
 by the suites and by [`example/run.sh`](example/run.sh). To run against the next major, which the
 example does not do (its client must match the baseline major):
 

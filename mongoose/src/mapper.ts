@@ -1,4 +1,5 @@
 import type { Mapper, MapperConfig } from "./index";
+import { UnsupportedQueryPlanError } from "./errors";
 import { isFunction } from "./narrowing";
 import type { MongoValue } from "./expression";
 
@@ -224,7 +225,11 @@ export const relationOfReference = (
  * that returns one.
  */
 export const unmappedReferenceError = (reference: string): Error =>
-  new Error(
+  reference.startsWith("request.principal.")
+    ? new UnsupportedQueryPlanError(
+        `The plan leaves ${reference} unresolved: the planner did not fold it into a value, and a principal attribute is not a field of any document`,
+      )
+    : new Error(
     `No mapper entry for ${reference}: an unmapped reference is not used verbatim as a ` +
       "document path, because MongoDB's $ne and $nor match every document a path is absent " +
       "from. Map it to a field, or declare it with an entry to use the plan path as-is.",

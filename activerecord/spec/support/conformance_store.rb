@@ -15,22 +15,23 @@ module ConformanceStore
 
     Database.establish!
     define_schema!
-    verify_mysql_collation! if Database::STORE == "mysql"
+    verify_mysql_collation!(Database::MYSQL_COLLATION) if Database::STORE == "mysql"
+    verify_mysql_collation!(Database::MARIADB_COLLATION) if Database::STORE == "mariadb"
     seed!
   end
 
-  # The columns and the session must both be on MySQL's case-folding default, or the corpus
+  # The columns and the session must both be on the server's case-folding default, or the corpus
   # would not prove the adapter's own collation.
-  def verify_mysql_collation!
+  def verify_mysql_collation!(collation)
     connection = ActiveRecord::Base.connection
     columns = connection.select_values(<<~SQL)
       SELECT DISTINCT collation_name FROM information_schema.columns
       WHERE table_schema = DATABASE() AND collation_name IS NOT NULL
     SQL
     session = connection.select_value("SELECT @@collation_connection")
-    return if columns == [Database::MYSQL_COLLATION] && session == Database::MYSQL_COLLATION
+    return if columns == [collation] && session == collation
 
-    raise "MySQL must run on #{Database::MYSQL_COLLATION}: columns #{columns}, session #{session}"
+    raise "#{Database::STORE} must run on #{collation}: columns #{columns}, session #{session}"
   end
 
   def define_schema!

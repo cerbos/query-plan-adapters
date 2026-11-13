@@ -34,6 +34,9 @@ module Cerbos
       # `value OP field` is `field MIRROR(OP) value`.
       MIRRORED = {"eq" => "eq", "ne" => "ne", "lt" => "gt", "le" => "ge", "gt" => "lt", "ge" => "le"}.freeze
 
+      # `$type` matches an array by its elements, so a list holding a boolean needs excluding.
+      STORED_BOOLEAN = {"$type" => "bool", "$not" => {"$type" => "array"}}.freeze
+
       def initialize(mapper:, null_representation:)
         unless NULL_REPRESENTATIONS.include?(null_representation)
           raise ArgumentError, "null_attribute_representation must be :explicit or :omitted, got #{null_representation.inspect}"
@@ -258,7 +261,7 @@ module Cerbos
         # (cerbos/query-plan-adapters#375).
         raise UnsupportedError, "Bare collection variables are unsupported" if resolved.relation && resolved.relation.type != :one
 
-        Guards.guarded_field_filter(resolved.path, {"$eq" => true}, mapper.nullable?(name))
+        Guards.guarded_field_filter(resolved.path, STORED_BOOLEAN.merge("$eq" => true), mapper.nullable?(name))
       end
 
       def translate_not(operands, mapper, scope)
@@ -316,7 +319,7 @@ module Cerbos
         # required outside the $nor, which would otherwise match every other value.
         if variable?(operand)
           assert_scoped(operand.name, scope)
-          negated = {"$and" => [Guards.field_filter(mapper.resolve_field(operand.name).path, {"$type" => "bool"}), negated]}
+          negated = {"$and" => [Guards.field_filter(mapper.resolve_field(operand.name).path, STORED_BOOLEAN), negated]}
         end
         guarded = Guards.with_evaluation(negated, [operand], mapper)
         list_shape = Guards.list_shape_guard(operand, mapper, !scope.collection?)

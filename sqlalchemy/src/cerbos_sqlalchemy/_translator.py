@@ -178,6 +178,11 @@ class Translator:
                     "an index and membership read: this shape needs a relation for it in "
                     "the attribute map"
                 )
+            if variable.startswith("request.principal."):
+                raise UnsupportedPlanError(
+                    f"The plan leaves {variable} unresolved: the planner did not fold it into a "
+                    "value, and a principal attribute is not a column"
+                ) from None
             raise KeyError(
                 f"Attribute does not exist in the attribute column map: {variable}"
             )
@@ -837,6 +842,9 @@ class Translator:
     def predicate(self, operand: Operand) -> Any:
         """Translate a node in a boolean position."""
         if isinstance(operand, Variable):
+            if operand.name in self._declared_names:
+                # A list where CEL needs a boolean is a type error too.
+                return null()
             column = self._resolve_variable(operand.name)
             if isinstance(getattr(column, "type", None), _NON_BOOLEAN_TYPES):
                 # A column of another type is a CEL type error: one UNKNOWN, which

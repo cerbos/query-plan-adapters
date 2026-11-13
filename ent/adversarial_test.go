@@ -37,14 +37,9 @@ import (
 // and holds for every dialect. No PDP is started: its answers are recorded. This file owns only the
 // SQL half — the schemas, the mapping and the seeding; corpus_test.go reads the corpus.
 
-// Database container images, pinned by tag AND digest. A tag is mutable, so a tag-only pin
-// records an intent rather than a build; the conformance suite is a differential whose
-// divergences are dialect behaviour, so "which build was this proved against" has to be
-// answerable from the repository alone. conformance/scripts/validate-corpus.sh asserts every
-// service image reference in the repository carries both halves.
 const (
-	postgresImage = "postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b"
-	mysqlImage    = "mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69"
+	postgresImage = "postgres:17-alpine"
+	mysqlImage    = "mysql:8.4"
 )
 
 const (
@@ -689,13 +684,14 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 
 	// Translate wraps every mapper miss in ErrUnsupported, so a resource attribute this harness
 	// forgot to map would satisfy an `unsupported` ledger entry vacuously. A miss on a
-	// `request.*` reference is therefore a harness defect, reported as such rather than as the
-	// adapter's refusal. (Lambda-local names such as `t.name` also reach the root mapper, as a
-	// probe before the element scope answers them, so only `request.*` is checked.)
+	// `request.resource.*` reference is therefore a harness defect, reported as such rather than as
+	// the adapter's refusal. (Lambda-local names such as `t.name` also reach the root mapper, as a
+	// probe before the element scope answers them, and a `request.principal.*` reference the
+	// planner left unresolved has no column to map, so only `request.resource.*` is checked.)
 	var unmapped []string
 	recording := cerbosent.MapperFunc(func(reference string) (cerbosent.Entry, bool) {
 		entry, ok := mapper.Resolve(reference)
-		if !ok && strings.HasPrefix(reference, "request.") {
+		if !ok && strings.HasPrefix(reference, "request.resource.") {
 			unmapped = append(unmapped, reference)
 		}
 		return entry, ok

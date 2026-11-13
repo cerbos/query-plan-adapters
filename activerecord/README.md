@@ -101,6 +101,7 @@ Errors, all subclasses of `Cerbos::ActiveRecord::Error`:
 | `UnsupportedOperatorError` | An operator or operand shape has no exact SQL translation |
 | `InvalidPlanError` | The plan is malformed, or holds a literal the adapter cannot represent (a hierarchy delimiter that is not a string) |
 | `UnsupportedAssociationError` | An attribute maps to an association the adapter cannot turn into a correlated subquery |
+| `UnsupportedDatabaseError` | The model's connection is not SQLite, PostgreSQL, MySQL 8.0 or later, or MariaDB 11.4.5 or later (SQL Server and Oracle are refused) |
 
 ## Mapping attributes
 
@@ -335,7 +336,7 @@ conventions answer each as its own convention says, as `eq` does
 CEL compares strings byte for byte and orders them by code point. The adapter does not trust the
 column's collation for that:
 
-- **MySQL:** every string literal is quoted as `CONVERT('…' USING utf8mb4) COLLATE
+- **MySQL and MariaDB:** every string literal is quoted as `CONVERT('…' USING utf8mb4) COLLATE
   utf8mb4_0900_bin`, and a `string` or `text` column compared with another column is read under
   the same collation, so `==`, `in`, `contains`, `startsWith`, `endsWith` and ordering are
   byte-exact and NO PAD even under the default `utf8mb4_0900_ai_ci`, on the columns or on the
@@ -346,11 +347,16 @@ column's collation for that:
   `en_US.UTF-8` sorts `"One"` after `"a"`
   ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Avoid nondeterministic ICU
   collations and `citext`.
+  MariaDB has `utf8mb4_0900_bin` from 11.4.5, the lowest version the adapter accepts.
 - **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
   point.
 
-The conformance suite runs on SQLite, PostgreSQL (initialised under ICU's `en-US`) and MySQL (on
-the server's default collation). The other suites run on SQLite.
+The conformance suite runs on SQLite, PostgreSQL (initialised under ICU's `en-US`), MySQL and
+MariaDB (each on the server's default collation). The other suites run on SQLite.
+
+Any other store raises `UnsupportedDatabaseError` at translation time. SQL Server's and Oracle's
+default collations fold case, so string equality would match rows CEL does not, and Oracle stores
+`""` as NULL.
 
 ## How the adapter keeps the three-valued logic
 
@@ -442,7 +448,7 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | --- | --- |
 | core | 32 / 32 |
 | extended | 106 / 110 |
-| adversarial | 473 / 536 |
+| adversarial | 479 / 546 |
 
 Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
 asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
@@ -496,16 +502,17 @@ Everything runs in Docker; you do not need Ruby locally, and no suite needs a PD
 ```bash
 ./scripts/test.sh                                   # all suites
 ./scripts/test.sh spec/conformance_spec.rb          # the conformance harness alone
-ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # on PostgreSQL (or mysql)
+ADAPTER_TEST_DB=postgres ./scripts/test.sh spec/conformance_spec.rb   # on PostgreSQL (or mysql, mariadb)
 RUBY_VERSION=3.3 ACTIVERECORD_VERSION=7.1 ./scripts/test.sh
 ./scripts/lint.sh                                   # RuboCop on Standard, via `rake lint`
 ./scripts/docs.sh                                   # YARD, failing on a warning or an undocumented object
 ```
 
 The `tests` service mounts the repository root, because the suites read `../conformance/`.
-`ADAPTER_TEST_DB` picks the store: `sqlite` (the default, in memory), `postgres` or `mysql`, which
-`scripts/test.sh` starts from `docker-compose.yaml` with the images pinned in
-[`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE). Any other value fails.
+`ADAPTER_TEST_DB` picks the store: `sqlite` (the default, in memory), `postgres`, `mysql` or
+`mariadb`, which `scripts/test.sh` starts from `docker-compose.yaml` with the images pinned in
+[`POSTGRES_IMAGE`](POSTGRES_IMAGE), [`MYSQL_IMAGE`](MYSQL_IMAGE) and
+[`MARIADB_IMAGE`](MARIADB_IMAGE). Any other value fails.
 Specs run in random order; rerun a failure with the seed RSpec prints (`--seed N`).
 
 | Suite | What it covers |

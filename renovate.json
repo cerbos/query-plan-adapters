@@ -11,7 +11,7 @@
   ],
   "automerge": true,
   "automergeSchedule": [
-    "after 9am and before 5pm Monday"
+    "* 9-16 * * 1"
   ],
   "major": {
     "automerge": false
@@ -23,17 +23,56 @@
   "additionalReviewers": [
     "alexolivier"
   ],
+  "hostRules": [
+    {
+      "matchHost": "repo.maven.apache.org",
+      "concurrentRequestLimit": 2,
+      "maxRequestsPerSecond": 2
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "The JVM adapters, which their examples and spring-data consume from a local Maven repository the build publishes. They are versioned in this repository, not on Maven Central, so a lookup only fails.",
+      "matchPackageNames": [
+        "/^dev\\.cerbos:cerbos-(elasticsearch|exposed|jpa|spring-data)$/"
+      ],
+      "enabled": false
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
-      "description": "The per-harness service image pins (`<adapter>/<SERVICE>_IMAGE`, one `repo:tag@sha256:<digest>` line each, the form conformance/scripts/validate-corpus.sh enforces). `docker:disable` above switches off the Dockerfile and compose managers, not the docker datasource, so this is the one path by which those files are bumped; the digest is captured so a tag bump carries the build it resolves to, and a major stays a non-automerged PR like every other major.",
+      "description": "The per-harness service image pins (`<adapter>/<SERVICE>_IMAGE`, one `repo:tag` line each). `docker:disable` above switches off the Dockerfile and compose managers, not the docker datasource, so this is the one path by which those files are bumped. Pins carry no digest, so Renovate proposes tag bumps only.",
       "managerFilePatterns": [
         "/(^|/)[A-Z][A-Z0-9_]*_IMAGE$/"
       ],
       "matchStrings": [
-        "^(?<depName>[a-z0-9][a-z0-9._/-]*):(?<currentValue>[A-Za-z0-9._-]+)@(?<currentDigest>sha256:[0-9a-f]{64})\\s*$"
+        "^(?<depName>[a-z0-9][a-z0-9._/-]*):(?<currentValue>[A-Za-z0-9._-]+)\\s*$"
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "The same images written as a quoted `\"repo:tag\"` literal in the ent, drizzle and prisma adversarial suites, so a tag bump moves them in the same PR as the `_IMAGE` files.",
+      "managerFilePatterns": [
+        "/(^|/)[^/]*adversarial[^/]*\\.(go|ts|js)$/"
+      ],
+      "matchStrings": [
+        "\"(?<depName>(?:postgres|mysql|mariadb|mongo)):(?<currentValue>[A-Za-z0-9._-]+)\""
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "The Exposed `baseline` in exposed/build.gradle.kts, which exposed/example/run.sh requires the example's exposed-* pins to equal. Renovate's Gradle manager cannot read a version inside a map, so without this an example bump fails the example job. The `floor` entry is deliberately not matched.",
+      "managerFilePatterns": [
+        "/^exposed/build\\.gradle\\.kts$/"
+      ],
+      "matchStrings": [
+        "\"baseline\" to mapOf\\(\"exposed\" to \"(?<currentValue>[^\"]+)\"\\)"
+      ],
+      "depNameTemplate": "org.jetbrains.exposed:exposed-core",
+      "datasourceTemplate": "maven"
     }
   ]
 }

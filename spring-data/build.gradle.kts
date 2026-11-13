@@ -58,7 +58,7 @@ dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
     // Must match the gencode version cerbos-sdk-java was generated against (see jpa/README.md,
     // "Pin protobuf-java"); older runtimes throw ProtobufRuntimeVersionException.
-    implementation("com.google.protobuf:protobuf-java:4.35.1")
+    implementation("com.google.protobuf:protobuf-java:4.36.2")
     // The consumer brings Spring Data JPA, Jakarta Persistence and Hibernate, so they stay out of
     // the published POM. The consumer floor is spring-data-jpa 3.5.2, for
     // `Specification.unrestricted()`; nothing tests that version, so re-check it when the adapter
@@ -69,15 +69,15 @@ dependencies {
 
     testImplementation("org.springframework.data:spring-data-jpa:${orm["springDataJpa"]}")
     testImplementation("jakarta.persistence:jakarta.persistence-api:${orm["jakartaPersistence"]}")
-    testImplementation(platform("org.junit:junit-bom:6.1.2"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.hibernate.orm:hibernate-core:${orm["hibernate"]}")
-    testImplementation("com.h2database:h2:2.4.240")
+    testImplementation("com.h2database:h2:2.5.252")
     // Reads the shared ../conformance/ corpus (golden plans are protobuf JSON).
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
-    testImplementation("com.google.protobuf:protobuf-java-util:4.35.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.23.0")
+    testImplementation("com.google.protobuf:protobuf-java-util:4.36.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.18")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.20")
 }
 
 tasks.test {

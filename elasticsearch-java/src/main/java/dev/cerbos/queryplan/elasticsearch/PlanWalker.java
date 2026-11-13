@@ -84,7 +84,8 @@ final class PlanWalker {
     /**
      * A field read as a condition. Only a stored boolean makes it defined: CEL has no overload of
      * a condition or {@code !} for another type, so it denies under both polarities, while a term
-     * query for {@code true} matches a keyword field holding {@code "true"}.
+     * query for {@code true} matches a keyword field holding {@code "true"}, and an array holding
+     * {@code true}.
      */
     private Map<String, Object> bareVariable(String field, Polarity polarity) {
         ElasticsearchQueryPlanAdapter.ScalarType type = options.scalarTypes().get(field);
@@ -94,7 +95,9 @@ final class PlanWalker {
                     + "text \"true\" or \"false\", where CEL has no overload for a non-boolean "
                     + "condition. Declare it in Options.withScalarTypes");
         }
-        if (type != ElasticsearchQueryPlanAdapter.ScalarType.BOOLEAN) {
+        if (type != ElasticsearchQueryPlanAdapter.ScalarType.BOOLEAN
+                || options.collectionFields().contains(field)
+                || options.nestedPaths().contains(field)) {
             return Queries.matchNone();
         }
         return leaf.operatorOrDefault("eq").apply(field, polarity.holds());
