@@ -2,11 +2,11 @@
 
 # PDP 0.56.0 → 0.57.0
 
-What changes for the 688 cases between the previous PDP (`0.56.0`) and the current one (`0.57.0`).
+What changes for the 689 cases between the previous PDP (`0.56.0`) and the current one (`0.57.0`).
 
 | Change | Cases |
 |---|---|
-| Plan | 17 |
+| Plan | 18 |
 | Allowed set | 0 |
 | Plan error | 0 |
 
@@ -192,6 +192,20 @@ What changes for the 688 cases between the previous PDP (`0.56.0`) and the curre
 
 ```json
 {"condition":{"expression":{"operands":[{"variable":"request.resource.attr.obj.inner"}],"operator":"has"}},"kind":"KIND_CONDITIONAL"}
+```
+
+### `null/has/unparseable-timestamp-string`
+
+`0.56.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"variable":"request.resource.attr.aNumber"},{"value":5}],"operator":"ne"}},"kind":"KIND_CONDITIONAL"}
+```
+
+`0.57.0`:
+
+```json
+{"condition":{"expression":{"operands":[{"expression":{"operands":[{"variable":"request.resource.attr.createdBy"}],"operator":"has"}},{"expression":{"operands":[{"variable":"request.resource.attr.aNumber"},{"value":5}],"operator":"ne"}}],"operator":"and"}},"kind":"KIND_CONDITIONAL"}
 ```
 
 ### `relation/has/negated-parent-attribute`

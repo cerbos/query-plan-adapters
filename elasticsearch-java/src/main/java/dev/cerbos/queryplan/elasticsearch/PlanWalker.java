@@ -323,7 +323,8 @@ final class PlanWalker {
             }
         }
         // `_ignored` lists a field whose value is in _source but unindexed (ignore_above, ignore_malformed).
-        return polarity.holds() ? Queries.exists(field) : Map.of("bool", Map.of("must_not",
+        return polarity.holds() ? Queries.boolShould(List.of(Queries.exists(field), Queries.term("_ignored", field)))
+                : Map.of("bool", Map.of("must_not",
                 List.of(Queries.exists(field), Queries.term("_ignored", field))));
     }
 

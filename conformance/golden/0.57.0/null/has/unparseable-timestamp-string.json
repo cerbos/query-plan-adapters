@@ -1,0 +1,110 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j3",
+    "j4",
+    "k1",
+    "k2",
+    "k3",
+    "l1",
+    "l2",
+    "l3",
+    "l4"
+  ],
+  "degenerateReason": null,
+  "id": "null/has/unparseable-timestamp-string",
+  "intent": "has(createdBy) && aNumber != 5: presence of an attribute whose value some stores keep without indexing it.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdBy"
+                }
+              ],
+              "operator": "has"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "ne"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "null/has/unparseable-timestamp-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "has(R.attr.createdBy) && R.attr.aNumber != 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "h5 holds a createdBy that is not a timestamp, so has() is true there. Elasticsearch keeps that value in _source but leaves it out of the index under ignore_malformed, so a bare exists query denies h5."
+}
