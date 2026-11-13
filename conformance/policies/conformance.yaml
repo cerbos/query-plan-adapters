@@ -3140,6 +3140,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!has(R.attr.createdBy) || R.attr.aNumber == 5'
+    # null/has/unparseable-timestamp-string
+    - actions:
+        - null/has/unparseable-timestamp-string
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: has(R.attr.createdBy) && R.attr.aNumber != 5
     # null/has/explicit-null-attribute
     - actions:
         - null/has/explicit-null-attribute

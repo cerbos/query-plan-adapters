@@ -323,8 +323,14 @@ final class PlanWalker {
             }
         }
         // `_ignored` lists a field whose value is in _source but unindexed (ignore_above, ignore_malformed).
-        return polarity.holds() ? Queries.exists(field) : Map.of("bool", Map.of("must_not",
-                List.of(Queries.exists(field), Queries.term("_ignored", field))));
+        // It is a root field, which a nested query cannot read.
+        List<Map<String, Object>> present = scope instanceof Scope.Root
+                ? List.of(Queries.exists(field), Queries.term("_ignored", field))
+                : List.of(Queries.exists(field));
+        if (!polarity.holds()) {
+            return Map.of("bool", Map.of("must_not", present));
+        }
+        return present.size() == 1 ? present.get(0) : Queries.boolShould(present);
     }
 
     private static void requireUnary(String operator, List<Operand> operands) {

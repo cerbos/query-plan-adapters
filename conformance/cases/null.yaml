@@ -159,6 +159,13 @@ cases:
   condition:
     match:
       expr: '!has(R.attr.createdBy) || R.attr.aNumber == 5'
+- id: 'null/has/unparseable-timestamp-string'
+  tier: adversarial
+  intent: 'has(createdBy) && aNumber != 5: presence of an attribute whose value some stores keep without indexing it.'
+  trap: 'h5 holds a createdBy that is not a timestamp, so has() is true there. Elasticsearch keeps that value in _source but leaves it out of the index under ignore_malformed, so a bare exists query denies h5.'
+  condition:
+    match:
+      expr: 'has(R.attr.createdBy) && R.attr.aNumber != 5'
 - id: 'null/has/explicit-null-attribute'
   tier: adversarial
   intent: 'has(owner) && aBool == true: a presence test on an attribute sent as an explicit null.'
