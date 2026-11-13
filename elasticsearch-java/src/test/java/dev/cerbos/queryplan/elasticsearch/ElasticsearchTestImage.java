@@ -16,16 +16,6 @@ import java.nio.file.Path;
  * {@code elasticsearch-java/}: {@code ELASTICSEARCH_IMAGE} by default, or the file named by the
  * {@code elasticsearch.test.image.file} system property (the workflow uses this to select
  * {@code ELASTICSEARCH_NEXT_IMAGE}). The pin is a file so {@code example/run.sh} can read it too.
- *
- * <p>Pinning by digest has two Testcontainers side effects:
- *
- * <ul>
- *   <li>{@link DockerImageName} treats everything before {@code @sha256:} as the repository, so
- *       the image must declare {@link DockerImageName#asCompatibleSubstituteFor(String)}.
- *   <li>{@code ElasticsearchContainer} reads the version from the digest and takes its pre-8
- *       branch, so it sets no {@code ELASTIC_PASSWORD} or CA cert. Both suites disable security
- *       and use plain HTTP, so this does not matter to them.
- * </ul>
  */
 final class ElasticsearchTestImage {
 

@@ -11,10 +11,7 @@
 # laptop.
 #
 # The image is READ from ../CHROMA_IMAGE rather than restated here — the same constant this
-# adapter's suites, its `npm run chroma` helper and its workflow already share. A second copy is a
-# second thing to bump, and conformance/scripts/validate-corpus.sh requires every reference to a
-# service image to carry the same tag AND digest; a reference that reads the file cannot drift from
-# it at all.
+# adapter's suites, its `npm run chroma` helper and its workflow already share, so it cannot drift.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
 # document, which the shared runner diffs against demo/expected.json.

@@ -870,6 +870,5 @@ ADAPTER_TEST_DB=mysql ./gradlew test      # … on MySQL (see "Database collatio
 ADAPTER_TEST_ORM=next ./gradlew test      # every suite under Hibernate 7
 ```
 
-The PostgreSQL and MySQL images are pinned by tag and digest in [`POSTGRES_IMAGE`](POSTGRES_IMAGE)
-and [`MYSQL_IMAGE`](MYSQL_IMAGE) (files, so Renovate's custom manager can bump them;
-`conformance/scripts/validate-corpus.sh` checks them).
+The PostgreSQL and MySQL images are pinned by tag in [`POSTGRES_IMAGE`](POSTGRES_IMAGE)
+and [`MYSQL_IMAGE`](MYSQL_IMAGE) (files, so Renovate's custom manager can bump them).

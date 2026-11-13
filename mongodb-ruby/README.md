@@ -314,7 +314,7 @@ No suite starts a PDP.
   plan is fetched through the Cerbos Ruby SDK's client from an in-process stub PDP
   (`spec/support/stub_pdp.rb`) that answers with the recorded plan, so the adapter reads the SDK's
   output types.
-  `scripts/test.sh` starts the server in Docker, pinned by tag and digest, on a port Docker chooses.
+  `scripts/test.sh` starts the server in Docker, pinned by tag, on a port Docker chooses.
 - `spec/mongoid_spec.rb` asserts, offline, that the Mongoid criteria's selector is the emitted
   filter for every corpus case, and that a bare `where` is not.
 - `spec/adapter_contract_spec.rb` covers what the corpus cannot vary: `value_parser`, callable

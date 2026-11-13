@@ -15,7 +15,7 @@ set -euo pipefail
 SQLALCHEMY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "${SQLALCHEMY_DIR}/.." && pwd)"
 # Ubuntu 24.04 is what ubuntu-latest runs; its libsqlite3 is the SQLite the workflow's Python uses.
-UBUNTU_IMAGE="ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55"
+UBUNTU_IMAGE="ubuntu:24.04"
 
 docker run --rm -v "${REPO_ROOT}:/repo:ro" -e PYTHONDONTWRITEBYTECODE=1 \
   -e PDM_BUILD_SCM_VERSION=0.0.0 "${UBUNTU_IMAGE}" bash -c '

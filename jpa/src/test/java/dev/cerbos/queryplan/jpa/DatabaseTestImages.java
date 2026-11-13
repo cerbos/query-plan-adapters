@@ -13,11 +13,7 @@ import java.nio.file.Path;
 
 /**
  * Database images for the adversarial suite, read from {@code jpa/POSTGRES_IMAGE} and
- * {@code jpa/MYSQL_IMAGE} so Renovate can bump them. Each reference carries a tag and a
- * digest; {@code validate-corpus.sh} checks both.
- *
- * <p>{@link DockerImageName} treats a {@code repo:tag@digest} reference as a different repository,
- * so it must be declared a compatible substitute for the module's expected image.
+ * {@code jpa/MYSQL_IMAGE} so Renovate can bump them.
  */
 final class DatabaseTestImages {
 

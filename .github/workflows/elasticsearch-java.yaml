@@ -38,7 +38,7 @@ jobs:
       matrix:
         java-version: ["17", "21"]
         # Files under elasticsearch-java/ holding the pinned image, so no image is restated here.
-        # The `_IMAGE` suffix is what validate-corpus.sh scans.
+        # The `_IMAGE` suffix is the file pattern renovate.json bumps.
         elasticsearch-image-file:
           - ELASTICSEARCH_IMAGE
           - ELASTICSEARCH_NEXT_IMAGE

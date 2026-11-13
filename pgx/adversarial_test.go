@@ -29,18 +29,8 @@ import (
 // this adapter cannot pass. No PDP is started: its answers are recorded. This file owns only the
 // PostgreSQL half — the schema, the mapping and the seeding; corpus_test.go reads the corpus.
 
-// The database container image, pinned by tag AND digest. A tag is mutable, so a tag-only pin
-// records an intent rather than a build; the adversarial suite is a differential whose
-// divergences are dialect behaviour, so "which build was this proved against" has to be
-// answerable from the repository alone. conformance/scripts/validate-corpus.sh asserts every
-// service image reference in the repository carries both halves.
-//
-// It lives in a file rather than in this constant because example/run.sh needs the same reference
-// and cannot read a Go constant, which is the same argument as langchain-chromadb/CHROMA_IMAGE and
-// mongoose/MONGO_IMAGE. A literal in each would be two copies, and validate-corpus.sh can only hold
-// one digest per TAG — nothing holds two tags equal, so moving this suite off 17-alpine would leave
-// the example behind, still pinned to a real build and still green. The `_IMAGE` suffix is what that
-// script's file scan looks for.
+// The database container image lives in a file because example/run.sh needs the same reference
+// and cannot read a Go constant.
 const postgresImageFile = "POSTGRES_IMAGE"
 
 func postgresImage(tb testing.TB) string {

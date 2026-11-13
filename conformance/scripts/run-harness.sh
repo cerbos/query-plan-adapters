@@ -39,7 +39,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CACHE_DIR="${QPA_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/query-plan-adapters}"
 # The JDK the JVM adapters build in when none is on PATH. A toolchain, not a service the harness
 # talks to, so it is pinned here rather than in an <adapter>/*_IMAGE file.
-TEMURIN_IMAGE="eclipse-temurin:21-jdk@sha256:3e3c176ffed168beb42c607be9bc1639b466cf00261a0fb04425562c9d0c5c2b"
+TEMURIN_IMAGE="eclipse-temurin:21-jdk"
 mkdir -p "${CACHE_DIR}"
 
 roster() {
