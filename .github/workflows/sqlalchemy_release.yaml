@@ -46,3 +46,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: sqlalchemy/dist/
+
+  github-release:
+    needs: release-sqla
+    permissions:
+      contents: write
+    uses: ./.github/workflows/github-release.yaml
+    with:
+      path: sqlalchemy

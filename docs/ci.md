@@ -30,7 +30,9 @@ filenames stable: npm trusted publishing is configured against them.
 Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` and `sequel/v*` -> RubyGems (each checks the tag against the gem's
 version), `efcore/v*` -> NuGet (trusted publishing, configured against `efcore-publish.yaml`, which checks the tag against the
 project's `<Version>`). Their publish workflows call the adapter's test workflow the same way and publish only after it
-passes. `ent/v*` and `pgx/v*` are Go
+passes. Every publish workflow then calls `github-release.yaml`, which creates the tag's GitHub release, listing the
+commits that touched the adapter's directory since its previous tag; it skips a tag that already has a release, and marks none
+as "Latest", since the repository releases many packages. `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository. `elasticsearch-java/v*`, `jpa/v*`, `spring-data/v*` and `exposed/v*` only run that adapter's CI
 workflow: none of those builds configures a Maven Central release (all are `publishToMavenLocal` only, and their `publishing` blocks
 say what wiring a release still needs), so no Maven Central publish is wired yet. `spring-data` depends on `cerbos-jpa` at the same

@@ -35,3 +35,11 @@ jobs:
       - run: npm ci
       - run: npm run build --if-present
       - run: npm publish
+
+  github-release:
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/github-release.yaml
+    with:
+      path: drizzle
