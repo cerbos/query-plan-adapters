@@ -35,27 +35,11 @@ jobs:
       # neither a pass nor a failure for the repo's load-bearing signal.
       fail-fast: false
       matrix:
-        # Pinned by tag AND digest. `supercharge/mongodb-github-action` took a bare version
-        # string and resolved `mongo:<version>` at run time, so the server a green run proved
-        # the adapter against was whatever the tag pointed at that morning — and the corpus
-        # discriminates server behaviour, which is the whole reason this dimension exists.
-        # Starting the container directly is what makes the digest expressible.
-        #
-        # The references themselves live in mongoose/MONGO_IMAGE and mongoose/MONGO_NEXT_IMAGE,
-        # so this dimension is a list of FILENAMES and no image is restated here. `npm run mongo`
-        # and mongoose/example/run.sh read MONGO_IMAGE too, and a matrix entry that drifted from
-        # it would prove the adapter against a different server than anyone reproducing a failure
-        # locally — the same argument as langchain-chromadb/CHROMA_IMAGE, which is the precedent
-        # this follows. A matrix value cannot be a `$(cat …)`, so the alternative was to restate
-        # the baseline here and leave the two copies free to name different TAGS:
-        # conformance/scripts/validate-corpus.sh holds every reference to one digest per tag, but
-        # nothing holds two tags equal.
-        #
-        # MONGO_IMAGE is the baseline: the server the adapter is developed against, and the only
-        # one the example runs. MONGO_NEXT_IMAGE is the forward-compatibility leg, deliberately a
-        # different major and read by nothing else. Both names end in `_IMAGE` because that suffix
-        # is what validate-corpus.sh's `--include='*_IMAGE'` scans; a `MONGO_IMAGE_NEXT` would be
-        # a pin nothing checks.
+        # The references live in mongoose/MONGO_IMAGE and mongoose/MONGO_NEXT_IMAGE, so this
+        # dimension is a list of FILENAMES and no image is restated here: `npm run mongo` and
+        # mongoose/example/run.sh read MONGO_IMAGE too. MONGO_IMAGE is the baseline, the only one
+        # the example runs; MONGO_NEXT_IMAGE is the forward-compatibility leg, a different major.
+        # Both names end in `_IMAGE` because that is the file pattern renovate.json bumps.
         mongodb-image-file:
           - MONGO_IMAGE
           - MONGO_NEXT_IMAGE

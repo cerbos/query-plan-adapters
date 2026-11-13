@@ -11,8 +11,7 @@
 #
 # It is started from the ADAPTER's compose file rather than a copy, so the backend this example
 # proves the packaging against is the one the adapter is developed and tested against, and the
-# image pin — tag AND digest, which conformance/scripts/validate-corpus.sh asserts on every service
-# image in the repository — stays in one place. The ports are the one thing overridden.
+# image pin stays in one place. The ports are the one thing overridden.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
 # document, which the shared runner diffs against demo/expected.json.

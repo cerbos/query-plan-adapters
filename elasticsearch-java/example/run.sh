@@ -76,9 +76,8 @@ if (( found_jar == 0 )); then
 fi
 
 # 3. The client version in build.gradle.kts and the server image must share a major: the 8.x
-#    client refuses a 9.x server. Strip the digest first, since it contains a colon.
-es_image_tag="${ES_IMAGE%%@*}"
-es_image_tag="${es_image_tag##*:}"
+#    client refuses a 9.x server.
+es_image_tag="${ES_IMAGE##*:}"
 es_client_version="$(sed -n 's/.*co\.elastic\.clients:elasticsearch-java:\([0-9][^"]*\)".*/\1/p' \
   "${EXAMPLE_DIR}/build.gradle.kts")"
 if [[ -z "${es_client_version}" ]]; then

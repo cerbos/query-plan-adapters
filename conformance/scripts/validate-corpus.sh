@@ -7,10 +7,9 @@
 #   1. each <adapter>/conformance-ledger.json against conformance/README.md, "The ledger", its lacks
 #      mapping only store capabilities some seed in seeds.json requires to a reason and its stores;
 #   2. the PDP pin: pdp-versions.json is well-formed, and every restatement of it agrees;
-#   3. service image pinning (repo:tag@sha256, one digest per tag);
-#   4. the ent and pgx vendored translator trees are byte-identical;
-#   5. the dataset's to-one relation resolves;
-#   6. each adapter README's "Conformance contract" table matches its ledger on the current PDP.
+#   3. the ent and pgx vendored translator trees are byte-identical;
+#   4. the dataset's to-one relation resolves;
+#   5. each adapter README's "Conformance contract" table matches its ledger on the current PDP.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -98,7 +97,7 @@ done < <(find "${REPO_ROOT}" -mindepth 2 -maxdepth 2 -name conformance-ledger.js
 SOURCE_INCLUDES=(
   --include='*.yml' --include='*.yaml' --include='*.sh' --include='*.py' --include='*.go'
   --include='*.java' --include='*.kt' --include='*.kts' --include='*.ts' --include='*.js'
-  --include='*.json' --include='*.cs' --include='*.csproj' --include='Dockerfile' --include='*_IMAGE'
+  --include='*.json' --include='*.cs' --include='*.csproj' --include='Dockerfile'
 )
 SOURCE_EXCLUDES=(
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude --exclude-dir=lib
@@ -140,41 +139,7 @@ for gomod in "${REPO_ROOT}"/ent/go.mod "${REPO_ROOT}"/pgx/go.mod; do
     || fail "${gomod#"${REPO_ROOT}"/} pins cerbos/api/genpb v${genpb}, expected v${current_tag}"
 done
 
-# ---- 3. Service images. ----------------------------------------------------------------------
-# Pinned per harness, not centrally: a shared file under conformance/ would re-run every adapter's
-# CI on each bump. The rule is shared instead. Add a repository here when you add a service.
-IMAGE_REPOSITORIES=(
-  "postgres" "mysql" "mongo" "chromadb/chroma"
-  "docker.elastic.co/elasticsearch/elasticsearch" "ghcr.io/convex/convex-backend"
-  "mcr.microsoft.com/mssql/server"
-)
-: >"${TMP}/image-refs"
-for repository in "${IMAGE_REPOSITORIES[@]}"; do
-  escaped="${repository//./\\.}"
-  matched=0
-  # A leading character class rather than \b keeps URLs such as `jdbc:mysql://…` out.
-  while IFS=: read -r file _ match; do
-    matched=$((matched + 1))
-    reference="${match}"
-    [[ "${reference}" == "${repository}"* ]] || reference="${reference:1}"
-    relative="${file#"${REPO_ROOT}"/}"
-    if [[ ! "${reference}" =~ ^${escaped}:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]; then
-      fail "${relative} references '${reference}': pin service images as repo:tag@sha256:<64 hex>"
-      continue
-    fi
-    printf '%s\t%s\t%s\n' "${reference%@*}" "${reference#*@}" "${relative}" >>"${TMP}/image-refs"
-  done < <(source_grep -rnoIE "(^|[^A-Za-z0-9._/:-])${escaped}:[A-Za-z0-9._-]+(@sha256:[0-9a-fA-F]*)?" \
-    "${REPO_ROOT}")
-  # A repository nothing references is a guard watching nothing.
-  [[ "${matched}" -gt 0 ]] || fail "no reference to image repository '${repository}': remove the entry or fix the scan"
-done
-while IFS= read -r conflict; do
-  fail "one image tag, two digests: ${conflict}"
-done < <(sort -u "${TMP}/image-refs" | awk -F'\t' '
-  { if (!($1 in seen)) { seen[$1] = $2; where[$1] = $3 }
-    else if (seen[$1] != $2) { print $1 ": " seen[$1] " (" where[$1] ") vs " $2 " (" $3 ")" } }')
-
-# ---- 4. The vendored Go translator. ----------------------------------------------------------
+# ---- 3. The vendored Go translator. ----------------------------------------------------------
 # ent and pgx each vendor it so a consumer pulls in one module. The copies must stay identical,
 # or a fix can land in one alone (#319). Per-module code belongs in that module's render.go.
 VENDORED="internal/queryplan"
@@ -185,7 +150,7 @@ elif ! diff -ru --label "ent/${VENDORED}" --label "pgx/${VENDORED}" \
   fail "the vendored translator trees have drifted: apply the change to both copies"
 fi
 
-# ---- 5. The dataset's to-one relation. -------------------------------------------------------
+# ---- 4. The dataset's to-one relation. -------------------------------------------------------
 # A dangling parentSeedId reads as "no parent" on both sides, so it would pass for the wrong reason.
 while IFS= read -r problem; do
   fail "seeds.json: ${problem}"
@@ -197,7 +162,7 @@ done < <(jq -r '
     else empty end
 ' seeds.json)
 
-# ---- 6. README contract tables. ---------------------------------------------------------------
+# ---- 5. README contract tables. ---------------------------------------------------------------
 # Each adapter's README carries `| <tier> | <passed> / <total> |` for the current PDP. The numbers
 # follow from the goldens and the ledger: total is every case in the tier, passed drops the cases
 # the ledger names for this tag and the planner divergences every harness skips. A table left

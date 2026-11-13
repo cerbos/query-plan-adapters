@@ -147,9 +147,8 @@ projection is recorded, so a field the harness forgets to store shows up as a wr
 a vacuous pass.
 
 Every service image a harness starts is pinned in one constant file that adapter's suites share,
-`<adapter>/<SERVICE>_IMAGE`, as `repo:tag@sha256:...`, never under `conformance/`, since a change
-there re-runs every adapter's workflow. `scripts/validate-corpus.sh` enforces the pin format; add a
-new service's repository to its `IMAGE_REPOSITORIES`.
+`<adapter>/<SERVICE>_IMAGE`, as `repo:tag`, never under `conformance/`, since a change there re-runs
+every adapter's workflow. Renovate bumps those files and the quoted pins in the adversarial suites.
 
 ### The ledger — `<adapter>/conformance-ledger.json`
 

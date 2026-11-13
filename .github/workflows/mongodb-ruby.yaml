@@ -37,8 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         # The MongoDB server is a real one, started by scripts/test.sh from the pinned reference in
-        # the named file — tag AND digest, which conformance/scripts/validate-corpus.sh holds to one
-        # digest per tag repo-wide. MONGO_IMAGE is the baseline, the server the example also runs;
+        # the named file. MONGO_IMAGE is the baseline, the server the example also runs;
         # MONGO_NEXT_IMAGE is the forward-compatibility leg. Listed as FILENAMES so no image is
         # restated here, where a matrix value could drift from the file a local run reads.
         mongodb-image-file:

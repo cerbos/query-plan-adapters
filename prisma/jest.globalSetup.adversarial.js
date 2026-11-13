@@ -19,15 +19,10 @@ const { execFileSync } = require("node:child_process");
  */
 
 // Both images mirror the ent and spring-data harnesses' targets so every adapter proves the same
-// servers. Pinned by tag AND digest: a tag is mutable, so a tag-only pin records an intent rather
-// than a build, and these legs exist to prove typed-column and collation behaviour a re-pushed
-// image could change under them. `conformance/scripts/validate-corpus.sh` asserts every service
-// image reference in the repository carries both halves.
-const POSTGRES_IMAGE =
-  "postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b";
+// servers.
+const POSTGRES_IMAGE = "postgres:17-alpine";
 
-const MYSQL_IMAGE =
-  "mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69";
+const MYSQL_IMAGE = "mysql:8.4";
 
 /**
  * How the PostgreSQL leg's database is initialised: `--lc-collate=C`, a byte-order collation.

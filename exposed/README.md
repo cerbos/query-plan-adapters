@@ -803,8 +803,8 @@ in one of them. Treat them as constraints on the policies you write.
 
 These are not the same test four times, which is the point: collation, LIKE escaping, cast targets
 and parameter typing are all translator behaviour, so a dialect the harness does not execute is a
-dialect this adapter does not cover. The PostgreSQL and MySQL servers are pinned by tag **and**
-digest in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE), read at runtime and
+dialect this adapter does not cover. The PostgreSQL and MySQL servers are pinned by tag
+in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE), read at runtime and
 declared as inputs of the `test` task. Files rather than Kotlin constants for one reason:
 `renovate.json`'s custom manager bumps `<SERVICE>_IMAGE` files and nothing else, so a reference held
 in source would never get a Renovate PR.

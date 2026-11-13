@@ -674,7 +674,7 @@ JDK 17+; sources compile with `options.release = 17`. Gradle comes from the comm
 | `ElasticsearchSurfaceTest` | what a real server does with emitted clauses, and the store facts the corpus reasons cite — unindexed empty arrays (nested and flat), JSON nulls and null elements, an indexed empty string, analyzed fields, Lucene regex including whole-field alternation, wildcard escaping, `date` vs `date_nanos` precision | Elasticsearch (Testcontainers) |
 | `ElasticsearchQueryPlanAdapterTest` | shapes no policy can produce — malformed operands, caller-supplied arguments, literal validation — plus a few labelled shapes the corpus does not carry yet | nothing |
 
-The server is pinned in [`ELASTICSEARCH_IMAGE`](ELASTICSEARCH_IMAGE) (`repo:tag@sha256:...`), read
+The server is pinned in [`ELASTICSEARCH_IMAGE`](ELASTICSEARCH_IMAGE) (`repo:tag`), read
 by the suites and by [`example/run.sh`](example/run.sh). To run against the next major, which the
 example does not do (its client must match the baseline major):
 
