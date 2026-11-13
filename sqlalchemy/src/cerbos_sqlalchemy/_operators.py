@@ -46,6 +46,7 @@ from sqlalchemy.sql.expression import ColumnElement, Grouping
 from sqlalchemy.sql.functions import FunctionElement
 from sqlalchemy.sql.visitors import InternalTraversal
 
+from cerbos_sqlalchemy._nullness import is_not_null, is_null
 from cerbos_sqlalchemy._regex import (
     AllCharactersIn,
     Literals,
@@ -561,7 +562,7 @@ def _sqlite_string_match(element, compiler, **kw):
         # hex() reads NULL as '', so NULL is propagated by hand.
         "ends": case(
             (
-                and_(receiver.is_not(None), needle.is_not(None)),
+                and_(is_not_null(receiver), is_not_null(needle)),
                 func.hex(receiver).like(literal("%", String) + func.hex(needle)),
             )
         ),
@@ -659,7 +660,7 @@ def _matches(receiver: Any, pattern: Any) -> Any:
                 )
             )
     matched = or_(*conditions) if conditions else false()
-    return case((receiver.isnot(None), matched))
+    return case((is_not_null(receiver), matched))
 
 
 _ASCII_LOWER = "abcdefghijklmnopqrstuvwxyz"
@@ -704,7 +705,7 @@ def _upper_ascii_equals(receiver: Any, text: str) -> Any:
     subquery.
     """
     if any(ch in _ASCII_LOWER for ch in text):
-        return case((receiver.isnot(None), false()))
+        return case((is_not_null(receiver), false()))
     letters = "".join(sorted({ch.lower() for ch in text} & set(_ASCII_LOWER)))
     return _eq(_replace_ascii_letters(receiver, letters), text)
 
@@ -740,7 +741,7 @@ class _UpperAsciiString(String):
                 )
             if op in (operators.is_, operators.is_not) and target is None:
                 return (
-                    receiver.is_(None) if op is operators.is_ else receiver.isnot(None)
+                    is_null(receiver) if op is operators.is_ else is_not_null(receiver)
                 )
             return super().operate(op, *other, **kwargs)
 
@@ -797,7 +798,7 @@ def _string_cast(c: Any) -> Any:
         )
     if isinstance(type_, Boolean):
         return case(
-            (c.is_(None), null()),
+            (is_null(c), null()),
             (c, literal_column("'true'", String)),
             else_=literal_column("'false'", String),
         )
@@ -1028,7 +1029,7 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
         result = literal(operator == "ne") if operator in ("eq", "ne") else _unknown()
         for value in (left, right):
             if hasattr(value, "is_"):
-                result = case((value.isnot(None), result))
+                result = case((is_not_null(value), result))
         return result
     left_is_ieee = isinstance(left, IEEEConstant)
     right_is_ieee = isinstance(right, IEEEConstant)
@@ -1045,7 +1046,7 @@ def _compare_leaf(operator: str, left: Any, right: Any) -> Any:
             if hasattr(other, "is_"):
                 # NULL stays UNKNOWN, as CEL errors on a missing attribute.
                 return case(
-                    (other.is_(None), null()),
+                    (is_null(other), null()),
                     else_=(operator == "ne"),
                 )
             raise UnsupportedPlanError(
@@ -1127,9 +1128,9 @@ def _in(c: Any, values: Any) -> Any:
             predicates.append(c.in_(comparable))
     elif non_nulls and hasattr(c, "isnot"):
         # All members dropped: FALSE if present, NULL if absent, like `c IN (...)`.
-        predicates.append(case((c.isnot(None), false())))
+        predicates.append(case((is_not_null(c), false())))
     if len(non_nulls) != len(members):
-        predicates.append(c.is_(None))
+        predicates.append(is_null(c))
     if not predicates:
         return false()
     return or_(*predicates)
@@ -1243,7 +1244,7 @@ def _ancestor_of(left: Any, right: Any) -> Any:
         parts = descendent_value.split(delimiter)
         prefixes = [delimiter.join(parts[:i]) for i in range(1, len(parts))]
         if not prefixes:
-            return case((ancestor_value.isnot(None), false()))
+            return case((is_not_null(ancestor_value), false()))
         return _exact_in(ancestor_value, prefixes)
     if isinstance(ancestor_value, str):
         return _string_match(

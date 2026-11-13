@@ -6,7 +6,7 @@ authors = [
 ]
 dependencies = [
     "sqlalchemy>=1.4",
-    "cerbos>=0.10.4",
+    "cerbos>=0.16.1",
 ]
 requires-python = ">=3.10"
 classifiers = [
@@ -25,7 +25,7 @@ Repository = "https://github.com/cerbos/query-plan-adapters/tree/main/sqlalchemy
 
 [project.optional-dependencies]
 testcontainers = [
-    "testcontainers>=3.5.3",
+    "testcontainers>=4.13.3",
 ]
 
 [build-system]

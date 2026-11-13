@@ -34,6 +34,7 @@ from cerbos_sqlalchemy._null_conventions import (
     omitted_null_comparison,
     with_null_conventions,
 )
+from cerbos_sqlalchemy._nullness import is_not_null, is_null
 from cerbos_sqlalchemy._operators import (
     FOLDABLE_COLLECTION_OPERATORS,
     MIRRORED_OPERATORS,
@@ -359,7 +360,7 @@ class Translator:
                     )
                 translated = self.value(element)
             if isinstance(translated, (ColumnElement, InstrumentedAttribute)):
-                guards.append(translated.isnot(None))
+                guards.append(is_not_null(translated))
             elif not isinstance(translated, (str, bool, int, float, type(None))):
                 raise UnsupportedPlanError(
                     "a constructed list element must be a scalar attribute or "
@@ -497,7 +498,7 @@ class Translator:
         if not predicates:
             return count
         return case(
-            (or_(*(predicate.is_(None) for predicate in predicates)), null()),
+            (or_(*(is_null(predicate) for predicate in predicates)), null()),
             else_=count,
         )
 
@@ -907,7 +908,7 @@ class Translator:
             ):
                 kept = [member for member in haystack.value if member is not None]
                 if not kept:
-                    return case((self._resolve(needle).isnot(None), false()))
+                    return case((is_not_null(self._resolve(needle)), false()))
                 operands = (needle, Value(kept))
 
         if self._reads_declared_index(operands):
@@ -980,7 +981,7 @@ class Translator:
                 f"Cannot translate has({name}): it is not mapped to a column"
             )
         if self._is_omitted_null(name):
-            return column.is_not(None)
+            return is_not_null(column)
         return true()
 
     def _with_null_conventions(
@@ -1084,7 +1085,7 @@ def _combine_macro(operator: str, predicates: list[Any]) -> Any:
         (case((predicate, 1), else_=0) for predicate in booleans), literal(0, Integer)
     )
     return case(
-        (or_(*(predicate.is_(None) for predicate in booleans)), null()),
+        (or_(*(is_null(predicate) for predicate in booleans)), null()),
         else_=count == 1,
     )
 
