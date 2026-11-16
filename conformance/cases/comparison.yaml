@@ -10,6 +10,13 @@ cases:
   condition:
     match:
       expr: R.attr.aString == R.attr.aOptionalString
+- id: 'comparison/equals/fractional-literal-against-whole-double'
+  tier: adversarial
+  intent: 'A double attribute compared == a fractional literal (aDouble == 0.3), where i5 holds -0.0.'
+  trap: 'A store that keeps a whole-valued double as an integer and compares a fractional literal with it truncated toward zero, as Chroma does, returns i5 (0 == trunc(0.3)). Found by fuzzing (fuzz/s89/0463, langchain-chromadb).'
+  condition:
+    match:
+      expr: 'R.attr.aDouble == 0.3'
 - id: 'comparison/equals/list-holding-nan'
   tier: adversarial
   intent: 'A one-element list holding aDouble / 0.0 compared with itself ([aDouble / 0.0] == [aDouble / 0.0]).'
@@ -150,6 +157,13 @@ cases:
   condition:
     match:
       expr: R.attr.aNumber <= 2
+- id: 'comparison/less-or-equal/fractional-literal-against-whole-double'
+  tier: adversarial
+  intent: 'A double attribute compared <= a negative fractional literal (aDouble <= -0.5), where i5 holds -0.0.'
+  trap: 'Truncating the literal toward zero against a whole-valued double stored as an integer compares i5 with 0 and returns it.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble <= -0.5'
 - id: 'comparison/less-or-equal/infinity-from-ternary'
   tier: adversarial
   intent: 'A ternary yielding +Infinity or -Infinity compared <= 0.5.'

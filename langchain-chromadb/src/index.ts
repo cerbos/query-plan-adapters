@@ -266,8 +266,21 @@ function isPlanComparison(operator: string): boolean {
 
 /** `{ field: { $op: literal } }`, once the literal has passed the comparison's validation. */
 function emit(field: string, operator: string, value: Value): Where {
-  const { chroma, literal } = COMPARISONS.get(operator)!;
+  const { chroma, literal, ordered } = COMPARISONS.get(operator)!;
   const validated = literal(value, operator);
+
+  if ((operator === "eq" || ordered) && isFractional(validated)) {
+    return fractional(field, operator, validated);
+  }
+
+  if (operator === "in" && Array.isArray(validated) && validated.some(isFractional)) {
+    const whole = validated.filter((v) => !isFractional(v));
+    const clauses = validated.filter(isFractional).map((v) => fractional(field, "eq", v));
+
+    if (whole.length > 0) clauses.unshift(emit(field, operator, whole));
+
+    return clauses.length === 1 ? clauses[0]! : { $or: clauses };
+  }
 
   if (Array.isArray(validated)) {
     // Chroma rejects a `$in`/`$nin` list whose values are not all one type, so a mixed CEL list
@@ -285,6 +298,40 @@ function emit(field: string, operator: string, value: Value): Where {
   }
 
   return clause(field, chroma, validated);
+}
+
+function isFractional(value: ChromaLiteral | ChromaLiteral[]): value is number {
+  return isNumber(value) && !Number.isInteger(value);
+}
+
+/**
+ * `field <operator> value` for a fractional `value`. The pinned server compares a float literal
+ * with integer metadata against the literal truncated toward zero (`$eq: 0.3` matches a stored 0),
+ * and the client writes a whole-valued double as integer metadata, because JSON has no `2.0`. So
+ * the literal is only compared between the integers around it, which compare exactly with both.
+ */
+function fractional(field: string, operator: string, value: number): Where {
+  const below = Math.floor(value);
+  const above = Math.ceil(value);
+
+  const between: Where = {
+    $and: [
+      clause(field, "$gt", below),
+      clause(field, "$lt", above),
+      clause(field, COMPARISONS.get(operator)!.chroma, value),
+    ],
+  };
+
+  switch (operator) {
+    case "gt":
+    case "ge":
+      return { $or: [clause(field, "$gte", above), between] };
+    case "lt":
+    case "le":
+      return { $or: [clause(field, "$lte", below), between] };
+    default:
+      return between;
+  }
 }
 
 /** `{ field: { operator: value } }`. */
