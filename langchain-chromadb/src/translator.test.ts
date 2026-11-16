@@ -332,13 +332,21 @@ describe("what an emitted filter may contain", () => {
 
       return translated.has(id) === (raised === undefined)
         ? []
-        : [{ id, operator: raised instanceof UnsupportedOperatorError ? raised.operator : undefined }];
+        : [
+            {
+              id,
+              operator: raised instanceof UnsupportedOperatorError ? raised.operator : undefined,
+              fractional: raised instanceof Error && /fractional threshold/.test(raised.message),
+            },
+          ];
     });
 
     expect(changed.length).toBeGreaterThan(0);
     expect(
       changed.filter(
-        ({ id, operator }) => !translated.has(id) || operator !== "ne",
+        ({ id, operator, fractional }) =>
+          !translated.has(id) ||
+          !(operator === "ne" || (fractional && ["lt", "le", "gt", "ge"].includes(operator!))),
       ),
     ).toEqual([]);
   });
@@ -386,11 +394,17 @@ describe("what an emitted filter may contain", () => {
    * never holds. The adapter refuses it unless the mapping declares `numericType: "float"`.
    */
   test("an ordered comparison binds a fractional threshold only where float is declared", () => {
+    const floats = new Set(
+      Object.values(FIELD_NAME_MAPPER).flatMap((entry) =>
+        !isString(entry) && entry.numericType === "float" ? [entry.field] : [],
+      ),
+    );
     const fractional = ALL_COMPARISONS.filter(
-      ({ operator, value }) =>
+      ({ operator, value, field }) =>
         ["$lt", "$lte", "$gt", "$gte"].includes(operator) &&
         isNumber(value) &&
-        !Number.isInteger(value),
+        !Number.isInteger(value) &&
+        !floats.has(field),
     ).map(({ action, field }) => `${action}: ${field}`);
 
     expect(fractional).toEqual([]);
@@ -485,7 +499,12 @@ describe("mapper forms", () => {
     );
     expect(await translate(action, { fieldNameMapper: asFloat })).toEqual({
       kind: PlanKind.CONDITIONAL,
-      filters: { aNumber: { $gte: 1.5 } },
+      filters: {
+        $or: [
+          { aNumber: { $gte: 2 } },
+          { $and: [{ aNumber: { $gt: 1 } }, { aNumber: { $lt: 2 } }, { aNumber: { $gte: 1.5 } }] },
+        ],
+      },
     });
   });
 });

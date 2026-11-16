@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a7",
+    "h4"
+  ],
+  "degenerateReason": null,
+  "id": "comparison/equals/fractional-literal-against-whole-double",
+  "intent": "A double attribute compared == a fractional literal (aDouble == 0.3), where i5 holds -0.0.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aDouble"
+          },
+          {
+            "value": 0.3
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "comparison/equals/fractional-literal-against-whole-double",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aDouble == 0.3"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A store that keeps a whole-valued double as an integer and compares a fractional literal with it truncated toward zero, as Chroma does, returns i5 (0 == trunc(0.3)). Found by fuzzing (fuzz/s89/0463, langchain-chromadb)."
+}

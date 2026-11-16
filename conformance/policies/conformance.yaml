@@ -1506,6 +1506,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString == R.attr.aOptionalString
+    # comparison/equals/fractional-literal-against-whole-double
+    - actions:
+        - comparison/equals/fractional-literal-against-whole-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble == 0.3
     # comparison/equals/list-holding-nan
     - actions:
         - comparison/equals/list-holding-nan
@@ -1686,6 +1695,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber <= 2
+    # comparison/less-or-equal/fractional-literal-against-whole-double
+    - actions:
+        - comparison/less-or-equal/fractional-literal-against-whole-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble <= -0.5
     # comparison/less-or-equal/infinity-from-ternary
     - actions:
         - comparison/less-or-equal/infinity-from-ternary
@@ -2829,6 +2847,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.owner in R.attr.tagNames
+    # membership/in/list-mixing-whole-and-fractional-doubles
+    - actions:
+        - membership/in/list-mixing-whole-and-fractional-doubles
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble in [0.0, 0.3]
     # membership/in/list-mixing-literal-and-expression
     - actions:
         - membership/in/list-mixing-literal-and-expression

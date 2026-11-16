@@ -86,7 +86,7 @@ interface FieldNameMapperConfig {
 | --- | --- |
 | `field` | The metadata key. |
 | `required: true` | Asserts the key is present on **every** record. Required to permit `$ne` and `$nin`: Chroma matches records missing the key, whereas Cerbos denies a missing attribute. Declaring it for a key that can be absent reintroduces that over-grant. |
-| `numericType: "float"` | The key is always stored as floating-point metadata. Required for ordered comparisons against a fractional threshold, because Chroma distinguishes integer from float metadata. |
+| `numericType: "float"` | The key holds doubles. Required for ordered comparisons against a fractional threshold. The client writes a whole-valued double (`2.0`, `-0.0`) as integer metadata, and Chroma compares a fractional literal with integer metadata truncated toward zero, so every fractional comparison is bounded by the integers either side of the literal, which compare exactly with both. |
 | `numericType: "integer"` | Every value stored under the key is an integer. An inequality then needs no `$ne` and no `required`: `x != 5` becomes `$or` of `$lt: 5` and `$gt: 5`, and `x != "5"` (a string or boolean literal, which no integer equals) becomes `$or` of `$lt: 0` and `$gte: 0`. A fractional literal (`x != 2.5`) still takes `$ne` and needs `required: true`, because Chroma compares a fractional threshold with integer metadata inexactly. |
 | `valueType: "boolean"` | Every value stored under the key is a boolean. An inequality against a boolean then needs no `$ne` and no `required`: `x != true` and `!x` become `$eq: false`. Cannot be combined with `numericType`. |
 | `valueType: "json"` | The key holds the attribute as JSON text (`JSON.stringify(value)`): a list, a map, a null, or a scalar, exactly as the application sends it to the PDP. Chroma metadata cannot hold a list with a null element or an empty list, a map, or a null, and this is how such an attribute reaches the [post-filter](#post-filtering), which parses it. No `Where` clause reads it: a comparison against it is refused, or answered by the post-filter under `allowPostFilter`. A reference below the attribute (`R.attr.doc.tags`) resolves through the entry for `R.attr.doc`. Cannot be combined with `numericType`. |
@@ -384,7 +384,7 @@ caller must. Passed cases on the current PDP, 0.57.0, out of every golden case i
 | --- | --- |
 | core | 32 / 32 |
 | extended | 96 / 110 |
-| adversarial | 479 / 547 |
+| adversarial | 482 / 550 |
 
 Without `allowPostFilter`, the 384 cases the post-filter answers throw `UnsupportedOperatorError`
 instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 78

@@ -34,6 +34,13 @@ cases:
   condition:
     match:
       expr: R.attr.owner in R.attr.tagNames
+- id: 'membership/in/list-mixing-whole-and-fractional-doubles'
+  tier: adversarial
+  intent: 'A double attribute in a list holding a whole and a fractional double (aDouble in [0.0, 0.3]).'
+  trap: 'i5 (-0.0) equals 0.0 and a7 and h4 equal 0.3. A store that types 0.0 as an integer and 0.3 as a float rejects the mixed list, as Chroma does; one that truncates 0.3 against integer metadata matches 0 twice. Found by fuzzing (fuzz/s89/0176 and 0195, langchain-chromadb).'
+  condition:
+    match:
+      expr: 'R.attr.aDouble in [0.0, 0.3]'
 - id: 'membership/in/list-mixing-literal-and-expression'
   tier: extended
   intent: 'Membership in a list literal whose elements mix a literal and an expression (aString in ["one", aOptionalString + "ret"]).'

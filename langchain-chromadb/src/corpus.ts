@@ -415,8 +415,9 @@ export const FIELD_NAME_MAPPER: ConformanceMapper =
       field: "aOptionalString",
       required: false,
     },
-    // NULL for some seeds (no metadata key), so `required: false`.
-    "request.resource.attr.aDouble": { field: "aDouble", required: false },
+    // NULL for some seeds (no metadata key), so `required: false`. i1, i2, i5 and g1 are whole-valued,
+    // so the client stores them as integer metadata.
+    "request.resource.attr.aDouble": { field: "aDouble", numericType: "float", required: false },
     // RFC 3339 strings from derived-fields.json, NULL for some seeds (no metadata key). No `Where`
     // clause reads them — Chroma's `$lt`/`$gt` reject a string — but the post-filter compares them
     // through `timestamp()` and as strings.
