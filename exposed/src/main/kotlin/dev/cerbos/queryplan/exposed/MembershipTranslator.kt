@@ -157,8 +157,13 @@ internal class MembershipTranslator(private val translation: Translation) {
      * one alone is a definite mismatch; under OMITTED, plain `=`'s UNKNOWN is CEL's error.
      */
     private fun attributeInAttribute(memberVar: String, collectionVar: String, scope: Scope): Op<Boolean> {
-        val collection = scope.resolve(collectionVar) as? Resolution.Collection
-            ?: throw RelationRefusals.membershipNeedsRelation("in", collectionVar)
+        val collection = when (val haystack = scope.resolve(collectionVar)) {
+            is Resolution.Collection -> haystack
+            // `in` over a string, number or boolean is CEL's no-overload error on every row.
+            is Resolution.Scalar ->
+                if (ScalarColumnTypes.familyOf(haystack.column) != null) return TriLogic.unknown()
+                else throw RelationRefusals.membershipNeedsRelation("in", collectionVar)
+        }
         val member = scope.scalar(memberVar)
         val element = collection.tail.element
             ?: throw RelationRefusals.noElementColumn(collection.variable, collection.tail)

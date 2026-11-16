@@ -1,14 +1,19 @@
 package dev.cerbos.queryplan.exposed
 
+import dev.cerbos.queryplan.exposed.sql.CountChars
 import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import org.jetbrains.exposed.v1.core.CustomFunction
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Expression
+import org.jetbrains.exposed.v1.core.GreaterEqOp
+import org.jetbrains.exposed.v1.core.IntegerColumnType
 import org.jetbrains.exposed.v1.core.IsNullOp
+import org.jetbrains.exposed.v1.core.LessEqOp
 import org.jetbrains.exposed.v1.core.LikeEscapeOp
 import org.jetbrains.exposed.v1.core.NeqOp
 import org.jetbrains.exposed.v1.core.Op
+import org.jetbrains.exposed.v1.core.QueryParameter
 import org.jetbrains.exposed.v1.core.TextColumnType
 import java.util.TreeSet
 
@@ -77,6 +82,18 @@ internal class RegexTranslator(private val translation: Translation) {
             end = true
         }
         if (parts.any(::containsAnchor)) throw unsupported(pattern, "an anchor inside the pattern")
+        trimUnanchoredEnds(parts, start, end)
+
+        // ^.{n,m}$ and ^.{n,}$: a length in code points, on one line.
+        val run = parts.singleOrNull()
+        if (start && end && run is Node.Rep && run.node is Node.Dot && run.min > 1) {
+            val length = CountChars(column)
+            val bounds = listOfNotNull(
+                GreaterEqOp(length, intParam(run.min)),
+                if (run.max >= 0) LessEqOp(length, intParam(run.max)) else null,
+            )
+            return TriLogic.and(TriLogic.and(bounds), TriLogic.not(like(column, "%\n%")))
+        }
 
         // ^[set]*$ and ^[set]+$: every character is a member.
         val only = parts.singleOrNull()
@@ -136,6 +153,27 @@ internal class RegexTranslator(private val translation: Translation) {
         // RE2's . excludes a newline, and no finite part holds one.
         return TriLogic.and(shape, TriLogic.not(like(column, "%\n%")))
     }
+
+    /**
+     * An unanchored end can start or stop the match anywhere, so a repetition there needs only its
+     * minimum: a text holding a match of `x*a+b` holds one of `ab`.
+     */
+    private fun trimUnanchoredEnds(parts: MutableList<Node>, start: Boolean, end: Boolean) {
+        while (!start && parts.isNotEmpty()) {
+            val first = parts.first() as? Node.Rep ?: break
+            if (first.min == first.max) break
+            parts.removeAt(0)
+            if (first.min > 0) parts.add(0, Node.Rep(first.node, first.min, first.min))
+        }
+        while (!end && parts.isNotEmpty()) {
+            val last = parts.last() as? Node.Rep ?: break
+            if (last.min == last.max) break
+            parts.removeAt(parts.size - 1)
+            if (last.min > 0) parts.add(Node.Rep(last.node, last.min, last.min))
+        }
+    }
+
+    private fun intParam(value: Int): Expression<Int> = QueryParameter(value, IntegerColumnType())
 
     private fun like(column: Expression<*>, pattern: String): Op<Boolean> =
         LikeEscapeOp(column, ExactString.param(pattern), true, LikeEscaping.ESCAPE_CHAR)

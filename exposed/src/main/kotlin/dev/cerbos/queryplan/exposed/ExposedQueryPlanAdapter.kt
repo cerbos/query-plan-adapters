@@ -51,7 +51,7 @@ public object ExposedQueryPlanAdapter {
     }
 
     private fun conditional(planned: Operand, options: Options): QueryPlanFilter {
-        val condition = PositionalRead.rewrite(PlanRewrites.selectMapKeys(planned, options.mapping), options.mapping)
+        val condition = PositionalRead.rewrite(PlanRewrites.selectMapKeys(PlanRewrites.withoutDyn(planned), options.mapping), options.mapping)
         NullOperandScan.assertTranslatable(condition, options)
         val translation = Translation(options)
         return QueryPlanFilter.Conditional(translation.walker.traverse(condition, translation.rootScope()))

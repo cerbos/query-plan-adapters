@@ -48,6 +48,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
         if (operator !in COMPARISON_OPERATORS && operator !in STRING_MATCH_OPERATORS) {
             throw ScalarRefusals.unsupportedOperator(operator)
         }
+        orderedTextAgainstNumber(operator, operands, scope)?.let { return it }
         translation.ternary.tryTernaryComparison(operator, operands, scope)?.let { return it }
 
         val normalized = NormalizedBinary.of(operator, operands)
@@ -350,6 +351,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
                 return upperAsciiComparison(NormalizedBinary.mirror(operator), right, left.value(), scope)
             }
             if (left is Resolved.TextCast || right is Resolved.TextCast) {
+                // string() has no overload for a list or a map: an error on every row.
+                val casts = listOf(left, right).filterIsInstance<Resolved.TextCast>()
+                if (casts.any { scope.resolve(it.variable) is Resolution.Collection }) return TriLogic.unknown()
                 return textCastComparison(operator, left, right, operands, scope)
             }
             // Fold: `field op add(value, value)`. The folded constant compares like any plan
@@ -442,6 +446,52 @@ internal class ComparisonTranslator(private val translation: Translation) {
         if (!isColumnShiftedByFiniteConstant(arithmetic)) return false
         val target = scope.resolve(field.variable) as? Resolution.Scalar ?: return false
         return ScalarColumnTypes.kindOf(target.column) == ScalarColumnKind.TEXT
+    }
+
+    /**
+     * A text column ordered against number constants, or arithmetic over them: CEL has no ordering
+     * between a string and a finite number, so it raises on every row, while a NaN orders false
+     * against anything, a string included. `null` for any other shape, an infinity among them.
+     */
+    private fun orderedTextAgainstNumber(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
+        if (operator !in ORDERING_OPERATORS || operands.size != 2) return null
+        for (i in 0..1) {
+            val field = operands[i]
+            if (field.nodeCase != Operand.NodeCase.VARIABLE) continue
+            val number = constantDouble(operands[1 - i]) ?: continue
+            val target = scope.resolve(field.variable) as? Resolution.Scalar ?: continue
+            if (ScalarColumnTypes.kindOf(target.column) != ScalarColumnKind.TEXT) continue
+            return when {
+                number.isFinite() -> TriLogic.unknown()
+                number.isNaN() && !translation.leaf.isExplicitNull(target) ->
+                    TriLogic.baseUnlessUnknown(Op.FALSE, IsNullOp(target.expression))
+                else -> null
+            }
+        }
+        return null
+    }
+
+    /** The IEEE value of number constants under `+ - * /`, or `null` for anything else. */
+    private fun constantDouble(operand: Operand): Double? = when (operand.nodeCase) {
+        Operand.NodeCase.VALUE ->
+            if (operand.value.kindCase == com.google.protobuf.Value.KindCase.NUMBER_VALUE) operand.value.numberValue else null
+        Operand.NodeCase.EXPRESSION -> {
+            val expression = operand.expression
+            val values = if (expression.operandsCount == 2) expression.operandsList.map(::constantDouble) else emptyList()
+            if (values.size != 2 || values.any { it == null }) {
+                null
+            } else {
+                val (a, b) = values.map { it!! }
+                when (expression.operator) {
+                    "add" -> a + b
+                    "sub" -> a - b
+                    "mult" -> a * b
+                    "div" -> a / b
+                    else -> null
+                }
+            }
+        }
+        else -> null
     }
 
     /** `add` or `sub` of exactly one variable and one finite number constant, in either order. */

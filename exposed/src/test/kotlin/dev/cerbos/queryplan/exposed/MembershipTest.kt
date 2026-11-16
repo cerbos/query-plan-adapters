@@ -117,17 +117,13 @@ class MembershipTest {
     }
 
     @Test
-    fun `attribute-in-attribute over a scalar container is refused`() {
+    fun `attribute-in-attribute over a scalar text container is CEL's no-overload error under both polarities`() {
         val scalarContainer = cerbosMapping {
             "request.resource.attr.owner" to RelResources.owner
             "request.resource.attr.tagNames" to RelResources.aString
         }
-        val error = runCatching { translate("membership/in/field-in-resource-list", scalarContainer) }.exceptionOrNull()
-        assertEquals(UnmappedAttributeException::class.java, error?.javaClass)
-        assertEquals(
-            "in tests membership of request.resource.attr.tagNames, which resolves to a scalar " +
-                "column; collection membership needs a relation mapping",
-            error?.message,
-        )
+        val membership = translate("membership/in/field-in-resource-list", scalarContainer)
+        assertEquals(emptyList<String>(), ids(membership))
+        assertEquals(emptyList<String>(), ids(TriLogic.not(membership)))
     }
 }

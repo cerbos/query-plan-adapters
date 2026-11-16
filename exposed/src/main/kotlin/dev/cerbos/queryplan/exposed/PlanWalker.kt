@@ -16,6 +16,8 @@ internal class PlanWalker(private val translation: Translation) {
         Operand.NodeCase.EXPRESSION -> traverseExpression(operand.expression, scope)
         // A bare boolean attribute in condition position: `R.attr.aBool`.
         Operand.NodeCase.VARIABLE -> translation.hopGuards.guarded {
+            // A relation in condition position is a list or a map: CEL's no-overload error.
+            if (scope.resolve(operand.variable) is Resolution.Collection) return@guarded TriLogic.unknown()
             val target = scope.scalar(operand.variable)
             // A text or numeric column in condition position is CEL's no-overload error, and so is a
             // null: the plain comparison keeps a NULL UNKNOWN under either null convention.
@@ -56,17 +58,9 @@ internal class PlanWalker(private val translation: Translation) {
     private fun traverseLeaf(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean> {
         return when (operator) {
             "exists", "exists_one", "all" -> translation.collections.translate(operator, operands, scope)
-            // filter() and map() return a LIST, not a boolean. `filter(...)` in condition position is
-            // not `size(filter(...)) > 0`, and lowering it as if it were over-grants.
-            "filter" -> throw Refusals.unsupported(
-                "filter() returns a list, not a boolean, so it cannot be a condition on its own; " +
-                    "only size(filter(...)) gives the list a scalar meaning",
-            )
-            "map" -> throw Refusals.unsupported(
-                "map() returns a list, not a boolean, so it cannot be a condition on its own; " +
-                    "only hasIntersection(map(...), [...]) gives the list a scalar meaning",
-            )
-            "except" -> throw ScalarRefusals.exceptUnsupported()
+            // filter(), map() and except() return a list, which in condition position is CEL's
+            // no-overload error, not `size(...) > 0`.
+            "filter", "map", "except" -> TriLogic.unknown()
             "hasIntersection", "has_intersection" -> translation.membership.translateHasIntersection(operands, scope)
             "in" -> membership(operands, scope)
             "isSubset" -> PlanRewrites.subsetAsMembership(operands, scope)?.let { traverse(it, scope) }
@@ -76,6 +70,7 @@ internal class PlanWalker(private val translation: Translation) {
             "overlaps", "ancestorOf", "descendentOf" -> translation.hierarchy.translate(operator, operands, scope)
             "matches" -> matches(operands, scope)
             else -> matchesComparedWithBoolean(operator, operands, scope)
+                ?: conditionComparedWithBoolean(operator, operands, scope)
                 ?: textOfConditionCompared(operator, operands, scope)
                 ?: (
                     PlanRewrites.intersectionEmptiness(operator, operands)
@@ -240,6 +235,22 @@ internal class PlanWalker(private val translation: Translation) {
         return if (expected == (operator == "eq")) translated else TriLogic.not(translated)
     }
 
+    /**
+     * `(a && b) == false` and the like: an operand that is a bool or an error, compared with a
+     * boolean constant, is that condition or its negation. `null` when the node is not that shape.
+     */
+    private fun conditionComparedWithBoolean(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
+        if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
+        val condition = operands.firstOrNull {
+            it.nodeCase == Operand.NodeCase.EXPRESSION && it.expression.operator in LOGICAL_OPERATORS
+        } ?: return null
+        val other = operands.first { it !== condition }
+        if (other.nodeCase != Operand.NodeCase.VALUE) return null
+        val expected = PlanValues.toKotlin(other.value) as? Boolean ?: return null
+        val translated = traverse(condition, scope)
+        return if (expected == (operator == "eq")) translated else TriLogic.not(translated)
+    }
+
     /** `string(condition) ==/!= "literal"`: the condition, its negation, or FALSE, keeping its UNKNOWN. `null` otherwise. */
     private fun textOfConditionCompared(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
         if ((operator != "eq" && operator != "ne") || operands.size != 2) return null
@@ -315,6 +326,9 @@ internal class PlanWalker(private val translation: Translation) {
         /** CEL equality between two plan constants: numbers by value, everything else by kind and value. */
         private fun celEquals(left: Any?, right: Any?): Boolean =
             if (left is Number && right is Number) left.toDouble() == right.toDouble() else left == right
+
+        /** The logical operators, which take and give a bool (or an error). */
+        private val LOGICAL_OPERATORS = setOf("and", "or", "not")
 
         /** Operators whose CEL result is always a bool (or an error). */
         private val BOOLEAN_OPERATORS = setOf(
