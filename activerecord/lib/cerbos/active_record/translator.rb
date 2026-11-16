@@ -67,7 +67,7 @@ module Cerbos
       # `"true"`/`"false"` rather than whatever the database renders a predicate as. `if` is
       # boolean only when an arm is: see {#ternary}.
       BOOLEAN_OPERATORS = (
-        %w[and or not exists all exists_one has in hasIntersection isSubset ancestorOf descendentOf overlaps] +
+        %w[and or not exists all exists_one has in hasIntersection has_intersection isSubset ancestorOf descendentOf overlaps] +
         COMPARISONS + STRING_MATCHES.keys + %w[matches]
       ).freeze
 
@@ -131,6 +131,7 @@ module Cerbos
         "matches" => Operator.new(2, ->(receiver, pattern) { regex_match(receiver, pattern) }),
         "in" => Operator.new(2, ->(needle, haystack) { membership(needle, haystack) }),
         "hasIntersection" => Operator.new(2, ->(left, right) { has_intersection(left, right) }),
+        "has_intersection" => Operator.new(2, ->(left, right) { has_intersection(left, right) }),
         "except" => Operator.new(2, ->(left, right) { except(left, right) }),
         "size" => Operator.new(1, ->(target) { size(target) }),
         "timestamp" => Operator.new(1, ->(value) { timestamp(value) }),
@@ -392,6 +393,11 @@ module Cerbos
       end
 
       def as_predicate(value)
+        if value.is_a?(Values::ConditionalValue)
+          return branches(value.condition, as_predicate(value.then_value), as_predicate(value.else_value))
+        end
+        return cel_type_error if value.is_a?(Values::IEEEConstant)
+
         # A constant list, map, number or string where a boolean belongs is a CEL error on every
         # row, and none may reach `where`, which reads a Hash or an Array as conditions of its own.
         if value.is_a?(Hash) || value.is_a?(Array) || value.is_a?(Numeric) ||
@@ -458,10 +464,11 @@ module Cerbos
         if [then_value, else_value].any? { |value| value.is_a?(Hash) || collection?(value) }
           raise UnsupportedOperatorError, "A ternary with a map or collection arm is not translated"
         end
-        if [condition, then_value, else_value].any? { |value| cel_error?(value) }
-          raise UnsupportedOperatorError,
-            "A ternary over a CEL type error (a string function or size() over a number or a " \
-            "boolean) cannot keep the error once its branches are folded into a CASE"
+        return cel_type_error if cel_error?(condition)
+        # An error arm stays an error only on the rows that select it, so the ternary is held
+        # for each consumer to take arm by arm, where the error arm is UNKNOWN again.
+        if [then_value, else_value].any? { |value| cel_error?(value) }
+          return Values::ConditionalValue.new(condition: condition, then_value: then_value, else_value: else_value)
         end
 
         # A non-finite arm must not reach SQL, so defer to the enclosing comparison. So must

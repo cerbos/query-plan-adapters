@@ -13,6 +13,7 @@ module Cerbos
         private
 
         def arithmetic(operator, left, right)
+          return cel_type_error if cel_error?(left) || cel_error?(right)
           return concatenate(left, right) if operator == "add" && (list_operand?(left) || list_operand?(right))
           if [left, right].any? { |operand| temporal_value?(operand) }
             return duration_arithmetic(operator, left, right)

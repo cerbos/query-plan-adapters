@@ -89,8 +89,8 @@ module ConformanceCorpus
     base = {"pdp" => golden.fetch("pdp"), "id" => golden.fetch("id")}
     begin
       returned = yield
-    rescue Cerbos::ActiveRecord::Error
-      return base.merge("verdict" => "refused")
+    rescue Cerbos::ActiveRecord::Error => e
+      return base.merge("verdict" => "refused", "detail" => e.message)
     rescue => e
       return base.merge("verdict" => "error", "detail" => "#{e.class}: #{e.message}")
     end

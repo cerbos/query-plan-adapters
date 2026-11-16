@@ -11,6 +11,8 @@ module Cerbos
         private
 
         def string_match(operator, receiver, needle)
+          return cel_type_error if composite?(receiver) || composite?(needle)
+
           reject_collection(operator, receiver)
           reject_collection(operator, needle)
           return cel_type_error if known_non_string?(receiver) || known_non_string?(needle)
@@ -38,7 +40,7 @@ module Cerbos
         # for it, even where the pattern matches every string.
         def regex_match(receiver, pattern)
           reject_collection("matches", receiver)
-          return cel_type_error if known_non_string?(receiver)
+          return cel_type_error if known_non_string?(receiver) || composite?(receiver) || composite?(pattern)
           unless pattern.is_a?(::String)
             raise UnsupportedOperatorError,
               "matches is translated only with a constant pattern, got #{describe(pattern)}"

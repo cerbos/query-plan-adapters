@@ -25,7 +25,7 @@ module Cerbos
       # The most literals one pattern may expand to before it is refused rather than enumerated.
       MAX_LITERALS = 256
       # The most characters a set may hold for the every-character-in-a-set form.
-      MAX_SET_SIZE = 64
+      MAX_SET_SIZE = 128
       # RE2's own bound on a counted repetition.
       MAX_REPEAT = 1000
 
@@ -309,7 +309,7 @@ module Cerbos
               raise InvalidPattern if finish.is_a?(Array) || finish.ord < start.ord
 
               span = Regex.range(start, finish)
-              raise Regex.unsupported(@pattern, "a class range is too wide to enumerate") if span.length > MAX_SET_SIZE * 4
+              raise Regex.unsupported(@pattern, "a class range is too wide to enumerate") if span.length > MAX_SET_SIZE * 2
 
               members.concat(span)
             else

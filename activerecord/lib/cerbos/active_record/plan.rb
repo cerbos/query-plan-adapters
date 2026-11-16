@@ -98,22 +98,25 @@ module Cerbos
           return Variable.new(name: operand[:variable].to_s)
         end
         if operand.key?(:operator)
-          return Expression.new(
-            operator: operand[:operator].to_s,
-            operands: Array(operand[:operands]).map { |child| node(child) }
-          )
+          return expression(operand[:operator].to_s, Array(operand[:operands]).map { |child| node(child) })
         end
 
         raise InvalidPlanError, "Unrecognised query plan operand: #{operand.inspect}"
       end
 
+      # `dyn(x)` is `x` at evaluation; the wrapper only quiets the type checker, so it is dropped.
+      #
+      # @private
+      def expression(operator, operands)
+        return operands.first if operator == "dyn" && operands.length == 1
+
+        Expression.new(operator: operator, operands: operands)
+      end
+
       # @private
       def object_node(operand)
         if operand.respond_to?(:operator) && operand.respond_to?(:operands)
-          return Expression.new(
-            operator: operand.operator.to_s,
-            operands: Array(operand.operands).map { |child| node(child) }
-          )
+          return expression(operand.operator.to_s, Array(operand.operands).map { |child| node(child) })
         end
         if operand.respond_to?(:name)
           return Variable.new(name: operand.name.to_s)

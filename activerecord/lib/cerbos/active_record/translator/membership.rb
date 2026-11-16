@@ -11,6 +11,7 @@ module Cerbos
         private
 
         def membership(needle, haystack)
+          return cel_type_error if cel_error?(needle) || cel_error?(haystack)
           # `x in map` tests the map's keys in CEL. The planner folds a literal map to `==`, but a
           # map can still arrive as a value; answering FALSE would grant its negation.
           haystack = haystack.keys if haystack.is_a?(Hash)
@@ -236,6 +237,11 @@ module Cerbos
           !literal_kind.nil? && literal_kind != kind
         end
 
+        def scalar_column?(value)
+          ArelSupport.arel_node?(value) &&
+            (!scalar_kind(value).nil? || TEMPORAL_COLUMN_TYPES.include?(column_type(value)))
+        end
+
         def has_intersection(left, right)
           # hasIntersection is symmetric and the planner keeps source order, so the literal list
           # can be on either side.
@@ -252,6 +258,9 @@ module Cerbos
 
           case left
           when Values::Collection
+            # Nothing intersects an empty list, whatever the relation's members are.
+            return left.scope.guarded(ArelSupport::FALSE_SQL) if values.empty?
+
             # Guarded as in membership (#315). Literals of another type never intersect.
             kind = member_kind(left.scope)
             values = values.reject { |value| cross_type_literal?(value, kind) }
@@ -271,6 +280,9 @@ module Cerbos
               )
             )
           else
+            # A scalar is CEL's no-overload error, whatever the list holds.
+            return cel_type_error if constant?(left) || scalar_column?(left)
+
             raise UnmappedAttributeError,
               "hasIntersection needs a collection, got #{describe(left)}"
           end
