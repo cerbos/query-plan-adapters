@@ -17,6 +17,13 @@
     "automerge": false
   },
   "dependencyDashboard": true,
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "vulnerabilityAlerts": {
+    "description": "One PR for every advisory open at once. The Go examples replace their adapter with ../ and list only the modules they import, so an advisory bump to the adapter alone (otel/sdk, #724) leaves the example inconsistent with the adapter until the sibling bump (otel/trace, #727) lands with it.",
+    "groupName": "security updates"
+  },
   "baseBranchPatterns": [
     "main"
   ],
@@ -37,6 +44,13 @@
         "/^dev\\.cerbos:cerbos-(elasticsearch|exposed|jpa|spring-data)$/"
       ],
       "enabled": false
+    },
+    {
+      "description": "npm `overrides` entries. The default update-lockfile strategy runs `npm install <pkg>@<version>`, which npm refuses for a package pinned by an override (EOVERRIDE), so the whole lockfile update for that package file is dropped (prisma on #729). Bumping the override range lets a plain install regenerate the lock.",
+      "matchDepTypes": [
+        "overrides"
+      ],
+      "rangeStrategy": "bump"
     }
   ],
   "customManagers": [
