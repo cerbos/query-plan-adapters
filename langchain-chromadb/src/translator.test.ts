@@ -399,6 +399,7 @@ describe("what an emitted filter may contain", () => {
         !isString(entry) && entry.numericType === "float" ? [entry.field] : [],
       ),
     );
+
     const fractional = ALL_COMPARISONS.filter(
       ({ operator, value, field }) =>
         ["$lt", "$lte", "$gt", "$gte"].includes(operator) &&

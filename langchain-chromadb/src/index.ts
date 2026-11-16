@@ -313,6 +313,7 @@ function isFractional(value: ChromaLiteral | ChromaLiteral[]): value is number {
 function fractional(field: string, operator: string, value: number): Where {
   const below = Math.floor(value);
   const above = Math.ceil(value);
+
   const between: Where = {
     $and: [
       clause(field, "$gt", below),
