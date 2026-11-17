@@ -8,10 +8,10 @@ import org.jetbrains.exposed.v1.javatime.timestamp
  * The relational shape the shared `../conformance/` corpus is persisted into, and the mapping the
  * corpus is read back through.
  *
- * The tables are declared BARE — no `references`, no Exposed relation metadata — because that is
- * what this adapter's subqueries read. An association the ORM knows about would carry predicates
- * the correlated subquery cannot see, which is the class-1 mapping hazard
- * `conformance/README.md` describes; here there is nothing to carry.
+ * Every relation key is a single-column `references(...)`, and every to-one key carries a unique
+ * index, so [MAPPING] declares no key and no cardinality: `relation(...)` infers both from that
+ * schema. [DECLARED_MAPPING] states them by hand. There is no DAO layer: an association the ORM filters would carry predicates the
+ * correlated subquery cannot see, the class-1 mapping hazard `conformance/README.md` describes.
  *
  * Both the mapping and the tables live in one file on purpose: the adapter resolves a reference
  * onto a COLUMN, so which column a reference names and which table owns it are one statement. The
@@ -55,7 +55,7 @@ internal object Parents : Table("adversarial_parents") {
     val aString = varchar("a_string", 255).nullable()
     val aNumber = integer("a_number").nullable()
     val aOptionalString = varchar("a_optional_string", 255).nullable()
-    val resourceId = varchar("resource_id", 64).uniqueIndex()
+    val resourceId = varchar("resource_id", 64).references(Resources.id).uniqueIndex()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -66,7 +66,7 @@ internal object Inners : Table("adversarial_inners") {
     val aString = varchar("a_string", 255).nullable()
     val aNumber = integer("a_number").nullable()
     val aOptionalString = varchar("a_optional_string", 255).nullable()
-    val parentId = varchar("parent_id", 64).uniqueIndex()
+    val parentId = varchar("parent_id", 64).references(Parents.id).uniqueIndex()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -78,7 +78,7 @@ internal object Inners : Table("adversarial_inners") {
 internal object Tags : Table("adversarial_tags") {
     val tagId = varchar("tag_id", 64)
     val name = varchar("name", 255).nullable()
-    val resourceId = varchar("resource_id", 64)
+    val resourceId = varchar("resource_id", 64).references(Resources.id)
     val position = integer("position")
     override val primaryKey = PrimaryKey(tagId)
 }
@@ -86,14 +86,14 @@ internal object Tags : Table("adversarial_tags") {
 internal object Categories : Table("adversarial_categories") {
     val id = varchar("id", 64)
     val name = varchar("name", 255)
-    val resourceId = varchar("resource_id", 64)
+    val resourceId = varchar("resource_id", 64).references(Resources.id)
     override val primaryKey = PrimaryKey(id)
 }
 
 internal object SubCategories : Table("adversarial_sub_categories") {
     val id = varchar("id", 64)
     val name = varchar("name", 255)
-    val categoryId = varchar("category_id", 64)
+    val categoryId = varchar("category_id", 64).references(Categories.id)
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -101,7 +101,7 @@ internal object SubCategories : Table("adversarial_sub_categories") {
 internal object Labels : Table("adversarial_labels") {
     val id = varchar("id", 64)
     val name = varchar("name", 255).nullable()
-    val subCategoryId = varchar("sub_category_id", 64)
+    val subCategoryId = varchar("sub_category_id", 64).references(SubCategories.id)
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -112,7 +112,7 @@ internal object Labels : Table("adversarial_labels") {
 internal object NumberListElements : Table("adversarial_number_list") {
     val id = varchar("id", 64)
     val element = double("element").nullable()
-    val resourceId = varchar("resource_id", 64)
+    val resourceId = varchar("resource_id", 64).references(Resources.id)
     val position = integer("position")
     override val primaryKey = PrimaryKey(id)
 }
@@ -121,7 +121,7 @@ internal object NumberListElements : Table("adversarial_number_list") {
 internal object BoolListElements : Table("adversarial_bool_list") {
     val id = varchar("id", 64)
     val element = bool("element").nullable()
-    val resourceId = varchar("resource_id", 64)
+    val resourceId = varchar("resource_id", 64).references(Resources.id)
     val position = integer("position")
     override val primaryKey = PrimaryKey(id)
 }
@@ -138,7 +138,42 @@ internal val ADVERSARIAL_TABLES: List<Table> = listOf(
  * The corpus's attribute mapping, built with the adapter's own DSL so the harness proves the
  * surface a consumer writes rather than an internal shortcut.
  */
-internal val MAPPING: AttributeMappings = cerbosMapping {
+internal val MAPPING: AttributeMappings = corpusMapping(RelationMode.INFERRED)
+
+/**
+ * The same mapping with every relation declared by hand through `one(...)`/`many(...)`. The harness
+ * replays each case through both and requires the same answer, so neither surface can drift.
+ */
+internal val DECLARED_MAPPING: AttributeMappings = corpusMapping(RelationMode.DECLARED)
+
+internal enum class RelationMode { INFERRED, DECLARED }
+
+/**
+ * A corpus relation in either [mode]: [RelationMode.INFERRED] hands only the table to
+ * `relation(...)`, and [RelationMode.DECLARED] states the keys and cardinality the schema implies.
+ */
+private fun <T : Table> MappingBuilder.link(
+    mode: RelationMode,
+    table: T,
+    from: Column<*>,
+    to: Column<*>,
+    toOne: Boolean = false,
+    element: Column<*>? = null,
+    orderBy: Column<*>? = null,
+    block: RelationBuilder<T>.() -> Unit = {},
+): AttributeMapping.Relation = when {
+    mode == RelationMode.INFERRED -> relation(table, element = element, orderBy = orderBy, block = block)
+    toOne -> one(table, from = from, to = to, block = block)
+    else -> many(table, from = from, to = to, element = element, orderBy = orderBy, block = block)
+}
+
+/** DECLARED names no root, exactly as a mapping written before `relation(...)` existed. */
+private fun corpusMapping(mode: RelationMode): AttributeMappings = when (mode) {
+    RelationMode.INFERRED -> cerbosMapping(root = Resources) { corpusEntries(mode) }
+    RelationMode.DECLARED -> cerbosMapping { corpusEntries(mode) }
+}
+
+private fun MappingBuilder.corpusEntries(mode: RelationMode) {
     // The primary key, reached as `request.resource.id` rather than through `attr` (the `id-*`
     // actions). An adapter that resolves references by stripping a `request.resource.attr.` prefix
     // never sees this name.
@@ -175,12 +210,12 @@ internal val MAPPING: AttributeMappings = cerbosMapping {
     // hop can be ABSENT, which the negated shapes discriminate: a row with no parent sends no
     // attribute, so CEL raises a missing-path error and the PDP denies, while an unguarded
     // two-valued read of the hop is TRUE for exactly those rows.
-    "request.resource.attr.parent" to one(Parents, from = Resources.id, to = Parents.resourceId) {
+    "request.resource.attr.parent" to link(mode, Parents, Resources.id, Parents.resourceId, toOne = true) {
         "aBool" to omitted(Parents.aBool)
         "aString" to omitted(Parents.aString)
         "aNumber" to omitted(Parents.aNumber)
         "aOptionalString" to omitted(Parents.aOptionalString)
-        "inner" to one(Inners, from = Parents.id, to = Inners.parentId) {
+        "inner" to link(mode, Inners, Parents.id, Inners.parentId, toOne = true) {
             "aBool" to omitted(Inners.aBool)
             "aString" to omitted(Inners.aString)
             "aNumber" to omitted(Inners.aNumber)
@@ -189,27 +224,25 @@ internal val MAPPING: AttributeMappings = cerbosMapping {
     }
     // Scalar lists, one related row per element; a NULL element column is a null element.
     "request.resource.attr.aNumberList" to
-        many(NumberListElements, from = Resources.id, to = NumberListElements.resourceId, element = NumberListElements.element,
-            orderBy = NumberListElements.position)
+        link(mode, NumberListElements, Resources.id, NumberListElements.resourceId, element = NumberListElements.element, orderBy = NumberListElements.position)
     "request.resource.attr.aBoolList" to
-        many(BoolListElements, from = Resources.id, to = BoolListElements.resourceId, element = BoolListElements.element,
-            orderBy = BoolListElements.position)
-    "request.resource.attr.tags" to many(Tags, from = Resources.id, to = Tags.resourceId, orderBy = Tags.position) {
+        link(mode, BoolListElements, Resources.id, BoolListElements.resourceId, element = BoolListElements.element, orderBy = BoolListElements.position)
+    "request.resource.attr.tags" to link(mode, Tags, Resources.id, Tags.resourceId, orderBy = Tags.position) {
         "id" to Tags.tagId
         "name" to Tags.name
     }
     // The scalar projection of the same relation, for `null in R.attr.tagNames`: each element IS a
     // value, and a NULL name column is an explicit null list element on the check side.
     "request.resource.attr.tagNames" to
-        many(Tags, from = Resources.id, to = Tags.resourceId, element = Tags.name, orderBy = Tags.position)
+        link(mode, Tags, Resources.id, Tags.resourceId, element = Tags.name, orderBy = Tags.position)
     "request.resource.attr.categories" to
-        many(Categories, from = Resources.id, to = Categories.resourceId) {
+        link(mode, Categories, Resources.id, Categories.resourceId) {
             "name" to Categories.name
             "subCategories" to
-                many(SubCategories, from = Categories.id, to = SubCategories.categoryId) {
+                link(mode, SubCategories, Categories.id, SubCategories.categoryId) {
                     "name" to SubCategories.name
                     // Third macro level, for the macro-depth3-* actions.
-                    "labels" to many(Labels, from = SubCategories.id, to = Labels.subCategoryId) {
+                    "labels" to link(mode, Labels, SubCategories.id, Labels.subCategoryId) {
                         "name" to Labels.name
                     }
                 }
@@ -220,20 +253,15 @@ internal val MAPPING: AttributeMappings = cerbosMapping {
     // TWO collection hops, pinning that chained variables join through every intermediate hop,
     // never off the root.
     "request.resource.attr.mainCategory" to
-        many(Categories, from = Resources.id, to = Categories.resourceId) {
+        link(mode, Categories, Resources.id, Categories.resourceId) {
             "name" to Categories.name
             "subCategories" to
-                many(SubCategories, from = Categories.id, to = SubCategories.categoryId) {
+                link(mode, SubCategories, Categories.id, SubCategories.categoryId) {
                     "name" to SubCategories.name
                 }
             // subNames: the same 2-hop chain but with an element column, so plain `in` membership
             // compares the flattened tail's name.
-            "subNames" to many(
-                SubCategories,
-                from = Categories.id,
-                to = SubCategories.categoryId,
-                element = SubCategories.name,
-            )
+            "subNames" to link(mode, SubCategories, Categories.id, SubCategories.categoryId, element = SubCategories.name)
         }
 }
 
