@@ -5,6 +5,7 @@ package cerbosent
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/cerbos/query-plan-adapters/ent/internal/queryplan"
@@ -22,8 +23,10 @@ type Schema struct {
 type SchemaType struct {
 	// Columns maps each column to its ent field type name (field.Type.String()).
 	Columns map[string]string
-	Name    string
-	Table   string
+	// Fields maps each ent field name, the id's included, to its column.
+	Fields map[string]string
+	Name   string
+	Table  string
 	// ID is the id column, empty for a composite id.
 	ID    string
 	Edges []SchemaEdge
@@ -49,13 +52,16 @@ type SchemaJoin struct {
 	ToColumn   string
 }
 
-// SchemaMap maps plan references to schema entries, for Schema.Mapper.
+// SchemaMap maps plan references to schema entries, for Schema.Mapper. Each entry overrides
+// what the mapper would infer for its reference.
 type SchemaMap map[string]SchemaEntry
 
 // SchemaEntry maps one attribute onto a column or an edge of the schema. Whether an edge is read
 // as a collection or through a to-one hop, and the tables and columns joining it, come from the
 // schema.
 type SchemaEntry struct {
+	// Declared, when set, is used as it is, with nothing read from the schema.
+	Declared *Entry
 	// Element, Fields, SubqueryFilter and Position apply to a to-many Edge, as the Relation fields
 	// of the same names do. Element and Fields are read from the edge's target type.
 	Element *SchemaEntry
@@ -73,23 +79,175 @@ type SchemaEntry struct {
 	NullConvention NullConvention
 }
 
-// Mapper resolves every entry against the schema, starting from the root type, and returns an
-// ordinary MapperMap. An edge or column the schema does not have is an error. Entries the schema
-// cannot express can be added to the returned map directly.
-func (s *Schema) Mapper(root string, entries SchemaMap) (MapperMap, error) {
+// SchemaOption configures Schema.Mapper.
+type SchemaOption func(*schemaOptions)
+
+type schemaOptions struct {
+	nullConvention NullConvention
+}
+
+// WithInferredNullConvention declares the NULL convention of every inferred column on the
+// resource row or read through a to-one edge. Columns inside a collection's elements follow the
+// call's NullRepresentation.
+func WithInferredNullConvention(c NullConvention) SchemaOption {
+	return func(o *schemaOptions) { o.nullConvention = c }
+}
+
+// Mapper resolves plan references against the schema, starting from the root type.
+//
+// A reference with no override is inferred from its name: `request.resource.id` is the id
+// column, and each segment of `request.resource.attr.a.b.c` names an edge to follow or, last, a
+// column, by its ent name (`owner_id`) or that name in lower camel case (`ownerId`). A path
+// ending on a to-one edge reads the joined row; one ending on a to-many edge is a collection whose
+// elements expose their columns and to-many edges the same way. A name the schema does not have,
+// or one that matches two things, is left unmapped, which the translator refuses.
+//
+// overrides replaces inference for the references it names: a custom column or edge, a list's
+// Position or element column, a SubqueryFilter, or a null convention. An override the schema
+// cannot resolve is an error here.
+func (s *Schema) Mapper(root string, overrides SchemaMap, opts ...SchemaOption) (Mapper, error) {
 	typ, err := s.typeNamed(root)
 	if err != nil {
 		return nil, err
 	}
-	out := make(MapperMap, len(entries))
-	for reference, entry := range entries {
+	o := schemaOptions{}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	fixed := make(MapperMap, len(overrides))
+	for reference, entry := range overrides {
 		resolved, err := s.resolve(typ, entry)
 		if err != nil {
 			return nil, fmt.Errorf("cerbosent: %s: %w", reference, err)
 		}
-		out[reference] = resolved
+		fixed[reference] = resolved
 	}
-	return out, nil
+	return MapperFunc(func(reference string) (Entry, bool) {
+		if entry, ok := fixed[reference]; ok {
+			return entry, true
+		}
+		return s.infer(typ, reference, o)
+	}), nil
+}
+
+const elementDepth = 3
+
+func (s *Schema) infer(typ *SchemaType, reference string, o schemaOptions) (Entry, bool) {
+	if reference == "request.resource.id" {
+		if typ.ID == "" {
+			return Entry{}, false
+		}
+		e, err := column(typ, SchemaEntry{Column: typ.ID, NullConvention: o.nullConvention})
+		return e, err == nil
+	}
+	path, ok := strings.CutPrefix(reference, "request.resource.attr.")
+	if !ok {
+		return Entry{}, false
+	}
+	segments := strings.Split(path, ".")
+	var edges []string
+	cur := typ
+	for i, segment := range segments {
+		edge, edgeOK := matchEdge(cur, segment)
+		col, colOK := matchColumn(cur, segment)
+		switch {
+		case edgeOK && !colOK:
+			edges = append(edges, edge.Name)
+			next, err := s.typeNamed(edge.Type)
+			if err != nil {
+				return Entry{}, false
+			}
+			cur = next
+		case colOK && !edgeOK && i == len(segments)-1:
+			entry := SchemaEntry{Edge: strings.Join(edges, "."), Column: col, NullConvention: o.nullConvention}
+			e, err := s.resolve(typ, entry)
+			return e, err == nil
+		default:
+			return Entry{}, false
+		}
+	}
+
+	target, rel, unique, err := s.walk(typ, strings.Join(edges, "."))
+	if err != nil {
+		return Entry{}, false
+	}
+	if unique {
+		return Entry{ScalarRelation: rel, NullConvention: o.nullConvention}, true
+	}
+	rel.Fields = s.elementFields(target, elementDepth)
+	return Entry{Relation: rel}, true
+}
+
+// elementFields exposes a collection element's columns and to-many edges under both spellings of
+// their names.
+func (s *Schema) elementFields(typ *SchemaType, depth int) map[string]Entry {
+	fields := map[string]Entry{}
+	for name, col := range typ.Fields {
+		e, _ := column(typ, SchemaEntry{Column: col})
+		for _, spelling := range spellings(name) {
+			fields[spelling] = e
+		}
+	}
+	if depth == 0 {
+		return fields
+	}
+	for _, edge := range typ.Edges {
+		if edge.Unique {
+			continue
+		}
+		target, rel, _, err := s.walk(typ, edge.Name)
+		if err != nil {
+			continue
+		}
+		rel.Fields = s.elementFields(target, depth-1)
+		for _, name := range spellings(edge.Name) {
+			fields[name] = Entry{Relation: rel}
+		}
+	}
+	return fields
+}
+
+func spellings(name string) []string {
+	if camel := lowerCamel(name); camel != name {
+		return []string{name, camel}
+	}
+	return []string{name}
+}
+
+func lowerCamel(name string) string {
+	parts := strings.Split(name, "_")
+	for i := 1; i < len(parts); i++ {
+		if parts[i] != "" {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+func matchEdge(typ *SchemaType, segment string) (*SchemaEdge, bool) {
+	var found *SchemaEdge
+	for i := range typ.Edges {
+		if slices.Contains(spellings(typ.Edges[i].Name), segment) {
+			if found != nil {
+				return nil, false
+			}
+			found = &typ.Edges[i]
+		}
+	}
+	return found, found != nil
+}
+
+func matchColumn(typ *SchemaType, segment string) (string, bool) {
+	found := ""
+	for name, col := range typ.Fields {
+		if slices.Contains(spellings(name), segment) {
+			if found != "" {
+				return "", false
+			}
+			found = col
+		}
+	}
+	return found, found != ""
 }
 
 func (s *Schema) typeNamed(name string) (*SchemaType, error) {
@@ -102,6 +260,9 @@ func (s *Schema) typeNamed(name string) (*SchemaType, error) {
 }
 
 func (s *Schema) resolve(typ *SchemaType, entry SchemaEntry) (Entry, error) {
+	if entry.Declared != nil {
+		return *entry.Declared, nil
+	}
 	if entry.Edge == "" {
 		if entry.Position != "" || entry.Element != nil || entry.Fields != nil || entry.SubqueryFilter != nil {
 			return Entry{}, fmt.Errorf("position, element, fields and subquery filter need a to-many edge")

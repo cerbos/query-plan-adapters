@@ -18,6 +18,18 @@ go get github.com/cerbos/query-plan-adapters/ent
 
 ## Quick start
 
+Register the `entcerbos` extension where you run entc. It writes `cerbos_schema.go` next to the
+generated client, declaring `CerbosSchema`: every type's table, fields and edges as ent resolved
+them.
+
+```go
+// ent/entc.go
+entc.Generate("./schema", &gen.Config{}, entc.Extensions(entcerbos.Extension{}))
+```
+
+Then pass that schema and the resource's type. Nothing else needs declaring: attributes named
+after ent fields and edges map themselves, relations included.
+
 ```go
 import (
     "context"
@@ -32,12 +44,12 @@ import (
     "example.com/app/ent/contact"
 )
 
-var mapper = cerbosent.MapperMap{
-    "request.resource.attr.ownerId": {Column: contact.FieldOwnerID},
-    "request.resource.attr.status":  {Column: contact.FieldStatus},
-}
-
 func listContacts(ctx context.Context, c *cerbos.GRPCClient, db *ent.Client, principal *cerbos.Principal) ([]*ent.Contact, error) {
+    mapper, err := ent.CerbosSchema.Mapper("Contact", nil)
+    if err != nil {
+        return nil, err
+    }
+
     plan, err := c.PlanResources(ctx, principal, cerbos.NewResource("contact", ""), "read")
     if err != nil {
         return nil, err
@@ -64,6 +76,7 @@ func listContacts(ctx context.Context, c *cerbos.GRPCClient, db *ent.Client, pri
 ```
 
 `Translate` takes the resource's table name (ent's generated `<entity>.Table`) and a mapper.
+Build the mapper once and reuse it.
 `Result.Predicate` is never nil: it renders `FALSE` for `KindAlwaysDenied` and `TRUE` for
 `KindAlwaysAllowed`, so a caller that applies it without switching on `Kind` still gets exactly the
 rows the PDP allows. The switch above only skips a query that cannot return a row. It is an
@@ -77,6 +90,75 @@ cannot express" from a mapping or configuration error. The corpus cases it refus
 [`conformance-ledger.json`](conformance-ledger.json) (see [Conformance contract](#conformance-contract)).
 
 ## Mapping attributes
+
+### What is inferred
+
+`Schema.Mapper` resolves each plan reference against the ent schema:
+
+- `request.resource.id` is the id column.
+- Each segment of `request.resource.attr.a.b.c` names an edge to follow or, last, a field. A name
+  matches by its ent spelling (`owner_id`, `sub_categories`) or in lower camel case (`ownerId`,
+  `subCategories`).
+- A path ending on a field reads that column. If the path crosses edges, they must all be unique
+  (O2O or M2O), and the column is read through them as a correlated scalar subquery.
+- A path ending on a unique edge reads the joined row itself. A path ending on any other edge is
+  a collection, whose elements expose their own fields and to-many edges the same way (`t.name`,
+  `t.labels`).
+- An M2M edge joins through its join table, and a chain of edges joins through each table on the
+  way.
+- Each column's value type comes from its ent field: `bool`, `time.Time`, `string` and enum, and
+  the numeric types. Bytes, JSON, UUID and `field.Other` stay undeclared.
+
+Resolution stays fail-closed. A name the schema does not have, or one that matches two things, is
+left unmapped, and the translator refuses it with `ErrUnsupported`. Nothing is guessed: every
+column and join comes from ent.
+
+### Overrides
+
+Add configuration only where your attributes differ from your ent schema, or where the schema
+cannot say what the adapter needs. An override replaces inference for its reference, and is
+checked against the schema when the mapper is built:
+
+```go
+mapper, err := ent.CerbosSchema.Mapper("Contact", cerbosent.SchemaMap{
+    // an attribute named differently from its field
+    "request.resource.attr.owner": {Column: contact.FieldOwnerID},
+    // an ordered list of scalars: its position column and its element column
+    "request.resource.attr.tagNames": {
+        Edge: "tags", Position: tag.FieldPosition,
+        Element: &cerbosent.SchemaEntry{Column: tag.FieldName},
+    },
+    // a predicate your own reads apply, such as soft-delete
+    "request.resource.attr.notes": {
+        Edge:           "notes",
+        SubqueryFilter: []cerbosent.Restriction{{Column: note.FieldDeletedAt, Op: cerbosent.RestrictIsNull}},
+    },
+    // a null convention for one attribute
+    "request.resource.attr.manager": {Column: contact.FieldManagerID, NullConvention: cerbosent.NullConventionExplicit},
+    // a hand-written entry, used as is
+    "request.resource.attr.legacy": {Declared: &cerbosent.Entry{Column: "legacy_flag", ValueType: cerbosent.ValueBool}},
+}, cerbosent.WithInferredNullConvention(cerbosent.NullConventionOmitted))
+```
+
+| Override | Why the schema cannot supply it |
+| --- | --- |
+| `Column`, `Edge` | The attribute is named differently from its field, or flattens a chain (`mainCategory.subCategories` over `categories.sub_categories`). |
+| `Position` | ent has no ordered edges. `list[k]` and ordered list equality need it. |
+| `Element` | A list of scalars stored one per row: the column holding each value. |
+| `SubqueryFilter` | Privacy rules, interceptors, soft-delete and tenant scopes live in Go code, not the schema graph. See [Mapping hazards](#mapping-hazards). |
+| `NullConvention`, `WithInferredNullConvention` | Whether your application omits a NULL attribute or sends `null` (see [NULL representation](#null-representation)). The option sets it for every inferred column on the resource row or behind a unique edge. |
+| `ValueType` | The ent field type is not what the column holds, such as a `string` field with a `uuid` `SchemaType`. |
+| `Declared` | Anything else: a raw `Entry`, used without reading the schema. |
+
+To build the schema at runtime instead of at code generation, use
+`entcerbos.Load(schema.Contact{}, schema.Tag{}, ...)`, passing every type an edge reaches. This
+links ent's code generator into your binary. Composite ids (edge schemas with `field.ID`) are not
+read; map those edges with `Declared`.
+
+### Mapping without an ent schema
+
+The fully declared form, with no `Schema`, is what `Schema.Mapper` produces internally. Use it
+when you have no `CerbosSchema`, or when the tables you read are not ent's.
 
 A `Mapper` resolves each attribute reference in the plan to storage. Use `MapperMap` for a static
 table or `MapperFunc` for a function. Resolution is **fail-closed**: an unmapped reference is an
@@ -125,42 +207,6 @@ A related table has no row order, so `R.attr.tags[0]` and an ordered list equali
 position for its parent, `0, 1, 2, …` with no gaps. `list[k]` then reads the element row at `k`,
 and a position past the end, negative or fractional is CEL's error: UNKNOWN, so the row is
 excluded under both polarities. Without `Position` those shapes are refused.
-
-### Reading relations from the ent schema
-
-Instead of declaring each `Relation` and `ScalarRelation`, name the ent edge and let the adapter
-read its cardinality, tables and join columns from your schema. `entcerbos` builds a
-`cerbosent.Schema` from the graph entc resolves, either at code generation or at runtime:
-
-```go
-// ent/entc.go: writes ent/cerbos_schema.go, declaring ent.CerbosSchema
-entc.Generate("./schema", &gen.Config{}, entc.Extensions(entcerbos.Extension{}))
-
-// or at runtime, from the schema types (this links ent's code generator)
-schema, err := entcerbos.Load(schema.Contact{}, schema.Tag{}, schema.Company{})
-```
-
-```go
-mapper, err := ent.CerbosSchema.Mapper("Contact", cerbosent.SchemaMap{
-    "request.resource.attr.ownerId":     {Column: contact.FieldOwnerID},
-    "request.resource.attr.tags":        {Edge: "tags", Element: &cerbosent.SchemaEntry{Column: tag.FieldName}},
-    "request.resource.attr.company.name": {Edge: "company", Column: company.FieldName},
-    "request.resource.attr.team.members": {Edge: "team.members", Fields: map[string]cerbosent.SchemaEntry{
-        "id": {Column: user.FieldID},
-    }},
-})
-```
-
-- A unique edge (O2O, M2O) becomes a `ScalarRelation`; any other edge, or a path through one,
-  becomes a `Relation`. An M2M edge joins through its join table. A dotted path becomes `Via` hops.
-- Mapping a column through a to-many edge, or a list option on a to-one edge, is an error, as is
-  an edge or column the schema does not have.
-- A column left at `ValueDefault` takes its type from the ent field: `bool`, `time.Time`, `string`
-  and enum, and the numeric types. Bytes, JSON, UUID and `field.Other` stay undeclared.
-- What the schema cannot say is still yours to declare: `NullConvention`, `Position`,
-  `SubqueryFilter`, and a scalar list's element column. The result is an ordinary `MapperMap`, so
-  an entry ent cannot express can be set on it directly.
-- Composite ids (edge schemas with `field.ID`) are not read; map those edges explicitly.
 
 ### Declaring value types
 
@@ -301,7 +347,10 @@ surface. The [pgx adapter](../pgx) quotes defensively instead.
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the plans
 Cerbos PDP 0.57.0 recorded for each case are translated, run against the corpus dataset in real
 Ent-built queries on **SQLite, PostgreSQL and MySQL**, and the returned ids are compared with the
-recorded `check()` decisions. The previous PDP's goldens (0.56.0) are replayed too. The counts are
+recorded `check()` decisions. Every store is replayed twice: once through a mapper inferred from ent schema
+types with only the overrides the corpus needs, and once through a fully declared mapper. Both
+must give the same result, and each writes its own fuzz results (`<store>-inferred`,
+`<store>-declared`). The previous PDP's goldens (0.56.0) are replayed too. The counts are
 the same on all three databases. The total is every golden case in the tier; a case whose golden
 records a planner divergence (the plan and `check()` disagree, so no adapter can pass) is skipped
 and counts toward the total but not toward passed — on 0.57.0 that is three extended cases and four
@@ -348,7 +397,7 @@ adapter cannot detect the omission. Where your reads narrow a table, declare the
 | Filtered association | **Caller-owned**, reproducible with `SubqueryFilter` | Ent interceptors (`client.Intercept(intercept.TraverseFunc(…))` calling `q.WhereP`), privacy filter rules (`privacy.FilterFunc`), and `.Where(...)` predicates a repository helper always applies. They rewrite the ent query they are attached to, not the raw correlated subquery this adapter builds |
 | Default scope on the target model | **Caller-owned**, reproducible with `SubqueryFilter` | A soft-delete column (`deleted_at IS NULL`), a tenant column, a `published` flag — anything every read of that table filters on. Go has no default-scope construct, so it lives in your query code |
 | Subtype discrimination | **Caller-owned**, reproducible with `SubqueryFilter` | A `type`/`kind` discriminator column. Declare `{Column: "kind", Value: "…"}`, or `RestrictIn` over the kinds the association admits |
-| To-one relation used as a collection | **Caller-owned** | A relation whose `TargetColumn` has no unique index. The mapping carries no cardinality, so nothing enforces the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
+| To-one relation used as a collection | **Caller-owned** | A relation whose `TargetColumn` has no unique index. An inferred mapping takes cardinality from ent, which creates the unique index for an O2O edge; a declared one carries none, so nothing enforces the single row the application saw. Add the unique constraint, or accept that the subquery examines every matching row |
 | Composite association key | **Rejected by the type system** | `SourceColumn` and `TargetColumn` are each one `string`; a two-column key is a compile error, not a wrong join |
 | Absent to-one parent | **Reproduced**, and proved by the corpus (`relation/all/to-one-chain`, `relation/bare-attribute/negated-one-hop-boolean` and siblings) | None — every operator reached through a `Via` chain requires its intermediate hops, so a missing parent is UNKNOWN under both polarities ([#309](https://github.com/cerbos/query-plan-adapters/issues/309), [#315](https://github.com/cerbos/query-plan-adapters/issues/315)). `SubqueryFilter` on a `Hop` extends that to a parent the application *hides*. A scalar read through a to-one hop is `Entry.ScalarRelation` ([#375](https://github.com/cerbos/query-plan-adapters/issues/375)), which is NULL when no row correlates and needs no hop guard |
 

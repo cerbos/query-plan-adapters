@@ -370,45 +370,29 @@ func openPostgres(t *testing.T) *sql.DB {
 	return db
 }
 
-// buildMapper wires the corpus's attribute references onto the schema above, through the ent
-// schema types in internal/conformanceschema: every relation's cardinality, tables and join
-// columns, and every column's value type, come from ent.
-//
-// `owner` and `tagNames` deliberately alias columns that `aOptionalString` and `tags[].name`
-// already cover: the corpus sends those two as EXPLICIT nulls while the originals are omitted when
-// NULL, and CEL membership distinguishes null from missing. Mapping both is what lets a single
-// schema exercise both conventions.
-//
-// Every attribute resources.json omits when its column is NULL is declared NullConventionOmitted,
-// as is every parent.* hop, whose absent level is omitted too. A null literal against one is then
-// a missing-attribute error CEL denies, so it is refused rather than rendered as IS NULL (#528).
-// `owner` and `coOwner` alias `aOptionalString` and `scope` under the explicit convention.
-func buildMapper(tb testing.TB) cerbosent.Mapper {
+// inferredMapper maps the corpus through the ent schema types in internal/conformanceschema, the
+// way an application passes its ent schema: every attribute whose name is an ent field or edge
+// (aBool, parent.inner.aString, categories, request.resource.id) is inferred, with its
+// relation, joins and value type. The overrides are the shapes no ent schema says: the aliases
+// declared under the other null convention (owner, coOwner, obj.inner, tagNames), the ordered
+// lists' Position and element column, the flattened mainCategory chain, and `t.id` reading tag_id
+// rather than the tag's primary key.
+func inferredMapper(tb testing.TB) cerbosent.Mapper {
 	tb.Helper()
 
 	const omitted, explicit = cerbosent.NullConventionOmitted, cerbosent.NullConventionExplicit
-	named := map[string]cerbosent.SchemaEntry{"name": {Column: "name"}}
-	labels := cerbosent.SchemaEntry{Edge: "labels", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: named}
-	subCategoryFields := map[string]cerbosent.SchemaEntry{"name": {Column: "name"}, "labels": labels}
 	tagFields := map[string]cerbosent.SchemaEntry{"id": {Column: "tag_id"}, "name": {Column: "name"}}
+	subCategoryFields := map[string]cerbosent.SchemaEntry{
+		"name":   {Column: "name"},
+		"labels": {Edge: "labels", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: map[string]cerbosent.SchemaEntry{"name": {Column: "name"}}},
+	}
 	elements := func(edge string) cerbosent.SchemaEntry {
 		return cerbosent.SchemaEntry{Edge: edge, Position: "position", Element: &cerbosent.SchemaEntry{Column: "value", NullConvention: explicit}}
 	}
 
-	entries := cerbosent.SchemaMap{
-		"request.resource.id":                   {Column: "id"},
-		"request.resource.attr.aBool":           {Column: "a_bool", NullConvention: omitted},
-		"request.resource.attr.aString":         {Column: "a_string", NullConvention: omitted},
-		"request.resource.attr.aNumber":         {Column: "a_number", NullConvention: omitted},
-		"request.resource.attr.aDouble":         {Column: "a_double", NullConvention: omitted},
-		"request.resource.attr.aOptionalString": {Column: "a_optional_string", NullConvention: omitted},
-		"request.resource.attr.createdBy":       {Column: "created_by"},
-		"request.resource.attr.owner":           {Column: "a_optional_string", NullConvention: explicit},
-		"request.resource.attr.coOwner":         {Column: "scope", NullConvention: explicit},
-		"request.resource.attr.scope":           {Column: "scope", NullConvention: omitted},
-		"request.resource.attr.createdAt":       {Column: "created_at", NullConvention: omitted},
-		"request.resource.attr.updatedAt":       {Column: "updated_at", NullConvention: omitted},
-		// obj.inner is not a real nested column: it mirrors aString, as in the other harnesses.
+	mapper, err := conformanceschema.CerbosSchema.Mapper("Resource", cerbosent.SchemaMap{
+		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: explicit},
+		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: explicit},
 		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: omitted},
 
 		"request.resource.attr.tags": {Edge: "tags", Position: "position", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: tagFields},
@@ -416,30 +400,166 @@ func buildMapper(tb testing.TB) cerbosent.Mapper {
 			Edge: "tags", Position: "position", Fields: tagFields,
 			Element: &cerbosent.SchemaEntry{Column: "name", NullConvention: explicit},
 		},
-		"request.resource.attr.categories": {
-			Edge:   "categories",
-			Fields: map[string]cerbosent.SchemaEntry{"name": {Column: "name"}, "subCategories": {Edge: "sub_categories", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: subCategoryFields}},
-		},
 		"request.resource.attr.aNumberList": elements("number_elems"),
 		"request.resource.attr.aBoolList":   elements("bool_elems"),
 
-		// mainCategory.* flattens the two-hop chain from the root.
 		"request.resource.attr.mainCategory.subCategories": {Edge: "categories.sub_categories", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: subCategoryFields},
 		"request.resource.attr.mainCategory.subNames":      {Edge: "categories.sub_categories", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: subCategoryFields},
-
-		// `parent` itself is the to-one hop, not a column: declared so a macro over it
-		// (`collection/exists/map-keys`) meets the translator's own refusal.
-		"request.resource.attr.parent": {Edge: "parent"},
-	}
-	for _, level := range []struct{ attr, edge string }{{"parent", "parent"}, {"parent.inner", "parent.inner"}} {
-		for attr, col := range map[string]string{"aBool": "a_bool", "aString": "a_string", "aNumber": "a_number", "aOptionalString": "a_optional_string"} {
-			entries["request.resource.attr."+level.attr+"."+attr] = cerbosent.SchemaEntry{Edge: level.edge, Column: col, NullConvention: omitted}
-		}
-	}
-
-	mapper, err := conformanceschema.CerbosSchema.Mapper("Resource", entries)
+	}, cerbosent.WithInferredNullConvention(omitted))
 	require.NoError(tb, err)
 	return mapper
+}
+
+// declaredMapper wires the corpus's attribute references onto the schema above with every
+// relation, hop and value type written out, the way a mapper without an ent schema does.
+//
+// `owner` and `tagNames` deliberately alias columns that `aOptionalString` and `tags[].name`
+// already cover: the corpus sends those two as EXPLICIT nulls while the originals are omitted when
+// NULL, and CEL membership distinguishes null from missing. Mapping both is what lets a single
+// schema exercise both conventions.
+func declaredMapper() cerbosent.Mapper {
+	tags := &cerbosent.Relation{
+		Table:        tagTable,
+		SourceColumn: "id", TargetColumn: "resource_id",
+		Position: "position",
+		Field:    &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString},
+		Fields: map[string]cerbosent.Entry{
+			"id": {Column: "tag_id"},
+			// Declared, like every other string column: `t.name == 0` is false in CEL, and an
+			// undeclared column hands the number to the engine, which coerces (MySQL reads each
+			// non-numeric name as 0) or fails to execute (PostgreSQL has no text = double).
+			"name": {Column: "name", ValueType: cerbosent.ValueString},
+		},
+	}
+
+	tagNames := *tags
+	tagNames.Field = &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionExplicit}
+
+	labels := &cerbosent.Relation{
+		Table:        labelTable,
+		SourceColumn: "id", TargetColumn: "sub_category_id",
+		Field:  &cerbosent.Entry{Column: "name"},
+		Fields: map[string]cerbosent.Entry{"name": {Column: "name"}},
+	}
+
+	subCategories := &cerbosent.Relation{
+		Table:        subCategoryTable,
+		SourceColumn: "id", TargetColumn: "category_id",
+		Field: &cerbosent.Entry{Column: "name"},
+		Fields: map[string]cerbosent.Entry{
+			"name":   {Column: "name"},
+			"labels": {Relation: labels},
+		},
+	}
+
+	categories := &cerbosent.Relation{
+		Table:        categoryTable,
+		SourceColumn: "id", TargetColumn: "resource_id",
+		Fields: map[string]cerbosent.Entry{
+			"name":          {Column: "name"},
+			"subCategories": {Relation: subCategories},
+		},
+	}
+
+	// mainCategory.* flattens the two-hop chain from the root: the subquery joins through the
+	// intermediate category table while only the resource row correlates outwards.
+	mainSub := &cerbosent.Relation{
+		Table:        subCategoryTable,
+		Via:          []cerbosent.Hop{{Table: categoryTable, ChildColumn: "category_id", JoinColumn: "id"}},
+		SourceColumn: "id", TargetColumn: "resource_id",
+		Field: &cerbosent.Entry{Column: "name"},
+		Fields: map[string]cerbosent.Entry{
+			"name":   {Column: "name"},
+			"labels": {Relation: labels},
+		},
+	}
+
+	// The two levels of the corpus's real to-one chain. The resource owns at most one parent
+	// (`resource_id` is UNIQUE) and a parent at most one inner (`parent_id` is UNIQUE), so each
+	// correlation matches at most one row.
+	parentRel := &cerbosent.Relation{
+		Table:        parentTable,
+		SourceColumn: "id", TargetColumn: "resource_id",
+	}
+	innerRel := &cerbosent.Relation{
+		Table:        innerTable,
+		Via:          []cerbosent.Hop{{Table: parentTable, ChildColumn: "parent_id", JoinColumn: "id"}},
+		SourceColumn: "id", TargetColumn: "resource_id",
+	}
+
+	return cerbosent.MapperMap{
+		// The primary key, reached as `request.resource.id` rather than through `attr` (the
+		// `identifier/*` cases). An adapter that resolves references by stripping a
+		// `request.resource.attr.` prefix never sees this name.
+		"request.resource.id": {Column: "id"},
+		// Declared boolean so `string()` over it spells CEL's "true"/"false" through a CASE
+		// rather than a CAST: SQLite and MySQL store a boolean as 1/0 and render "1" where CEL
+		// and PostgreSQL render "true", and nothing in the plan names a column's type.
+		//
+		// Every attribute resources.json omits when its column is NULL is declared
+		// NullConventionOmitted: aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString,
+		// aDouble, scope, createdAt, updatedAt, obj.inner and every parent.* hop. A null literal
+		// against one is then a missing-attribute error CEL denies, so it is refused rather than
+		// rendered as IS NULL (#528).
+		"request.resource.attr.aBool": {Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		// Declared string so CEL's `+` between two columns resolves to concatenation:
+		// the operator is overloaded and the plan carries no operand types, so an
+		// undeclared pair fails closed rather than emitting a numeric `+`.
+		"request.resource.attr.aString":         {Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.aNumber":         {Column: "a_number", ValueType: cerbosent.ValueNumber, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.aDouble":         {Column: "a_double", ValueType: cerbosent.ValueNumber, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.aOptionalString": {Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.createdBy":       {Column: "created_by"},
+		// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under
+		// the OTHER null convention: the corpus sends a real null attribute for them rather than
+		// omitting it. Declaring that here is what makes the equality family definite for these
+		// two attributes and leaves it untouched for every other mapping.
+		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: cerbosent.NullConventionExplicit},
+		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: cerbosent.NullConventionExplicit},
+		"request.resource.attr.scope":     {Column: "scope", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbosent.ValueTimestamp, NullConvention: cerbosent.NullConventionOmitted},
+		// obj.inner is not a real nested column — it mirrors aString, the same trick the
+		// other harnesses use for the `obj.inner` cases.
+		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+
+		"request.resource.attr.tags":       {Relation: tags},
+		"request.resource.attr.tagNames":   {Relation: &tagNames},
+		"request.resource.attr.categories": {Relation: categories},
+
+		// The two homogeneous scalar lists, one element per row of a related table, the way
+		// tagNames is stored. Declaring the element's type is what lets a literal of another
+		// type (`"2" in aNumberList`) be answered false as CEL answers it, rather than handed to
+		// an engine that coerces '2' onto a numeric column. A null element is a real null
+		// member, as the corpus spells it, so the elements take the explicit-null convention.
+		"request.resource.attr.aNumberList": {Relation: elementList(numberElemTable, cerbosent.Entry{ValueType: cerbosent.ValueNumber})},
+		"request.resource.attr.aBoolList":   {Relation: elementList(boolElemTable, cerbosent.Entry{ValueType: cerbosent.ValueBool})},
+
+		"request.resource.attr.mainCategory.subCategories": {Relation: mainSub},
+		"request.resource.attr.mainCategory.subNames":      {Relation: mainSub},
+
+		// The corpus's one REAL to-one chain (the `relation/*` cases). `ScalarRelation` reads one
+		// column of the joined row as a correlated scalar subquery; both levels' foreign keys are
+		// UNIQUE, which is the to-ONE claim the field's doc comment says the caller is making.
+		// `parent.inner` reaches two tables out, so it names the inner table and joins THROUGH
+		// the parent with a Hop — the same Via vocabulary mainCategory.subCategories uses.
+		// A hop's NULL column, like an absent level, is omitted from the resource, so every hop
+		// is declared NullConventionOmitted.
+		// The two aBool hops are declared boolean, like the root aBool, because that is what they
+		// hold, and an undeclared one keeps the plain CAST that SQLite and MySQL render as 1/0.
+		// `parent` itself is the to-one hop, not a column: a CEL map whose keys are the joined
+		// row's non-NULL columns. Declared so a macro over it (`collection/exists/map-keys`) meets
+		// the translator's own refusal rather than a harness defect.
+		"request.resource.attr.parent":                       {ScalarRelation: parentRel},
+		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
+	}
 }
 
 // -- the stores ---------------------------------------------------------------------------------
@@ -574,6 +694,20 @@ func nullableFloat(v *float64) any {
 	return *v
 }
 
+// elementList maps a scalar list stored one element per row of table.
+// element.ValueType declares the element type; the column and the explicit-null convention are
+// the same for both lists.
+func elementList(table string, element cerbosent.Entry) *cerbosent.Relation {
+	element.Column = "value"
+	element.NullConvention = cerbosent.NullConventionExplicit
+	return &cerbosent.Relation{
+		Table:        table,
+		SourceColumn: "id", TargetColumn: "resource_id",
+		Position: "position",
+		Field:    &element,
+	}
+}
+
 func nullableBool(v *bool) any {
 	if v == nil {
 		return nil
@@ -654,55 +788,68 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 // -- the suite ----------------------------------------------------------------------------------
 
 func TestAdversarialConformance(t *testing.T) {
-	mapper := buildMapper(t)
+	// Both ways of mapping are replayed against every store: written out by hand, and read from
+	// the ent schema by Schema.Mapper. Each writes its own fuzz results, as <store>-<mapping>.
+	mappers := []struct {
+		mapper cerbosent.Mapper
+		name   string
+	}{{declaredMapper(), "declared"}, {inferredMapper(t), "inferred"}}
 
 	for _, tgt := range targets() {
 		t.Run(tgt.name, func(t *testing.T) {
 			corpus := loadCorpus(t, tgt.name)
 			s := openStore(t, tgt, corpus)
-			var fuzzResults []FuzzVerdict
-			defer func() { writeFuzzResults(t, "ent", tgt.name, fuzzResults) }()
-			for _, tag := range corpus.Tags {
-				t.Run(tag, func(t *testing.T) {
-					// passed[tier] and total[tier] feed the summary logged at the end.
-					passed, total := map[string]int{}, map[string]int{}
-					for _, golden := range corpus.Goldens[tag] {
-						total[golden.Tier]++
-						entry, listed := corpus.Ledger[golden.ID]
-						listed = listed && entry.AppliesTo(tag)
+			for _, m := range mappers {
+				t.Run(m.name, func(t *testing.T) { s.replay(t, corpus, m.mapper, tgt.name+"-"+m.name) })
+			}
+		})
+	}
+}
 
-						ok := t.Run(golden.ID, func(t *testing.T) {
-							if golden.Skipped() {
-								t.Skip("plannerDivergence: the recorded plan and check() disagree under this PDP")
-							}
-							ids, err := s.filteredIDs(t.Context(), mapper, golden)
-							if fuzzDir != "" {
-								v := fuzzVerdict(golden, ids, err, cerbosent.ErrUnsupported)
-								fuzzResults = append(fuzzResults, v)
-								require.True(t, v.OK(), "%+v", v)
-								return
-							}
-							switch {
-							case !listed:
-								require.NoError(t, err)
-								require.Equal(t, sortedCopy(golden.Allowed), ids)
-							case entry.Status == "unsupported":
-								require.ErrorIs(t, err, cerbosent.ErrUnsupported,
-									"ledger says unsupported (%s): translation must refuse", entry.Reason)
-							default: // divergent
-								require.NoError(t, err)
-								require.NotEqual(t, sortedCopy(golden.Allowed), ids,
-									"ledger says divergent (%s), but the result matches: remove the entry", entry.Issue)
-							}
-						})
-						if ok && !listed && !golden.Skipped() {
-							passed[golden.Tier]++
-						}
+// replay runs every golden of the corpus through mapper against the store.
+func (s *store) replay(t *testing.T, corpus *Corpus, mapper cerbosent.Mapper, leg string) {
+	t.Helper()
+	var fuzzResults []FuzzVerdict
+	defer func() { writeFuzzResults(t, "ent", leg, fuzzResults) }()
+	for _, tag := range corpus.Tags {
+		t.Run(tag, func(t *testing.T) {
+			// passed[tier] and total[tier] feed the summary logged at the end.
+			passed, total := map[string]int{}, map[string]int{}
+			for _, golden := range corpus.Goldens[tag] {
+				total[golden.Tier]++
+				entry, listed := corpus.Ledger[golden.ID]
+				listed = listed && entry.AppliesTo(tag)
+
+				ok := t.Run(golden.ID, func(t *testing.T) {
+					if golden.Skipped() {
+						t.Skip("plannerDivergence: the recorded plan and check() disagree under this PDP")
 					}
-					for _, tier := range []string{"core", "extended", "adversarial"} {
-						t.Logf("%s, PDP %s, %s: %d / %d passed", tgt.name, tag, tier, passed[tier], total[tier])
+					ids, err := s.filteredIDs(t.Context(), mapper, golden)
+					if fuzzDir != "" {
+						v := fuzzVerdict(golden, ids, err, cerbosent.ErrUnsupported)
+						fuzzResults = append(fuzzResults, v)
+						require.True(t, v.OK(), "%+v", v)
+						return
+					}
+					switch {
+					case !listed:
+						require.NoError(t, err)
+						require.Equal(t, sortedCopy(golden.Allowed), ids)
+					case entry.Status == "unsupported":
+						require.ErrorIs(t, err, cerbosent.ErrUnsupported,
+							"ledger says unsupported (%s): translation must refuse", entry.Reason)
+					default: // divergent
+						require.NoError(t, err)
+						require.NotEqual(t, sortedCopy(golden.Allowed), ids,
+							"ledger says divergent (%s), but the result matches: remove the entry", entry.Issue)
 					}
 				})
+				if ok && !listed && !golden.Skipped() {
+					passed[golden.Tier]++
+				}
+			}
+			for _, tier := range []string{"core", "extended", "adversarial"} {
+				t.Logf("%s, PDP %s, %s: %d / %d passed", leg, tag, tier, passed[tier], total[tier])
 			}
 		})
 	}

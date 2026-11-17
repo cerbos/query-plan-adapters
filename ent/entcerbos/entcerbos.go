@@ -55,13 +55,15 @@ func FromGraph(graph *gen.Graph) (*cerbosent.Schema, error) {
 	schema := &cerbosent.Schema{}
 	nodes := slices.SortedFunc(slices.Values(graph.Nodes), func(a, b *gen.Type) int { return strings.Compare(a.Name, b.Name) })
 	for _, t := range nodes {
-		st := cerbosent.SchemaType{Name: t.Name, Table: t.Table(), Columns: map[string]string{}}
+		st := cerbosent.SchemaType{Name: t.Name, Table: t.Table(), Columns: map[string]string{}, Fields: map[string]string{}}
 		if t.HasOneFieldID() {
 			st.ID = t.ID.StorageKey()
 			st.Columns[st.ID] = t.ID.Type.Type.String()
+			st.Fields[t.ID.Name] = st.ID
 		}
 		for _, f := range t.Fields {
 			st.Columns[f.StorageKey()] = f.Type.Type.String()
+			st.Fields[f.Name] = f.StorageKey()
 		}
 		for _, e := range t.Edges {
 			edge, err := readEdge(t, e)
@@ -151,6 +153,15 @@ func Source(pkg string, schema *cerbosent.Schema) ([]byte, error) {
 		sort.Strings(cols)
 		for _, c := range cols {
 			fmt.Fprintf(&b, "%q: %q,", c, t.Columns[c])
+		}
+		b.WriteString("}, Fields: map[string]string{")
+		names := make([]string, 0, len(t.Fields))
+		for n := range t.Fields {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			fmt.Fprintf(&b, "%q: %q,", n, t.Fields[n])
 		}
 		b.WriteString("}")
 		if len(t.Edges) > 0 {
