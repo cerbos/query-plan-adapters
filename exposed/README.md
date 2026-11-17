@@ -86,11 +86,13 @@ import dev.cerbos.queryplan.exposed.cerbosMapping
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 
-// Map the plan's attribute references onto your columns:
-val mapping = cerbosMapping {
+// Map the plan's attribute references onto your columns. Relations come from your tables'
+// `references(...)`: name the table and the adapter reads the keys and cardinality.
+val mapping = cerbosMapping(root = Documents) {
     "request.resource.id" to Documents.id
     "request.resource.attr.ownerId" to Documents.ownerId
     "request.resource.attr.isPublic" to Documents.isPublic
+    "request.resource.attr.tags" to relation(Tags) { "name" to Tags.name }
 }
 
 // 1) Ask the PDP for a query plan
@@ -196,48 +198,61 @@ later without breaking your call.
 
 ## Mapping attributes
 
-`cerbosMapping { }` builds the usual static table. Resolution is **fail-closed**: a reference
-nothing maps raises `UnmappedAttributeException` rather than guessing a column name.
+`cerbosMapping(root = ...) { }` builds the usual static table. `root` is the table the filter is
+applied to. Resolution is **fail-closed**: a reference nothing maps raises
+`UnmappedAttributeException` rather than guessing a column name.
+
+**The happy path names columns and related tables, nothing more.** When your tables declare their
+keys with `references(...)` (or DAO `reference(...)`), `relation(...)` reads each relation's keys
+and cardinality from that schema:
 
 ```kotlin
-val mapping = cerbosMapping {
-    // A column. `to` takes a bare Column for the common case…
+val mapping = cerbosMapping(root = Documents) {
     "request.resource.id" to Documents.id
     "request.resource.attr.aString" to Documents.aString
-    // …or `field(...)`, which additionally declares this attribute's NULL convention.
-    "request.resource.attr.owner" to field(Documents.ownerId, nulls = NullAttributeRepresentation.EXPLICIT)
 
-    // A to-many relation whose elements are objects.
-    "request.resource.attr.tags" to many(Tags, from = Documents.id, to = Tags.documentId) {
+    // A collection of objects: Tags.documentId references Documents.id.
+    "request.resource.attr.tags" to relation(Tags) {
         "id" to Tags.tagId
         "name" to Tags.name
-        // Optional. See "Mapping hazards".
-        visibleWhen { t -> t[Tags.deletedAt].isNull() }
     }
 
-    // A to-many relation whose elements ARE values: `element` is the value each element stands for.
-    // `orderBy` is optional: the column whose ascending order is the list's order.
-    "request.resource.attr.tagNames" to
-        many(Tags, from = Documents.id, to = Tags.documentId, element = Tags.name, orderBy = Tags.position)
+    // A collection whose elements ARE values. `orderBy` is optional: the list's order.
+    "request.resource.attr.tagNames" to relation(Tags, element = Tags.name, orderBy = Tags.position)
 
-    // A to-one relation, and a chain through it.
-    "request.resource.attr.parent" to one(Parents, from = Documents.id, to = Parents.documentId) {
+    // A to-one, because Parents.documentId has a unique index, and a chain through it.
+    "request.resource.attr.parent" to relation(Parents) {
         "aString" to Parents.aString
-        "inner" to one(Inners, from = Parents.id, to = Inners.parentId) {
-            "aBool" to Inners.aBool
-        }
+        "inner" to relation(Inners) { "aBool" to Inners.aBool }
     }
 }
 ```
 
-- **`from` is a column on the scope that declares the relation** — the root table at the top level,
-  the enclosing relation's table when nested — and **`to` is the matching column on the related
-  table**. The correlation is always `<table>.<to> = <parent>.<from>`.
+You add configuration only where the schema cannot say what you mean: a
+[NULL convention](#null-attribute-representation) on a column, a
+[`visibleWhen`](#mapping-hazards) predicate for soft-deleted or tenant-scoped rows, the key to use
+when two reach the same table, or a relation [declared by hand](#overrides-declaring-a-relation-by-hand).
+
+- **The key is the single-column foreign key between the two tables, in either direction.** A key
+  on the related table that points back at the scope is a child (`Tags.documentId`); a key on the
+  scope that points at the related table is a reference (`Documents.reviewerId`, read through the
+  column it references). A nested `relation(...)` infers against its enclosing relation's table.
+- **`one` is inferred only from a key the schema proves unique**: a single-column primary key, or a
+  unique index on that column alone with no `filterCondition`. Anything else is `many`, so a to-one
+  your database keeps unique without telling Exposed reads as a collection, and a member read
+  through it (`parent.label`) is refused, never answered from an arbitrary row. Add the unique
+  index, or [declare it](#overrides-declaring-a-relation-by-hand).
+- **What the schema cannot settle is a construction error**, not a guess: no key, a composite key,
+  or several keys between the same two tables (including a self reference). Name the key with
+  `relation(via = Documents.reviewerId)`, or declare the relation by hand.
+- **`references(...)` is metadata here, not a filter.** Inference reads keys, never a DAO's
+  conditions, so `visibleWhen` is still how a soft-delete or tenant predicate reaches the subquery.
 - **A dotted reference resolves against the longest mapped prefix**, and the remainder is walked
   through that relation's nested entries. So `request.resource.attr.parent.inner.aBool` above is one
   mapping entry reached in three steps, not a third top-level key.
-- **`one` is read as a scalar** through a correlated scalar subquery: no matching row yields NULL,
-  which is already CEL's missing-attribute error, so both polarities deny. `many` is a collection.
+- **A to-one is read as a scalar** through a correlated scalar subquery: no matching row yields
+  NULL, which is already CEL's missing-attribute error, so both polarities deny. A to-many is a
+  collection.
 - **A list read by position needs `orderBy`.** Without it a relation's rows have no order, and
   `tags[0]`, `tags[0].name`, `tagNames == ["a", "b"]` and `tags.map(t, t.id) == [...]` are refused.
   With it, `tags[0]` is the row at `OFFSET 0` of the subquery in that order, and a comparison around
@@ -246,56 +261,42 @@ val mapping = cerbosMapping {
   `map()` projection compares this way only over a non-null member column, since `map()` raises on
   a missing member whatever the list's length. Rows with equal `orderBy` values have no defined
   order.
-- **A relation is validated where it is built.** `to` must be a column of `table`, `element` must be
-  a column of `table`, `orderBy` must be a column of `table`, and every nested entry must read `table` — each is an
+- **A relation is validated where it is built.** `element`, `orderBy` and every nested entry must
+  read the related table, and every top-level `from` must be a column of `root`. Each is an
   `IllegalArgumentException` at mapping-construction time, not a wrong join at query time.
-- **A top-level relation's `from` is the one key nothing can check.** The adapter is never told
-  which table you select from: a mapping names columns, and the root scope reads them bare. So
-  `from` naming a column of some other table is accepted at construction and fails at *execution*,
-  exactly the way [an aliased root table](#aliased-root-tables) does — a rejected statement, never a
-  wrong row set. A nested relation's `from` *is* checked, because the enclosing relation declares
-  its table.
-- **`one(...)` is a promise the database has to keep.** The mapping declares the cardinality; only a
-  unique index on `to` enforces it. Without one the scalar subquery can return several rows, which
-  PostgreSQL, MySQL and H2 raise on and **SQLite silently answers from the first row** — so a schema
-  that passes your SQLite tests can fail, or quietly answer from an arbitrary row, in production.
 
-### Inferring relations from the schema
+### Overrides: declaring a relation by hand
 
-When your tables declare their keys with `references(...)` (or DAO `reference(...)`), `relation(...)`
-reads the keys and the cardinality from them, so a relation names only the related table:
+`one(...)` and `many(...)` state the keys and the cardinality themselves. Use them for what
+inference does not cover: a correlation on columns with no foreign key, an
+[aliased table](#aliased-root-tables), or a to-one the schema does not prove unique. They work with
+or without `root`, and mappings written before `relation(...)` existed keep working unchanged.
 
 ```kotlin
-val mapping = cerbosMapping(root = Documents) {
-    "request.resource.attr.tags" to relation(Tags) { "name" to Tags.name }
-    "request.resource.attr.tagNames" to relation(Tags, element = Tags.name, orderBy = Tags.position)
-    "request.resource.attr.parent" to relation(Parents) {
-        "inner" to relation(Inners) { "aBool" to Inners.aBool }
+val mapping = cerbosMapping {
+    "request.resource.attr.tags" to many(Tags, from = Documents.id, to = Tags.documentId) {
+        "name" to Tags.name
     }
-    // Two keys reach the same table: name the one this attribute means.
-    "request.resource.attr.reviewer" to relation(via = Documents.reviewerId)
+    "request.resource.attr.tagNames" to
+        many(Tags, from = Documents.id, to = Tags.documentId, element = Tags.name, orderBy = Tags.position)
+    "request.resource.attr.parent" to one(Parents, from = Documents.id, to = Parents.documentId) {
+        "inner" to one(Inners, from = Parents.id, to = Inners.parentId)
+    }
 }
 ```
 
-- **The root is named once.** A top-level `relation(...)` needs `cerbosMapping(root = ...)`, the
-  table the filter is applied to; a nested one infers against its enclosing relation's table.
-  Naming the root also checks every top-level `one(...)`/`many(...)` `from` against it.
-- **The key is the single-column foreign key between the two tables, in either direction.** A key
-  on the related table that points back at the scope is a child (`Tags.documentId`); a key on the
-  scope that points at the related table is a reference (`Documents.reviewerId`, read through the
-  column it references).
-- **`one` is inferred only from a key the schema proves unique**: a single-column primary key, or a
-  unique index on that column alone with no `filterCondition`. Anything else is `many`, so a to-one
-  your database keeps unique without telling Exposed reads as a collection, and a member read
-  through it (`parent.label`) is refused, never answered from an arbitrary row. Add the unique
-  index, or declare it with `one(...)`.
-- **What the schema cannot settle is a construction error**, not a guess: no key, a composite key,
-  or several keys between the same two tables (including a self reference by table name). Use
-  `relation(via = column)` or the explicit `one(...)`/`many(...)`, which stay the override for
-  everything inference does not cover: an aliased table, a correlation on columns with no foreign
-  key, or a to-one the schema does not prove unique.
-- **`references(...)` is metadata here, not a filter.** Inference reads keys, never a DAO's
-  conditions, so `visibleWhen` is still how a soft-delete or tenant predicate reaches the subquery.
+- **`from` is a column on the scope that declares the relation** — the root table at the top level,
+  the enclosing relation's table when nested — and **`to` is the matching column on the related
+  table**. The correlation is always `<table>.<to> = <parent>.<from>`. `to` must be a column of
+  `table`.
+- **Without `root`, a top-level relation's `from` is the one key nothing can check.** The adapter is
+  then never told which table you select from, so `from` naming a column of some other table is
+  accepted at construction and fails at *execution*, exactly the way
+  [an aliased root table](#aliased-root-tables) does — a rejected statement, never a wrong row set.
+- **`one(...)` is a promise the database has to keep.** Only a unique index on `to` enforces it.
+  Without one the scalar subquery can return several rows, which PostgreSQL, MySQL and H2 raise on
+  and **SQLite silently answers from the first row** — so a schema that passes your SQLite tests can
+  fail, or quietly answer from an arbitrary row, in production.
 
 ### The operand's type has to match the column's
 
@@ -796,7 +797,7 @@ silence is not a warning.
 reads through a fresh alias and the predicate has to be built against that alias:
 
 ```kotlin
-"request.resource.attr.tags" to many(Tags, from = Documents.id, to = Tags.documentId) {
+"request.resource.attr.tags" to relation(Tags) {
     "name" to Tags.name
     visibleWhen { t -> (t[Tags.deletedAt].isNull()) and (t[Tags.kind] eq "label") }
 }
@@ -916,7 +917,7 @@ An unknown value fails rather than falling back to the default.
 
 | Suite | Role | Needs |
 |---|---|---|
-| `AdversarialConformanceTest` | Conformance: every recorded golden plan of both PDPs replayed, rows compared with the recorded `check()` decisions; exceptions in [`conformance-ledger.json`](conformance-ledger.json) | H2 or SQLite in-process, or Docker for PostgreSQL/MySQL |
+| `AdversarialConformanceTest` | Conformance: every recorded golden plan of both PDPs replayed, rows compared with the recorded `check()` decisions; exceptions in [`conformance-ledger.json`](conformance-ledger.json). Each case is translated through the inferred mapping and the hand-declared one, which must give the same rows or the same refusal; a fuzz replay (`QPA_FUZZ_DIR`) judges both the same way | H2 or SQLite in-process, or Docker for PostgreSQL/MySQL |
 | `ContractTest` | Call contract: the null-convention options, a resolver mapping, `maxMacroDepth`, and plans the planner cannot produce | nothing — no database |
 | `ExposedSurfaceTest`, `ContractSmokeTest`, `MappingDslTest` | The public surface: `QueryPlanFilter`, the mapping DSL, composition with `where`, `andWhere` and DAO `find` | H2 in-process |
 | The translator and review suites | Branches no policy reaches, caller-supplied options, and dialect rendering | H2 and SQLite in-process |

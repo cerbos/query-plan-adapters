@@ -31,7 +31,8 @@ import java.util.stream.Stream
 /**
  * The conformance harness. It implements `conformance/README.md`, "The harness contract":
  *
- * 1. Store the dataset (`seeds.json` + `derived-fields.json`) and map it ([MAPPING]).
+ * 1. Store the dataset (`seeds.json` + `derived-fields.json`) and map it ([MAPPING]; every case is
+ *    also translated through [DECLARED_MAPPING] and must answer the same).
  * 2. For each PDP and each recorded golden file, translate the plan, run the query, and compare the
  *    ids with the ones `check()` allowed. `conformance-ledger.json` lists the exceptions:
  *    `unsupported` must throw one of the adapter's refusal types, and `divergent` must still give a
@@ -251,8 +252,21 @@ class AdversarialConformanceTest {
 
         // -- the query ----------------------------------------------------------------------------
 
-        private fun ids(golden: JsonNode): List<String> =
-            idsSelectedBy(ExposedQueryPlanAdapter.toFilter(Corpus.plan(golden), Options.of(MAPPING).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)))
+        private fun ids(golden: JsonNode, mapping: AttributeMappings): List<String> =
+            idsSelectedBy(ExposedQueryPlanAdapter.toFilter(Corpus.plan(golden), Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT)))
+
+        /**
+         * The case under the inferred mapping, after requiring the declared mapping to answer the
+         * same: the same rows, or a refusal of the same type.
+         */
+        private fun ids(golden: JsonNode): List<String> {
+            val inferred = runCatching { ids(golden, MAPPING) }
+            val declared = runCatching { ids(golden, DECLARED_MAPPING) }
+            val same = inferred.getOrNull() == declared.getOrNull() &&
+                inferred.exceptionOrNull()?.javaClass == declared.exceptionOrNull()?.javaClass
+            if (!same) throw MappingModesDisagree(golden["id"].asText(), inferred, declared)
+            return inferred.getOrThrow()
+        }
 
         /**
          * The ids a caller's query returns under [filter], each kind handled the way a caller is
@@ -419,3 +433,6 @@ class AdversarialConformanceTest {
         }
     }
 }
+
+private class MappingModesDisagree(id: String, inferred: Result<List<String>>, declared: Result<List<String>>) :
+    AssertionError("$id: the inferred mapping gave $inferred but the declared one gave $declared")
