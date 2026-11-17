@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0
 
 - **Breaking:** `SchemaType.Table` is removed; nothing read it. Regenerate `cerbos_schema.go`.
 - Added: `SchemaEdge.Unsupported` says why an edge has no join, and the error for an override on
