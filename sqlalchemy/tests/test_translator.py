@@ -18,6 +18,7 @@ from corpus import (
     ATTR_MAP,
     ATTRIBUTE_NULL_REPRESENTATION,
     COLLECTION_COLUMNS,
+    DECLARED_ATTR_MAP,
     OPERATOR_OVERRIDES,
     PDP_TAGS,
     PG_ARRAY_COLLECTION_COLUMNS,
@@ -153,12 +154,14 @@ class TestOperatorOverrides:
         assert "= ANY (" in emitted({"in": lambda c, v: c == any_(v)})
 
     def test_an_unmapped_attribute_is_refused_rather_than_dropped(self):
-        # Dropping it would change what the filter means.
+        # Dropping it would change what the filter means. A Core Table has no mapping
+        # to read the attribute from.
         with pytest.raises(KeyError, match="Attribute does not exist"):
             translate(
                 "string/equals/case-sensitive",
                 attr_map={},
                 attribute_null_representation=None,
+                table=AdvResource.__table__,
             )
 
     # "Unsupported" in the ledger means unsupported with the corpus's overrides.
@@ -483,14 +486,17 @@ class TestDeclarativeBaseModels:
             )
             for legacy in {
                 value.class_
-                for value in list(ATTR_MAP.values())
+                for value in list(DECLARED_ATTR_MAP.values())
                 + [declared.column for declared in COLLECTION_COLUMNS.values()]
                 if isinstance(value, InstrumentedAttribute)
             }
         }
 
         def swap(value):
-            if isinstance(value, InstrumentedAttribute):
+            # A relationship() stays on the legacy model: the twins share its tables.
+            if isinstance(value, InstrumentedAttribute) and hasattr(
+                twins[value.class_], value.key
+            ):
                 return getattr(twins[value.class_], value.key)
             return value
 
@@ -498,7 +504,9 @@ class TestDeclarativeBaseModels:
         assert not isinstance(table, DeclarativeMeta)
         return {
             "table": table,
-            "attr_map": {name: swap(value) for name, value in ATTR_MAP.items()},
+            "attr_map": {
+                name: swap(value) for name, value in DECLARED_ATTR_MAP.items()
+            },
             "collection_columns": {
                 name: CollectionColumn(swap(declared.column), declared.storage)
                 for name, declared in COLLECTION_COLUMNS.items()
@@ -511,7 +519,9 @@ class TestDeclarativeBaseModels:
             case["id"]
             for case in CURRENT
             if _translated_or_refused(
-                lambda cid=case["id"]: render(translate(cid), "sqlite")
+                lambda cid=case["id"]: render(
+                    translate(cid, attr_map=DECLARED_ATTR_MAP), "sqlite"
+                )
             )
             != _translated_or_refused(
                 lambda cid=case["id"]: render(translate(cid, **modern), "sqlite")

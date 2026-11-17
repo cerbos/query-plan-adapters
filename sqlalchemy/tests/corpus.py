@@ -42,9 +42,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, relationship
 
-from cerbos_sqlalchemy import CollectionColumn, Relation, relation_overrides
+from cerbos_sqlalchemy import CollectionColumn, Relation, related, relation_overrides
 
 CONFORMANCE_DIR = os.path.realpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "conformance")
@@ -379,6 +379,12 @@ class AdvResource(AdvBase):
     a_number_list_array = Column(_NUMBER_ARRAY, nullable=True)
     a_bool_list_array = Column(_BOOL_ARRAY, nullable=True)
 
+    tags = relationship("AdvTag", viewonly=True)
+    categories = relationship("AdvCategory", viewonly=True)
+    # The same rows as `categories`; the unique foreign key makes it to-one.
+    main_category = relationship("AdvCategory", uselist=False, viewonly=True)
+    parent = relationship("AdvParent", uselist=False, viewonly=True)
+
 
 class AdvTag(AdvBase):
     __tablename__ = "adversarial_tag"
@@ -394,7 +400,11 @@ class AdvCategory(AdvBase):
 
     id = Column(_STRING, primary_key=True)
     name = Column(_STRING, nullable=False)
-    resource_id = Column(_STRING, ForeignKey("adversarial_resource.id"), nullable=False)
+    resource_id = Column(
+        _STRING, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
+    )
+
+    sub_categories = relationship("AdvSubCategory", viewonly=True)
 
 
 class AdvSubCategory(AdvBase):
@@ -403,6 +413,8 @@ class AdvSubCategory(AdvBase):
     id = Column(_STRING, primary_key=True)
     name = Column(_STRING, nullable=False)
     category_id = Column(_STRING, ForeignKey("adversarial_category.id"), nullable=False)
+
+    labels = relationship("AdvLabel", viewonly=True)
 
 
 class AdvLabel(AdvBase):
@@ -429,6 +441,8 @@ class AdvParent(AdvBase):
         _STRING, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
     )
 
+    inner = relationship("AdvInner", uselist=False, viewonly=True)
+
 
 class AdvInner(AdvBase):
     __tablename__ = "adversarial_inner"
@@ -444,68 +458,8 @@ class AdvInner(AdvBase):
 
 
 # -- relations -----------------------------------------------------------------
-# ATTR_MAP points relation attributes at the shipped `Relation`, and the shipped
-# `relation_overrides()` translate macros over them, so the corpus proves the code
-# the README hands consumers (#527).
-
-TAGS = Relation(
-    [AdvTag.resource_id == AdvResource.id],
-    # The resource may be several lambdas up: collection/exists/outer-collection-inside-lambda
-    # nests tags in categories.
-    correlate=[AdvResource],
-)
-TAG_NAMES = Relation(
-    [AdvTag.resource_id == AdvResource.id],
-    correlate=[AdvResource],
-    member=AdvTag.name,
-)
-CATEGORIES = Relation(
-    [AdvCategory.resource_id == AdvResource.id],
-    correlate=[AdvResource],
-)
-# Correlates to the enclosing category, but the body may read resource columns
-# (collection/exists/nested-with-outer-attribute), so the resource correlates too.
-SUB_OF_CATEGORY = Relation(
-    [AdvSubCategory.category_id == AdvCategory.id],
-    correlate=[AdvCategory, AdvResource],
-)
-LABELS_OF_SUB = Relation(
-    [AdvLabel.sub_category_id == AdvSubCategory.id],
-    correlate=[AdvSubCategory, AdvCategory, AdvResource],
-)
-# The same two-hop chain from the root. The category hop stays in the subquery's
-# FROM; only the resource correlates.
-MAIN_SUB = Relation(
-    [
-        AdvSubCategory.category_id == AdvCategory.id,
-        AdvCategory.resource_id == AdvResource.id,
-    ],
-    correlate=[AdvResource],
-    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
-)
-MAIN_SUBNAMES = Relation(
-    [
-        AdvSubCategory.category_id == AdvCategory.id,
-        AdvCategory.resource_id == AdvResource.id,
-    ],
-    correlate=[AdvResource],
-    member=AdvSubCategory.name,
-    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
-)
-
-
-class _ToOneRow:
-    """The to-one `parent` read whole: a map-valued attribute, stored as a row.
-
-    A macro or `in` over it ranges over the keys of a map, and SQL cannot read which
-    of a row's columns are non-NULL as those keys, so the overrides refuse it.
-    """
-
-    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
-        return "_ToOneRow(parent)"
-
-
-PARENT = _ToOneRow()
+# ATTR_MAP names the models' relationship() attributes; the adapter reads the
+# correlation, cardinality and to-one hop guards from them.
 
 OPERATOR_OVERRIDES = relation_overrides()
 
@@ -609,6 +563,91 @@ ATTRIBUTE_NULL_REPRESENTATION = {
 }
 
 
+#: What a caller writes when the model's columns and relationships carry the attribute
+#: names: only what inference cannot read. Everything else in a plan, lambda variables
+#: included, resolves through AdvResource's mapping.
+ATTR_MAP = {
+    # Attributes that alias another column, or have no column of their own name.
+    "request.resource.attr.owner": AdvResource.a_optional_string,
+    "request.resource.attr.coOwner": AdvResource.scope,
+    "request.resource.attr.obj.inner": AdvResource.a_string,
+    # A list of strings: the relationship, then the member column.
+    "request.resource.attr.tagNames": related(AdvResource.tags, AdvTag.name),
+    "request.resource.attr.mainCategory.subNames": related(
+        AdvResource.main_category, AdvCategory.sub_categories, AdvSubCategory.name
+    ),
+    # A tag's `id` is its tag_id; `pk` is the surrogate key.
+    "t.id": AdvTag.tag_id,
+    # A key of the parent map (collection/exists/map-keys). It has no column: the
+    # body translates, and the `exists` override then refuses the map it ranges over.
+    "k": literal(None, String),
+}
+
+# -- the declared mapping -------------------------------------------------------
+# The same attributes written out by hand, as before relationships were inferred:
+# `Relation`s with their own correlation and hop guards, and scalar subqueries for the
+# to-one chain. The harness and the fuzzer replay every case under both mappings.
+
+TAGS = Relation(
+    [AdvTag.resource_id == AdvResource.id],
+    # The resource may be several lambdas up: collection/exists/outer-collection-inside-lambda
+    # nests tags in categories.
+    correlate=[AdvResource],
+)
+TAG_NAMES = Relation(
+    [AdvTag.resource_id == AdvResource.id],
+    correlate=[AdvResource],
+    member=AdvTag.name,
+)
+CATEGORIES = Relation(
+    [AdvCategory.resource_id == AdvResource.id],
+    correlate=[AdvResource],
+)
+# Correlates to the enclosing category, but the body may read resource columns
+# (collection/exists/nested-with-outer-attribute), so the resource correlates too.
+SUB_OF_CATEGORY = Relation(
+    [AdvSubCategory.category_id == AdvCategory.id],
+    correlate=[AdvCategory, AdvResource],
+)
+LABELS_OF_SUB = Relation(
+    [AdvLabel.sub_category_id == AdvSubCategory.id],
+    correlate=[AdvSubCategory, AdvCategory, AdvResource],
+)
+# The same two-hop chain from the root. The category hop stays in the subquery's
+# FROM; only the resource correlates.
+MAIN_SUB = Relation(
+    [
+        AdvSubCategory.category_id == AdvCategory.id,
+        AdvCategory.resource_id == AdvResource.id,
+    ],
+    correlate=[AdvResource],
+    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
+)
+MAIN_SUBNAMES = Relation(
+    [
+        AdvSubCategory.category_id == AdvCategory.id,
+        AdvCategory.resource_id == AdvResource.id,
+    ],
+    correlate=[AdvResource],
+    member=AdvSubCategory.name,
+    hop_correlation=[AdvCategory.resource_id == AdvResource.id],
+)
+
+
+class _ToOneRow:
+    """The to-one `parent` read whole: a map-valued attribute, stored as a row.
+
+    A macro or `in` over it ranges over the keys of a map, and SQL cannot read which
+    of a row's columns are non-NULL as those keys, so the overrides refuse it.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return "_ToOneRow(parent)"
+
+
+PARENT = _ToOneRow()
+
+
 def _parent_scalar(column):
     """One scalar of the to-one `parent`, as a correlated scalar subquery."""
     # A missing parent gives NULL, which stays excluded under negation too, so no
@@ -637,7 +676,8 @@ def _inner_scalar(column):
     )
 
 
-ATTR_MAP = {
+#: The same mapping written out in full, as before inference.
+DECLARED_ATTR_MAP = {
     # Not under `attr` (the `identifier/*` cases).
     "request.resource.id": AdvResource.id,
     "request.resource.attr.aBool": AdvResource.a_bool,
@@ -692,6 +732,13 @@ ATTR_MAP = {
     "k": literal(None, String),
     "request.resource.attr.mainCategory.subCategories": MAIN_SUB,
     "request.resource.attr.mainCategory.subNames": MAIN_SUBNAMES,
+}
+
+
+#: Each mapping the harness replays the corpus under, with the overrides its caller passes.
+MAPPINGS = {
+    "inferred": (ATTR_MAP, None),
+    "declared": (DECLARED_ATTR_MAP, OPERATOR_OVERRIDES),
 }
 
 

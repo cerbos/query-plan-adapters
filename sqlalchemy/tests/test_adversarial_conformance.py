@@ -7,7 +7,8 @@ Each golden plan, for both recorded PDPs, is translated with ``corpus.py``'s map
 executed; the ids must equal the recorded ``allowed``. ``conformance-ledger.json`` lists the
 exceptions. SQLite (sync and async), PostgreSQL and MySQL run every case. PostgreSQL runs
 the cases that read a declared collection once more, with the collections stored as native
-arrays instead of JSON.
+arrays instead of JSON. Every leg runs under both mappings in ``corpus.MAPPINGS``: relations
+inferred from ``relationship()`` and relations written out by hand.
 """
 
 import asyncio
@@ -19,11 +20,10 @@ from typing import Any
 
 import pytest
 from corpus import (
-    ATTR_MAP,
     ATTRIBUTE_NULL_REPRESENTATION,
     COLLECTION_COLUMNS,
     FUZZ_DIR,
-    OPERATOR_OVERRIDES,
+    MAPPINGS,
     PDP_TAGS,
     PG_ARRAY_COLLECTION_COLUMNS,
     AdvBase,
@@ -97,15 +97,22 @@ FUZZ_RESULTS: dict[str, list[dict[str, Any]]] = {}
 
 def _params():
     for store in STORES:
-        for tag in PDP_TAGS:
-            for case in GOLDEN[tag]:
-                # Only a declared collection's storage tells the two PostgreSQL shapes
-                # apart, so the array shape runs just the cases that read one.
-                if store == "postgresql-pgArray" and not reads_declared_collection(
-                    case
-                ):
-                    continue
-                yield pytest.param(store, tag, case, id=f"{store}-{tag}-{case['id']}")
+        for mapping in MAPPINGS:
+            for tag in PDP_TAGS:
+                for case in GOLDEN[tag]:
+                    # Only a declared collection's storage tells the two PostgreSQL shapes
+                    # apart, so the array shape runs just the cases that read one.
+                    if store == "postgresql-pgArray" and not reads_declared_collection(
+                        case
+                    ):
+                        continue
+                    yield pytest.param(
+                        store,
+                        mapping,
+                        tag,
+                        case,
+                        id=f"{store}-{mapping}-{tag}-{case['id']}",
+                    )
 
 
 # -- the store --------------------------------------------------------------
@@ -365,12 +372,13 @@ def _execute_async(path: str, query) -> list[str]:
 # -- the contract -----------------------------------------------------------
 
 
-def _translate(store: str, case: dict[str, Any]):
+def _translate(store: str, mapping: str, case: dict[str, Any]):
+    attr_map, overrides = MAPPINGS[mapping]
     return get_query(
         plan_from_golden(case),
         AdvResource,
-        ATTR_MAP,
-        operator_override_fns=OPERATOR_OVERRIDES,
+        attr_map,
+        operator_override_fns=overrides,
         # Every column the dataset omits when NULL is declared "omitted" in
         # ATTRIBUTE_NULL_REPRESENTATION. The call-level value covers what is left, list
         # elements and principal-side literals, which the dataset sends as values; the
@@ -387,22 +395,23 @@ def _translate(store: str, case: dict[str, Any]):
 
 # A cartesian-product warning means a subquery failed to correlate: make it an error.
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
-@pytest.mark.parametrize("store,tag,case", _params())
-def test_case(store, tag, case, request):
+@pytest.mark.parametrize("store,mapping,tag,case", _params())
+def test_case(store, mapping, tag, case, request):
     if FUZZ_DIR:
         try:
             verdict = fuzz_verdict(
                 case,
                 _held(store, case["allowed"]),
-                _execute(store, _translate(store, case), request),
+                _execute(store, _translate(store, mapping, case), request),
             )
         except Exception as error:  # noqa: BLE001 - every throw is judged, not raised
             verdict = fuzz_thrown(case, error, UnsupportedPlanError)
-        FUZZ_RESULTS.setdefault(store, []).append(verdict)
+        leg = store if mapping == "inferred" else f"{store}-{mapping}"
+        FUZZ_RESULTS.setdefault(leg, []).append(verdict)
         assert verdict["verdict"] in ("match", "refused"), verdict
         return
 
-    tally = RESULTS.setdefault(f"{store} @ {tag}", Counter())
+    tally = RESULTS.setdefault(f"{store} ({mapping}) @ {tag}", Counter())
     # A golden file carries `plannerDivergence` only for the PDP tags it applies to.
     if case["plannerDivergence"] is not None:
         tally[(case["tier"], "planner divergence")] += 1
@@ -416,9 +425,9 @@ def test_case(store, tag, case, request):
 
     if status == "unsupported":
         with pytest.raises(UnsupportedPlanError):
-            _translate(store, case)
+            _translate(store, mapping, case)
     else:
-        returned = _execute(store, _translate(store, case), request)
+        returned = _execute(store, _translate(store, mapping, case), request)
         if status == "divergent":
             assert sorted(returned) != sorted(allowed), (
                 f"{case['id']} now matches the PDP: remove its divergent ledger entry"

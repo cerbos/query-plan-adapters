@@ -26,7 +26,7 @@ from sqlalchemy import (
     true,
 )
 from sqlalchemy.orm import InstrumentedAttribute
-from sqlalchemy.sql.expression import ColumnElement
+from sqlalchemy.sql.expression import ColumnElement, ScalarSelect
 
 from cerbos_sqlalchemy._null_conventions import (
     EQUALITY_FAMILY,
@@ -979,6 +979,13 @@ class Translator:
         if not isinstance(column, (ColumnElement, InstrumentedAttribute)):
             raise UnsupportedPlanError(
                 f"Cannot translate has({name}): it is not mapped to a column"
+            )
+        if isinstance(column, ScalarSelect):
+            raise UnsupportedPlanError(
+                f"Cannot translate has({name}): it is a correlated subquery, NULL both "
+                "for a missing value and for a missing row it reads through, and has() "
+                "through a missing parent is an error CEL denies under both polarities; "
+                "supply an operator_override_fns entry for 'has'"
             )
         if self._is_omitted_null(name):
             return is_not_null(column)

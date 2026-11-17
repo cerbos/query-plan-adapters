@@ -47,7 +47,8 @@ from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - re-exported f
     require_index_position,
 )
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
-from cerbos_sqlalchemy.relations import Relation
+from cerbos_sqlalchemy.inference import RelatedRow, infer, infer_attributes, resolvable
+from cerbos_sqlalchemy.relations import Relation, relation_overrides
 
 try:  # SQLAlchemy >= 2.0
     from sqlalchemy.orm import DeclarativeBase
@@ -71,7 +72,7 @@ _ORMModel = TypeVar("_ORMModel", bound=_MappedClass)
 # A 2.0-style model's metaclass is not a DeclarativeMeta, hence DeclarativeBase.
 GenericTable = Table | DeclarativeMeta | type[DeclarativeBase]
 GenericColumn = Column | InstrumentedAttribute
-AttrMapValue = GenericColumn | ColumnElement | Relation
+AttrMapValue = GenericColumn | ColumnElement | Relation | RelatedRow
 GenericExpression = BinaryExpression | ColumnOperators
 OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
@@ -196,6 +197,8 @@ def _require_table_mapping(
 
     required_tables = set()
     for variable, column in attributes:
+        if isinstance(column, RelatedRow):
+            continue
         column_table = getattr(column, "table", None)
         if column_table is None:
             # A self-contained expression, e.g. a correlated scalar subquery, needs
@@ -230,7 +233,7 @@ def _require_table_mapping(
 def get_query(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: type[_ORMModel],
-    attr_map: dict[str, AttrMapValue],
+    attr_map: dict[str, AttrMapValue] | None = ...,
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = ...,
     operator_override_fns: OperatorFnMap | None = ...,
     null_attribute_representation: NullAttributeRepresentation = ...,
@@ -244,7 +247,7 @@ def get_query(
 def get_query(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
-    attr_map: dict[str, AttrMapValue],
+    attr_map: dict[str, AttrMapValue] | None = ...,
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = ...,
     operator_override_fns: OperatorFnMap | None = ...,
     null_attribute_representation: NullAttributeRepresentation = ...,
@@ -256,7 +259,7 @@ def get_query(
 def get_query(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,  # type: ignore (https://github.com/microsoft/pyright/issues/1035)
     table: GenericTable,
-    attr_map: dict[str, AttrMapValue],
+    attr_map: dict[str, AttrMapValue] | None = None,
     table_mapping: list[tuple[GenericTable, GenericExpression]] | None = None,
     operator_override_fns: OperatorFnMap | None = None,
     null_attribute_representation: NullAttributeRepresentation = "omitted",
@@ -269,8 +272,10 @@ def get_query(
         query_plan: A plan response from the HTTP or gRPC Cerbos client.
         table: The ORM model or Core ``Table`` to select from.
         attr_map: Maps each plan attribute reference, e.g. ``request.resource.attr.x``,
-            to a column or SQL expression, or a collection attribute to a
-            ``Relation`` translated by ``relation_overrides()``.
+            to a column or SQL expression, a collection attribute to a
+            ``relationship()`` attribute, ``related(...)`` or a ``Relation``.
+            Mapping any collection merges ``relation_overrides()`` beneath
+            ``operator_override_fns``.
         table_mapping: ``(table, join_predicate)`` pairs for every other table the
             mapped columns live on.
         operator_override_fns: Per-call handlers that replace the default lowering
@@ -305,6 +310,35 @@ def get_query(
         TypeError: If a mapped column's table is not joined via ``table_mapping``,
             or a ``collection_columns`` value is not a ``CollectionColumn``.
     """
+    attr_map = {
+        attribute: infer(value) for attribute, value in (attr_map or {}).items()
+    }
+    null_conventions = validate_representations(
+        null_attribute_representation,
+        attribute_null_representation,
+        attr_map,
+        lambda attribute: resolvable(table, attribute),
+    )
+    declared_collections = _validate_collection_columns(collection_columns)
+
+    if query_plan.filter is None or query_plan.filter.kind in _DENY_KINDS:
+        return select(table).where(False)
+
+    if query_plan.filter.kind in _ALLOW_KINDS:
+        return select(table)
+
+    raw_condition = _plan_condition(query_plan)
+    attr_map = {
+        **attr_map,
+        **infer_attributes(
+            raw_condition, table, attr_map, frozenset(declared_collections)
+        ),
+    }
+    if any(isinstance(value, Relation) for value in attr_map.values()):
+        operator_override_fns = {
+            **relation_overrides(),
+            **(operator_override_fns or {}),
+        }
     # Drop None entries, but keep None distinct from {} for _require_table_mapping.
     overrides = (
         None
@@ -315,20 +349,7 @@ def get_query(
             if override is not None
         }
     )
-    null_conventions = validate_representations(
-        null_attribute_representation, attribute_null_representation, attr_map
-    )
-    declared_collections = _validate_collection_columns(collection_columns)
-
-    if query_plan.filter is None or query_plan.filter.kind in _DENY_KINDS:
-        return select(table).where(False)
-
-    if query_plan.filter.kind in _ALLOW_KINDS:
-        return select(table)
-
-    condition = resolve_map_member_paths(
-        _plan_condition(query_plan), frozenset(attr_map)
-    )
+    condition = resolve_map_member_paths(raw_condition, frozenset(attr_map))
     assert_single_variable_lambdas(condition)
     # Always run: an attribute can declare "omitted" under an "explicit" call.
     assert_no_null_comparison_operands(
