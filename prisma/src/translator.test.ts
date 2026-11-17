@@ -14,16 +14,10 @@ import type {
   PrismaFilter,
   QueryPlanToPrismaResult,
 } from ".";
-import { MAPPER as CORPUS_MAPPER, MODEL, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
-import { prepareMapper } from "./datamodel";
-import { datamodel } from "./generated/cerbos-datamodel/datamodel";
+import { DECLARED_MAPPER as MAPPER, MODEL, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
 import { isObject } from "./narrowing";
 
 type Relation = NonNullable<MapperConfig["relation"]>;
-
-/** The corpus mapper as the schema completes it, so a test can pass it without a `datamodel`. */
-// SAFETY: prepareMapper returns a record for a record mapper; only a function mapper stays a function.
-const MAPPER = prepareMapper(CORPUS_MAPPER, MODEL, datamodel) as Record<string, MapperConfig>;
 
 /** `response` with `field` replaced by a value its type rules out: a plan the SDK never decodes. */
 const overwritten = (response: PlanResourcesResponse, field: string, value: Value): PlanResourcesResponse =>

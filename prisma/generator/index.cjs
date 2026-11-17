@@ -10,12 +10,13 @@ function prune(datamodel) {
   return {
     models: datamodel.models.map((model) => ({
       name: model.name,
-      fields: model.fields.map(({ name, kind, type, isList, isRequired }) => ({
+      fields: model.fields.map(({ name, kind, type, isList, isRequired, isId }) => ({
         name,
         kind,
         type,
         isList,
         isRequired,
+        isId,
       })),
     })),
   };

@@ -13,10 +13,11 @@ import { queryPlanToPrisma, PlanKind, UnsupportedQueryPlanError } from ".";
 import type { PrismaFilter } from ".";
 import {
   assertFuzzVerdict,
+  DECLARED_MAPPER,
   FUZZ_DIR,
   fuzzThrown,
   fuzzVerdict,
-  MAPPER,
+  INFERRED_MAPPER,
   MODEL,
   pdpTags,
   planOf,
@@ -278,20 +279,25 @@ async function selectIds(where: PrismaFilter): Promise<string[]> {
   return rows.map((row) => row.id).sort();
 }
 
-// Every attribute the dataset omits when NULL is declared `omitted` in MAPPER. The call-level
+// The two ways a caller maps the corpus: completed from the Prisma schema's datamodel, and spelled
+// out in full without it. Every case replays under both, against the same ledger.
+type MappingMode = "inferred" | "declared";
+
+const MODES: readonly MappingMode[] = ["inferred", "declared"];
+
+// Every attribute the dataset omits when NULL is declared `omitted` in the mapper. The call-level
 // option covers what is left, the list and relation elements, which the dataset sends as values;
 // the adapter's own default is pinned in translator.test.ts.
-const translatePlan = (queryPlan: PlanResourcesResponse) =>
+const translatePlan = (queryPlan: PlanResourcesResponse, mode: MappingMode) =>
   queryPlanToPrisma({
     queryPlan,
-    mapper: MAPPER,
     model: MODEL,
-    datamodel,
     nullAttributeRepresentation: "explicit",
+    ...(mode === "inferred" ? { mapper: INFERRED_MAPPER, datamodel } : { mapper: DECLARED_MAPPER }),
   });
 
-async function selectAllowed(queryPlan: PlanResourcesResponse): Promise<string[]> {
-  const result = translatePlan(queryPlan);
+async function selectAllowed(queryPlan: PlanResourcesResponse, mode: MappingMode): Promise<string[]> {
+  const result = translatePlan(queryPlan, mode);
 
   if (result.kind === PlanKind.ALWAYS_DENIED) return [];
 
@@ -326,12 +332,12 @@ const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
-const fuzzResults: FuzzVerdict[] = [];
+const fuzzResults: Record<MappingMode, FuzzVerdict[]> = { inferred: [], declared: [] };
 
 /** A fuzz case judged on this store (conformance/README.md, "Fuzzing"). */
-async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+async function fuzzReplay(golden: Golden, mode: MappingMode): Promise<FuzzVerdict> {
   try {
-    return fuzzVerdict(golden, held(golden.allowed).sort(), await selectAllowed(await planOf(golden)));
+    return fuzzVerdict(golden, held(golden.allowed).sort(), await selectAllowed(await planOf(golden), mode));
   } catch (error) {
     return fuzzThrown(golden, error, UnsupportedQueryPlanError);
   }
@@ -350,13 +356,20 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.$disconnect();
-  writeFuzzResults("prisma", `${STORE_NAME}-v${process.env["PRISMA_VERSION"] ?? "7"}`, fuzzResults);
+  const leg = `${STORE_NAME}-v${process.env["PRISMA_VERSION"] ?? "7"}`;
 
-  const lines = TAGS.map((tag) => {
+  writeFuzzResults("prisma", leg, fuzzResults.inferred);
+  writeFuzzResults("prisma", `${leg}-declared`, fuzzResults.declared);
+
+  const lines = TAGS.flatMap((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
     const skipped = GOLDENS.get(tag)!.filter((golden) => golden.plannerDivergence !== null);
 
-    return `${tag}: ${tiers.map((tier) => `${tier} ${passed[tag]?.[tier] ?? 0}/${totals[tag]?.[tier]}`).join(", ")} (planner divergences skipped: ${skipped.map((golden) => golden.id).join(", ") || "none"})`;
+    return MODES.map((mode) => {
+      const counts = passed[`${tag} ${mode}`];
+
+      return `${tag} ${mode}: ${tiers.map((tier) => `${tier} ${counts?.[tier] ?? 0}/${totals[tag]?.[tier]}`).join(", ")} (planner divergences skipped: ${skipped.map((golden) => golden.id).join(", ") || "none"})`;
+    });
   });
 
   console.log(`conformance (${STORE_NAME}) passed per tier\n${lines.join("\n")}`);
@@ -442,12 +455,14 @@ describe(`conformance (${STORE_NAME})`, () => {
     // golden files of the tags it applies to, so a non-null value is the whole skip condition.
     const cases = GOLDENS.get(tag)!.filter((golden) => golden.plannerDivergence === null);
 
-    test.each(cases.map((golden) => [golden.id, golden] as const))(
-      `${tag} %s`,
-      async (_id, golden) => {
+    test.each(
+      MODES.flatMap((mode) => cases.map((golden) => [mode, golden.id, golden] as const))
+    )(
+      `${tag} %s %s`,
+      async (mode, _id, golden) => {
         if (FUZZ_DIR) {
-          const verdict = await fuzzReplay(golden);
-          fuzzResults.push(verdict);
+          const verdict = await fuzzReplay(golden, mode);
+          fuzzResults[mode].push(verdict);
           assertFuzzVerdict(verdict);
 
           return;
@@ -457,13 +472,13 @@ describe(`conformance (${STORE_NAME})`, () => {
         const queryPlan = await planOf(golden);
 
         if (entry?.status === "unsupported") {
-          expect(() => translatePlan(queryPlan)).toThrow(UnsupportedQueryPlanError);
+          expect(() => translatePlan(queryPlan, mode)).toThrow(UnsupportedQueryPlanError);
 
           return;
         }
 
         // Both sides sorted the same way, so a divergent entry cannot pass on ordering alone.
-        const ids = await selectAllowed(queryPlan);
+        const ids = await selectAllowed(queryPlan, mode);
         const allowed = held(golden.allowed).sort();
 
         if (entry?.status === "divergent") {
@@ -473,7 +488,9 @@ describe(`conformance (${STORE_NAME})`, () => {
         }
 
         expect(ids).toEqual(allowed);
-        (passed[tag] ??= {})[golden.tier] = (passed[tag]?.[golden.tier] ?? 0) + 1;
+        const counts = (passed[`${tag} ${mode}`] ??= {});
+
+        counts[golden.tier] = (counts[golden.tier] ?? 0) + 1;
       }
     );
 
@@ -490,7 +507,7 @@ describe(`conformance (${STORE_NAME})`, () => {
 // `mainCategory` chain rather than of the few spellings the corpus pins. Every expectation is a
 // recorded check() decision from a golden file, never a hand-computed row list.
 
-describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
+describe.each(MODES)(`the absent-parent guard over the chain (${STORE_NAME}, %s)`, (mode) => {
   const allowedFor = (id: string) => held(readGolden(TAGS[0]!, id).allowed);
 
   async function synthetic(condition: PlanExpressionOperand): Promise<string[]> {
@@ -503,7 +520,7 @@ describe(`the absent-parent guard over the chain (${STORE_NAME})`, () => {
       metadata: undefined,
     };
 
-    return selectAllowed(queryPlan);
+    return selectAllowed(queryPlan, mode);
   }
 
   // Every count threshold, not only the two spellings the corpus pins (#316). Each is TRUE for a

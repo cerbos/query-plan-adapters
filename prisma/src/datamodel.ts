@@ -10,6 +10,7 @@ export type PrismaDatamodelField = {
   readonly type: string;
   readonly isList: boolean;
   readonly isRequired?: boolean;
+  readonly isId?: boolean;
 };
 
 /**
@@ -214,7 +215,44 @@ export function prepareMapper(
     return (key) => complete(key, mapper(key));
   }
 
-  return Object.fromEntries(
+  const completed: Record<string, MapperConfig> = Object.fromEntries(
     Object.entries(mapper).map(([key, config]) => [key, complete(key, config)])
   );
+
+  const inferred = new Map<string, MapperConfig | undefined>();
+
+  const infer = (key: string): MapperConfig | undefined => {
+    if (!inferred.has(key)) {
+      const name = rootFieldName(models, model, key);
+
+      inferred.set(key, name === undefined ? undefined : complete(key, { field: name }));
+    }
+
+    return inferred.get(key);
+  };
+
+  // Only `get` is trapped, as in completeFields: the declared keys stay the mapper's own.
+  return new Proxy(completed, {
+    get: (target, key) => (key in target ? target[String(key)] : infer(String(key))),
+  });
+}
+
+/**
+ * The root model's field an unmapped reference names by convention: `request.resource.id` is the
+ * model's `@id` field, and `request.resource.attr.<name>` is the field called `<name>`. A deeper
+ * reference resolves through its longest mapped prefix instead.
+ */
+function rootFieldName(models: Models, model: string, key: string): string | undefined {
+  const fields = models.get(model);
+
+  if (key === "request.resource.id") {
+    return [...(fields?.values() ?? [])].find((field) => field.isId)?.name;
+  }
+
+  const prefix = "request.resource.attr.";
+
+  if (!key.startsWith(prefix)) return undefined;
+  const name = key.slice(prefix.length);
+
+  return !name.includes(".") && fields?.has(name) ? name : undefined;
 }
