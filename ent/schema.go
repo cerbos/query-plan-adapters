@@ -35,11 +35,11 @@ type SchemaEdge struct {
 	Name string
 	// Type is the name of the type the edge reaches.
 	Type string
+	// Unsupported says why Join is empty: ent joins the edge in a way the adapter cannot lower.
+	Unsupported string
 	// Join is the path from the owner's row to the target's row: one step, or two through an
 	// M2M join table.
 	Join []SchemaJoin
-	// Unsupported says why Join is empty: ent joins the edge in a way the adapter cannot lower.
-	Unsupported string
 	// Unique is ent's to-one flag: the edge reaches at most one row.
 	Unique bool
 }
@@ -209,8 +209,8 @@ func (s *Schema) elementFields(typ *SchemaType, depth int) map[string]Entry {
 
 // schemaName is what one spelling of a name reaches on a type: a column or an edge.
 type schemaName struct {
-	column string
 	edge   *SchemaEdge
+	column string
 }
 
 // namesOf indexes a type's fields and edges by their ent name and its lower camel case. A
