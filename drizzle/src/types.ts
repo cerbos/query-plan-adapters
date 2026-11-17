@@ -86,13 +86,13 @@ export interface ScopedRelationEntry {
   };
 }
 
-export type MapperEntry = BaseMapperEntry | ScopedRelationEntry;
+export type ResolvedMapperEntry = BaseMapperEntry | ScopedRelationEntry;
 
-export type Mapper =
+export type ResolvedMapper =
   | {
-      [key: string]: MapperEntry | undefined;
+      [key: string]: ResolvedMapperEntry | undefined;
     }
-  | ((reference: string) => MapperEntry | undefined);
+  | ((reference: string) => ResolvedMapperEntry | undefined);
 
 /**
  * How the caller represents a NULL column when building the attributes it sends to `check()`.
@@ -120,7 +120,7 @@ export interface QueryPlanToDrizzleArgs {
    * Overrides for what the schema cannot say. With `table`, an attribute the mapper leaves out
    * reads the resource table's column or relation of the same name.
    */
-  mapper?: DeclaredMapper;
+  mapper?: Mapper;
   /**
    * The table the plan's resource lives in. `request.resource.attr.<name>` reads its column or
    * relation `<name>` unless the mapper declares it, `request.resource.id` its single-column
@@ -153,8 +153,8 @@ export interface RelationMapping {
   table: Table;
   sourceColumn: AnyColumn;
   targetColumn: AnyColumn;
-  field?: MapperEntry;
-  fields?: { [key: string]: MapperEntry };
+  field?: ResolvedMapperEntry;
+  fields?: { [key: string]: ResolvedMapperEntry };
   /**
    * The column holding each row's zero-based index in the list the application sends to
    * `check()`, unique per source row and contiguous from 0. A relation has no order of its own,
@@ -223,19 +223,19 @@ export type DeclaredRelation = Omit<
   table?: Table;
   sourceColumn?: AnyColumn;
   targetColumn?: AnyColumn;
-  field?: DeclaredMapperEntry;
-  fields?: { [key: string]: DeclaredMapperEntry };
+  field?: MapperEntry;
+  fields?: { [key: string]: MapperEntry };
 };
 
 export type DeclaredMappingConfig = Omit<MappingConfig, "relation"> & {
   relation?: DeclaredRelation;
 };
 
-export type DeclaredMapperEntry = MapperEntry | DeclaredMappingConfig;
+export type MapperEntry = ResolvedMapperEntry | DeclaredMappingConfig;
 
-export type DeclaredMapper =
-  | { [key: string]: DeclaredMapperEntry | undefined }
-  | ((reference: string) => DeclaredMapperEntry | undefined);
+export type Mapper =
+  | { [key: string]: MapperEntry | undefined }
+  | ((reference: string) => MapperEntry | undefined);
 
 /** A drizzle `relations()` declaration (before 1.0, or from `drizzle-orm/_relations`). */
 export interface LegacyRelationsDeclaration {

@@ -1,7 +1,8 @@
-import { Column, Table, is, sql } from "drizzle-orm";
-import type { AnyColumn, SQL, SQLWrapper } from "drizzle-orm";
+import { Column, SQL, Table, is, sql } from "drizzle-orm";
+import type { AnyColumn, SQLChunk, SQLWrapper } from "drizzle-orm";
 
 import { isNumber } from "./narrowing";
+import type { RelationV2, RelationsSchema } from "./types";
 
 /**
  * The few places drizzle 0.44/0.45 and 1.0 differ at runtime or in their types. Everything else
@@ -52,4 +53,65 @@ export const pgArrayElementColumnType = (column: AnyColumn): string | undefined 
   }
 
   return dimensionsOf(column) === 1 ? column.columnType : undefined;
+};
+
+/** A module of the installed drizzle, or undefined when this version has no such module. */
+export const loadModule = <T>(id: string): Partial<T> | undefined => {
+  try {
+    return require(id);
+  } catch {
+    return undefined;
+  }
+};
+
+export interface LegacyRelation {
+  referencedTable: Table;
+}
+
+export interface LegacyRelationalConfig {
+  tables: Record<string, { relations: Record<string, LegacyRelation> }>;
+  tableNamesMap: Record<string, string>;
+}
+
+export interface LegacyRelationsApi {
+  extractTablesRelationalConfig(
+    schema: RelationsSchema,
+    helpers: LegacyRelationsApi["createTableRelationsHelpers"],
+  ): LegacyRelationalConfig;
+  createTableRelationsHelpers(table: Table): object;
+  normalizeRelation(
+    tables: LegacyRelationalConfig["tables"],
+    tableNamesMap: Record<string, string>,
+    relation: LegacyRelation,
+  ): { fields: AnyColumn[]; references: AnyColumn[] };
+  One: abstract new (...args: never[]) => LegacyRelation;
+}
+
+const isLegacyRelationsApi = (
+  module: Partial<LegacyRelationsApi> | undefined,
+): module is LegacyRelationsApi => typeof module?.extractTablesRelationalConfig === "function";
+
+/** `relations()` lives in the root module before 1.0 and in `drizzle-orm/_relations` from it. */
+export const legacyRelationsApi = (): LegacyRelationsApi | undefined => {
+  const root = loadModule<LegacyRelationsApi>("drizzle-orm");
+
+  if (isLegacyRelationsApi(root)) return root;
+
+  const legacy = loadModule<LegacyRelationsApi>("drizzle-orm/_relations");
+
+  return isLegacyRelationsApi(legacy) ? legacy : undefined;
+};
+
+interface RelationsV2Api {
+  relationsFilterToSQL(table: Table, filter: Exclude<RelationV2["where"], symbol | undefined>): { sql?: SQLChunk[] };
+}
+
+/** A `defineRelations()` `where` as SQL over `table`, or undefined before 1.0. */
+export const renderRelationsFilter = (
+  table: Table,
+  where: Exclude<RelationV2["where"], symbol | undefined>,
+): SQL | undefined => {
+  const chunks = loadModule<RelationsV2Api>("drizzle-orm")?.relationsFilterToSQL?.(table, where).sql;
+
+  return chunks === undefined ? undefined : new SQL(chunks);
 };

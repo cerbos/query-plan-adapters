@@ -29,7 +29,7 @@ import {
 } from "./relations";
 import type {
   BuildFilterOptions,
-  Mapper,
+  ResolvedMapper,
   RelationMapping,
   ResolvedMapping,
 } from "./types";
@@ -108,7 +108,7 @@ const buildChainMembership = (
 const buildMappedIntersection = (
   mapOperand: ExpressionOperand,
   values: Value[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (mapOperand.operands.length !== 2) {
@@ -186,7 +186,7 @@ const buildMappedIntersection = (
 
 export const buildHasIntersectionFilter = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {

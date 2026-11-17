@@ -10,10 +10,10 @@ import { resolveTableName } from "./relations";
 import { SCOPED_RELATION } from "./types";
 import type {
   BaseMapperEntry,
-  DeclaredMapperEntry,
-  DeclaredMappingConfig,
-  Mapper,
   MapperEntry,
+  DeclaredMappingConfig,
+  ResolvedMapper,
+  ResolvedMapperEntry,
   MappingConfig,
   NullAttributeRepresentation,
   RelationMapping,
@@ -31,13 +31,13 @@ import { isFunction } from "./narrowing";
 // -- entry shapes --------------------------------------------------------------------------------
 
 const isScopedRelationEntry = (
-  entry: DeclaredMapperEntry,
+  entry: MapperEntry,
 ): entry is ScopedRelationEntry =>
   typeof entry === "object" && entry !== null && SCOPED_RELATION in entry;
 
-export function isMappingConfig(entry: MapperEntry): entry is MappingConfig;
-export function isMappingConfig(entry: DeclaredMapperEntry): entry is DeclaredMappingConfig;
-export function isMappingConfig(entry: DeclaredMapperEntry): entry is DeclaredMappingConfig {
+export function isMappingConfig(entry: ResolvedMapperEntry): entry is MappingConfig;
+export function isMappingConfig(entry: MapperEntry): entry is DeclaredMappingConfig;
+export function isMappingConfig(entry: MapperEntry): entry is DeclaredMappingConfig {
   return (
     typeof entry === "object" &&
     entry !== null &&
@@ -67,12 +67,12 @@ export const isColumn = (entry: BaseMapperEntry): entry is AnyColumn =>
   typeof entry !== "function";
 
 /** Whether an entry declares its relation a collection of scalars (`collectionValueType`). */
-export const isScalarCollection = (entry: MapperEntry | undefined): boolean =>
+export const isScalarCollection = (entry: ResolvedMapperEntry | undefined): boolean =>
   entry !== undefined &&
   isMappingConfig(entry) &&
   entry.collectionValueType === "scalar";
 
-const toBaseMapperEntry = (entry: MapperEntry): BaseMapperEntry =>
+const toBaseMapperEntry = (entry: ResolvedMapperEntry): BaseMapperEntry =>
   isScopedRelationEntry(entry) ? entry.resolve().mapping : entry;
 
 const makeScopedRelationEntry = (
@@ -95,8 +95,8 @@ export const mappingNullRepresentation = (
 
 export const getMappingEntry = (
   reference: string,
-  mapper: Mapper,
-): MapperEntry | undefined =>
+  mapper: ResolvedMapper,
+): ResolvedMapperEntry | undefined =>
   isFunction(mapper) ? mapper(reference) : mapper[reference];
 
 /** Every `[prefix, suffix]` split of a dotted reference, longest prefix first. */
@@ -194,7 +194,7 @@ const resolveRelationField = (
  */
 export const resolveFieldReference = (
   reference: string,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): ResolvedMapping => {
   const direct = getMappingEntry(reference, mapper);
 
@@ -226,7 +226,7 @@ export const resolveFieldReference = (
 /** The relation chain a collection reference iterates, root first. */
 const resolveRelationChain = (
   reference: string,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): RelationMapping[] => {
   const direct = getMappingEntry(reference, mapper);
 
@@ -292,7 +292,7 @@ export const resolveRelationDefaultField = (
  * split into the relation being iterated (`primaryRelation`) and the hops leading to it.
  */
 export interface CollectionScope {
-  mapper: Mapper;
+  mapper: ResolvedMapper;
   primaryRelation: RelationMapping;
   leadingRelations: RelationMapping[];
   /** Every relation of the chain: the lambda body's subqueries are already correlated to them. */
@@ -357,7 +357,7 @@ const aliasElementMapping = (
 export const createCollectionScope = (
   collectionReference: string,
   variableName: string,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   openTables: readonly string[] = [],
 ): CollectionScope => {
   const relationChain = resolveRelationChain(collectionReference, mapper);
@@ -401,7 +401,7 @@ export const createCollectionScope = (
           ),
     );
 
-  const scopedMapper = (reference: string): MapperEntry | undefined => {
+  const scopedMapper = (reference: string): ResolvedMapperEntry | undefined => {
     if (reference === variableName) {
       const resolved = resolveRelationField(
         primaryRelation,
@@ -460,7 +460,7 @@ export const createCollectionScope = (
 /** The drizzle column an operand names, if it names one directly. */
 export const columnForOperand = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): AnyColumn | undefined => {
   if (!isNameOperand(operand)) {
     return undefined;
@@ -516,7 +516,7 @@ export const buildColumnExpression = (
 };
 
 /** Whether `reference` reads one scalar column on this row, where CEL has no membership overload. */
-export const isScalarColumnReference = (reference: string, mapper: Mapper): boolean => {
+export const isScalarColumnReference = (reference: string, mapper: ResolvedMapper): boolean => {
   if (isScalarCollection(getMappingEntry(reference, mapper))) return false;
   const { relations, mapping } = resolveFieldReference(reference, mapper);
   const column = isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;

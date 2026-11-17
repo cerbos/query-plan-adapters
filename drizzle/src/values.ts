@@ -31,7 +31,7 @@ import {
   resolveTableName,
 } from "./relations";
 import { normalizeRfc3339Milliseconds, timestampColumnForm } from "./timestamp";
-import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
+import type { BuildFilterOptions, ResolvedMapper, RelationMapping } from "./types";
 import { isNumber, isString, lookup, typeofValue } from "./narrowing";
 
 /**
@@ -137,7 +137,7 @@ const buildBooleanString = (column: AnyColumn, expr: SQL): SQL => {
  */
 const booleanStringColumn = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): AnyColumn | undefined => {
   const [inner] = operands;
 
@@ -177,7 +177,7 @@ const INTEGER_COLUMN_TYPES = new Set([
  */
 export const isIntegerColumnReference = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): boolean => {
   if (!isNameOperand(operand)) return false;
   const column = columnForOperand(operand, mapper);
@@ -192,7 +192,7 @@ export const isIntegerColumnReference = (
  */
 const integerConversionColumn = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): AnyColumn | undefined => {
   if (!isOperatorCall(operand, "int") || !isExpressionOperand(operand)) return undefined;
   const [inner] = operand.operands;
@@ -304,7 +304,7 @@ export const buildCheckedIntComparison = (
   operator: "eq" | "ne" | "lt" | "le" | "gt" | "ge",
   conversion: PlanExpressionOperand,
   constant: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL | undefined => {
   if (
@@ -339,7 +339,7 @@ export const buildCheckedIntComparison = (
  * A divisor `%` can take from a column: `int()` of an integer column, alone or plus or minus a
  * whole constant. Its value is an integer on every dialect, so the remainder stays integral.
  */
-const isIntegerColumnDivisor = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
+const isIntegerColumnDivisor = (operand: PlanExpressionOperand, mapper: ResolvedMapper): boolean => {
   if (integerConversionColumn(operand, mapper) !== undefined) return true;
 
   if (
@@ -426,7 +426,7 @@ const mixesIntWithDouble = (
 const buildIntDivision = (
   leftOperand: PlanExpressionOperand,
   rightOperand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   const dividend = integerConversionColumn(leftOperand, mapper);
@@ -466,7 +466,7 @@ const buildIntDivision = (
 const buildModulo = (
   leftOperand: PlanExpressionOperand,
   rightOperand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (isNameOperand(leftOperand) || isNameOperand(rightOperand)) {
@@ -515,7 +515,7 @@ const buildModulo = (
  */
 const isStringConcatenation = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): boolean =>
   operands.some((operand) => {
     if (isValueOperand(operand)) {
@@ -546,7 +546,7 @@ type ConcatenationDialect = "pipes" | "concat";
  */
 const concatenationDialect = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): ConcatenationDialect | undefined => {
   const dialects = new Set<ConcatenationDialect>();
 
@@ -579,7 +579,7 @@ const concatenationDialect = (
 const buildConcatenation = (
   leftOperand: PlanExpressionOperand,
   rightOperand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (
@@ -615,7 +615,7 @@ const buildConcatenation = (
 /** The CEL type an attribute or literal operand certainly has, read off its column or value. */
 const operandKind = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): string | undefined => {
   if (isValueOperand(operand)) {
     const type = typeofValue(operand.value);
@@ -632,7 +632,7 @@ const operandKind = (
 const buildArithmeticExpression = (
   operator: string,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
@@ -712,7 +712,7 @@ const buildArithmeticExpression = (
 /** `size()` of a relation (a correlated COUNT), a filtered relation, or a string column. */
 const buildSizeExpression = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (isOperatorCall(operand, "filter")) {
@@ -785,7 +785,7 @@ const buildSizeExpression = (
 
 const buildTimestampExpression = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 1) {
@@ -839,7 +839,7 @@ const buildTimestampExpression = (
 /** An operand in value position, rendered as a SQL scalar expression. */
 export const buildValueExpression = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (isValueOperand(operand)) {
@@ -996,7 +996,7 @@ export interface ResolvedScalarOperand {
  */
 export const resolveScalarOperand = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): ResolvedScalarOperand => {
   if (isValueOperand(operand)) {

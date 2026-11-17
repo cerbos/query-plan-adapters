@@ -68,7 +68,7 @@ import {
 } from "./values";
 import type {
   BuildFilterOptions,
-  Mapper,
+  ResolvedMapper,
   RelationMapping,
   ResolvedMapping,
 } from "./types";
@@ -83,7 +83,7 @@ import { isBoolean, isNumber, isObject, isString, typeofValue } from "./narrowin
 /** One comparison being translated: its operator and the context every branch needs. */
 interface ComparisonContext {
   operator: LeafComparisonOperator;
-  mapper: Mapper;
+  mapper: ResolvedMapper;
   options: BuildFilterOptions;
   /** The polarity a `not` pushed down to this comparison. */
   negated: boolean;
@@ -114,7 +114,7 @@ const LEAF_COMPARISON_OPERATORS = new Set(["eq", "ne", "lt", "le", "gt", "ge"]);
  * Whether `operand` is a boolean wherever CEL evaluates it: a boolean literal or column, a
  * predicate, a logical connective, or a ternary whose two arms are.
  */
-const isBooleanExpression = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
+const isBooleanExpression = (operand: PlanExpressionOperand, mapper: ResolvedMapper): boolean => {
   if (isValueOperand(operand)) return isBoolean(operand.value);
 
   if (isNameOperand(operand)) return dataTypeOf(columnForOperand(operand, mapper)) === "boolean";
@@ -536,7 +536,7 @@ const timestampColumnDigits = (column: AnyColumn): number | undefined => {
 /** `timestamp(<field typed "timestamp">)` over a column, with how that column compares instants. */
 const timestampColumnOperand = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): { name: string; resolved: ResolvedMapping; form: TimestampColumnForm } | undefined => {
   const field = timestampField(operand, mapper);
 
@@ -684,7 +684,7 @@ const buildOffGridTimestampComparison = (
 /** `timestamp(<field typed "timestamp">)`, as the field it converts. */
 const timestampField = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): { name: string } | undefined => {
   if (!isOperatorCall(operand, "timestamp") || !isExpressionOperand(operand)) return undefined;
   const [inner] = operand.operands;
@@ -762,7 +762,7 @@ const buildNumberStringComparison = (
 /** A `string()` over one number column, if `operand` is one. */
 const numberStringConversion = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): ExpressionOperand | undefined => {
   if (!isStringConversion(operand) || !isExpressionOperand(operand)) return undefined;
   const [inner] = operand.operands;
@@ -780,7 +780,7 @@ const numberStringConversion = (
  */
 const scalarType = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): string | undefined => {
   if (isValueOperand(operand)) {
     return operand.value === null ? undefined : typeofValue(operand.value);
@@ -818,7 +818,7 @@ const isOrdering = (operator: LeafComparisonOperator): boolean =>
   operator !== "eq" && operator !== "ne";
 
 /** Every column the operands read, however deeply nested. */
-const operandColumns = (operands: PlanExpressionOperand[], mapper: Mapper): AnyColumn[] =>
+const operandColumns = (operands: PlanExpressionOperand[], mapper: ResolvedMapper): AnyColumn[] =>
   operands.flatMap((operand) =>
     isExpressionOperand(operand)
       ? operandColumns(operand.operands, mapper)
@@ -901,7 +901,7 @@ export const buildComparisonFilter = (
   operator: LeafComparisonOperator,
   left: PlanExpressionOperand,
   right: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {

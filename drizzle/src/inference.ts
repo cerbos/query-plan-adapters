@@ -1,18 +1,19 @@
 import { Column, SQL, Table, getTableColumns, getTableUniqueName, is } from "drizzle-orm";
-import type { AnyColumn, SQLChunk } from "drizzle-orm";
+import type { AnyColumn } from "drizzle-orm";
 import { MySqlTable, getTableConfig as mysqlTableConfig } from "drizzle-orm/mysql-core";
 import { PgTable, getTableConfig as pgTableConfig } from "drizzle-orm/pg-core";
 import { SQLiteTable, getTableConfig as sqliteTableConfig } from "drizzle-orm/sqlite-core";
 
-import { columnTable } from "./compat";
+import { columnTable, legacyRelationsApi, renderRelationsFilter } from "./compat";
+import type { LegacyRelation, LegacyRelationalConfig, LegacyRelationsApi } from "./compat";
 import { isFunction } from "./narrowing";
 import type {
-  DeclaredMapper,
-  DeclaredMapperEntry,
-  DeclaredMappingConfig,
-  DeclaredRelation,
   Mapper,
   MapperEntry,
+  DeclaredMappingConfig,
+  DeclaredRelation,
+  ResolvedMapper,
+  ResolvedMapperEntry,
   RelationMapping,
   RelationV2,
   RelationV2Column,
@@ -37,6 +38,7 @@ interface ForeignKeyReference {
 interface TableConstraints {
   foreignKeys: ForeignKeyReference[];
   uniqueColumns: Set<AnyColumn>;
+  primaryKey: AnyColumn | undefined;
 }
 
 const tableConstraints = (table: Table): TableConstraints => {
@@ -60,11 +62,16 @@ const tableConstraints = (table: Table): TableConstraints => {
     if (columns.length === 1 && is(only, Column)) uniqueColumns.add(only);
   };
 
-  for (const column of config.columns) {
-    if (column.primary || column.isUnique) addSingle([column]);
-  }
+  const primaryKeys: (readonly unknown[])[] = [
+    ...config.columns.filter((column) => column.primary).map((column) => [column]),
+    ...config.primaryKeys.map((key) => [...key.columns]),
+  ];
 
-  for (const key of config.primaryKeys) addSingle([...key.columns]);
+  for (const key of primaryKeys) addSingle(key);
+
+  for (const column of config.columns) {
+    if (column.isUnique) addSingle([column]);
+  }
 
   for (const unique of config.uniqueConstraints) addSingle([...unique.columns]);
 
@@ -74,9 +81,13 @@ const tableConstraints = (table: Table): TableConstraints => {
     if (index.config.unique && !partial) addSingle([...index.config.columns]);
   }
 
+  const [onlyKey] = primaryKeys;
+  const [primaryKey] = primaryKeys.length === 1 && onlyKey?.length === 1 ? onlyKey : [];
+
   return {
     foreignKeys: config.foreignKeys.map((foreignKey) => foreignKey.reference()),
     uniqueColumns,
+    primaryKey: is(primaryKey, Column) ? primaryKey : undefined,
   };
 };
 
@@ -117,52 +128,6 @@ const toOneType = (target: AnyColumn, what: string): "one" => {
 };
 
 // -- relations(), before drizzle 1.0 -------------------------------------------------------------
-
-interface LegacyRelation {
-  referencedTable: Table;
-}
-
-interface LegacyRelationalConfig {
-  tables: Record<string, { relations: Record<string, LegacyRelation> }>;
-  tableNamesMap: Record<string, string>;
-}
-
-interface LegacyRelationsApi {
-  extractTablesRelationalConfig(
-    schema: RelationsSchema,
-    helpers: LegacyRelationsApi["createTableRelationsHelpers"],
-  ): LegacyRelationalConfig;
-  createTableRelationsHelpers(table: Table): object;
-  normalizeRelation(
-    tables: LegacyRelationalConfig["tables"],
-    tableNamesMap: Record<string, string>,
-    relation: LegacyRelation,
-  ): { fields: AnyColumn[]; references: AnyColumn[] };
-  One: abstract new (...args: never[]) => LegacyRelation;
-}
-
-const isLegacyRelationsApi = (
-  module: Partial<LegacyRelationsApi> | undefined,
-): module is LegacyRelationsApi => typeof module?.extractTablesRelationalConfig === "function";
-
-const loadModule = (id: string): Partial<LegacyRelationsApi & RelationsV2Api> | undefined => {
-  try {
-    return require(id);
-  } catch {
-    return undefined;
-  }
-};
-
-/** `relations()` lives in the root module before 1.0 and in `drizzle-orm/_relations` from it. */
-const legacyRelationsApi = (): LegacyRelationsApi | undefined => {
-  const root = loadModule("drizzle-orm");
-
-  if (isLegacyRelationsApi(root)) return root;
-
-  const legacy = loadModule("drizzle-orm/_relations");
-
-  return isLegacyRelationsApi(legacy) ? legacy : undefined;
-};
 
 const legacyConfigs = new WeakMap<RelationsSchema, LegacyRelationalConfig>();
 
@@ -212,10 +177,6 @@ const inferFromLegacyRelations = (
 };
 
 // -- defineRelations(), from drizzle 1.0 ---------------------------------------------------------
-
-interface RelationsV2Api {
-  relationsFilterToSQL(table: Table, filter: Exclude<RelationV2["where"], symbol | undefined>): { sql?: SQLChunk[] };
-}
 
 const isTableRelationsV2 = (entry: RelationsSchemaEntry): entry is TableRelationsV2 =>
   !is(entry, Table) && "relations" in entry;
@@ -272,35 +233,53 @@ const inferFromRelationsV2 = (
     throw new Error(`${what} is filtered on its source table, which a subquery over its target cannot apply`);
   }
 
-  const chunks = loadModule("drizzle-orm")?.relationsFilterToSQL?.(relation.targetTable, relation.where).sql;
+  const filter = renderRelationsFilter(relation.targetTable, relation.where);
 
-  if (chunks === undefined) {
+  if (filter === undefined) {
     throw new Error(`${what} declares a filter this drizzle version cannot render`);
   }
 
-  inferred.subqueryFilter = new SQL(chunks);
+  inferred.subqueryFilter = filter;
 
   return inferred;
 };
 
 // -- either style --------------------------------------------------------------------------------
 
-/** The names of the relations `schema` defines on `table`, in either drizzle's style. */
-const relationNames = (table: Table, schema: RelationsSchema | undefined): string[] => {
-  if (schema === undefined) return [];
+interface DeclaredRelations {
+  names(table: Table): string[];
+  infer(source: Table, name: string, what: string): Inferred;
+}
+
+const declaredRelationsCache = new WeakMap<RelationsSchema, DeclaredRelations | undefined>();
+
+/** The relations `schema` declares, in whichever of drizzle's two styles it uses. */
+const declaredRelations = (schema: RelationsSchema): DeclaredRelations | undefined => {
+  if (declaredRelationsCache.has(schema)) return declaredRelationsCache.get(schema);
 
   const tablesV2 = relationsV2Of(schema);
+  const legacy = tablesV2.length > 0 ? undefined : legacyRelationsApi();
 
-  if (tablesV2.length > 0) {
-    return Object.keys(tablesV2.find((entry) => entry.table === table)?.relations ?? {});
-  }
+  const relations: DeclaredRelations | undefined =
+    tablesV2.length > 0
+      ? {
+          names: (table) => Object.keys(tablesV2.find((entry) => entry.table === table)?.relations ?? {}),
+          infer: (source, name, what) => inferFromRelationsV2(tablesV2, source, name, what),
+        }
+      : legacy === undefined
+        ? undefined
+        : {
+            names: (table) => Object.keys(legacyRelationsOf(legacyConfig(legacy, schema), schema, table)),
+            infer: (source, name, what) => inferFromLegacyRelations(legacy, source, name, schema, what),
+          };
 
-  const legacy = legacyRelationsApi();
+  declaredRelationsCache.set(schema, relations);
 
-  return legacy === undefined
-    ? []
-    : Object.keys(legacyRelationsOf(legacyConfig(legacy, schema), schema, table));
+  return relations;
 };
+
+const relationNames = (table: Table, schema: RelationsSchema | undefined): string[] =>
+  (schema === undefined ? undefined : declaredRelations(schema)?.names(table)) ?? [];
 
 const inferFromRelations = (
   source: Table,
@@ -316,17 +295,13 @@ const inferFromRelations = (
     );
   }
 
-  const tablesV2 = relationsV2Of(schema);
+  const relations = declaredRelations(schema);
 
-  if (tablesV2.length > 0) return inferFromRelationsV2(tablesV2, source, name, what);
-
-  const legacy = legacyRelationsApi();
-
-  if (legacy === undefined) {
+  if (relations === undefined) {
     throw new Error(`${what} is declared by name, but \`schema\` holds no relations`);
   }
 
-  return inferFromLegacyRelations(legacy, source, name, schema, what);
+  return relations.infer(source, name, what);
 };
 
 // -- foreign keys --------------------------------------------------------------------------------
@@ -435,17 +410,13 @@ const infer = (
   return completed;
 };
 
-const isDeclaredConfig = (entry: DeclaredMapperEntry): entry is DeclaredMappingConfig =>
+const isDeclaredConfig = (entry: MapperEntry): entry is DeclaredMappingConfig =>
   typeof entry === "object" && "relation" in entry && !("kind" in entry);
 
 const ATTR = "request.resource.attr.";
 
 /** The table's single-column primary key, which `request.resource.id` reads unless mapped. */
-const primaryKey = (table: Table): AnyColumn | undefined => {
-  const keys = Object.values(tableColumns(table)).filter((column) => column.primary);
-
-  return keys.length === 1 ? keys[0] : undefined;
-};
+const primaryKey = (table: Table): AnyColumn | undefined => tableConstraints(table).primaryKey;
 
 /**
  * The caller's mapper completed from the schema. Each declared relation resolves to one
@@ -453,10 +424,10 @@ const primaryKey = (table: Table): AnyColumn | undefined => {
  * apart by identity.
  */
 export const inferRelations = (
-  mapper: DeclaredMapper,
+  mapper: Mapper,
   root: Table | undefined,
   schema: RelationsSchema | undefined,
-): Mapper => {
+): ResolvedMapper => {
   const resolved = new Map<DeclaredRelation, Map<Table | undefined, RelationMapping>>();
   const implicit = new Map<Table, Map<string, DeclaredRelation>>();
 
@@ -477,7 +448,7 @@ export const inferRelations = (
    * A path segment under `table` that the mapper does not declare: the table's column of that
    * name, else its relation of that name.
    */
-  const implicitEntry = (table: Table, segment: string): MapperEntry | undefined => {
+  const implicitEntry = (table: Table, segment: string): ResolvedMapperEntry | undefined => {
     const column = tableColumns(table)[segment];
 
     if (column !== undefined) return column;
@@ -526,7 +497,7 @@ export const inferRelations = (
     return relation;
   };
 
-  const resolveEntry = (entry: DeclaredMapperEntry, source: Table | undefined): MapperEntry => {
+  const resolveEntry = (entry: MapperEntry, source: Table | undefined): ResolvedMapperEntry => {
     if (!isDeclaredConfig(entry)) return entry;
 
     const { relation, ...config } = entry;
@@ -534,7 +505,7 @@ export const inferRelations = (
     return relation === undefined ? config : { ...config, relation: resolveRelation(relation, source) };
   };
 
-  const implicitReference = (table: Table, reference: string): MapperEntry | undefined => {
+  const implicitReference = (table: Table, reference: string): ResolvedMapperEntry | undefined => {
     if (reference === "request.resource.id") return primaryKey(table);
 
     const segment = reference.startsWith(ATTR) ? reference.slice(ATTR.length) : undefined;
@@ -542,7 +513,7 @@ export const inferRelations = (
     return segment === undefined || segment.includes(".") ? undefined : implicitEntry(table, segment);
   };
 
-  const entries = new Map<string, MapperEntry | undefined>();
+  const entries = new Map<string, ResolvedMapperEntry | undefined>();
 
   return (reference: string) => {
     if (entries.has(reference)) return entries.get(reference);

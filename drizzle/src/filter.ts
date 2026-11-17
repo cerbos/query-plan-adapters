@@ -50,7 +50,7 @@ import {
 import type { StringMatchOperator } from "./predicates";
 import { compileRegex } from "./regex";
 import { wrapCombinedRelations, wrapRelationChain } from "./relations";
-import type { BaseMapperEntry, BuildFilterOptions, Mapper } from "./types";
+import type { BaseMapperEntry, BuildFilterOptions, ResolvedMapper } from "./types";
 import { resolveScalarOperand } from "./values";
 import { isBoolean, isFunction, isNumber, isString, pair, typeofValue } from "./narrowing";
 
@@ -68,7 +68,7 @@ import { isBoolean, isFunction, isNumber, isString, pair, typeofValue } from "./
 const buildStringMatchFilter = (
   operator: StringMatchOperator,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
@@ -154,7 +154,7 @@ const buildStringMatchFilter = (
 /** `R.attr.x in R.attr.list`: a field that is a member of a scalar collection mapping. */
 const buildVariableMembershipFilter = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {
@@ -277,7 +277,7 @@ const columnOfMapping = (mapping: BaseMapperEntry): AnyColumn | undefined =>
 const buildListConstructorMembership = (
   element: PlanExpressionOperand,
   members: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (members.length === 0) return FALSE_CONDITION;
@@ -297,7 +297,7 @@ const buildListConstructorMembership = (
 const guardConstructorElements = (
   members: PlanExpressionOperand[],
   filter: SQL,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   const errors = members.flatMap((member): SQL[] => {
@@ -327,7 +327,7 @@ const buildConstructedListMacro = (
   operator: "exists" | "all",
   members: PlanExpressionOperand[],
   lambdaOperand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
@@ -364,7 +364,7 @@ const buildConstructedListMacro = (
 const buildDerivedListMembership = (
   element: { value: Value },
   derived: { operator: string; operands: PlanExpressionOperand[] },
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
@@ -413,7 +413,7 @@ const buildConstantMapIndexComparison = (
   operator: "eq" | "ne",
   left: PlanExpressionOperand,
   right: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL | undefined => {
@@ -455,7 +455,7 @@ const buildConstantMapIndexComparison = (
 
 const buildMembershipFilter = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   const [elementOperand, collectionOperand] = operands;
@@ -575,7 +575,7 @@ const buildMembershipFilter = (
  */
 const buildMatchesFilter = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   const [receiverOperand, patternOperand] = operands;
@@ -673,7 +673,7 @@ const buildMatchesFilter = (
 /** A ternary in boolean position: each branch guarded by the (un)satisfied condition. */
 const buildTernaryFilter = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
@@ -725,7 +725,7 @@ const NON_BOOLEAN_DATA_TYPES = new Set(["string", "number", "bigint", "date", "a
 
 export const buildFilterFromExpression = (
   expression: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated = false,
 ): SQL => {
