@@ -244,6 +244,7 @@ export function resolveFieldReference(
   // not a relation names the leaf column. A segment past that one would be read from the wrong
   // row: `parent.inner.x` with `inner` unmapped is not `parent.x`.
   let leafConfig: MapperConfig | undefined;
+
   const rejectUnmappedHop = (unresolved: string[]) => {
     if (unresolved.length > 1) {
       throw new UnsupportedQueryPlanError(

@@ -18,6 +18,7 @@ import type { PrismaFilter } from "./value";
 export { PlanKind, UnsupportedQueryPlanError };
 
 export type { PrismaFilter, PrismaValue } from "./value";
+
 export type { PrismaDatamodel, PrismaDatamodelField } from "./datamodel";
 
 export type MapperConfig = {

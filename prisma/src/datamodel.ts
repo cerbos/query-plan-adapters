@@ -29,13 +29,15 @@ type Models = ReadonlyMap<string, ReadonlyMap<string, PrismaDatamodelField>>;
 
 type RelationMapping = NonNullable<MapperConfig["relation"]>;
 
-const VALUE_TYPES: Record<string, MapperConfig["valueType"]> = {
-  String: "string",
-  Int: "number",
-  Float: "number",
-  Boolean: "boolean",
-  DateTime: "dateTime",
-};
+const VALUE_TYPES = new Map<string, MapperConfig["valueType"]>([
+  ["String", "string"],
+  ["Int", "number"],
+  ["Float", "number"],
+  ["Boolean", "boolean"],
+  ["DateTime", "dateTime"],
+]);
+
+type ElementMappings = Record<string, MapperConfig>;
 
 function indexModels(datamodel: PrismaDatamodel): Models {
   return new Map(
@@ -95,10 +97,10 @@ function completeRelation(
 function completeFields(
   models: Models,
   model: string,
-  declared: Record<string, MapperConfig>,
+  declared: ElementMappings,
   reference: string
-): Record<string, MapperConfig> {
-  const completed: Record<string, MapperConfig> = {};
+) {
+  const completed: ElementMappings = {};
 
   for (const [key, config] of Object.entries(declared)) {
     completed[key] = completeConfig(models, model, key, config, `${reference}.${key}`);
@@ -106,22 +108,20 @@ function completeFields(
 
   const inferred = new Map<string, MapperConfig | undefined>();
 
+  const infer = (key: string): MapperConfig | undefined => {
+    if (!inferred.has(key)) {
+      const field = models.get(model)?.get(key);
+
+      inferred.set(key, field && completeConfig(models, model, key, {}, `${reference}.${key}`));
+    }
+
+    return inferred.get(key);
+  };
+
+  // Only `get` is trapped: `key in fields` still answers for the declared keys alone, which is the
+  // key set `"k" in R.attr.parent` tests.
   return new Proxy(completed, {
-    get(target, key, receiver) {
-      if (typeof key !== "string" || Object.hasOwn(target, key)) {
-        return Reflect.get(target, key, receiver);
-      }
-
-      if (!inferred.has(key)) {
-        const field = models.get(model)?.get(key);
-        inferred.set(
-          key,
-          field && completeConfig(models, model, key, {}, `${reference}.${key}`)
-        );
-      }
-
-      return inferred.get(key);
-    },
+    get: (target, key) => (key in target ? target[String(key)] : infer(String(key))),
   });
 }
 
@@ -155,7 +155,7 @@ function completeConfig(
   return {
     ...config,
     field: name,
-    valueType: config.valueType ?? VALUE_TYPES[field.type],
+    valueType: config.valueType ?? VALUE_TYPES.get(field.type),
     nullable: config.nullable ?? (field.isRequired === undefined ? undefined : !field.isRequired),
   };
 }
