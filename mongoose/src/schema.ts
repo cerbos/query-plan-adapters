@@ -1,6 +1,6 @@
 import type { MapperConfig } from "./index";
 import type { ScopedMapper } from "./mapper";
-import { isFunction } from "./narrowing";
+import { lookup } from "./narrowing";
 
 /** The part of a Mongoose `SchemaType` the adapter reads. */
 export type SchemaTypeLike = {
@@ -22,38 +22,40 @@ export type SchemaSource = SchemaLike | { readonly schema: SchemaLike };
 
 const RESOURCE_ATTR = "request.resource.attr.";
 
-const SCALAR_TYPES: Readonly<Record<string, NonNullable<MapperConfig["valueType"]>>> = {
+const SCALAR_TYPES = {
   String: "string",
   Number: "number",
   Boolean: "boolean",
   Date: "dateTime",
-};
+} as const satisfies Record<string, NonNullable<MapperConfig["valueType"]>>;
 
-type Shape =
+type Stored =
   | { kind: "one" | "many" }
   | { kind: "scalar"; valueType?: MapperConfig["valueType"] }
   | { kind: "absent" };
 
 export const schemaOf = (source: SchemaSource): SchemaLike =>
-  isFunction((source as SchemaLike).path) ? (source as SchemaLike) : (source as { schema: SchemaLike }).schema;
+  "path" in source ? source : source.schema;
 
 /**
  * What a document path holds. A single-nested subdocument or a nested object is to-one, a document
  * array is to-many, and an array of scalars, `Mixed`, `ObjectId` or `Map` is a scalar with no type
  * the adapter can check a literal against.
  */
-const shapeOf = (schema: SchemaLike, path: string): Shape => {
+const storedAt = (schema: SchemaLike, path: string): Stored => {
   const pathType = schema.pathType(path);
 
   if (pathType === "nested") return { kind: "one" };
+
   if (pathType !== "real") return { kind: "absent" };
 
   const type = schema.path(path);
 
   if (type?.$isSingleNested) return { kind: "one" };
+
   if (type?.$isMongooseDocumentArray) return { kind: "many" };
 
-  const valueType = type?.instance ? SCALAR_TYPES[type.instance] : undefined;
+  const valueType = type?.instance ? lookup(SCALAR_TYPES, type.instance) : undefined;
 
   return valueType ? { kind: "scalar", valueType } : { kind: "scalar" };
 };
@@ -62,6 +64,7 @@ const shapeOf = (schema: SchemaLike, path: string): Shape => {
 const childrenOf = (schema: SchemaLike, path: string): string[] => {
   const type = schema.path(path);
   const prefix = `${path}.`;
+
   const paths = type?.schema
     ? Object.keys(type.schema.paths).map((child) => `${prefix}${child}`)
     : Object.keys(schema.paths).filter((child) => child.startsWith(prefix));
@@ -76,15 +79,15 @@ const childrenOf = (schema: SchemaLike, path: string): string[] => {
  * `name` is the field the filter reads, which inside a to-many element is relative to the element.
  */
 const inferAt = (schema: SchemaLike, path: string, name: string, config: MapperConfig): MapperConfig => {
-  const shape = shapeOf(schema, path);
+  const stored = storedAt(schema, path);
   const { field: _field, ...rest } = config;
 
-  if (shape.kind === "one" || shape.kind === "many") {
-    return { ...rest, relation: inferRelation(schema, path, { name, type: shape.kind }) };
+  if (stored.kind === "one" || stored.kind === "many") {
+    return { ...rest, relation: inferRelation(schema, path, { name, type: stored.kind }) };
   }
 
-  return shape.kind === "scalar" && shape.valueType && config.valueType === undefined
-    ? { ...rest, field: name, valueType: shape.valueType }
+  return stored.kind === "scalar" && stored.valueType && config.valueType === undefined
+    ? { ...rest, field: name, valueType: stored.valueType }
     : { ...rest, field: name };
 };
 
@@ -98,9 +101,10 @@ const inferRelation = (
   path: string,
   relation: NonNullable<MapperConfig["relation"]>,
 ): NonNullable<MapperConfig["relation"]> => {
-  const shape = shapeOf(schema, path);
+  const stored = storedAt(schema, path);
+
   const type =
-    relation.type ?? (shape.kind === "one" || shape.kind === "many" ? shape.kind : undefined);
+    relation.type ?? (stored.kind === "one" || stored.kind === "many" ? stored.kind : undefined);
 
   if (!type) {
     throw new Error(
@@ -185,14 +189,14 @@ export const withSchema = (
       if (enclosing.relation.type !== "one") return config;
 
       const path = `${enclosing.relation.name}.${enclosing.rest}`;
-      const shape = shapeOf(schema, path);
+      const stored = storedAt(schema, path);
 
-      return shape.kind === "one" || shape.kind === "many" ? inferAt(schema, path, path, config ?? {}) : config;
+      return stored.kind === "one" || stored.kind === "many" ? inferAt(schema, path, path, config ?? {}) : config;
     }
 
     const path = reference.slice(RESOURCE_ATTR.length);
 
-    return shapeOf(schema, path).kind === "absent" ? config : inferAt(schema, path, path, config ?? {});
+    return storedAt(schema, path).kind === "absent" ? config : inferAt(schema, path, path, config ?? {});
   };
 
   const inferred = (reference: string): MapperConfig | undefined => {

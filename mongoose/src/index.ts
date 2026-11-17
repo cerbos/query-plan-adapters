@@ -14,6 +14,7 @@ export { PlanKind };
 export { UnsupportedQueryPlanError };
 
 export type { MongoValue, MongooseFilter } from "./expression";
+
 export type { SchemaLike, SchemaSource, SchemaTypeLike } from "./schema";
 
 export type MapperConfig = {

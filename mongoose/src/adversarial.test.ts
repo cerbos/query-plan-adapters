@@ -342,7 +342,7 @@ const MAPPINGS = {
 
 type Mapping = keyof typeof MAPPINGS;
 
-const MAPPING_NAMES = Object.keys(MAPPINGS) as Mapping[];
+const MAPPING_NAMES = ["declared", "schema"] as const satisfies readonly Mapping[];
 
 async function eachMapping<T>(run: (mapping: Mapping) => Promise<T>): Promise<Record<Mapping, T>> {
   return Object.fromEntries(
