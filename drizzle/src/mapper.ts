@@ -2,6 +2,7 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 import { aliasedTableColumn } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 
+import { columnTable, dataTypeOf } from "./compat";
 import { exactString } from "./collation";
 import { UnsupportedQueryPlanError } from "./errors";
 import { isNameOperand } from "./operands";
@@ -9,6 +10,8 @@ import { resolveTableName } from "./relations";
 import { SCOPED_RELATION } from "./types";
 import type {
   BaseMapperEntry,
+  DeclaredMapperEntry,
+  DeclaredMappingConfig,
   Mapper,
   MapperEntry,
   MappingConfig,
@@ -28,20 +31,25 @@ import { isFunction } from "./narrowing";
 // -- entry shapes --------------------------------------------------------------------------------
 
 const isScopedRelationEntry = (
-  entry: MapperEntry,
+  entry: DeclaredMapperEntry,
 ): entry is ScopedRelationEntry =>
   typeof entry === "object" && entry !== null && SCOPED_RELATION in entry;
 
-export const isMappingConfig = (entry: MapperEntry): entry is MappingConfig =>
-  typeof entry === "object" &&
-  entry !== null &&
-  !isScopedRelationEntry(entry) &&
-  ("column" in entry ||
-    "transform" in entry ||
-    "relation" in entry ||
-    "valueType" in entry ||
-    "indexable" in entry ||
-    "collectionValueType" in entry);
+export function isMappingConfig(entry: MapperEntry): entry is MappingConfig;
+export function isMappingConfig(entry: DeclaredMapperEntry): entry is DeclaredMappingConfig;
+export function isMappingConfig(entry: DeclaredMapperEntry): entry is DeclaredMappingConfig {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    !isScopedRelationEntry(entry) &&
+    ("column" in entry ||
+      "transform" in entry ||
+      "relation" in entry ||
+      "valueType" in entry ||
+      "indexable" in entry ||
+      "collectionValueType" in entry)
+  );
+}
 
 export const isRelationValue = (
   entry: BaseMapperEntry,
@@ -321,7 +329,7 @@ const aliasElementMapping = (
   if (resolved.relations.length !== chainLength) refuse();
 
   const rebind = (column: AnyColumn): AnyColumn =>
-    column.table === primaryRelation.table
+    columnTable(column) === primaryRelation.table
       ? aliasedTableColumn(column, alias)
       : refuse();
 
@@ -513,5 +521,5 @@ export const isScalarColumnReference = (reference: string, mapper: Mapper): bool
   const { relations, mapping } = resolveFieldReference(reference, mapper);
   const column = isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
 
-  return relations.length === 0 && ["string", "number", "boolean"].includes(column?.dataType ?? "");
+  return relations.length === 0 && ["string", "number", "boolean"].includes(dataTypeOf(column) ?? "");
 };

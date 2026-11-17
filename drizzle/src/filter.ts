@@ -1,5 +1,6 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, not, or, sql } from "drizzle-orm";
+import { and, or, sql } from "drizzle-orm";
+import { columnTable, dataTypeOf, not } from "./compat";
 import type { AnyColumn, SQL } from "drizzle-orm";
 
 import { UnsupportedQueryPlanError } from "./errors";
@@ -119,7 +120,7 @@ const buildStringMatchFilter = (
   for (const operand of [receiverOperand, needleOperand]) {
     const column = columnForOperand(operand, mapper);
 
-    if (column && column.dataType !== "string") return sql`null`;
+    if (column && dataTypeOf(column) !== "string") return sql`null`;
   }
 
   const receiver = resolveScalarOperand(receiverOperand, mapper, options);
@@ -212,7 +213,7 @@ const buildVariableMembershipFilter = (
     collection.relations.some(
       (relation) =>
         !options.skipRelations?.has(relation) &&
-        relation.table === memberColumn.table,
+        relation.table === columnTable(memberColumn),
     )
   ) {
     throw new UnsupportedQueryPlanError(
@@ -517,7 +518,7 @@ const buildMembershipFilter = (
 
     if (
       elementColumn === undefined ||
-      !SCALAR_ELEMENT_TYPES.has(elementColumn.dataType) ||
+      !SCALAR_ELEMENT_TYPES.has(dataTypeOf(elementColumn)) ||
       unresolved.relations.length > 1
     ) {
       throw new UnsupportedQueryPlanError(
@@ -606,7 +607,7 @@ const buildMatchesFilter = (
   const column = columnForOperand(receiverOperand, mapper);
 
   // A non-string receiver is a CEL no-overload error: UNKNOWN.
-  if (column && column.dataType !== "string") return sql`null`;
+  if (column && dataTypeOf(column) !== "string") return sql`null`;
   const plans = compileRegex(patternOperand.value);
 
   if (plans === "error") return UNKNOWN_CONDITION;
@@ -734,7 +735,7 @@ export const buildFilterFromExpression = (
   // (cerbos/query-plan-adapters#375).
   if (isNameOperand(expression)) {
     // A column of another type in boolean position is a CEL type error, a denial either way.
-    if (NON_BOOLEAN_DATA_TYPES.has(columnForOperand(expression, mapper)?.dataType ?? "")) {
+    if (NON_BOOLEAN_DATA_TYPES.has(dataTypeOf(columnForOperand(expression, mapper)) ?? "")) {
       return constantCondition(false);
     }
 

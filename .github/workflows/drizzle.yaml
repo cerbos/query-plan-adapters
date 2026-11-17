@@ -82,6 +82,38 @@ jobs:
         if: matrix.node-version == '22'
         run: npm run test:adversarial:mysql
 
+  # The peer range also admits drizzle 1.0, whose column types, PostgreSQL arrays and relations
+  # differ from 0.45 at runtime. The unit suite and the corpus run again against it, the corpus on
+  # every store with defineRelations() and on SQLite with the legacy relations().
+  drizzle-1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            drizzle/package-lock.json
+            drizzle/example/package-lock.json
+
+      - run: npm install
+      - run: npm install --no-save drizzle-orm@1.0.0-rc.5
+      - run: npm run typecheck
+      - run: npm run test
+      - name: Run conformance harness (SQLite)
+        run: npm run test:adversarial
+      - name: Run conformance harness (SQLite, legacy relations)
+        run: npm run test:adversarial
+        env:
+          QPA_DRIZZLE_RELATIONS: legacy
+      - name: Run conformance harness (PostgreSQL)
+        run: npm run test:adversarial:postgres
+      - name: Run conformance harness (MySQL)
+        run: npm run test:adversarial:mysql
+
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the
   # suites above structurally cannot — the packaging surface (`exports`, `types`, the `files`

@@ -116,7 +116,22 @@ export type NullAttributeRepresentation = "explicit" | "omitted";
 
 export interface QueryPlanToDrizzleArgs {
   queryPlan: PlanResourcesResponse;
-  mapper: Mapper;
+  /**
+   * Overrides for what the schema cannot say. With `table`, an attribute the mapper leaves out
+   * reads the resource table's column or relation of the same name.
+   */
+  mapper?: DeclaredMapper;
+  /**
+   * The table the plan's resource lives in. `request.resource.attr.<name>` reads its column or
+   * relation `<name>` unless the mapper declares it, `request.resource.id` its single-column
+   * primary key, and every top-level relation that leaves `sourceColumn` undeclared starts here.
+   */
+  table?: Table;
+  /**
+   * Your relations: the tables and their `relations()` you pass to `drizzle()` before drizzle 1.0,
+   * or the result of `defineRelations()` from 1.0. A relation reached by name is read from them.
+   */
+  schema?: RelationsSchema;
   /**
    * Which NULL-column representation the caller uses when building `check()` attributes.
    * Defaults to `"omitted"`, which never selects NULL rows for an undeclared column.
@@ -153,7 +168,7 @@ export interface RelationMapping {
    * flag, a tenant column, a subtype discriminator, whatever narrows the rows that became the
    * resource attributes.
    *
-   * The adapter reads `table` directly. Drizzle has no association metadata to consult, so
+   * The adapter reads `table` directly. Drizzle's relations() carry no filter to consult, so
    * nothing that narrows the application's own read reaches the generated `EXISTS`, and any
    * such narrowing makes the subquery see rows the application never serialised — a filter that
    * returns rows the PDP denies. Declaring the predicate here restores the equality; the adapter
@@ -192,3 +207,64 @@ export type BuildFilterOptions = {
    */
   openTables?: readonly string[];
 };
+
+/**
+ * A relation as the caller declares it. Any of `type`, `table`, `sourceColumn` and
+ * `targetColumn` left out is inferred: from the `relations()` entry called `name` on the source
+ * table, or else from the single foreign key between the source table and `table`. A declared
+ * value always wins over an inferred one.
+ */
+export type DeclaredRelation = Omit<
+  RelationMapping,
+  "type" | "table" | "sourceColumn" | "targetColumn" | "field" | "fields"
+> & {
+  name?: string;
+  type?: "one" | "many";
+  table?: Table;
+  sourceColumn?: AnyColumn;
+  targetColumn?: AnyColumn;
+  field?: DeclaredMapperEntry;
+  fields?: { [key: string]: DeclaredMapperEntry };
+};
+
+export type DeclaredMappingConfig = Omit<MappingConfig, "relation"> & {
+  relation?: DeclaredRelation;
+};
+
+export type DeclaredMapperEntry = MapperEntry | DeclaredMappingConfig;
+
+export type DeclaredMapper =
+  | { [key: string]: DeclaredMapperEntry | undefined }
+  | ((reference: string) => DeclaredMapperEntry | undefined);
+
+/** A drizzle `relations()` declaration (before 1.0, or from `drizzle-orm/_relations`). */
+export interface LegacyRelationsDeclaration {
+  readonly table: Table;
+  readonly config: (helpers: never) => object;
+}
+
+/** The column side of a `defineRelations()` relation. */
+export interface RelationV2Column {
+  readonly _: { readonly column: object };
+}
+
+/** One relation of a `defineRelations()` result, as the adapter reads it. */
+export interface RelationV2 {
+  readonly relationType: "one" | "many";
+  readonly sourceColumns: readonly RelationV2Column[];
+  readonly targetColumns: readonly RelationV2Column[];
+  readonly targetTable: Table;
+  readonly through?: object;
+  readonly where?: object | symbol;
+  readonly isFilterReversed?: boolean;
+}
+
+/** One table's entry in a `defineRelations()` result. */
+export interface TableRelationsV2 {
+  readonly table: Table;
+  readonly relations: Readonly<Record<string, RelationV2>>;
+}
+
+export type RelationsSchemaEntry = Table | LegacyRelationsDeclaration | TableRelationsV2;
+
+export type RelationsSchema = Readonly<Record<string, RelationsSchemaEntry>>;

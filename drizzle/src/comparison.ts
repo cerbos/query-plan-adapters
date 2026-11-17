@@ -1,5 +1,6 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { not, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
+import { dataTypeOf, not } from "./compat";
 import { is } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
@@ -116,7 +117,7 @@ const LEAF_COMPARISON_OPERATORS = new Set(["eq", "ne", "lt", "le", "gt", "ge"]);
 const isBooleanExpression = (operand: PlanExpressionOperand, mapper: Mapper): boolean => {
   if (isValueOperand(operand)) return isBoolean(operand.value);
 
-  if (isNameOperand(operand)) return columnForOperand(operand, mapper)?.dataType === "boolean";
+  if (isNameOperand(operand)) return dataTypeOf(columnForOperand(operand, mapper)) === "boolean";
 
   if (!isExpressionOperand(operand)) return false;
   const { operator, operands } = operand;
@@ -768,7 +769,7 @@ const numberStringConversion = (
 
   return operand.operands.length === 1 &&
     inner !== undefined &&
-    columnForOperand(inner, mapper)?.dataType === "number"
+    dataTypeOf(columnForOperand(inner, mapper)) === "number"
     ? operand
     : undefined;
 };
@@ -808,7 +809,7 @@ const scalarType = (
     if (isMappingConfig(mapping) && mapping.transform) return undefined;
   }
 
-  return columnForOperand(operand, mapper)?.dataType;
+  return dataTypeOf(columnForOperand(operand, mapper));
 };
 
 const SCALAR_TYPES = new Set(["string", "number", "boolean"]);

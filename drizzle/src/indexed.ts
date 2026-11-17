@@ -1,8 +1,9 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, is, not, sql } from "drizzle-orm";
+import { and, is, sql } from "drizzle-orm";
+import { dataTypeOf, not, pgArrayElementColumnType } from "./compat";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
-import { PgArray, PgColumn } from "drizzle-orm/pg-core";
+import { PgColumn } from "drizzle-orm/pg-core";
 import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { UnsupportedQueryPlanError } from "./errors";
@@ -59,7 +60,7 @@ export function indexedEquality({
   const path = `$[${index}]`;
 
   if (is(column, MySqlColumn)) {
-    if (column.dataType !== "json") {
+    if (dataTypeOf(column) !== "json") {
       throw new Error('indexable: "json" requires a MySQL JSON column');
     }
 
@@ -217,7 +218,7 @@ export function indexedMembership({
   }
 
   if (is(column, MySqlColumn)) {
-    if (column.dataType !== "json") {
+    if (dataTypeOf(column) !== "json") {
       throw new Error('indexable: "json" requires a MySQL JSON column');
     }
 
@@ -473,13 +474,14 @@ function sqliteElementEquality(type: SQL, element: SQL, value: Scalar): SQL {
 }
 
 function assertPgArrayColumn(column: AnyColumn): void {
-  if (!is(column, PgArray)) {
+  const elementType = is(column, PgColumn) ? pgArrayElementColumnType(column) : undefined;
+
+  if (elementType === undefined) {
     throw new Error('indexable: "pgArray" requires a PostgreSQL array column');
   }
 
   if (
-    !["PgText", "PgVarchar", "PgBoolean", "PgInteger", "PgSmallInt"]
-      .includes(column.baseColumn.columnType)
+    !["PgText", "PgVarchar", "PgBoolean", "PgInteger", "PgSmallInt"].includes(elementType)
   ) {
     // Numeric/string-mode, bigint and custom decoders can change the representation of a
     // value (including a SQL NULL element) before the application sends it to check().
@@ -491,7 +493,7 @@ function assertPgArrayColumn(column: AnyColumn): void {
 }
 
 function assertPgJsonColumn(column: PgColumn): void {
-  if (column.dataType !== "json") {
+  if (dataTypeOf(column) !== "json") {
     throw new Error(
       'indexable: "json" requires a PostgreSQL JSON or JSONB column',
     );
@@ -499,7 +501,7 @@ function assertPgJsonColumn(column: PgColumn): void {
 }
 
 function assertSqliteJsonColumn(column: SQLiteColumn): void {
-  if (column.dataType !== "json" && column.dataType !== "string") {
+  if (dataTypeOf(column) !== "json" && dataTypeOf(column) !== "string") {
     throw new Error('indexable: "json" requires a SQLite JSON text column');
   }
 }

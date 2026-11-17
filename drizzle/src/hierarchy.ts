@@ -2,6 +2,7 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 import { and, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
+import { dataTypeOf } from "./compat";
 import { UnsupportedQueryPlanError } from "./errors";
 import {
   buildColumnExpression,
@@ -105,7 +106,7 @@ const resolveSegments = (
 
       const column = columnForOperand(segment, mapper);
 
-      if (column && column.dataType !== "string") error = true;
+      if (column && dataTypeOf(column) !== "string") error = true;
 
       return {
         kind: "column",
@@ -221,7 +222,7 @@ const buildFieldHierarchyFilter = (
       : undefined;
 
   // A hierarchy over a non-string column is a CEL error: UNKNOWN under both polarities.
-  if (fieldColumn && fieldColumn.dataType !== "string") return sql`null`;
+  if (fieldColumn && dataTypeOf(fieldColumn) !== "string") return sql`null`;
 
   const fieldExpr = buildColumnExpression(mapping, field.reference);
   const constantPath = constant.segments.join(field.delimiter);
@@ -361,7 +362,7 @@ const buildCharacterHierarchyFilter = (
       ? field.resolved.mapping.column
       : undefined;
 
-  if (fieldColumn && fieldColumn.dataType !== "string") return sql`null`;
+  if (fieldColumn && dataTypeOf(fieldColumn) !== "string") return sql`null`;
   const expr = buildColumnExpression(field.resolved.mapping, field.reference);
   const characters = constant.segments;
   const path = characters.join("");

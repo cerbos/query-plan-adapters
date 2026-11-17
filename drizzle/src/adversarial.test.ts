@@ -3,10 +3,10 @@ import * as path from "path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import Database from "better-sqlite3";
+import * as drizzleOrm from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import type { AnyColumn, SQL } from "drizzle-orm";
+import type { AnyColumn, SQL, Table } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
-import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
 import { MySqlContainer } from "@testcontainers/mysql";
@@ -18,7 +18,8 @@ import { Pool } from "pg";
 
 import type { PlanResourcesResponse } from "@cerbos/core";
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
-import type { Mapper } from ".";
+import type { Mapper, QueryPlanToDrizzleArgs } from ".";
+import type { RelationsSchema } from "./types";
 import {
   assertFuzzVerdict,
   buildMapper,
@@ -37,6 +38,18 @@ import {
 import type { ConformanceMapper, FuzzVerdict, Golden } from "./corpus";
 import { isMappingConfig } from "./mapper";
 import { isObject, isString } from "./narrowing";
+
+/** drizzle 1.0 takes only `{ client }`; 0.45 reads only the positional client and `mode`. */
+interface MysqlDriver {
+  drizzle(config: { client: mysql.Pool }): MySql2Database;
+  drizzle(client: mysql.Pool, config: { mode: "default" }): MySql2Database;
+}
+
+function mysqlDriver(): MysqlDriver {
+  return require("drizzle-orm/mysql2");
+}
+
+const IS_DRIZZLE_1 = "defineRelations" in drizzleOrm;
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -349,6 +362,10 @@ const STORE_ENGINES: Record<StoreName, string> = {
 interface AdversarialStore {
   readonly name: StoreName;
   readonly mapper: ConformanceMapper;
+  /** The same mapper with every relation spelled out, translated without `root`. */
+  readonly declaredMapper: ConformanceMapper;
+  /** The resource table and the schema holding the `relations()` the mapper names. */
+  readonly root: { table: Table; schema: RelationsSchema };
   readonly indexMappers?: ConformanceMapper[];
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -375,11 +392,13 @@ function sqliteStore(): AdversarialStore {
   const dbPath = path.join(__dirname, "..", "adversarial.db");
   fs.rmSync(dbPath, { force: true });
   const sqlite = new Database(dbPath);
-  const db = drizzleSqlite(sqlite);
+  const db = drizzleSqlite({ client: sqlite });
 
   return {
     name: "sqlite",
     mapper: buildMapper(schema),
+    declaredMapper: buildMapper(schema, "declared"),
+    root: { table: schema.resources, schema: schema.relationsSchema },
 
     async start(): Promise<void> {
       sqlite.exec(`
@@ -523,6 +542,8 @@ function postgresStore(): AdversarialStore {
   return {
     name: "postgres",
     mapper: buildMapper(schema),
+    declaredMapper: buildMapper(schema, "declared"),
+    root: { table: schema.resources, schema: schema.relationsSchema },
     // The same mapper with the three ordered lists stored two other ways: a native array rebased to
     // a zero lower bound, and plain `json`. A caller chooses the storage, so the corpus cannot vary
     // it; the harness replays every case that reads these lists under each one.
@@ -544,7 +565,7 @@ function postgresStore(): AdversarialStore {
         .withEnvironment({ POSTGRES_INITDB_ARGS })
         .start();
       pool = new Pool({ connectionString: container.getConnectionUri() });
-      db = drizzlePostgres(pool);
+      db = drizzlePostgres({ client: pool });
 
       await db.execute(sql`
         CREATE TABLE adversarial_resources (
@@ -787,6 +808,8 @@ function mysqlStore(): AdversarialStore {
   return {
     name: "mysql",
     mapper: buildMapper(schema),
+    declaredMapper: buildMapper(schema, "declared"),
+    root: { table: schema.resources, schema: schema.relationsSchema },
 
     async start(): Promise<void> {
       // The image's entrypoint prepends `mysqld` to arguments that begin with a dash, which is
@@ -804,7 +827,8 @@ function mysqlStore(): AdversarialStore {
         // out of the comparison.
         timezone: "Z",
       });
-      db = drizzleMysql(pool, { mode: "default" });
+
+      db = IS_DRIZZLE_1 ? mysqlDriver().drizzle({ client: pool }) : mysqlDriver().drizzle(pool, { mode: "default" });
 
       for (const statement of DDL) {
         await db.execute(sql.raw(statement));
@@ -843,7 +867,9 @@ function mysqlStore(): AdversarialStore {
       const [rows] = await connected().execute(sql`select @@version_comment as version`);
       const first = Array.isArray(rows) ? rows[0] : undefined;
 
-      return isObject(first) && "version" in first && isString(first.version) ? first.version : "";
+      const version = isObject(first) && "version" in first ? first["version"] : undefined;
+
+      return isString(version) ? version : "";
     },
   };
 }
@@ -896,7 +922,9 @@ const STORE_FACTORIES: Record<StoreName, () => AdversarialStore> = {
 };
 
 const store: AdversarialStore = STORE_FACTORIES[STORE_NAME]();
-const MAPPER = store.mapper;
+
+/** Every case is replayed with the relations inferred from the schema and with them declared. */
+const MAPPERS: ConformanceMapper[] = [store.mapper, store.declaredMapper];
 
 /** `base` with the three ordered lists moved to other columns, every other declaration kept. */
 function withListColumns(
@@ -947,8 +975,13 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 // Every column the dataset omits when NULL is declared `omitted` in the mapping. The call-level
 // option covers what is left, list elements and principal-side literals, which the dataset sends as
 // values; the adapter's own default is pinned in translator.test.ts.
-const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) =>
-  queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "explicit" });
+const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) => {
+  const args: QueryPlanToDrizzleArgs = { queryPlan, mapper, nullAttributeRepresentation: "explicit" };
+
+  if (mapper !== store.declaredMapper) Object.assign(args, store.root);
+
+  return queryPlanToDrizzle(args);
+};
 
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
   const result = translatePlan(await planOf(golden), mapper);
@@ -964,8 +997,8 @@ const LIST_REFERENCE = /"request\.resource\.attr\.(tagNames|aNumberList|aBoolLis
 /** A fuzz case replayed under every mapper a corpus case would be; the first failure is its verdict. */
 async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
   const mappers = LIST_REFERENCE.test(JSON.stringify(golden.plan))
-    ? [MAPPER, ...(store.indexMappers ?? [])]
-    : [MAPPER];
+    ? [...MAPPERS, ...(store.indexMappers ?? [])]
+    : MAPPERS;
 
   const verdicts: FuzzVerdict[] = [];
 
@@ -1053,24 +1086,18 @@ describe(`conformance (${STORE_NAME})`, () => {
 
         const entry = ledgerEntry(golden, tag);
 
-        if (entry?.status === "unsupported") {
-          const queryPlan = await planOf(golden);
-          expect(() => translatePlan(queryPlan, MAPPER)).toThrow(
-            UnsupportedQueryPlanError,
-          );
-
-          return;
+        for (const mapper of MAPPERS) {
+          if (entry?.status === "unsupported") {
+            const queryPlan = await planOf(golden);
+            expect(() => translatePlan(queryPlan, mapper)).toThrow(UnsupportedQueryPlanError);
+          } else if (entry?.status === "divergent") {
+            expect(await selectAllowed(golden, mapper)).not.toEqual(golden.allowed);
+          } else {
+            expect(await selectAllowed(golden, mapper)).toEqual(golden.allowed);
+          }
         }
 
-        const ids = await selectAllowed(golden, MAPPER);
-
-        if (entry?.status === "divergent") {
-          expect(ids).not.toEqual(golden.allowed);
-
-          return;
-        }
-
-        expect(ids).toEqual(golden.allowed);
+        if (entry !== undefined) return;
 
         if (LIST_REFERENCE.test(JSON.stringify(golden.plan))) {
           for (const mapper of store.indexMappers ?? []) {

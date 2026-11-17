@@ -3,6 +3,7 @@ import { PlanKind } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
 import { unrollKnownValueMaps } from "./collections";
 import { buildFilterFromExpression, rejectNullConstructors } from "./filter";
+import { inferRelations } from "./inference";
 import { foldConstantConstructors } from "./operands";
 import { rewritePlan } from "./rewrite";
 import type {
@@ -25,9 +26,10 @@ import type {
 export type { Indexable } from "./indexed";
 
 export type {
+  DeclaredRelation,
+  DeclaredMapper as Mapper,
+  DeclaredMapperEntry as MapperEntry,
   DrizzleFilter,
-  Mapper,
-  MapperEntry,
   NullAttributeRepresentation,
   QueryPlanToDrizzleArgs,
   QueryPlanToDrizzleResult,
@@ -40,9 +42,13 @@ export { UnsupportedQueryPlanError };
 
 export function queryPlanToDrizzle({
   queryPlan,
-  mapper,
+  mapper: declaredMapper = {},
+  table,
+  schema,
   nullAttributeRepresentation = "omitted",
 }: QueryPlanToDrizzleArgs): QueryPlanToDrizzleResult {
+  const mapper = inferRelations(declaredMapper, table, schema);
+
   const options: BuildFilterOptions = {
     nullRepresentation: nullAttributeRepresentation,
   };
