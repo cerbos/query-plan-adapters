@@ -11,8 +11,7 @@ import {
   temporalMismatch,
 } from "./aggregation";
 import { FinalUnsupportedQueryPlanError, UnsupportedQueryPlanError } from "./errors";
-import type { MapperConfig } from "./index";
-import type { ScopedMapper } from "./mapper";
+import type { ResolvedMapperConfig, ResolvedRelation, ScopedMapper } from "./mapper";
 import {
   isNullableReference,
   relationOfReference,
@@ -535,11 +534,11 @@ const elementMapper = (
   outer: ScopedMapper,
   variable: string,
   binding: string,
-  relation: MapperConfig["relation"] | undefined,
+  relation: ResolvedRelation | undefined,
 ): ScopedMapper => {
   const nullableDefault = outer.nullableDefault;
 
-  const lookup = (key: string): MapperConfig | undefined => {
+  const lookup = (key: string): ResolvedMapperConfig | undefined => {
     if (key !== variable && !key.startsWith(`${variable}.`)) return outer.lookup(key);
     const field = key === variable ? relation?.field : key.slice(variable.length + 1);
 
@@ -547,7 +546,7 @@ const elementMapper = (
     const config = relation?.fields?.[field];
     const nested = config?.relation && { ...config.relation, name: `${binding}.${config.relation.name}` };
 
-    const scoped: MapperConfig = {
+    const scoped: ResolvedMapperConfig = {
       field: `${binding}.${config?.field ?? field}`,
       nullable: config?.nullable ?? nullableDefault,
     };

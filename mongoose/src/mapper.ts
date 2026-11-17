@@ -4,13 +4,23 @@ import { isFunction } from "./narrowing";
 import type { MongoValue } from "./expression";
 import { withSchema, type SchemaSource } from "./schema";
 
+/** A mapping whose every relation, at any depth, has its `type` settled. */
+export type ResolvedMapperConfig = Omit<MapperConfig, "relation"> & {
+  relation?: ResolvedRelation;
+};
+
+export type ResolvedRelation = Omit<NonNullable<MapperConfig["relation"]>, "type" | "fields"> & {
+  type: "one" | "many";
+  fields?: Record<string, ResolvedMapperConfig>;
+};
+
 /**
  * The caller's mapper as one translation scope reads it. `queryPlanToMongoose` builds the root
  * scope, and each macro body gets its own.
  */
 export type ScopedMapper = {
   /** The entry for exactly `reference`. */
-  readonly lookup: (reference: string) => MapperConfig | undefined;
+  readonly lookup: (reference: string) => ResolvedMapperConfig | undefined;
   /** Whether an entry that does not declare `nullable` is nullable (the call's convention). */
   readonly nullableDefault: boolean;
   /** The macro variables whose elements this scope reads. */
@@ -66,10 +76,10 @@ export const declaredScalarType = (
 };
 
 /** `config` with `nullable: true` wherever it, or a relation field beneath it, declares nothing. */
-const nullableByDefault = (config: MapperConfig): MapperConfig => {
+const nullableByDefault = (config: ResolvedMapperConfig): ResolvedMapperConfig => {
   const fields = config.relation?.fields;
 
-  const defaulted: MapperConfig = { ...config, nullable: config.nullable ?? true };
+  const defaulted: ResolvedMapperConfig = { ...config, nullable: config.nullable ?? true };
 
   if (config.relation && fields) {
     defaulted.relation = {
@@ -149,11 +159,9 @@ export type ResolvedFieldReference = {
 };
 
 const relationReference = (
-  { name, type, requiresParent }: NonNullable<MapperConfig["relation"]>,
+  { name, type, requiresParent }: ResolvedRelation,
   field: string | undefined,
 ): ResolvedFieldReference => {
-  if (!type) throw new Error(`Relation ${name} declares no type`);
-
   return {
     path: !field ? [name] : type === "one" ? [`${name}.${field}`] : [name, field],
     relation: { name, type, requiresParent },

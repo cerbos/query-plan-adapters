@@ -1,5 +1,5 @@
 import type { MapperConfig } from "./index";
-import type { ScopedMapper } from "./mapper";
+import type { ResolvedMapperConfig, ResolvedRelation, ScopedMapper } from "./mapper";
 import { lookup } from "./narrowing";
 
 /** The part of a Mongoose `SchemaType` the adapter reads. */
@@ -34,7 +34,7 @@ type Stored =
   | { kind: "scalar"; valueType?: MapperConfig["valueType"] }
   | { kind: "absent" };
 
-export const schemaOf = (source: SchemaSource): SchemaLike =>
+const schemaOf = (source: SchemaSource): SchemaLike =>
   "path" in source ? source : source.schema;
 
 /**
@@ -78,9 +78,14 @@ const childrenOf = (schema: SchemaLike, path: string): string[] => {
  * `config` with what the schema says about `path` filled in wherever `config` declares nothing.
  * `name` is the field the filter reads, which inside a to-many element is relative to the element.
  */
-const inferAt = (schema: SchemaLike, path: string, name: string, config: MapperConfig): MapperConfig => {
+const inferAt = (
+  schema: SchemaLike,
+  path: string,
+  name: string,
+  config: MapperConfig,
+): ResolvedMapperConfig => {
   const stored = storedAt(schema, path);
-  const { field: _field, ...rest } = config;
+  const { field: _field, relation: _relation, ...rest } = config;
 
   if (stored.kind === "one" || stored.kind === "many") {
     return { ...rest, relation: inferRelation(schema, path, { name, type: stored.kind }) };
@@ -100,7 +105,7 @@ const inferRelation = (
   schema: SchemaLike,
   path: string,
   relation: NonNullable<MapperConfig["relation"]>,
-): NonNullable<MapperConfig["relation"]> => {
+): ResolvedRelation => {
   const stored = storedAt(schema, path);
 
   const type =
@@ -135,7 +140,7 @@ const inferRelation = (
 const enclosingRelation = (
   reference: string,
   lookup: ScopedMapper["lookup"],
-): { relation: NonNullable<MapperConfig["relation"]>; rest: string } | undefined => {
+): { relation: ResolvedRelation; rest: string } | undefined => {
   const parts = reference.slice(RESOURCE_ATTR.length).split(".");
 
   for (let length = parts.length - 1; length > 0; length--) {
@@ -164,20 +169,22 @@ const enclosingRelation = (
  * to-one on the `check()` side may be stored as an array.
  */
 export const withSchema = (
-  lookup: ScopedMapper["lookup"],
+  lookup: (reference: string) => MapperConfig | undefined,
   source: SchemaSource | undefined,
 ): ScopedMapper["lookup"] => {
   if (!source) return withDeclaredRelationTypes(lookup);
 
   const schema = schemaOf(source);
-  const cache = new Map<string, MapperConfig | undefined>();
+  const cache = new Map<string, ResolvedMapperConfig | undefined>();
 
-  const infer = (reference: string): MapperConfig | undefined => {
-    const config = lookup(reference);
+  const infer = (reference: string): ResolvedMapperConfig | undefined => {
+    const declared = lookup(reference);
 
-    if (config?.relation) {
-      return { ...config, relation: inferRelation(schema, config.relation.name, config.relation) };
+    if (declared?.relation) {
+      return { ...declared, relation: inferRelation(schema, declared.relation.name, declared.relation) };
     }
+
+    const config = declared && scalarOf(declared);
 
     if (config?.field) return inferAt(schema, config.field, config.field, config);
 
@@ -199,7 +206,7 @@ export const withSchema = (
     return storedAt(schema, path).kind === "absent" ? config : inferAt(schema, path, path, config ?? {});
   };
 
-  const inferred = (reference: string): MapperConfig | undefined => {
+  const inferred = (reference: string): ResolvedMapperConfig | undefined => {
     if (!cache.has(reference)) cache.set(reference, infer(reference));
 
     return cache.get(reference);
@@ -208,9 +215,11 @@ export const withSchema = (
   return inferred;
 };
 
+const scalarOf = ({ relation: _relation, ...scalar }: MapperConfig): ResolvedMapperConfig => scalar;
+
 /** Without a schema, a relation must say whether it is to-one or to-many. */
 const withDeclaredRelationTypes =
-  (lookup: ScopedMapper["lookup"]): ScopedMapper["lookup"] =>
+  (lookup: (reference: string) => MapperConfig | undefined): ScopedMapper["lookup"] =>
   (reference) => {
     const config = lookup(reference);
 
@@ -219,7 +228,9 @@ const withDeclaredRelationTypes =
     return config;
   };
 
-const assertRelationTypes = (config: MapperConfig | undefined): void => {
+function assertRelationTypes(
+  config: MapperConfig | undefined,
+): asserts config is ResolvedMapperConfig | undefined {
   const relation = config?.relation;
 
   if (!relation) return;
@@ -230,5 +241,5 @@ const assertRelationTypes = (config: MapperConfig | undefined): void => {
     );
   }
 
-  Object.values(relation.fields ?? {}).forEach(assertRelationTypes);
-};
+  Object.values(relation.fields ?? {}).forEach((field) => assertRelationTypes(field));
+}
