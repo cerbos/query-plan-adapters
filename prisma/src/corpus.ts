@@ -376,7 +376,82 @@ interface ConformanceMapper {
   [reference: string]: MapperConfig;
 }
 
-export const MAPPER: ConformanceMapper = {
+// Everything the Prisma schema already says is left to the `datamodel` option: an attribute named
+// like its column (`request.resource.id` is the `@id` field, so `identifier/*` needs nothing),
+// whether a relation is to-one or to-many, the model it reaches, segments named like their field,
+// and each column's type and nullability. What is left is what only the application knows: the
+// NULL convention, aliases, projections, a list's element type and a to-one relation's keys.
+export const INFERRED_MAPPER: ConformanceMapper = {
+  // Every attribute resources.json OMITS when its column is NULL follows the omitted convention:
+  // aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString, aDouble, scope, createdAt,
+  // updatedAt, obj.inner and every `parent` field. A null literal against one is then a
+  // missing-attribute error the PDP denies, never an IS NULL match (#528).
+  "request.resource.attr.aBool": { field: "aBool", nullAttributeRepresentation: "omitted" },
+  "request.resource.attr.aString": { field: "aString", nullAttributeRepresentation: "omitted" },
+  "request.resource.attr.aNumber": { field: "aNumber", nullAttributeRepresentation: "omitted" },
+  "request.resource.attr.aDouble": { field: "aDouble", nullAttributeRepresentation: "omitted" },
+  "request.resource.attr.aOptionalString": {
+    field: "aOptionalString",
+    nullAttributeRepresentation: "omitted",
+  },
+  "request.resource.attr.scope": { field: "scope", nullAttributeRepresentation: "omitted" },
+  "request.resource.attr.createdAt": { field: "createdAt", nullAttributeRepresentation: "omitted" },
+  "request.resource.attr.updatedAt": { field: "updatedAt", nullAttributeRepresentation: "omitted" },
+  // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
+  // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
+  // it. Declaring that here is what makes the equality family definite for these two attributes
+  // and leaves it untouched for every other mapping (cerbos/query-plan-adapters#308).
+  "request.resource.attr.owner": { field: "aOptionalString", nullAttributeRepresentation: "explicit" },
+  "request.resource.attr.coOwner": { field: "scope", nullAttributeRepresentation: "explicit" },
+  // obj.inner is not a real nested column — mirrors aString, same trick the spring-data reference
+  // harness uses for the comparison/equals/nested-map-member case. `parent.inner` below is the
+  // opposite: a real two-level join. The two are kept side by side on purpose.
+  "request.resource.attr.obj.inner": { field: "aString", nullAttributeRepresentation: "omitted" },
+  // The corpus's one REAL to-one chain (the `relation/*` cases), `parent` and `parent.inner`, both
+  // read from the schema. A column reached through a relation takes the relation entry's null
+  // convention, so the one declaration here covers every `parent.*` and `parent.inner.*` field.
+  // The keys listed under `fields` are the attributes the application sends for the related row,
+  // which `"aString" in R.attr.parent` tests; the schema cannot say which columns those are.
+  "request.resource.attr.parent": {
+    nullAttributeRepresentation: "omitted",
+    relation: {
+      name: "parent",
+      fields: { aBool: {}, aString: {}, aNumber: {}, aOptionalString: {}, inner: {} },
+    },
+  },
+  "request.resource.attr.tags": {
+    relation: { name: "tags", fields: { id: { field: "tagId" } } },
+  },
+  "request.resource.attr.tagNames": { relation: { name: "tags", field: "name" } },
+  // The two homogeneous scalar lists, one owned row per element, projected the way `tagNames`
+  // is. `valueType` sits on the list mapping itself because that is where a membership test reads
+  // it: a literal of another type (`"2" in aNumberList`) is refused rather than bound, since CEL's
+  // heterogeneous equality answers it false and a store that coerces would not. It is not read
+  // from the projected column, because `size()` reads the same key as the type of the attribute.
+  "request.resource.attr.aNumberList": {
+    valueType: "number",
+    relation: { name: "numberList", field: "value" },
+  },
+  "request.resource.attr.aBoolList": {
+    valueType: "boolean",
+    relation: { name: "boolList", field: "value" },
+  },
+  // The multi-hop chain (the `relation/*/*-to-one-chain` cases): mainCategory mirrors the SAME
+  // categories/subCategories relation as a single-object dotted chain on the check side (every
+  // seed holds at most one category), pinning that the adapter joins through every intermediate
+  // hop, never off the root. subNames is the same 2-hop chain with a bare `field`, so plain `in`
+  // membership compares the flattened tail's name column directly.
+  "request.resource.attr.mainCategory": {
+    relation: {
+      name: "categories",
+      fields: { subNames: { relation: { name: "subCategories", field: "name" } } },
+    },
+  },
+};
+
+// Every mapping spelled out, the way a caller without the `datamodel` option writes it. The harness
+// replays the corpus under both mappers, so the two must agree on every case.
+export const DECLARED_MAPPER: ConformanceMapper = {
   // The primary key, reached as `request.resource.id` rather than through `attr` (the
   // `identifier/*` cases). It is a mapping like any other here, which is the point: an adapter that resolves
   // references by stripping a `request.resource.attr.` prefix never sees this name.

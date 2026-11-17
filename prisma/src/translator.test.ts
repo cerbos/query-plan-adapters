@@ -14,7 +14,7 @@ import type {
   PrismaFilter,
   QueryPlanToPrismaResult,
 } from ".";
-import { MAPPER, MODEL, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
+import { DECLARED_MAPPER as MAPPER, MODEL, pdpTags, planOf, readGolden, readGoldens } from "./corpus";
 import { isObject } from "./narrowing";
 
 type Relation = NonNullable<MapperConfig["relation"]>;

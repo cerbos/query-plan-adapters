@@ -28,6 +28,8 @@ npm install @cerbos/grpc   # or @cerbos/http — whichever client your deploymen
 import { GRPC } from "@cerbos/grpc";
 import { PlanKind, queryPlanToPrisma } from "@cerbos/orm-prisma";
 
+import { Prisma } from "@prisma/client";
+
 import { prisma } from "./db"; // your PrismaClient instance
 
 const cerbos = new GRPC("localhost:3593", { tls: false });
@@ -38,12 +40,11 @@ const queryPlan = await cerbos.planResources({
   action: "view",
 });
 
+// Prisma 5/6 (prisma-client-js): Prisma.dmmf.datamodel. Prisma 7: see "Prisma 7" below.
 const result = queryPlanToPrisma({
   queryPlan,
-  mapper: {
-    "request.resource.attr.ownerId": { field: "ownerId" },
-    "request.resource.attr.status": { field: "status" },
-  },
+  model: "Document",
+  datamodel: Prisma.dmmf.datamodel,
 });
 
 let documents;
@@ -62,6 +63,13 @@ switch (result.kind) {
 }
 ```
 
+That is the whole setup when your resource attributes are named like the model's fields:
+`R.attr.status` reads `status`, `R.attr.owner.name` joins through the `owner` relation, and
+`R.attr.tags.exists(t, t.name == "x")` becomes `tags: { some: ... }`. The adapter reads every one of
+those from the schema. Add a [mapper](#overrides-the-mapper) only for what the schema cannot know:
+an attribute named differently from its column, how you send NULL columns, or a narrowing your
+application applies to a relation.
+
 `queryPlanToPrisma` returns `{ kind }` for `ALWAYS_ALLOWED` / `ALWAYS_DENIED` and
 `{ kind: CONDITIONAL, filters }` otherwise. `filters` is a plain where-input for the model, so you
 can `AND` it with your own predicates, paginate, or add `select`/`orderBy`. Short-circuit
@@ -73,17 +81,89 @@ returns a broader filter.
 | Argument | Required | Description |
 | --- | --- | --- |
 | `queryPlan` | yes | The `PlanResourcesResponse` from `planResources`. |
-| `mapper` | no | Maps Cerbos attribute paths to Prisma fields and relations. Defaults to `{}`. |
-| `model` | no | Prisma model name of the queried model (e.g. `"Resource"`). Needed only for [field-to-field comparisons](#field-to-field-comparisons) between root columns. |
+| `model` | with `datamodel` | Prisma model name of the queried model (e.g. `"Document"`). Without `datamodel`, needed only for [field-to-field comparisons](#field-to-field-comparisons) between root columns. |
+| `datamodel` | no, recommended | The Prisma schema's datamodel. See [What the schema supplies](#what-the-schema-supplies). |
+| `mapper` | no | [Overrides](#overrides-the-mapper) for what the schema cannot say. Defaults to `{}`. |
 | `nullAttributeRepresentation` | no | `"omitted"` (default) or `"explicit"`. See [NULL attribute representation](#null-attribute-representation). |
 
 Exported types: `QueryPlanToPrismaArgs`, `QueryPlanToPrismaResult`, `Mapper`, `MapperConfig`,
-`NullAttributeRepresentation`, `PrismaFilter`, and `PlanKind` (re-exported from `@cerbos/core`).
+`NullAttributeRepresentation`, `PrismaDatamodel`, `PrismaFilter`, and `PlanKind` (re-exported from
+`@cerbos/core`).
 
-## Mapping attributes
+## What the schema supplies
 
-Cerbos attribute paths are not column names, so you map them. The mapper is an object keyed by the
-full attribute path, or a function from path to config:
+With `datamodel` and `model`, an attribute resolves by name:
+
+- `request.resource.attr.<name>` is the root model's field `<name>`, and `request.resource.id` is its
+  `@id` field.
+- A relation field is a relation: to-one compiles to `is`, to-many to `some`/`every`/`none`, and the
+  related model is known, so field-to-field comparisons inside a collection need no `model` either.
+- Every segment beneath a relation resolves on the related model by name, however deep:
+  `R.attr.comments.exists(c, c.author.name == P.id)` joins through `comments` and `author`.
+- A scalar column's `valueType` comes from its type (`String`, `Int`, `Float`, `Boolean`,
+  `DateTime`) and `nullable` from `?`. Enum, `Decimal`, `BigInt` and `Json` columns are left untyped.
+
+### Getting the datamodel
+
+**Prisma 5 and 6** (`prisma-client-js`): pass `Prisma.dmmf.datamodel`.
+
+**Prisma 7** (`prisma-client`): the generated client has no `Prisma.dmmf`, and its runtime model
+cannot tell a to-one relation from a to-many one. Add this package's generator beside your client,
+and pass the `datamodel` it writes on every `prisma generate`:
+
+```prisma
+generator cerbos {
+  provider = "cerbos-prisma-datamodel"
+  output   = "../src/generated/cerbos"
+}
+```
+
+```ts
+import { datamodel } from "./generated/cerbos/datamodel";
+```
+
+It also writes `datamodel.json` for code that does not compile TypeScript.
+
+## Overrides: the mapper
+
+The mapper is for what the schema cannot say. You need an entry when:
+
+- **an attribute is named differently from its column** (`R.attr.owner` reads `ownerId`), or is a
+  projection (`"x" in R.attr.tagNames` compares `tags.name`);
+- **your application sends NULL columns as explicit `null`s**, or mixes conventions. See
+  [NULL attribute representation](#null-attribute-representation);
+- **your reads of a relation are narrowed** (soft delete, tenant, subtype). Declare that as
+  [`subqueryFilter`](#declaring-the-applications-own-predicate);
+- **a policy tests the keys of a to-one relation** (`"name" in R.attr.owner`). The keys listed under
+  `relation.fields` are the attributes your application sends for the related row. The schema does
+  not know which columns those are, so an unlisted key is refused;
+- **a projected list holds scalars of a known type** (`valueType` on `R.attr.scores` for `"2" in
+  R.attr.scores`). The list's own `valueType` is also what `size()` reads, so it is never inferred
+  from the projected column.
+
+An entry only states what differs, and the schema fills in the rest. A `type` or `model` that the
+schema contradicts throws.
+
+```ts
+queryPlanToPrisma({
+  queryPlan,
+  model: "Document",
+  datamodel,
+  mapper: {
+    "request.resource.attr.owner": { field: "ownerId", nullAttributeRepresentation: "explicit" },
+    "request.resource.attr.tagNames": { relation: { name: "tags", field: "name" } },
+    "request.resource.attr.comments": {
+      relation: { name: "comments", subqueryFilter: { deletedAt: null } },
+    },
+  },
+});
+```
+
+### Without the datamodel
+
+Without `datamodel`, the mapper must declare everything: every attribute's field, and every
+relation's `type`. A relation with no `type` throws. The mapper is an object keyed by the full
+attribute path, or a function from path to config:
 
 ```ts
 // Object
@@ -96,8 +176,8 @@ mapper: {
 mapper: (path) => ({ field: path.replace("request.resource.attr.", "") })
 ```
 
-An unmapped path is used verbatim as the Prisma field name, which makes the query fail. Without a
-mapping of its own, a path resolves through its longest mapped prefix only when that prefix names a
+Without `datamodel`, an unmapped path is used verbatim as the Prisma field name, which makes the
+query fail. With or without it, and without a mapping of its own, a path resolves through its longest mapped prefix only when that prefix names a
 relation; a key read beneath a prefix mapped to a scalar field throws `UnsupportedQueryPlanError`.
 
 ### `MapperConfig`
@@ -105,17 +185,17 @@ relation; a key read beneath a prefix mapped to a scalar field throws `Unsupport
 | Key | Description |
 | --- | --- |
 | `field` | Prisma field name. |
-| `valueType` | `"string"`, `"number"`, `"boolean"` or `"dateTime"`. Lets the adapter settle comparisons the type already decides before Prisma sees them: CEL answers `R.attr.aNumber == "5"` false for every row and `R.attr.aNumber.contains("2")` with an error, so neither literal is bound for the store to coerce. Required (`"dateTime"`) for `timestamp()` comparisons. Undeclared keeps the untyped behaviour; the adapter cannot read your schema. |
+| `valueType` | `"string"`, `"number"`, `"boolean"` or `"dateTime"`. Lets the adapter settle comparisons the type already decides before Prisma sees them: CEL answers `R.attr.aNumber == "5"` false for every row and `R.attr.aNumber.contains("2")` with an error, so neither literal is bound for the store to coerce. Required (`"dateTime"`) for `timestamp()` comparisons. Read from the schema when `datamodel` is passed; otherwise undeclared keeps the untyped behaviour. |
 | `nullable` | `false` declares the column cannot be NULL, which drops the NULL guards on [relation elements](#relation-element-nullability) and hierarchy segments. |
 | `nullAttributeRepresentation` | Per-attribute NULL convention. See [Declare the convention per attribute](#declare-the-convention-per-attribute). |
 | `relation.name` | Prisma relation field name. |
-| `relation.type` | `"one"` (compiles to `is`/`isNot`) or `"many"` (`some`/`every`/`none`). |
+| `relation.type` | `"one"` (compiles to `is`/`isNot`) or `"many"` (`some`/`every`/`none`). Read from the schema when `datamodel` is passed. |
 | `relation.field` | Column to compare when the policy compares the relation itself (e.g. `"x" in R.attr.tags`). |
 | `relation.fields` | Mappings for fields of the related model, recursively (a nested entry can itself have a `relation`). Unmapped fields are inferred from the path. |
 | `relation.model` | Prisma model name of the related model. Needed only for field-to-field comparisons inside a collection expression. |
 | `relation.subqueryFilter` | A where-input over the related model that your application applies to its own reads. See [Declaring the application's own predicate](#declaring-the-applications-own-predicate). |
 
-### Relations
+### Relations declared by hand
 
 ```ts
 mapper: {
@@ -258,9 +338,9 @@ explicit side's NULL compares as a value, the other side's NULL stays an error. 
 Collection macros lower to `some`/`every`/`none`, which treat SQL UNKNOWN as false. Without a guard,
 `!R.attr.tags.exists(t, t.name == "x")`, `all()` and `hasIntersection()` over `map()` would return
 rows holding a NULL element that `check()` denies. So a relation element column is treated as
-nullable and guarded **unless its mapping says `nullable: false`**.
-
-Declare `nullable: false` on every required element column a policy reaches through a macro:
+nullable and guarded **unless it is known to be required**. With `datamodel`, that comes from the
+schema and there is nothing to declare. Without it, declare `nullable: false` on every required
+element column a policy reaches through a macro:
 
 ```ts
 "request.resource.attr.tags": {
@@ -499,6 +579,14 @@ records are ignored rather than required. If the declaration hides every record,
 vacuously true, matching the empty list your application would send to `check()`.
 
 ## Behaviour changes
+
+- A `datamodel` option reads the Prisma schema, so a basic setup needs no mapper: unmapped
+  attributes resolve to same-named fields (`request.resource.id` to the `@id` field), and relation
+  cardinality and target model, nested segments, and scalar `valueType`/`nullable` come from the
+  schema. `relation.type` is optional when it is passed. A `cerbos-prisma-datamodel` generator writes the datamodel for the `prisma-client`
+  generator, which ships no `Prisma.dmmf`. `@prisma/generator-helper` is a new dependency.
+- A reference that continues past an unmapped segment beneath a relation (`parent.inner.x` with
+  `inner` not mapped) throws `UnsupportedQueryPlanError`. It used to read `x` from `parent`.
 
 - **Breaking:** a field declared with a `valueType` other than `"boolean"` read where CEL needs a boolean (`!R.attr.aString`) throws `UnsupportedQueryPlanError`: it is CEL's type error under both polarities, which no Prisma filter keeps out. Prisma rejected the filter before.
 - Whether `matches()` raises an error on a pattern (which denies every row) is now decided by

@@ -22,6 +22,7 @@
     }
   },
   "files": [
+    "generator/index.cjs",
     "lib/**/*.d.ts",
     "lib/**/*.d.ts.map",
     "lib/**/*.js",
@@ -103,6 +104,10 @@
     "permissions"
   ],
   "dependencies": {
+    "@prisma/generator-helper": "^7.10.1",
     "re2js": "^2.9.1"
+  },
+  "bin": {
+    "cerbos-prisma-datamodel": "generator/index.cjs"
   }
 }

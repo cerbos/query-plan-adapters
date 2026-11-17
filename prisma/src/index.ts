@@ -1,6 +1,8 @@
 import { PlanKind } from "@cerbos/core";
 import type { PlanResourcesResponse } from "@cerbos/core";
 
+import { prepareMapper } from "./datamodel";
+import type { PrismaDatamodel } from "./datamodel";
 import { rejectConstantFalse } from "./fields";
 import { assertStructuralNulls } from "./mapping";
 import type { TranslationContext } from "./mapping";
@@ -16,6 +18,8 @@ import type { PrismaFilter } from "./value";
 export { PlanKind, UnsupportedQueryPlanError };
 
 export type { PrismaFilter, PrismaValue } from "./value";
+
+export type { PrismaDatamodel, PrismaDatamodelField } from "./datamodel";
 
 export type MapperConfig = {
   field?: string;
@@ -69,11 +73,16 @@ export type MapperConfig = {
   nullAttributeRepresentation?: NullAttributeRepresentation;
   relation?: {
     name: string;
-    type: "one" | "many";
     /**
-     * The Prisma model name of the related record (e.g. "Tag"). Required only for
-     * field-to-field comparisons between two columns of the related model, which compile to
-     * Prisma field references and need the model name as their container.
+     * Whether the relation is to-one (`is`) or to-many (`some`/`every`/`none`). Read from the
+     * schema when `datamodel` is passed, and required otherwise.
+     */
+    type?: "one" | "many";
+    /**
+     * The Prisma model name of the related record (e.g. "Tag"). Read from the schema when
+     * `datamodel` is passed. Without it, required only for field-to-field comparisons between two
+     * columns of the related model, which compile to Prisma field references and need the model
+     * name as their container.
      */
     model?: string;
     field?: string;
@@ -138,6 +147,14 @@ export interface QueryPlanToPrismaArgs {
    */
   model?: string;
   /**
+   * The Prisma schema's datamodel, which completes the mapper: a relation needs only its `name`
+   * (or a `field` naming a relation field), segments the mapper leaves out are read from the
+   * related model by name, and a scalar column's `valueType` and `nullable` default to what the
+   * schema declares. Requires `model`. Pass `Prisma.dmmf.datamodel` from a `prisma-client-js`
+   * client, or the `datamodel` the `@cerbos/orm-prisma/generator` generator writes.
+   */
+  datamodel?: PrismaDatamodel;
+  /**
    * Which NULL-column representation the caller uses when building `check()` attributes.
    * Defaults to `"omitted"`, which never selects NULL rows for an undeclared attribute.
    */
@@ -160,10 +177,11 @@ export function queryPlanToPrisma({
   queryPlan,
   mapper = {},
   model,
+  datamodel,
   nullAttributeRepresentation = "omitted",
 }: QueryPlanToPrismaArgs): QueryPlanToPrismaResult {
   const context: TranslationContext = {
-    mapper,
+    mapper: prepareMapper(mapper, model, datamodel),
     rootModel: model,
     nullRepresentation: nullAttributeRepresentation,
     scopes: [],
