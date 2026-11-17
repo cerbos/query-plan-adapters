@@ -3,12 +3,7 @@
 
 import type { PlanExpressionOperand } from "@cerbos/core";
 
-import type {
-  Mapper,
-  MapperConfig,
-  NullAttributeRepresentation,
-  PrismaFilter,
-} from "./index";
+import type { MapperConfig, NullAttributeRepresentation, PrismaFilter } from "./index";
 import { isNamedOperand, isOperatorOperand, isValueOperand } from "./plan";
 import { UnsupportedQueryPlanError } from "./errors";
 import { isFunction } from "./narrowing";
@@ -22,8 +17,21 @@ export type LambdaScope = {
   unknownFilters: PrismaFilter[];
 };
 
+export type PreparedMapperConfig = Omit<MapperConfig, "relation"> & {
+  relation?: PreparedRelation;
+};
+
+export type PreparedRelation = Omit<NonNullable<MapperConfig["relation"]>, "type" | "fields"> & {
+  type: "one" | "many";
+  fields?: Record<string, PreparedMapperConfig>;
+};
+
+export type PreparedMapper =
+  | Record<string, PreparedMapperConfig>
+  | ((key: string) => PreparedMapperConfig | undefined);
+
 export type TranslationContext = {
-  readonly mapper: Mapper;
+  readonly mapper: PreparedMapper;
   readonly rootModel: string | undefined;
   readonly nullRepresentation: NullAttributeRepresentation;
   readonly scopes: readonly LambdaScope[];
@@ -93,9 +101,9 @@ export function getLeafField(path: string[]): string {
 
 /** The mapping the caller declared for `key`, through either mapper form. */
 export function lookupMapping(
-  mapper: Mapper,
+  mapper: PreparedMapper,
   key: string
-): MapperConfig | undefined {
+): PreparedMapperConfig | undefined {
   return isFunction(mapper) ? mapper(key) : mapper[key];
 }
 
@@ -105,9 +113,9 @@ export function lookupMapping(
  * prefix through the nested `relation.fields`, the same walk resolveFieldReference performs.
  */
 export function lookupElementFields(
-  mapper: Mapper,
+  mapper: PreparedMapper,
   collectionPath: string
-): Record<string, MapperConfig> | undefined {
+): Record<string, PreparedMapperConfig> | undefined {
   const direct = lookupMapping(mapper, collectionPath);
 
   if (direct) {
@@ -138,7 +146,7 @@ export function lookupElementFields(
  * CEL reads such a relation as a map whose keys are the attribute names present on the related
  * row, and no Prisma filter enumerates those.
  */
-export function namesToOneRelation(mapper: Mapper, reference: string): boolean {
+export function namesToOneRelation(mapper: PreparedMapper, reference: string): boolean {
   const direct = lookupMapping(mapper, reference)?.relation;
 
   if (direct) return direct.type === "one" && direct.field === undefined;
@@ -161,13 +169,7 @@ export function namesToOneRelation(mapper: Mapper, reference: string): boolean {
   return false;
 }
 
-function toRelationConfig(
-  relation: NonNullable<MapperConfig["relation"]>
-): RelationConfig {
-  if (relation.type === undefined) {
-    throw new Error(`Relation "${relation.name}" has no type`);
-  }
-
+function toRelationConfig(relation: PreparedRelation): RelationConfig {
   return {
     name: relation.name,
     type: relation.type,
@@ -189,7 +191,7 @@ export function resolveFieldReference(
 
   // Without a direct match, the longest dotted prefix that has a mapping applies.
   let matchedPrefix = "";
-  let matchedConfig: MapperConfig | undefined;
+  let matchedConfig: PreparedMapperConfig | undefined;
 
   if (!config) {
     for (let i = parts.length - 1; i >= 0; i--) {
@@ -243,7 +245,7 @@ export function resolveFieldReference(
   // Walk the remaining segments through nested relation mappings; the first segment that is
   // not a relation names the leaf column. A segment past that one would be read from the wrong
   // row: `parent.inner.x` with `inner` unmapped is not `parent.x`.
-  let leafConfig: MapperConfig | undefined;
+  let leafConfig: PreparedMapperConfig | undefined;
 
   const rejectUnmappedHop = (unresolved: string[]) => {
     if (unresolved.length > 1) {
@@ -256,7 +258,7 @@ export function resolveFieldReference(
   if (!fields) rejectUnmappedHop(remainingParts);
 
   if (fields) {
-    let currentMapper: Record<string, MapperConfig> = fields;
+    let currentMapper: Record<string, PreparedMapperConfig> = fields;
     let currentParts = remainingParts;
 
     while (currentParts.length > 0) {
@@ -266,7 +268,7 @@ export function resolveFieldReference(
         break;
       }
 
-      const nextConfig: MapperConfig | undefined = currentMapper[currentPart];
+      const nextConfig: PreparedMapperConfig | undefined = currentMapper[currentPart];
 
       if (!nextConfig?.relation) {
         rejectUnmappedHop(currentParts);
@@ -308,7 +310,7 @@ export function resolveFieldReference(
  */
 function recordNullableElementField(
   context: TranslationContext,
-  config: MapperConfig,
+  config: PreparedMapperConfig,
   defaultField: string
 ): void {
   if (config.nullable === false || config.relation) {
@@ -358,7 +360,7 @@ export function enterLambdaScope(
   const { variableName } = scope;
   const fullMapper = context.mapper;
 
-  const scopedMapper: Mapper = (key: string) => {
+  const scopedMapper: PreparedMapper = (key: string) => {
     if (key === variableName) {
       const { relations } = resolveFieldReference(collectionPath, scopedContext);
       const projection = relations?.[relations.length - 1]?.field;

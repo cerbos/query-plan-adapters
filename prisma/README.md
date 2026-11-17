@@ -141,8 +141,9 @@ The mapper is for what the schema cannot say. You need an entry when:
   R.attr.scores`). The list's own `valueType` is also what `size()` reads, so it is never inferred
   from the projected column.
 
-An entry only states what differs, and the schema fills in the rest. A `type` or `model` that the
-schema contradicts throws.
+An entry only states what differs, and the schema fills in the rest, including the `field` of an
+entry named like its column. A `type` or `model` that the schema contradicts throws. A function
+mapper returns `undefined` for a path it leaves to the schema.
 
 ```ts
 queryPlanToPrisma({
