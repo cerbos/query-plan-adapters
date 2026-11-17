@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** `SchemaType.Table` is removed; nothing read it. Regenerate `cerbos_schema.go`.
+- Added: `SchemaEdge.Unsupported` says why an edge has no join, and the error for an override on
+  such an edge says it.
+- Changed: a spelling that names two fields, or a field and an edge, is left unmapped inside a
+  collection's elements too, as it already was at the root. Before, one of the two was kept at
+  random.
+
 ## v0.1.0
 
 - Added: mappers inferred from the ent schema. `ent.CerbosSchema.Mapper("Contact", nil)` maps every attribute named after an ent field or edge, with each relation's cardinality, join columns and M2M join table, and each column's value type, read from ent; a `SchemaMap` overrides only what the schema cannot say (renamed attributes, `Position`, element columns, `SubqueryFilter`, null conventions). `entcerbos.Extension` generates `CerbosSchema` with entc, and `entcerbos.Load` builds it at runtime. Declared `MapperMap`s are unchanged.

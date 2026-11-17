@@ -103,7 +103,9 @@ cannot express" from a mapping or configuration error. The corpus cases it refus
   (O2O or M2O), and the column is read through them as a correlated scalar subquery.
 - A path ending on a unique edge reads the joined row itself. A path ending on any other edge is
   a collection, whose elements expose their own fields and to-many edges the same way (`t.name`,
-  `t.labels`).
+  `t.labels`), to three to-many edges below the collection. A deeper collection needs an override.
+- A spelling that names two things on a type, such as fields `owner_id` and `ownerId`, or a field
+  and an edge, is left unmapped wherever it appears.
 - An M2M edge joins through its join table, and a chain of edges joins through each table on the
   way.
 - Each column's value type comes from its ent field: `bool`, `time.Time`, `string` and enum, and

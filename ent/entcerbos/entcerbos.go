@@ -55,7 +55,7 @@ func FromGraph(graph *gen.Graph) (*cerbosent.Schema, error) {
 	schema := &cerbosent.Schema{}
 	nodes := slices.SortedFunc(slices.Values(graph.Nodes), func(a, b *gen.Type) int { return strings.Compare(a.Name, b.Name) })
 	for _, t := range nodes {
-		st := cerbosent.SchemaType{Name: t.Name, Table: t.Table(), Columns: map[string]string{}, Fields: map[string]string{}}
+		st := cerbosent.SchemaType{Name: t.Name, Columns: map[string]string{}, Fields: map[string]string{}}
 		if t.HasOneFieldID() {
 			st.ID = t.ID.StorageKey()
 			st.Columns[st.ID] = t.ID.Type.Type.String()
@@ -81,6 +81,7 @@ func readEdge(owner *gen.Type, e *gen.Edge) (cerbosent.SchemaEdge, error) {
 	edge := cerbosent.SchemaEdge{Name: e.Name, Type: e.Type.Name, Unique: e.Unique}
 	if e.Rel.Type == gen.M2M {
 		if !owner.HasOneFieldID() || !e.Type.HasOneFieldID() || len(e.Rel.Columns) != 2 {
+			edge.Unsupported = "an M2M edge between types with composite ids"
 			return edge, nil
 		}
 		own, other := e.Rel.Columns[0], e.Rel.Columns[1]
@@ -94,6 +95,7 @@ func readEdge(owner *gen.Type, e *gen.Edge) (cerbosent.SchemaEdge, error) {
 		return edge, nil
 	}
 	if len(e.Rel.Columns) != 1 || !owner.HasOneFieldID() || !e.Type.HasOneFieldID() {
+		edge.Unsupported = "an edge between types with composite ids or keys"
 		return edge, nil
 	}
 	fk := e.Rel.Columns[0]
@@ -145,7 +147,7 @@ func Source(pkg string, schema *cerbosent.Schema) ([]byte, error) {
 	b.WriteString("// CerbosSchema is this graph's tables, columns and edges, for cerbosent.Schema.Mapper.\n")
 	b.WriteString("var CerbosSchema = &cerbosent.Schema{Types: []cerbosent.SchemaType{\n")
 	for _, t := range schema.Types {
-		fmt.Fprintf(&b, "{Name: %q, Table: %q, ID: %q, Columns: map[string]string{", t.Name, t.Table, t.ID)
+		fmt.Fprintf(&b, "{Name: %q, ID: %q, Columns: map[string]string{", t.Name, t.ID)
 		cols := make([]string, 0, len(t.Columns))
 		for c := range t.Columns {
 			cols = append(cols, c)
@@ -172,7 +174,11 @@ func Source(pkg string, schema *cerbosent.Schema) ([]byte, error) {
 			for _, j := range e.Join {
 				fmt.Fprintf(&b, "{Table: %q, FromColumn: %q, ToColumn: %q},", j.Table, j.FromColumn, j.ToColumn)
 			}
-			b.WriteString("}},\n")
+			b.WriteString("}")
+			if e.Unsupported != "" {
+				fmt.Fprintf(&b, ", Unsupported: %q", e.Unsupported)
+			}
+			b.WriteString("},\n")
 		}
 		if len(t.Edges) > 0 {
 			b.WriteString("}")
