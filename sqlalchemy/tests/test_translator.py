@@ -490,7 +490,10 @@ class TestDeclarativeBaseModels:
         }
 
         def swap(value):
-            if isinstance(value, InstrumentedAttribute):
+            # A relationship() stays on the legacy model: the twins share its tables.
+            if isinstance(value, InstrumentedAttribute) and hasattr(
+                twins[value.class_], value.key
+            ):
                 return getattr(twins[value.class_], value.key)
             return value
 

@@ -311,29 +311,64 @@ index or map key has no SQL lowering. Macros over a related table (`R.attr.tags.
 
 ### Collections in a related table
 
-Map the collection attribute to a `Relation`, map each lambda variable's fields to the element
-table's columns, and pass `relation_overrides()`:
+Map the collection attribute to the model's `relationship()` and each lambda variable's fields to
+the element table's columns. The adapter reads the join and the cardinality from the mapping:
 
 ```python
-from cerbos_sqlalchemy import Relation, get_query, relation_overrides
+from cerbos_sqlalchemy import get_query, related
 
 attr_map = {
-    "request.resource.attr.tags": Relation(
-        [Tag.resource_id == Resource.id],
-        correlate=[Resource],
-    ),
+    # One-to-many or many-to-many: a collection.
+    "request.resource.attr.tags": Resource.tags,
     # The lambda variable in `R.attr.tags.exists(t, t.name == "public")`.
+    "t": Resource.tags,
     "t.name": Tag.name,
-    # A list of strings (`"public" in R.attr.tagNames`) needs the member column.
-    "request.resource.attr.tagNames": Relation(
-        [Tag.resource_id == Resource.id],
-        correlate=[Resource],
-        member=Tag.name,
+    # A list of strings (`"public" in R.attr.tagNames`): the relationship, then the member column.
+    "request.resource.attr.tagNames": related(Resource.tags, Tag.name),
+    # A scalar through to-one hops, NULL when a hop is absent.
+    "request.resource.attr.owner.name": related(Resource.owner, Owner.name),
+    # A collection reached through a to-one hop, guarded by `require_hops`.
+    "request.resource.attr.mainCategory.subCategories": related(
+        Resource.main_category, Category.sub_categories
     ),
 }
 
-query = get_query(
-    plan, Resource, attr_map, operator_override_fns=relation_overrides()
+query = get_query(plan, Resource, attr_map)
+```
+
+`related(*path)` takes relationship attributes, each starting where the last
+ends, optionally followed by one column of the last target. A bare relationship attribute is
+`related()` of it. What `related()` reads, and what it refuses with `UnsupportedPlanError`:
+
+- The join is the relationship's own `primaryjoin` and `secondaryjoin`, plus the target's
+  joined-inheritance condition and single-table discriminator, so a filtered association or a
+  subtype target selects the rows `Model.rel.any()` would.
+- A to-one hop (`uselist=False`) must equate a unique key of its target (primary key, unique
+  constraint, unique index or `unique=True` column) in its `primaryjoin`. Otherwise the database
+  does not hold it to one row and `related()` refuses it. A to-one over a `secondary` table is
+  refused.
+- Only the last hop may be to-many: CEL cannot dot through a list.
+- A self-referential relationship is refused: map it with a hand-written `Relation` over an
+  `aliased()` target.
+- Subqueries correlate against every enclosing table but their own, so a nested collection
+  (`c.subCategories` inside `categories`) needs no `correlate`.
+- Default scopes the mapping does not carry (`with_loader_criteria`, a soft-delete column the
+  relationship does not filter) are still yours: see [Mapping hazards](#mapping-hazards).
+
+Mapping any collection merges `relation_overrides()` beneath `operator_override_fns`, so your own
+overrides still win.
+
+#### A hand-written `Relation`
+
+When no `relationship()` fits, map the collection to a `Relation` you write:
+
+```python
+from cerbos_sqlalchemy import Relation
+
+attr_map["request.resource.attr.tagNames"] = Relation(
+    [Tag.resource_id == Resource.id],
+    correlate=[Resource],
+    member=Tag.name,
 )
 ```
 
@@ -547,8 +582,11 @@ depends on how you write it:
   `select(...).join(Model.rel)`), SQLAlchemy applies the `primaryjoin` and, for a
   single-table-inheritance target, the
   [discriminator](https://docs.sqlalchemy.org/en/20/orm/queryguide/inheritance.html#single-inheritance-mappings).
-- Through a **`Relation`**, or a hand-written correlated `select()` over columns (what the
-  conformance harness does), none of that applies.
+- Through a `relationship()` attribute or **`related()`**, the adapter applies the same
+  `primaryjoin`, `secondaryjoin` and discriminator, and refuses a to-one no unique key holds to
+  one row. The conformance harness maps this way.
+- Through a hand-written **`Relation`**, or a correlated `select()` over columns, none of that
+  applies.
 
 Check both against the SQLAlchemy version you run.
 
@@ -591,6 +629,10 @@ It must also keep a NULL body NULL, as `relation_overrides()` does; nothing chec
 
 ## Behaviour changes
 
+- Added: an `attr_map` value may be a `relationship()` attribute or `related(...)`, which read the
+  join, cardinality and to-one hop guards from the mapping, and mapping a collection merges
+  `relation_overrides()` in. A relationship attribute used to be refused with
+  `UnsupportedPlanError`. A widening.
 - Added ([#527](https://github.com/cerbos/query-plan-adapters/issues/527)): `Relation` and
   `relation_overrides()`, the conformance harness's three-valued relation macros, now shipped. This
   README used to show a hand-written `exists` override that put the body in `.where(body)`, which

@@ -23,7 +23,6 @@ from corpus import (
     ATTRIBUTE_NULL_REPRESENTATION,
     COLLECTION_COLUMNS,
     FUZZ_DIR,
-    OPERATOR_OVERRIDES,
     PDP_TAGS,
     PG_ARRAY_COLLECTION_COLUMNS,
     AdvBase,
@@ -370,7 +369,6 @@ def _translate(store: str, case: dict[str, Any]):
         plan_from_golden(case),
         AdvResource,
         ATTR_MAP,
-        operator_override_fns=OPERATOR_OVERRIDES,
         # Every column the dataset omits when NULL is declared "omitted" in
         # ATTRIBUTE_NULL_REPRESENTATION. The call-level value covers what is left, list
         # elements and principal-side literals, which the dataset sends as values; the

@@ -47,7 +47,8 @@ from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - re-exported f
     require_index_position,
 )
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
-from cerbos_sqlalchemy.relations import Relation
+from cerbos_sqlalchemy.inference import RelatedRow, infer
+from cerbos_sqlalchemy.relations import Relation, relation_overrides
 
 try:  # SQLAlchemy >= 2.0
     from sqlalchemy.orm import DeclarativeBase
@@ -71,7 +72,7 @@ _ORMModel = TypeVar("_ORMModel", bound=_MappedClass)
 # A 2.0-style model's metaclass is not a DeclarativeMeta, hence DeclarativeBase.
 GenericTable = Table | DeclarativeMeta | type[DeclarativeBase]
 GenericColumn = Column | InstrumentedAttribute
-AttrMapValue = GenericColumn | ColumnElement | Relation
+AttrMapValue = GenericColumn | ColumnElement | Relation | RelatedRow
 GenericExpression = BinaryExpression | ColumnOperators
 OperatorFnMap = dict[str, Callable[[GenericColumn, Any], GenericExpression]]
 
@@ -269,8 +270,10 @@ def get_query(
         query_plan: A plan response from the HTTP or gRPC Cerbos client.
         table: The ORM model or Core ``Table`` to select from.
         attr_map: Maps each plan attribute reference, e.g. ``request.resource.attr.x``,
-            to a column or SQL expression, or a collection attribute to a
-            ``Relation`` translated by ``relation_overrides()``.
+            to a column or SQL expression, a collection attribute to a
+            ``relationship()`` attribute, ``related(...)`` or a ``Relation``.
+            Mapping any collection merges ``relation_overrides()`` beneath
+            ``operator_override_fns``.
         table_mapping: ``(table, join_predicate)`` pairs for every other table the
             mapped columns live on.
         operator_override_fns: Per-call handlers that replace the default lowering
@@ -305,6 +308,12 @@ def get_query(
         TypeError: If a mapped column's table is not joined via ``table_mapping``,
             or a ``collection_columns`` value is not a ``CollectionColumn``.
     """
+    attr_map = {attribute: infer(value) for attribute, value in attr_map.items()}
+    if any(isinstance(value, Relation) for value in attr_map.values()):
+        operator_override_fns = {
+            **relation_overrides(),
+            **(operator_override_fns or {}),
+        }
     # Drop None entries, but keep None distinct from {} for _require_table_mapping.
     overrides = (
         None
