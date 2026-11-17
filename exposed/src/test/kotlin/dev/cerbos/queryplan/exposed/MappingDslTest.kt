@@ -247,7 +247,7 @@ class MappingDslTest {
             }
         }
         assertEquals(
-            "Relation field 'stray' reads mapping_elsewhere, not the relation's table mapping_tags",
+            "'stray' reads mapping_elsewhere, not mapping_tags",
             error.message,
         )
     }
@@ -264,7 +264,7 @@ class MappingDslTest {
             }
         }
         assertEquals(
-            "Relation field 'inner' reads mapping_docs, not the relation's table mapping_parents",
+            "'inner' reads mapping_docs, not mapping_parents",
             error.message,
         )
     }

@@ -199,7 +199,7 @@ later without breaking your call.
 ## Mapping attributes
 
 `cerbosMapping(root = ...) { }` builds the usual static table. `root` is the table the filter is
-applied to. Resolution is **fail-closed**: a reference nothing maps raises
+applied to; without it, `relation(...)` is not available at the top level. Resolution is **fail-closed**: a reference nothing maps raises
 `UnmappedAttributeException` rather than guessing a column name.
 
 **The happy path names columns and related tables, nothing more.** When your tables declare their

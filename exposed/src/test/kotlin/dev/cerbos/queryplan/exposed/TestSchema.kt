@@ -162,7 +162,8 @@ private fun <T : Table> MappingBuilder.link(
     orderBy: Column<*>? = null,
     block: RelationBuilder<T>.() -> Unit = {},
 ): AttributeMapping.Relation = when {
-    mode == RelationMode.INFERRED -> relation(table, element = element, orderBy = orderBy, block = block)
+    mode == RelationMode.INFERRED ->
+        (this as ScopedMappingBuilder).relation(table, element = element, orderBy = orderBy, block = block)
     toOne -> one(table, from = from, to = to, block = block)
     else -> many(table, from = from, to = to, element = element, orderBy = orderBy, block = block)
 }

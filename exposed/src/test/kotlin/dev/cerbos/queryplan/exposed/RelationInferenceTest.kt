@@ -7,6 +7,7 @@ import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
@@ -172,15 +173,9 @@ class RelationInferenceTest {
 
     @Test
     fun `two keys to the same table are ambiguous until one is named`() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        assertRefused("Several foreign keys", "infer_reviews.author_doc_id", "infer_reviews.subject_doc_id") {
             cerbosMapping(root = Docs) { "r" to relation(Reviews) }
         }
-        assertEquals(
-            "Several foreign keys link infer_docs and infer_reviews (infer_reviews.author_doc_id = infer_docs.id (MANY), " +
-                "infer_reviews.subject_doc_id = infer_docs.id (MANY)): name one with relation(via = ...), " +
-                "or declare the relation with one(...) or many(...)",
-            error.message,
-        )
         val authored = relationOf(cerbosMapping(root = Docs) { "r" to relation(via = Reviews.authorDocId) })
         assertSame(Reviews.authorDocId, authored.to)
         assertSame(Docs.id, authored.from)
@@ -197,61 +192,41 @@ class RelationInferenceTest {
 
     @Test
     fun `a composite key is not inferred`() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        assertRefused("composite", "infer_composite_children") {
             cerbosMapping(root = Composite) { "r" to relation(CompositeChildren) }
         }
-        assertEquals(
-            "A foreign key between infer_composite and infer_composite_children is composite: declare the relation with one(...) or many(...)",
-            error.message,
-        )
     }
 
     @Test
     fun `no key is a construction error`() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        assertRefused("No foreign key", "infer_unrelated") {
             cerbosMapping(root = Docs) { "r" to relation(Unrelated) }
         }
-        assertEquals(
-            "No foreign key links infer_docs and infer_unrelated: declare the relation with one(...) or many(...)",
-            error.message,
-        )
     }
 
     @Test
     fun `a via column unrelated to the scope is refused`() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        assertRefused("neither belongs to nor references", "infer_tags.doc_id") {
             cerbosMapping(root = Users) { "r" to relation(via = Tags.docId) }
         }
-        assertEquals("infer_tags.doc_id neither belongs to nor references infer_users", error.message)
-    }
-
-    @Test
-    fun `a top-level relation needs the root table`() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
-            cerbosMapping { "r" to relation(Tags) }
-        }
-        assertEquals(
-            "relation(infer_tags) at the top level needs the root table: build the mapping with cerbosMapping(root = ...)",
-            error.message,
-        )
     }
 
     @Test
     fun `a to-one takes no element or order`() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        assertRefused("is to-one", "infer_unique_parents.doc_id") {
             cerbosMapping(root = Docs) { "r" to relation(UniqueParents, element = UniqueParents.label) }
         }
-        assertEquals(
-            "infer_unique_parents.doc_id = infer_docs.id (ONE) is to-one, so it takes no element or orderBy",
-            error.message,
-        )
     }
 
     @Test
     fun `a declared root checks every top-level key`() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        assertRefused("'r' reads infer_docs", "infer_users") {
             cerbosMapping(root = Users) { "r" to many(Tags, from = Docs.id, to = Tags.docId) }
         }
-        assertEquals("Relation key infer_docs.id is not a column of infer_users", error.message)
+    }
+
+    private fun assertRefused(vararg fragments: String, build: () -> Unit) {
+        val message = assertThrows(IllegalArgumentException::class.java) { build() }.message.orEmpty()
+        fragments.forEach { assertTrue(it in message, "'$it' is not in: $message") }
     }
 }

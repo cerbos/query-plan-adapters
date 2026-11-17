@@ -107,15 +107,7 @@ public sealed interface AttributeMapping {
                     "Relation order column ${it.table.tableName}.${it.name} is not a column of ${table.tableName}"
                 }
             }
-            fields.forEach { (name, mapping) ->
-                val owner = when (mapping) {
-                    is Field -> mapping.column.table
-                    is Relation -> mapping.from.table
-                }
-                require(owner === table) {
-                    "Relation field '$name' reads ${owner.tableName}, not the relation's table ${table.tableName}"
-                }
-            }
+            fields.forEach { (name, mapping) -> requireReadsFrom(table, name, mapping) }
         }
 
         override fun toString(): String =
@@ -171,22 +163,30 @@ public annotation class CerbosMappingDsl
  * ```
  */
 public fun cerbosMapping(block: MappingBuilder.() -> Unit): AttributeMappings =
-    AttributeMappings(MappingBuilder(null).apply(block).entries)
+    AttributeMappings(MappingBuilder().apply(block).entries)
 
 /**
  * Builds a static mapping whose top-level references read [root], the table the filter is applied
- * to. Naming it lets a top-level [MappingBuilder.relation] infer its keys from [root]'s foreign keys,
+ * to. Naming it lets a top-level [ScopedMappingBuilder.relation] infer its keys from [root]'s foreign keys,
  * and lets every top-level relation's `from` be checked against it.
  */
-public fun cerbosMapping(root: Table, block: MappingBuilder.() -> Unit): AttributeMappings =
-    AttributeMappings(MappingBuilder(root).apply(block).entries)
+public fun cerbosMapping(root: Table, block: ScopedMappingBuilder.() -> Unit): AttributeMappings {
+    val entries = ScopedMappingBuilder(root).apply(block).entries
+    entries.forEach { (name, mapping) -> if (mapping is AttributeMapping.Relation) requireReadsFrom(root, name, mapping) }
+    return AttributeMappings(entries)
+}
+
+private fun requireReadsFrom(table: Table, name: String, mapping: AttributeMapping) {
+    val owner = when (mapping) {
+        is AttributeMapping.Field -> mapping.column.table
+        is AttributeMapping.Relation -> mapping.from.table
+    }
+    require(owner === table) { "'$name' reads ${owner.tableName}, not ${table.tableName}" }
+}
 
 /** Shared by the top-level mapping and every nested relation: the entries and their factories. */
 @CerbosMappingDsl
-public open class MappingBuilder internal constructor(
-    /** The table this scope's columns belong to, when known: the root, or the enclosing relation's table. */
-    internal val scope: Table?,
-) {
+public open class MappingBuilder internal constructor() {
     internal val entries: MutableMap<String, AttributeMapping> = LinkedHashMap()
 
     /**
@@ -212,11 +212,9 @@ public open class MappingBuilder internal constructor(
         from: Column<*>,
         to: Column<*>,
         block: RelationBuilder<T>.() -> Unit = {},
-    ): AttributeMapping.Relation {
-        requireFromInScope(from)
-        return RelationBuilder<T>(table).apply(block)
+    ): AttributeMapping.Relation =
+        RelationBuilder<T>(table).apply(block)
             .build(AttributeMapping.Relation.Cardinality.ONE, table, from, to, null, null)
-    }
 
     /**
      * A to-many relation: `table.to = parent.from`. Pass [element] for a scalar collection, where
@@ -230,12 +228,22 @@ public open class MappingBuilder internal constructor(
         element: Column<*>? = null,
         orderBy: Column<*>? = null,
         block: RelationBuilder<T>.() -> Unit = {},
-    ): AttributeMapping.Relation {
-        requireFromInScope(from)
-        return RelationBuilder<T>(table).apply(block)
+    ): AttributeMapping.Relation =
+        RelationBuilder<T>(table).apply(block)
             .build(AttributeMapping.Relation.Cardinality.MANY, table, from, to, element, orderBy)
-    }
 
+    private fun put(reference: String, mapping: AttributeMapping) {
+        require(reference.isNotEmpty()) { "An attribute reference must not be empty" }
+        require(entries.put(reference, mapping) == null) { "'$reference' is mapped twice" }
+    }
+}
+
+/**
+ * A scope whose table is known, the root named in `cerbosMapping(root = ...)` or a relation's
+ * table, so a relation's keys can be read from the schema.
+ */
+@CerbosMappingDsl
+public open class ScopedMappingBuilder internal constructor(internal val scope: Table) : MappingBuilder() {
     /**
      * A relation to [table] whose keys and cardinality come from the schema: the single-column
      * foreign key between this scope's table and [table], in either direction. It is
@@ -281,23 +289,11 @@ public open class MappingBuilder internal constructor(
         return RelationBuilder<T>(table).apply(block).build(keys.cardinality, table, keys.from, keys.to, element, orderBy)
     }
 
-    private fun requireFromInScope(from: Column<*>) {
-        if (this is RelationBuilder<*>) return
-        val table = scope ?: return
-        require(from.table === table) {
-            "Relation key ${from.table.tableName}.${from.name} is not a column of ${table.tableName}"
-        }
-    }
-
-    private fun put(reference: String, mapping: AttributeMapping) {
-        require(reference.isNotEmpty()) { "An attribute reference must not be empty" }
-        require(entries.put(reference, mapping) == null) { "'$reference' is mapped twice" }
-    }
 }
 
 /** The body of a [MappingBuilder.one] or [MappingBuilder.many] block. */
 @CerbosMappingDsl
-public class RelationBuilder<T : Table> internal constructor(table: T) : MappingBuilder(table) {
+public class RelationBuilder<T : Table> internal constructor(table: T) : ScopedMappingBuilder(table) {
     private var visibleWhen: ((Alias<T>) -> Op<Boolean>)? = null
 
     /**

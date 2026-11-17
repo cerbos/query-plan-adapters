@@ -10,8 +10,7 @@ internal class InferredKeys(val from: Column<*>, val to: Column<*>, val cardinal
         "${to.table.tableName}.${to.name} = ${from.table.tableName}.${from.name} ($cardinality)"
 }
 
-internal fun inferRelationKeys(scope: Table?, table: Table): InferredKeys {
-    val parent = requireScope(scope, table.tableName)
+internal fun inferRelationKeys(parent: Table, table: Table): InferredKeys {
     val keys = table.foreignKeys.filter { it.targetTable === parent }.map { pointsAtScope(it) } +
         parent.foreignKeys.filter { it.targetTable === table }.map { pointsAway(it) }
     val single = keys.filterNotNull()
@@ -28,8 +27,7 @@ internal fun inferRelationKeys(scope: Table?, table: Table): InferredKeys {
     return single.single()
 }
 
-internal fun inferRelationKeys(scope: Table?, via: Column<*>): InferredKeys {
-    val parent = requireScope(scope, "via = ${via.table.tableName}.${via.name}")
+internal fun inferRelationKeys(parent: Table, via: Column<*>): InferredKeys {
     val fk = requireNotNull(via.foreignKey) { "${via.table.tableName}.${via.name} references no column" }
     val keys = when {
         via.table === parent -> pointsAway(fk)
@@ -43,19 +41,14 @@ internal fun inferRelationKeys(scope: Table?, via: Column<*>): InferredKeys {
     }
 }
 
-private fun requireScope(scope: Table?, what: String): Table = requireNotNull(scope) {
-    "relation($what) at the top level needs the root table: build the mapping with cerbosMapping(root = ...)"
-}
+private fun pointsAtScope(fk: ForeignKeyConstraint): InferredKeys? =
+    singleKey(fk)?.let { (child, key) -> InferredKeys(from = key, to = child, cardinality = cardinalityOf(child)) }
 
-private fun pointsAtScope(fk: ForeignKeyConstraint): InferredKeys? {
-    val (child, key) = fk.references.entries.singleOrNull()?.let { registered(it.key) to registered(it.value) } ?: return null
-    return InferredKeys(from = key, to = child, cardinality = cardinalityOf(child))
-}
+private fun pointsAway(fk: ForeignKeyConstraint): InferredKeys? =
+    singleKey(fk)?.let { (own, target) -> InferredKeys(from = own, to = target, cardinality = cardinalityOf(target)) }
 
-private fun pointsAway(fk: ForeignKeyConstraint): InferredKeys? {
-    val (own, target) = fk.references.entries.singleOrNull()?.let { registered(it.key) to registered(it.value) } ?: return null
-    return InferredKeys(from = own, to = target, cardinality = cardinalityOf(target))
-}
+private fun singleKey(fk: ForeignKeyConstraint): Pair<Column<*>, Column<*>>? =
+    fk.references.entries.singleOrNull()?.let { registered(it.key) to registered(it.value) }
 
 // `nullable()` replaces a column after `references(...)` captured it; read the table's own copy.
 private fun registered(column: Column<*>): Column<*> =
