@@ -88,8 +88,8 @@ module Cerbos
 
           # An int beside a whole literal: bound as the Integer CEL holds, since MySQL compares a
           # BIGINT with a double literal as doubles, where 2^53 + 1 equals 2^53.
-          left = int_constant(left) if cel_type(right) == :int
-          right = int_constant(right) if cel_type(left) == :int
+          left = int_constant(left) if cel_type(right) == :int || column_type(right) == :integer
+          right = int_constant(right) if cel_type(left) == :int || column_type(left) == :integer
           ArelSupport.comparison(operator, left, right)
         end
 

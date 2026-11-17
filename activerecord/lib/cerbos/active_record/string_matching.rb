@@ -44,13 +44,13 @@ module Cerbos
             column_pattern(needle, prefix: prefix, suffix: suffix)
           end
 
-        Arel::Nodes::Matches.new(
+        ArelSupport.indexable(Arel::Nodes::Matches.new(
           ArelSupport.quote(receiver),
           pattern,
           Arel::Nodes.build_quoted(ESCAPE_CHAR),
           # Case-sensitive, like CEL. False would make PostgreSQL use ILIKE.
           true
-        )
+        ))
       end
 
       # Escapes each LIKE metacharacter in a literal needle.

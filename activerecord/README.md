@@ -340,8 +340,9 @@ column's collation for that:
   utf8mb4_0900_bin`, and a `string` or `text` column compared with another column is read under
   the same collation, so `==`, `in`, `contains`, `startsWith`, `endsWith` and ordering are
   byte-exact and NO PAD even under the default `utf8mb4_0900_ai_ci`, on the columns or on the
-  connection. String columns must use the `utf8mb4` character set, and a comparison over a
-  column whose own collation differs cannot use that column's index.
+  connection. String columns must use the `utf8mb4` character set. An `==`, `in` or
+  `startsWith` against a literal is also written under the column's own collation, which any
+  byte-equal value satisfies, so an index on the column still serves it.
 - **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
   ordering over a string runs under `COLLATE "C"`, since a linguistic collation such as
   `en_US.UTF-8` sorts `"One"` after `"a"`

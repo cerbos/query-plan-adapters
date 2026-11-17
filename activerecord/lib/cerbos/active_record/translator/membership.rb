@@ -173,9 +173,9 @@ module Cerbos
 
             predicates = []
             unless present.empty?
-              predicates << Arel::Nodes::In.new(
+              predicates << ArelSupport.indexable(Arel::Nodes::In.new(
                 ArelSupport.quote(needle), present.map { |value| ArelSupport.quote(value) }
-              )
+              ))
             end
             return ArelSupport.or_node(predicates) if present.length == members.length
             # A computed needle is never null in CEL; NULL is its error, which errors the whole
