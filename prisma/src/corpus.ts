@@ -376,37 +376,44 @@ interface ConformanceMapper {
   [reference: string]: MapperConfig;
 }
 
+// What only the application knows, which both mappers share.
+//
+// Every attribute resources.json OMITS when its column is NULL follows the omitted convention:
+// aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString, aDouble, scope, createdAt,
+// updatedAt, obj.inner and every `parent` field. A null literal against one is then a
+// missing-attribute error the PDP denies, never an IS NULL match (#528).
+//
+// `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
+// OTHER null convention: the oracle sends a real null attribute for them rather than omitting
+// it. Declaring that here is what makes the equality family definite for these two attributes
+// and leaves it untouched for every other mapping (cerbos/query-plan-adapters#308).
+//
+// obj.inner is not a real nested column — mirrors aString, same trick the spring-data reference
+// harness uses for the comparison/equals/nested-map-member case. `parent.inner` below is the
+// opposite: a real two-level join. The two are kept side by side on purpose.
+const OMITTED = { nullAttributeRepresentation: "omitted" } as const;
+
+const APPLICATION_ATTRIBUTES = {
+  "request.resource.attr.aBool": OMITTED,
+  "request.resource.attr.aString": OMITTED,
+  "request.resource.attr.aNumber": OMITTED,
+  "request.resource.attr.aDouble": OMITTED,
+  "request.resource.attr.aOptionalString": OMITTED,
+  "request.resource.attr.scope": OMITTED,
+  "request.resource.attr.createdAt": OMITTED,
+  "request.resource.attr.updatedAt": OMITTED,
+  "request.resource.attr.owner": { field: "aOptionalString", nullAttributeRepresentation: "explicit" },
+  "request.resource.attr.coOwner": { field: "scope", nullAttributeRepresentation: "explicit" },
+  "request.resource.attr.obj.inner": { field: "aString", ...OMITTED },
+} satisfies ConformanceMapper;
+
 // Everything the Prisma schema already says is left to the `datamodel` option: an attribute named
 // like its column (`request.resource.id` is the `@id` field, so `identifier/*` needs nothing),
 // whether a relation is to-one or to-many, the model it reaches, segments named like their field,
 // and each column's type and nullability. What is left is what only the application knows: the
 // NULL convention, aliases, projections, a list's element type and a to-one relation's keys.
 export const INFERRED_MAPPER: ConformanceMapper = {
-  // Every attribute resources.json OMITS when its column is NULL follows the omitted convention:
-  // aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString, aDouble, scope, createdAt,
-  // updatedAt, obj.inner and every `parent` field. A null literal against one is then a
-  // missing-attribute error the PDP denies, never an IS NULL match (#528).
-  "request.resource.attr.aBool": { field: "aBool", nullAttributeRepresentation: "omitted" },
-  "request.resource.attr.aString": { field: "aString", nullAttributeRepresentation: "omitted" },
-  "request.resource.attr.aNumber": { field: "aNumber", nullAttributeRepresentation: "omitted" },
-  "request.resource.attr.aDouble": { field: "aDouble", nullAttributeRepresentation: "omitted" },
-  "request.resource.attr.aOptionalString": {
-    field: "aOptionalString",
-    nullAttributeRepresentation: "omitted",
-  },
-  "request.resource.attr.scope": { field: "scope", nullAttributeRepresentation: "omitted" },
-  "request.resource.attr.createdAt": { field: "createdAt", nullAttributeRepresentation: "omitted" },
-  "request.resource.attr.updatedAt": { field: "updatedAt", nullAttributeRepresentation: "omitted" },
-  // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
-  // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
-  // it. Declaring that here is what makes the equality family definite for these two attributes
-  // and leaves it untouched for every other mapping (cerbos/query-plan-adapters#308).
-  "request.resource.attr.owner": { field: "aOptionalString", nullAttributeRepresentation: "explicit" },
-  "request.resource.attr.coOwner": { field: "scope", nullAttributeRepresentation: "explicit" },
-  // obj.inner is not a real nested column — mirrors aString, same trick the spring-data reference
-  // harness uses for the comparison/equals/nested-map-member case. `parent.inner` below is the
-  // opposite: a real two-level join. The two are kept side by side on purpose.
-  "request.resource.attr.obj.inner": { field: "aString", nullAttributeRepresentation: "omitted" },
+  ...APPLICATION_ATTRIBUTES,
   // The corpus's one REAL to-one chain (the `relation/*` cases), `parent` and `parent.inner`, both
   // read from the schema. A column reached through a relation takes the relation entry's null
   // convention, so the one declaration here covers every `parent.*` and `parent.inner.*` field.
@@ -449,6 +456,25 @@ export const INFERRED_MAPPER: ConformanceMapper = {
   },
 };
 
+// What the schema says about each shared attribute's column, spelled out for DECLARED_MAPPER.
+const COLUMNS: Record<keyof typeof APPLICATION_ATTRIBUTES, MapperConfig> = {
+  "request.resource.attr.aBool": { field: "aBool", valueType: "boolean", nullable: true },
+  "request.resource.attr.aString": { field: "aString", valueType: "string", nullable: true },
+  "request.resource.attr.aNumber": { field: "aNumber", valueType: "number", nullable: true },
+  "request.resource.attr.aDouble": { field: "aDouble", valueType: "number" },
+  "request.resource.attr.aOptionalString": {
+    field: "aOptionalString",
+    valueType: "string",
+    nullable: true,
+  },
+  "request.resource.attr.scope": { field: "scope", valueType: "string", nullable: true },
+  "request.resource.attr.createdAt": { field: "createdAt", valueType: "dateTime" },
+  "request.resource.attr.updatedAt": { field: "updatedAt", valueType: "dateTime" },
+  "request.resource.attr.owner": { valueType: "string", nullable: true },
+  "request.resource.attr.coOwner": { valueType: "string", nullable: true },
+  "request.resource.attr.obj.inner": { valueType: "string", nullable: true },
+};
+
 // Every mapping spelled out, the way a caller without the `datamodel` option writes it. The harness
 // replays the corpus under both mappers, so the two must agree on every case.
 export const DECLARED_MAPPER: ConformanceMapper = {
@@ -456,83 +482,13 @@ export const DECLARED_MAPPER: ConformanceMapper = {
   // `identifier/*` cases). It is a mapping like any other here, which is the point: an adapter that resolves
   // references by stripping a `request.resource.attr.` prefix never sees this name.
   "request.resource.id": { field: "id", valueType: "string" },
-  // Every attribute resources.json OMITS when its column is NULL follows the omitted convention:
-  // aBool, aString and aNumber (NULL on j3, j1, j2), aOptionalString, aDouble, scope, createdAt,
-  // updatedAt, obj.inner and every `parent` field. A null literal against one is then a
-  // missing-attribute error the PDP denies, never an IS NULL match (#528).
-  "request.resource.attr.aBool": {
-    field: "aBool",
-    valueType: "boolean",
-    nullable: true,
-    nullAttributeRepresentation: "omitted",
-  },
-  "request.resource.attr.aString": {
-    field: "aString",
-    valueType: "string",
-    nullable: true,
-    nullAttributeRepresentation: "omitted",
-  },
-  "request.resource.attr.aNumber": {
-    field: "aNumber",
-    valueType: "number",
-    nullable: true,
-    nullAttributeRepresentation: "omitted",
-  },
-  "request.resource.attr.aDouble": {
-    field: "aDouble",
-    valueType: "number",
-    nullAttributeRepresentation: "omitted",
-  },
-  // resources.json OMITS aOptionalString when the column is NULL, so `== null` against it is a
-  // missing-attribute error the PDP denies, never an IS NULL match.
-  "request.resource.attr.aOptionalString": {
-    field: "aOptionalString",
-    valueType: "string",
-    nullable: true,
-    nullAttributeRepresentation: "omitted",
-  },
+  ...Object.fromEntries(
+    Object.entries(APPLICATION_ATTRIBUTES).map(([key, config]) => [
+      key,
+      { ...COLUMNS[key as keyof typeof APPLICATION_ATTRIBUTES], ...config },
+    ])
+  ),
   "request.resource.attr.createdBy": { field: "createdBy", valueType: "string" },
-  "request.resource.attr.scope": {
-    field: "scope",
-    valueType: "string",
-    nullable: true,
-    nullAttributeRepresentation: "omitted",
-  },
-  "request.resource.attr.createdAt": {
-    field: "createdAt",
-    valueType: "dateTime",
-    nullAttributeRepresentation: "omitted",
-  },
-  "request.resource.attr.updatedAt": {
-    field: "updatedAt",
-    valueType: "dateTime",
-    nullAttributeRepresentation: "omitted",
-  },
-  // `owner` and `coOwner` alias columns that `aOptionalString` and `scope` also map, under the
-  // OTHER null convention: the oracle sends a real null attribute for them rather than omitting
-  // it. Declaring that here is what makes the equality family definite for these two attributes
-  // and leaves it untouched for every other mapping (cerbos/query-plan-adapters#308).
-  "request.resource.attr.owner": {
-    field: "aOptionalString",
-    valueType: "string",
-    nullable: true,
-    nullAttributeRepresentation: "explicit",
-  },
-  "request.resource.attr.coOwner": {
-    field: "scope",
-    valueType: "string",
-    nullable: true,
-    nullAttributeRepresentation: "explicit",
-  },
-  // obj.inner is not a real nested column — mirrors aString, same trick the spring-data reference
-  // harness uses for the comparison/equals/nested-map-member case. `parent.inner` below is the
-  // opposite: a real two-level join. The two are kept side by side on purpose.
-  "request.resource.attr.obj.inner": {
-    field: "aString",
-    valueType: "string",
-    nullable: true,
-    nullAttributeRepresentation: "omitted",
-  },
   // The corpus's one REAL to-one chain (the `relation/*` cases). `type: "one"` is what makes the
   // adapter emit `is:` rather than `some:`, and `is:` on an optional relation is what requires
   // the hop to exist — the absent-parent guard the negated shapes discriminate. `inner` nests

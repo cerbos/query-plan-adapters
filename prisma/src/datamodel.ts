@@ -2,6 +2,7 @@
 // which model it reaches, and the type and nullability of the scalar columns along the way.
 
 import type { Mapper, MapperConfig } from "./index";
+import type { PreparedMapper, PreparedMapperConfig, PreparedRelation } from "./mapping";
 import { isFunction } from "./narrowing";
 
 export type PrismaDatamodelField = {
@@ -15,7 +16,7 @@ export type PrismaDatamodelField = {
 
 /**
  * The part of Prisma's DMMF datamodel the adapter reads: `Prisma.dmmf.datamodel` from a
- * `prisma-client-js` client (Prisma 5 and 6), or the module the `@cerbos/orm-prisma/generator`
+ * `prisma-client-js` client (Prisma 5 and 6), or the module the `cerbos-prisma-datamodel`
  * generator writes (any Prisma version, and the only source under the `prisma-client` generator,
  * whose runtime model carries no list or required flags).
  */
@@ -38,7 +39,7 @@ const VALUE_TYPES = new Map<string, MapperConfig["valueType"]>([
   ["DateTime", "dateTime"],
 ]);
 
-type ElementMappings = Record<string, MapperConfig>;
+type ElementMappings = Record<string, PreparedMapperConfig>;
 
 function indexModels(datamodel: PrismaDatamodel): Models {
   return new Map(
@@ -58,7 +59,7 @@ function completeRelation(
   model: string,
   relation: RelationMapping,
   reference: string
-): RelationMapping {
+): PreparedRelation {
   const field = models.get(model)?.get(relation.name);
 
   if (!field || !isRelationField(models, field)) {
@@ -98,31 +99,41 @@ function completeRelation(
 function completeFields(
   models: Models,
   model: string,
-  declared: ElementMappings,
+  declared: Record<string, MapperConfig>,
   reference: string
-) {
+): ElementMappings {
   const completed: ElementMappings = {};
 
   for (const [key, config] of Object.entries(declared)) {
     completed[key] = completeConfig(models, model, key, config, `${reference}.${key}`);
   }
 
+  return withInferred(completed, (key) =>
+    models.get(model)?.has(key)
+      ? completeConfig(models, model, key, {}, `${reference}.${key}`)
+      : undefined
+  );
+}
+
+/**
+ * `declared` with every other key inferred on first read and remembered, misses included. Only
+ * `get` is trapped: `key in mappings` still answers for the declared keys alone, which is the key
+ * set `"k" in R.attr.parent` tests.
+ */
+function withInferred(
+  declared: ElementMappings,
+  infer: (key: string) => MapperConfig | undefined
+): ElementMappings {
   const inferred = new Map<string, MapperConfig | undefined>();
 
-  const infer = (key: string): MapperConfig | undefined => {
-    if (!inferred.has(key)) {
-      const field = models.get(model)?.get(key);
-
-      inferred.set(key, field && completeConfig(models, model, key, {}, `${reference}.${key}`));
-    }
+  const lookup = (key: string): MapperConfig | undefined => {
+    if (!inferred.has(key)) inferred.set(key, infer(key));
 
     return inferred.get(key);
   };
 
-  // Only `get` is trapped: `key in fields` still answers for the declared keys alone, which is the
-  // key set `"k" in R.attr.parent` tests.
-  return new Proxy(completed, {
-    get: (target, key) => (key in target ? target[String(key)] : infer(String(key))),
+  return new Proxy(declared, {
+    get: (target, key) => (key in target ? target[String(key)] : lookup(String(key))),
   });
 }
 
@@ -133,50 +144,64 @@ function completeConfig(
   key: string | undefined,
   config: MapperConfig,
   reference: string
-): MapperConfig {
-  if (config.relation) {
-    return { ...config, relation: completeRelation(models, model, config.relation, reference) };
+): PreparedMapperConfig {
+  const { relation, ...scalar } = config;
+
+  if (relation) {
+    return { ...scalar, relation: completeRelation(models, model, relation, reference) };
   }
 
-  const name = config.field ?? key;
+  const name = scalar.field ?? key;
   const field = name === undefined ? undefined : models.get(model)?.get(name);
 
-  if (!field || name === undefined) return config;
+  if (!field || name === undefined) return scalar;
 
   if (isRelationField(models, field)) {
-    const { field: _relationName, ...rest } = config;
+    const { field: _relationName, ...rest } = scalar;
 
     return completeConfig(models, model, key, { ...rest, relation: { name } }, reference);
   }
 
   if (field.kind !== "scalar" || field.isList) {
-    return config;
+    return scalar;
   }
 
   return {
-    ...config,
+    ...scalar,
     field: name,
     valueType: config.valueType ?? VALUE_TYPES.get(field.type),
     nullable: config.nullable ?? (field.isRequired === undefined ? undefined : !field.isRequired),
   };
 }
 
-function rejectUntypedRelations(config: MapperConfig, reference: string): MapperConfig {
-  const relation = config.relation;
+function requireRelationTypes(config: MapperConfig, reference: string): PreparedMapperConfig {
+  const { relation, ...scalar } = config;
 
-  if (!relation) return config;
+  if (!relation) return scalar;
 
-  if (relation.type === undefined) {
+  const { type, fields, ...rest } = relation;
+
+  if (type === undefined) {
     throw new Error(
       `"${reference}" maps relation "${relation.name}" without a \`type\`; declare "one" or "many", or pass the Prisma \`datamodel\` to infer it`
     );
   }
 
-  for (const [key, nested] of Object.entries(relation.fields ?? {})) {
-    rejectUntypedRelations(nested, `${reference}.${key}`);
-  }
-
-  return config;
+  return {
+    ...scalar,
+    relation: {
+      ...rest,
+      type,
+      ...(fields && {
+        fields: Object.fromEntries(
+          Object.entries(fields).map(([key, nested]) => [
+            key,
+            requireRelationTypes(nested, `${reference}.${key}`),
+          ])
+        ),
+      }),
+    },
+  };
 }
 
 /**
@@ -187,14 +212,18 @@ export function prepareMapper(
   mapper: Mapper,
   model: string | undefined,
   datamodel: PrismaDatamodel | undefined
-): Mapper {
+): PreparedMapper {
   if (!datamodel) {
     if (isFunction(mapper)) {
-      return (key) => rejectUntypedRelations(mapper(key), key);
+      return (key) => {
+        const config = mapper(key);
+
+        return config && requireRelationTypes(config, key);
+      };
     }
 
     return Object.fromEntries(
-      Object.entries(mapper).map(([key, config]) => [key, rejectUntypedRelations(config, key)])
+      Object.entries(mapper).map(([key, config]) => [key, requireRelationTypes(config, key)])
     );
   }
 
@@ -208,33 +237,28 @@ export function prepareMapper(
     throw new Error(`Model "${model}" is not in the Prisma datamodel`);
   }
 
-  const complete = (key: string, config: MapperConfig) =>
-    completeConfig(models, model, undefined, config, key);
+  const complete = (
+    key: string,
+    config: MapperConfig | undefined
+  ): PreparedMapperConfig | undefined => {
+    const name = rootFieldName(models, model, key);
+
+    if (config === undefined && name === undefined) return undefined;
+
+    return completeConfig(models, model, name, config ?? {}, key);
+  };
 
   if (isFunction(mapper)) {
     return (key) => complete(key, mapper(key));
   }
 
-  const completed: Record<string, MapperConfig> = Object.fromEntries(
-    Object.entries(mapper).map(([key, config]) => [key, complete(key, config)])
-  );
+  const completed: ElementMappings = {};
 
-  const inferred = new Map<string, MapperConfig | undefined>();
+  for (const [key, config] of Object.entries(mapper)) {
+    completed[key] = completeConfig(models, model, rootFieldName(models, model, key), config, key);
+  }
 
-  const infer = (key: string): MapperConfig | undefined => {
-    if (!inferred.has(key)) {
-      const name = rootFieldName(models, model, key);
-
-      inferred.set(key, name === undefined ? undefined : complete(key, { field: name }));
-    }
-
-    return inferred.get(key);
-  };
-
-  // Only `get` is trapped, as in completeFields: the declared keys stay the mapper's own.
-  return new Proxy(completed, {
-    get: (target, key) => (key in target ? target[String(key)] : infer(String(key))),
-  });
+  return withInferred(completed, (key) => complete(key, undefined));
 }
 
 /**

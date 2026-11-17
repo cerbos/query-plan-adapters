@@ -115,7 +115,7 @@ export type MapperConfig = {
 
 export type Mapper =
   | Record<string, MapperConfig>
-  | ((key: string) => MapperConfig);
+  | ((key: string) => MapperConfig | undefined);
 
 /**
  * How the caller represents a NULL column when building the attributes it sends to `check()`.
@@ -151,7 +151,7 @@ export interface QueryPlanToPrismaArgs {
    * (or a `field` naming a relation field), segments the mapper leaves out are read from the
    * related model by name, and a scalar column's `valueType` and `nullable` default to what the
    * schema declares. Requires `model`. Pass `Prisma.dmmf.datamodel` from a `prisma-client-js`
-   * client, or the `datamodel` the `@cerbos/orm-prisma/generator` generator writes.
+   * client, or the `datamodel` the `cerbos-prisma-datamodel` generator writes.
    */
   datamodel?: PrismaDatamodel;
   /**
