@@ -12,6 +12,7 @@ import {
   fuzzThrown,
   fuzzVerdict,
   MAPPER,
+  SCHEMA_MAPPER,
   pdpTags,
   planOf,
   readCorpusJson,
@@ -333,10 +334,26 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 
 // -- the replay -----------------------------------------------------------------------------------
 
-async function selectAllowed(golden: Golden): Promise<string[]> {
+/** The two ways a caller maps the corpus: every entry declared, or the schema read for the rest. */
+const MAPPINGS = {
+  declared: { mapper: MAPPER },
+  schema: { mapper: SCHEMA_MAPPER, schema: resourceSchema },
+} as const;
+
+type Mapping = keyof typeof MAPPINGS;
+
+const MAPPING_NAMES = ["declared", "schema"] as const satisfies readonly Mapping[];
+
+async function eachMapping<T>(run: (mapping: Mapping) => Promise<T>): Promise<Record<Mapping, T>> {
+  return Object.fromEntries(
+    await Promise.all(MAPPING_NAMES.map(async (mapping) => [mapping, await run(mapping)])),
+  );
+}
+
+async function selectAllowed(golden: Golden, mapping: Mapping = "declared"): Promise<string[]> {
   const result = queryPlanToMongoose({
     queryPlan: await planOf(golden),
-    mapper: MAPPER,
+    ...MAPPINGS[mapping],
     // The dataset stores what it sends: `owner` as an explicit null, the rest declared `nullable`.
     nullAttributeRepresentation: "explicit",
   });
@@ -357,12 +374,12 @@ const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
-const fuzzResults: FuzzVerdict[] = [];
+const fuzzResults: Record<Mapping, FuzzVerdict[]> = { declared: [], schema: [] };
 
 /** A fuzz case judged on this store (conformance/README.md, "Fuzzing"). */
-async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+async function fuzzReplay(golden: Golden, mapping: Mapping): Promise<FuzzVerdict> {
   try {
-    return fuzzVerdict(golden, golden.allowed, await selectAllowed(golden));
+    return fuzzVerdict(golden, golden.allowed, await selectAllowed(golden, mapping));
   } catch (error) {
     return fuzzThrown(golden, error, UnsupportedQueryPlanError);
   }
@@ -378,8 +395,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await mongoose.disconnect();
-  // run-harness.sh names the leg, since the MongoDB image is the store dimension here.
-  writeFuzzResults("mongoose", process.env["QPA_HARNESS_STORE"] ?? "mongo", fuzzResults);
+  // run-harness.sh names the leg, since the MongoDB image is the store dimension here. The schema
+  // mapping is a leg of its own, `<store>+schema`, so the report tells the two apart.
+  const store = process.env["QPA_HARNESS_STORE"] ?? "mongo";
+
+  writeFuzzResults("mongoose", store, fuzzResults.declared);
+  writeFuzzResults("mongoose", `${store}+schema`, fuzzResults.schema);
 
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
@@ -414,9 +435,11 @@ describe("conformance (mongodb)", () => {
       `${tag} %s`,
       async (_id, golden) => {
         if (FUZZ_DIR) {
-          const verdict = await fuzzReplay(golden);
-          fuzzResults.push(verdict);
-          assertFuzzVerdict(verdict);
+          const verdicts = await eachMapping((mapping) => fuzzReplay(golden, mapping));
+
+          for (const mapping of MAPPING_NAMES) fuzzResults[mapping].push(verdicts[mapping]);
+
+          for (const mapping of MAPPING_NAMES) assertFuzzVerdict(verdicts[mapping]);
 
           return;
         }
@@ -425,22 +448,25 @@ describe("conformance (mongodb)", () => {
 
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);
-          expect(() =>
-            queryPlanToMongoose({ queryPlan, mapper: MAPPER }),
-          ).toThrow(UnsupportedQueryPlanError);
+
+          for (const mapping of MAPPING_NAMES) {
+            expect(() =>
+              queryPlanToMongoose({ queryPlan, ...MAPPINGS[mapping] }),
+            ).toThrow(UnsupportedQueryPlanError);
+          }
 
           return;
         }
 
-        const ids = await selectAllowed(golden);
+        const ids = await eachMapping((mapping) => selectAllowed(golden, mapping));
 
         if (entry?.status === "divergent") {
-          expect(ids).not.toEqual(golden.allowed);
+          for (const mapping of MAPPING_NAMES) expect(ids[mapping]).not.toEqual(golden.allowed);
 
           return;
         }
 
-        expect(ids).toEqual(golden.allowed);
+        expect(ids).toEqual({ declared: golden.allowed, schema: golden.allowed });
         (passed[tag] ??= {})[golden.tier] =
           (passed[tag]?.[golden.tier] ?? 0) + 1;
       },

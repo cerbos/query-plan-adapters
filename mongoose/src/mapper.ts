@@ -2,6 +2,7 @@ import type { Mapper, MapperConfig } from "./index";
 import { UnsupportedQueryPlanError } from "./errors";
 import { isFunction } from "./narrowing";
 import type { MongoValue } from "./expression";
+import { withSchema, type SchemaSource } from "./schema";
 
 /**
  * The caller's mapper as one translation scope reads it. `queryPlanToMongoose` builds the root
@@ -101,23 +102,23 @@ export const withOmittedNullDefault =
   };
 
 /** The root scope: the caller's mapper, in either of its two forms, under the call's convention. */
-export const rootMapper = (mapper: Mapper, nullableDefault: boolean): ScopedMapper => {
-  if (isFunction(mapper)) {
-    return {
-      lookup: nullableDefault ? withOmittedNullDefault(mapper) : mapper,
-      nullableDefault,
-      bound: [],
-    };
-  }
+export const rootMapper = (
+  mapper: Mapper,
+  nullableDefault: boolean,
+  schema?: SchemaSource,
+): ScopedMapper => {
+  const declared = isFunction(mapper) ? mapper : (reference: string) => lookupEntry(mapper, reference);
+  const lookup = withSchema(declared, schema);
 
-  const entries = nullableDefault
-    ? Object.fromEntries(
-        Object.entries(mapper).map(([key, config]) => [key, nullableByDefault(config)]),
-      )
-    : mapper;
-
-  return { lookup: (reference) => entries[reference], nullableDefault, bound: [] };
+  return {
+    lookup: nullableDefault ? withOmittedNullDefault(lookup) : lookup,
+    nullableDefault,
+    bound: [],
+  };
 };
+
+const lookupEntry = (mapper: Record<string, MapperConfig>, reference: string): MapperConfig | undefined =>
+  Object.hasOwn(mapper, reference) ? mapper[reference] : undefined;
 
 export const isNullableReference = (
   reference: string,
@@ -150,10 +151,14 @@ export type ResolvedFieldReference = {
 const relationReference = (
   { name, type, requiresParent }: NonNullable<MapperConfig["relation"]>,
   field: string | undefined,
-): ResolvedFieldReference => ({
-  path: !field ? [name] : type === "one" ? [`${name}.${field}`] : [name, field],
-  relation: { name, type, requiresParent },
-});
+): ResolvedFieldReference => {
+  if (!type) throw new Error(`Relation ${name} declares no type`);
+
+  return {
+    path: !field ? [name] : type === "one" ? [`${name}.${field}`] : [name, field],
+    relation: { name, type, requiresParent },
+  };
+};
 
 /** The document path a plan variable maps to, or undefined when the mapper has no entry for it. */
 const lookupFieldReference = (

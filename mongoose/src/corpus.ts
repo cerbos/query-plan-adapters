@@ -566,3 +566,59 @@ export const MAPPER: ConformanceMapper = {
     },
   },
 };
+
+/**
+ * `MAPPER` as a caller who passes the Model's schema writes it: only what the schema cannot say.
+ * That is a resource attribute stored under another name, a stored null that means a missing
+ * attribute, an element field a relation is read through, and a to-one on the `check()` side that
+ * is stored as an array. Every relation type, element field and scalar `valueType` is read from
+ * the schema, and the harness replays every case through both mappers.
+ */
+const nullableLevel = {
+  aBool: { nullable: true },
+  aString: { nullable: true },
+  aNumber: { nullable: true },
+  aOptionalString: { nullable: true },
+};
+
+const schemaSubCategories: MapperConfig = {
+  relation: {
+    name: "subCategories",
+    field: "name",
+    fields: { labels: { relation: { name: "labels", fields: { name: { nullable: true } } } } },
+  },
+};
+
+export const SCHEMA_MAPPER: ConformanceMapper = {
+  "request.resource.id": { field: "resourceId" },
+  "request.resource.attr.aBool": { nullable: true },
+  "request.resource.attr.aString": { nullable: true },
+  "request.resource.attr.aNumber": { nullable: true },
+  "request.resource.attr.aDouble": { nullable: true },
+  "request.resource.attr.aOptionalString": { nullable: true },
+  "request.resource.attr.scope": { nullable: true },
+  "request.resource.attr.createdAt": { nullable: true },
+  "request.resource.attr.updatedAt": { nullable: true },
+  "request.resource.attr.owner": { field: "aOptionalString" },
+  "request.resource.attr.coOwner": { field: "scope" },
+  "request.resource.attr.obj.inner": { field: "aString", nullable: true },
+  "request.resource.attr.parent": { relation: { name: "parent", fields: nullableLevel } },
+  "request.resource.attr.parent.inner": { relation: { name: "parent.inner", fields: nullableLevel } },
+  "request.resource.attr.tags": { relation: { name: "tags", fields: { name: { nullable: true } } } },
+  "request.resource.attr.tagNames": { relation: { name: "tags", field: "name" } },
+  "request.resource.attr.categories": {
+    relation: { name: "categories", fields: { subCategories: schemaSubCategories } },
+  },
+  "request.resource.attr.mainCategory": {
+    relation: {
+      name: "categories",
+      fields: { subCategories: schemaSubCategories, subNames: schemaSubCategories },
+    },
+  },
+  "request.resource.attr.mainCategory.subCategories": {
+    relation: { name: "categories.subCategories", requiresParent: "categories" },
+  },
+  "request.resource.attr.mainCategory.subNames": {
+    relation: { name: "categories.subCategories", field: "name", requiresParent: "categories" },
+  },
+};

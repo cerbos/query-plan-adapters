@@ -184,7 +184,8 @@ func (l legRunner) failingVerdict(ctx context.Context, in *fuzzInputs, cases []*
 	if err := writeFuzzDir(scratch, fuzzManifest{Seed: seed, Count: len(cases), Tags: in.tags(), Dropped: dropped}, rec); err != nil {
 		return nil, err
 	}
-	harnessStore := l.store
+	// A `<store>+<mapping>` leg is a second mapper replayed by the same harness run.
+	harnessStore, _, _ := strings.Cut(l.store, "+")
 	if harnessStores[l.adapter] {
 		harnessStore = "all"
 	}
