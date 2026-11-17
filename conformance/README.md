@@ -223,7 +223,9 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   ignores its ledger, and gives each case one verdict: `match`, `refused` (the adapter's refusal
   type), `over-grant`, `under-grant` or `error` (any other throw, a query the store rejects, or
   the right rows repeated). It writes them to `<dir>/results/<adapter>-<store>.json` and fails on
-  the last three.
+  the last three. An adapter that can also read its mapping from the ORM replays every case through
+  both mappers and reports the second as its own leg, `<store>+schema`; `fuzz-shrink` takes that
+  name and runs the `<store>` harness.
 - **Report.** `fuzz-report` tabulates every leg and lists each failing case. A case every
   translating leg got wrong with the same rows is listed apart as a suspected planner divergence
   and does not fail the run: that agreement points at the plan and `check()` disagreeing. The

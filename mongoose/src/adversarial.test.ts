@@ -374,12 +374,12 @@ const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
 const totals: Record<string, Record<string, number>> = {};
-const fuzzResults: FuzzVerdict[] = [];
+const fuzzResults: Record<Mapping, FuzzVerdict[]> = { declared: [], schema: [] };
 
 /** A fuzz case judged on this store (conformance/README.md, "Fuzzing"). */
-async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
+async function fuzzReplay(golden: Golden, mapping: Mapping): Promise<FuzzVerdict> {
   try {
-    return fuzzVerdict(golden, golden.allowed, await selectAllowed(golden));
+    return fuzzVerdict(golden, golden.allowed, await selectAllowed(golden, mapping));
   } catch (error) {
     return fuzzThrown(golden, error, UnsupportedQueryPlanError);
   }
@@ -395,8 +395,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await mongoose.disconnect();
-  // run-harness.sh names the leg, since the MongoDB image is the store dimension here.
-  writeFuzzResults("mongoose", process.env["QPA_HARNESS_STORE"] ?? "mongo", fuzzResults);
+  // run-harness.sh names the leg, since the MongoDB image is the store dimension here. The schema
+  // mapping is a leg of its own, `<store>+schema`, so the report tells the two apart.
+  const store = process.env["QPA_HARNESS_STORE"] ?? "mongo";
+
+  writeFuzzResults("mongoose", store, fuzzResults.declared);
+  writeFuzzResults("mongoose", `${store}+schema`, fuzzResults.schema);
 
   const lines = TAGS.map((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();
@@ -431,9 +435,11 @@ describe("conformance (mongodb)", () => {
       `${tag} %s`,
       async (_id, golden) => {
         if (FUZZ_DIR) {
-          const verdict = await fuzzReplay(golden);
-          fuzzResults.push(verdict);
-          assertFuzzVerdict(verdict);
+          const verdicts = await eachMapping((mapping) => fuzzReplay(golden, mapping));
+
+          for (const mapping of MAPPING_NAMES) fuzzResults[mapping].push(verdicts[mapping]);
+
+          for (const mapping of MAPPING_NAMES) assertFuzzVerdict(verdicts[mapping]);
 
           return;
         }
