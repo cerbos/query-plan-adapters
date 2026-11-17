@@ -58,21 +58,29 @@ def require_hops(
     Returns:
         ``expression`` wrapped in a ``CASE`` that is NULL when a hop is missing.
     """
+    return _hop_guard(
+        expression, hop_correlation, lambda guard: guard.correlate(*correlate)
+    )
+
+
+def _hop_guard(
+    expression: Any,
+    hop_correlation: Sequence[Any],
+    correlated: Callable[[Any], Any],
+) -> Any:
     if not hop_correlation:
         return expression
-
     guard = select(literal(1))
     for predicate in hop_correlation:
         guard = guard.where(predicate)
-    return case((exists(guard.correlate(*correlate)), expression))
+    return case((exists(correlated(guard)), expression))
 
 
 class Relation:
     """A collection attribute held in a related table, as an ``attr_map`` value.
 
     Map the collection attribute to a ``Relation`` and each lambda variable that
-    ranges over it to the element table's columns, then pass
-    ``relation_overrides()`` as ``operator_override_fns``.
+    ranges over it to the element table's columns.
 
     Args:
         correlation: Predicates joining an element row to the row that owns the
@@ -98,38 +106,46 @@ class Relation:
         self.correlate = tuple(correlate)
         self.member = member
         self.hop_correlation = tuple(hop_correlation)
-        self._own: tuple[Any, ...] | None = None
-        self._hop_own: tuple[Any, ...] = ()
+        self._target: Any = None
+        self._correlated: Callable[[Any], Any] = lambda query: query.correlate(
+            *self.correlate
+        )
+        self._hops_correlated = self._correlated
+
+    @classmethod
+    def _inferred(
+        cls,
+        correlation: Sequence[Any],
+        *,
+        member: Any,
+        hop_correlation: Sequence[Any],
+        own: Sequence[Any],
+        hop_own: Sequence[Any],
+        target: Any,
+    ) -> "Relation":
+        relation = cls(correlation, member=member, hop_correlation=hop_correlation)
+        relation._target = target
+        relation._correlated = lambda query: query.correlate_except(*own)
+        relation._hops_correlated = lambda query: query.correlate_except(*hop_own)
+        return relation
 
     def __repr__(self) -> str:
         return f"Relation({', '.join(str(p) for p in self.correlation)})"
-
-    def _correlated(self, query: Any, own: tuple[Any, ...] | None) -> Any:
-        if own is None:
-            return query.correlate(*self.correlate)
-        return query.correlate_except(*own)
 
     def _exists(self, *conditions: Any) -> Any:
         query = select(literal(1))
         for predicate in (*self.correlation, *conditions):
             query = query.where(predicate)
-        return exists(self._correlated(query, self._own))
+        return exists(self._correlated(query))
 
     def _count(self, *conditions: Any) -> Any:
         query = select(func.count())
         for predicate in (*self.correlation, *conditions):
             query = query.where(predicate)
-        return self._correlated(query, self._own).scalar_subquery()
+        return self._correlated(query).scalar_subquery()
 
     def _guarded(self, expression: Any) -> Any:
-        if self._own is None:
-            return require_hops(expression, self.hop_correlation, self.correlate)
-        if not self.hop_correlation:
-            return expression
-        guard = select(literal(1))
-        for predicate in self.hop_correlation:
-            guard = guard.where(predicate)
-        return case((exists(guard.correlate_except(*self._hop_own)), expression))
+        return _hop_guard(expression, self.hop_correlation, self._hops_correlated)
 
     def _errors(self, body: Any) -> Any:
         return self._exists(is_null(body))

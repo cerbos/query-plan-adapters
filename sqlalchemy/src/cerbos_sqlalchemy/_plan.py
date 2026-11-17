@@ -39,6 +39,22 @@ class Expr:
 Operand = Value | Variable | Expr
 
 
+def lambda_binding(operand: Expr) -> tuple[Operand, Operand, Variable] | None:
+    children = operand.operands
+    if operand.operator not in LAMBDA_BINDING_OPERATORS or len(children) != 2:
+        return None
+    collection, lambda_operand = children
+    if (
+        not isinstance(lambda_operand, Expr)
+        or lambda_operand.operator != "lambda"
+        or len(lambda_operand.operands) != 2
+        or not isinstance(lambda_operand.operands[1], Variable)
+    ):
+        return None
+    body, variable = lambda_operand.operands
+    return collection, body, variable
+
+
 def _widen_integral_literals(node: Any) -> Any:
     """Rebind wire integers that do not fit int64 as floats.
 
@@ -103,24 +119,16 @@ def substitute_lambda_variable(
 
     operator = operand.operator
     children = operand.operands
-    if operator in LAMBDA_BINDING_OPERATORS and len(children) == 2:
+    binding = lambda_binding(operand)
+    if binding is not None and binding[2].name == variable_name:
         nested_collection, nested_lambda = children
-        if (
-            isinstance(nested_lambda, Expr)
-            and nested_lambda.operator == "lambda"
-            and len(nested_lambda.operands) == 2
-            and isinstance(nested_lambda.operands[1], Variable)
-            and nested_lambda.operands[1].name == variable_name
-        ):
-            return Expr(
-                operator,
-                (
-                    substitute_lambda_variable(
-                        nested_collection, variable_name, element
-                    ),
-                    nested_lambda,
-                ),
-            )
+        return Expr(
+            operator,
+            (
+                substitute_lambda_variable(nested_collection, variable_name, element),
+                nested_lambda,
+            ),
+        )
 
     return Expr(
         operator,
@@ -158,24 +166,16 @@ def substitute_lambda_operand(
 
     operator = operand.operator
     children = operand.operands
-    if operator in LAMBDA_BINDING_OPERATORS and len(children) == 2:
+    binding = lambda_binding(operand)
+    if binding is not None and binding[2].name == variable_name:
         nested_collection, nested_lambda = children
-        if (
-            isinstance(nested_lambda, Expr)
-            and nested_lambda.operator == "lambda"
-            and len(nested_lambda.operands) == 2
-            and isinstance(nested_lambda.operands[1], Variable)
-            and nested_lambda.operands[1].name == variable_name
-        ):
-            return Expr(
-                operator,
-                (
-                    substitute_lambda_operand(
-                        nested_collection, variable_name, element
-                    ),
-                    nested_lambda,
-                ),
-            )
+        return Expr(
+            operator,
+            (
+                substitute_lambda_operand(nested_collection, variable_name, element),
+                nested_lambda,
+            ),
+        )
 
     return Expr(
         operator,
@@ -262,35 +262,27 @@ def assert_no_same_collection_correlation(
     """
     if not isinstance(operand, Expr):
         return
-    children = operand.operands
-    if operand.operator in LAMBDA_BINDING_OPERATORS and len(children) == 2:
-        collection, lambda_operand = children
-        if (
-            isinstance(collection, Variable)
-            and isinstance(lambda_operand, Expr)
-            and lambda_operand.operator == "lambda"
-            and len(lambda_operand.operands) == 2
-            and isinstance(lambda_operand.operands[1], Variable)
-        ):
-            body, variable = lambda_operand.operands
-            for outer_collection, outer_variable in enclosing:
-                if (
-                    outer_collection == collection.name
-                    and outer_variable != variable.name
-                    and _reads_variable(body, outer_variable)
-                ):
-                    raise UnsupportedPlanError(
-                        f"Cannot correlate a macro over {collection.name} nested inside "
-                        "another over the same collection: attr_map gives both lambda "
-                        "scopes the same table, so the inner subquery would compare each "
-                        f"element with itself rather than with {outer_variable}"
-                    )
-            assert_no_same_collection_correlation(collection, enclosing)
-            assert_no_same_collection_correlation(
-                body,
-                tuple(scope for scope in enclosing if scope[1] != variable.name)
-                + ((collection.name, variable.name),),
-            )
-            return
-    for child in children:
+    binding = lambda_binding(operand)
+    if binding is not None and isinstance(binding[0], Variable):
+        collection, body, variable = binding
+        for outer_collection, outer_variable in enclosing:
+            if (
+                outer_collection == collection.name
+                and outer_variable != variable.name
+                and _reads_variable(body, outer_variable)
+            ):
+                raise UnsupportedPlanError(
+                    f"Cannot correlate a macro over {collection.name} nested inside "
+                    "another over the same collection: attr_map gives both lambda "
+                    "scopes the same table, so the inner subquery would compare each "
+                    f"element with itself rather than with {outer_variable}"
+                )
+        assert_no_same_collection_correlation(collection, enclosing)
+        assert_no_same_collection_correlation(
+            body,
+            tuple(scope for scope in enclosing if scope[1] != variable.name)
+            + ((collection.name, variable.name),),
+        )
+        return
+    for child in operand.operands:
         assert_no_same_collection_correlation(child, enclosing)

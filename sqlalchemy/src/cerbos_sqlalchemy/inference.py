@@ -22,13 +22,14 @@ from sqlalchemy.orm.interfaces import MANYTOMANY
 from sqlalchemy.sql import operators
 from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 from sqlalchemy.sql.schema import Column, Index, UniqueConstraint
+from sqlalchemy.sql.selectable import ScalarSelect
 
 from cerbos_sqlalchemy._plan import (
-    LAMBDA_BINDING_OPERATORS,
     Expr,
     Operand,
     Value,
     Variable,
+    lambda_binding,
 )
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from cerbos_sqlalchemy.relations import Relation
@@ -141,7 +142,7 @@ def _unique_keys(mapper: Any) -> list[frozenset[Any]]:
     return [key for key in keys if key]
 
 
-def related(*path: Any) -> Any:
+def related(*path: Any) -> "Relation | RelatedRow | ScalarSelect[Any]":
     """An ``attr_map`` value read through mapped ``relationship()`` attributes.
 
     ``path`` is one or more relationship attributes, each starting where the last
@@ -193,16 +194,14 @@ def related(*path: Any) -> Any:
     predicates = [p for hop in hops for p in hop.predicates]
 
     if tail.many:
-        hop_own = [t for hop in hops[:-1] for t in hop.own]
-        relation = Relation(
+        return Relation._inferred(
             predicates,
             member=column,
             hop_correlation=[p for hop in hops[:-1] for p in hop.predicates],
+            own=own,
+            hop_own=[t for hop in hops[:-1] for t in hop.own],
+            target=tail.prop.mapper,
         )
-        relation._own = tuple(own)
-        relation._target = tail.prop.mapper
-        relation._hop_own = tuple(hop_own)
-        return relation
 
     tail.require_to_one()
     if column is None:
@@ -269,12 +268,11 @@ def _root_segments(name: str) -> list[str] | None:
 
 
 def _element(collection: Any) -> tuple[Any, Any] | None:
-    target = getattr(collection, "_target", None)
-    if not isinstance(collection, Relation) or target is None:
+    if not isinstance(collection, Relation) or collection._target is None:
         return None
     if collection.member is not None:
         return collection.member, None
-    return collection, target
+    return collection, collection._target
 
 
 def resolvable(table: Any, name: str) -> bool:
@@ -351,15 +349,9 @@ def infer_attributes(
         if not isinstance(operand, Expr):
             return
         children = operand.operands
-        if (
-            operand.operator in LAMBDA_BINDING_OPERATORS
-            and len(children) == 2
-            and isinstance(children[1], Expr)
-            and children[1].operator == "lambda"
-            and len(children[1].operands) == 2
-            and isinstance(children[1].operands[1], Variable)
-        ):
-            collection, (body, variable) = children[0], children[1].operands
+        binding = lambda_binding(operand)
+        if binding is not None:
+            collection, body, variable = binding
             walk(collection, scope)
             inner = {k: v for k, v in scope.items() if k != variable.name}
             if isinstance(collection, Variable):
