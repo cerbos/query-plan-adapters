@@ -7,7 +7,7 @@ import { MySqlDialect } from "drizzle-orm/mysql-core/dialect";
 import { PgDialect } from "drizzle-orm/pg-core/dialect";
 import { bigint, doublePrecision, numeric, pgTable } from "drizzle-orm/pg-core";
 import { integer, sqliteTable } from "drizzle-orm/sqlite-core";
-import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core/dialect";
+import * as sqliteDialects from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
 import type {
@@ -65,14 +65,16 @@ const MAPPERS: Record<Store, Record<string, MapperEntry>> = {
 
 /** The resource table and `relations()` the mapper's undeclared relation halves are inferred from. */
 const ROOTS = {
-  sqlite: { table: SCHEMAS.sqlite.resources, schema: SCHEMAS.sqlite },
-  postgresql: { table: SCHEMAS.postgresql.resources, schema: SCHEMAS.postgresql },
-  mysql: { table: SCHEMAS.mysql.resources, schema: SCHEMAS.mysql },
+  sqlite: { table: SCHEMAS.sqlite.resources, schema: SCHEMAS.sqlite.relationsSchema },
+  postgresql: { table: SCHEMAS.postgresql.resources, schema: SCHEMAS.postgresql.relationsSchema },
+  mysql: { table: SCHEMAS.mysql.resources, schema: SCHEMAS.mysql.relationsSchema },
 };
 
 const DIALECTS = {
   postgresql: new PgDialect(),
-  sqlite: new SQLiteSyncDialect(),
+  // SQLiteSyncDialect before drizzle 1.0, SQLiteDialect from it.
+  sqlite: new ((sqliteDialects as unknown as Record<string, typeof MySqlDialect>)["SQLiteSyncDialect"] ??
+    (sqliteDialects as unknown as Record<string, typeof MySqlDialect>)["SQLiteDialect"]!)(),
   mysql: new MySqlDialect(),
 };
 
@@ -447,7 +449,7 @@ describe("nullAttributeRepresentation", () => {
       // NOT EXISTS that denies a row whose projected relation element is missing.
       const unguarded = render("postgresql", result.filter)
         .sql.replace(/case when (?:(?!then).)*? then null/g, "")
-        .replace(/not exists \(select 1 from [^()]* where \([^()]* is null\)\)/g, "");
+        .replace(/not exists \(select 1 from [^()]* where \((?:\([^()]*\) and \()?[^()]* is null\)\)?\)/g, "");
 
       return /\bis null\b/.test(unguarded);
     });

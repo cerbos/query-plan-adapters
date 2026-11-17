@@ -11,7 +11,7 @@ npm install @cerbos/grpc   # or @cerbos/http — any Cerbos client that can call
 ```
 
 - Node 22+
-- Peer dependencies: `drizzle-orm` `^0.44.0 || ^0.45.0`, `@cerbos/core` `^0.32.0 || ^0.33.0`.
+- Peer dependencies: `drizzle-orm` `^0.44.0 || ^0.45.0 || ^1.0.0-rc.5`, `@cerbos/core` `^0.32.0 || ^0.33.0`.
   Install `@cerbos/core` yourself so your Cerbos client and the adapter share one copy of the plan
   types (npm 7+ does this automatically; pnpm and Yarn need it declared).
 - The adapter depends on no Cerbos client, so an HTTP application does not pull in gRPC.
@@ -147,12 +147,14 @@ const mapper: Mapper = {
 
 #### Inferring a relation from the schema
 
-Pass the resource's `table` and the `schema` you give `drizzle(client, { schema })`, and a relation
-needs only what the schema cannot say. `type`, `table`, `sourceColumn` and `targetColumn` are
-inferred, and any of them you declare wins:
+Pass the resource's `table` and your relations as `schema`, and a relation needs only what the
+schema cannot say. `type`, `table`, `sourceColumn` and `targetColumn` are inferred, and any of them
+you declare wins. `schema` is the object you give `drizzle()`: the tables and their `relations()`
+before drizzle 1.0, or the result of `defineRelations()` from it.
 
-- `name` reads the `relations()` entry of that name on the source table: `one` or `many`, the
-  target table and the join columns.
+- `name` reads the relation of that name on the source table: `one` or `many`, the target table
+  and the join columns. A `defineRelations()` relation's `where` becomes its `subqueryFilter`,
+  unless you declare one.
 - `table` alone reads the single foreign key between the source table and `table`. A foreign key
   on the source is to-one; one on the target is to-one when its column is unique, else to-many.
 
@@ -169,8 +171,9 @@ queryPlanToDrizzle({
 ```
 
 A nested relation's source is its parent's table. An inferred to-one whose target column carries no
-unique constraint, a composite key, an unknown name and several candidate foreign keys each throw:
-declare the relation in full instead. `field`, `fields`, `position` and `subqueryFilter` are never
+unique constraint, a composite key, an unknown name, several candidate foreign keys, a
+`defineRelations()` relation `through` a junction table and one filtered on its source side each
+throw: declare the relation in full instead, a junction as two relations. `field`, `fields`, `position` and `subqueryFilter` are never
 inferred.
 
 The subquery reads the table **bare**. If your own reads of that table filter it (soft delete,
@@ -557,9 +560,10 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
-- A relation can be declared by `name` (from `relations()`) or by `table` alone (from the foreign
-  key), with `type` and the join columns inferred; the call takes the resource's `table` and the
-  drizzle `schema` for it. A fully declared relation behaves as before.
+- Supports drizzle 1.0 (from `1.0.0-rc.5`) as well as 0.44 and 0.45.
+- A relation can be declared by `name` (from `relations()` or `defineRelations()`) or by `table`
+  alone (from the foreign key), with `type` and the join columns inferred; the call takes the
+  resource's `table` and the relations as `schema`. A fully declared relation behaves as before.
 - Fixed over-grants: a string, number, date or array column read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, which denies under both polarities, where it was compared with `true`; and arithmetic over a ternary whose arms are an `int()` and a double (`(c ? R.attr.d : int(x)) + int(x)`) now throws `UnsupportedQueryPlanError` (**breaking**), where it was computed as a sum on every row.
 - A relation may declare [`position`](#relations), the column holding each row's zero-based
   index in the list sent to Cerbos. With it, `R.attr.tags[0].name == "public"` (a `get-field` over

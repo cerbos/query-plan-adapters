@@ -3,6 +3,7 @@ import * as path from "path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import Database from "better-sqlite3";
+import * as drizzleOrm from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import type { AnyColumn, SQL, Table } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
@@ -37,6 +38,8 @@ import {
 import type { ConformanceMapper, FuzzVerdict, Golden } from "./corpus";
 import { isMappingConfig } from "./mapper";
 import { isObject, isString } from "./narrowing";
+
+const IS_DRIZZLE_1 = "defineRelations" in drizzleOrm;
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -377,12 +380,12 @@ function sqliteStore(): AdversarialStore {
   const dbPath = path.join(__dirname, "..", "adversarial.db");
   fs.rmSync(dbPath, { force: true });
   const sqlite = new Database(dbPath);
-  const db = drizzleSqlite(sqlite);
+  const db = drizzleSqlite({ client: sqlite });
 
   return {
     name: "sqlite",
     mapper: buildMapper(schema),
-    root: { table: schema.resources, schema },
+    root: { table: schema.resources, schema: schema.relationsSchema },
 
     async start(): Promise<void> {
       sqlite.exec(`
@@ -526,7 +529,7 @@ function postgresStore(): AdversarialStore {
   return {
     name: "postgres",
     mapper: buildMapper(schema),
-    root: { table: schema.resources, schema },
+    root: { table: schema.resources, schema: schema.relationsSchema },
     // The same mapper with the three ordered lists stored two other ways: a native array rebased to
     // a zero lower bound, and plain `json`. A caller chooses the storage, so the corpus cannot vary
     // it; the harness replays every case that reads these lists under each one.
@@ -548,7 +551,7 @@ function postgresStore(): AdversarialStore {
         .withEnvironment({ POSTGRES_INITDB_ARGS })
         .start();
       pool = new Pool({ connectionString: container.getConnectionUri() });
-      db = drizzlePostgres(pool);
+      db = drizzlePostgres({ client: pool });
 
       await db.execute(sql`
         CREATE TABLE adversarial_resources (
@@ -791,7 +794,7 @@ function mysqlStore(): AdversarialStore {
   return {
     name: "mysql",
     mapper: buildMapper(schema),
-    root: { table: schema.resources, schema },
+    root: { table: schema.resources, schema: schema.relationsSchema },
 
     async start(): Promise<void> {
       // The image's entrypoint prepends `mysqld` to arguments that begin with a dash, which is
@@ -809,7 +812,10 @@ function mysqlStore(): AdversarialStore {
         // out of the comparison.
         timezone: "Z",
       });
-      db = drizzleMysql(pool, { mode: "default" });
+      // drizzle 1.0 dropped `mode` and the positional form; 0.45 reads only the positional one.
+      db = (drizzleMysql as unknown as (...args: unknown[]) => MySql2Database)(
+        ...(IS_DRIZZLE_1 ? [{ client: pool }] : [pool, { mode: "default" }]),
+      );
 
       for (const statement of DDL) {
         await db.execute(sql.raw(statement));
@@ -848,7 +854,9 @@ function mysqlStore(): AdversarialStore {
       const [rows] = await connected().execute(sql`select @@version_comment as version`);
       const first = Array.isArray(rows) ? rows[0] : undefined;
 
-      return isObject(first) && "version" in first && isString(first.version) ? first.version : "";
+      const version = isObject(first) ? (first as Record<string, unknown>)["version"] : undefined;
+
+      return isString(version) ? version : "";
     },
   };
 }

@@ -1,17 +1,10 @@
-import {
-  Column,
-  One,
-  createTableRelationsHelpers,
-  extractTablesRelationalConfig,
-  getTableUniqueName,
-  is,
-  normalizeRelation,
-} from "drizzle-orm";
-import type { AnyColumn, Table, TablesRelationalConfig } from "drizzle-orm";
+import { Column, SQL, Table, getTableUniqueName, is } from "drizzle-orm";
+import type { AnyColumn } from "drizzle-orm";
 import { MySqlTable, getTableConfig as mysqlTableConfig } from "drizzle-orm/mysql-core";
 import { PgTable, getTableConfig as pgTableConfig } from "drizzle-orm/pg-core";
 import { SQLiteTable, getTableConfig as sqliteTableConfig } from "drizzle-orm/sqlite-core";
 
+import { columnTable } from "./compat";
 import { isFunction } from "./narrowing";
 import type {
   DeclaredMapper,
@@ -25,8 +18,9 @@ import type {
 
 /**
  * Completing the relations a mapper declares from the schema: one-or-many, the target table and
- * the join columns come from drizzle's `relations()` or the tables' foreign keys, so the caller
- * names the relation and maps only what the schema cannot say (fields, order, visibility).
+ * the join columns come from drizzle's relations (`relations()` before 1.0, `defineRelations()`
+ * from 1.0) or the tables' foreign keys, so the caller names the relation and maps only what the
+ * schema cannot say (fields, order).
  */
 
 interface TableConstraints {
@@ -69,7 +63,7 @@ const tableConstraints = (table: Table): TableConstraints => {
 };
 
 const isUniqueColumn = (column: AnyColumn): boolean =>
-  tableConstraints(column.table).uniqueColumns.has(column);
+  tableConstraints(columnTable(column)).uniqueColumns.has(column);
 
 const tableLabel = (table: Table): string => getTableUniqueName(table);
 
@@ -78,6 +72,7 @@ interface Inferred {
   table: Table;
   sourceColumn: AnyColumn;
   targetColumn: AnyColumn;
+  subqueryFilter?: SQL;
 }
 
 const singleColumn = (columns: AnyColumn[], what: string): AnyColumn => {
@@ -101,21 +96,156 @@ const toOneType = (target: AnyColumn, what: string): "one" => {
   return "one";
 };
 
-type RelationalConfig = { tables: TablesRelationalConfig; tableNamesMap: Record<string, string> };
+interface LegacyRelationalConfig {
+  tables: Record<string, { relations: Record<string, { referencedTable: Table }> }>;
+  tableNamesMap: Record<string, string>;
+}
 
-const relationalConfigs = new WeakMap<Record<string, unknown>, RelationalConfig>();
+interface LegacyRelationsApi {
+  extractTablesRelationalConfig(schema: Record<string, unknown>, helpers: unknown): LegacyRelationalConfig;
+  createTableRelationsHelpers: unknown;
+  normalizeRelation(
+    tables: LegacyRelationalConfig["tables"],
+    tableNamesMap: Record<string, string>,
+    relation: object,
+  ): { fields: AnyColumn[]; references: AnyColumn[] };
+  One: abstract new (...args: never[]) => object;
+}
 
-const relationalConfig = (schema: Record<string, unknown>): RelationalConfig => {
-  const cached = relationalConfigs.get(schema);
-  if (cached) return cached;
+interface RelationsV2Api {
+  relationsFilterToSQL(table: Table, filter: unknown): { sql?: unknown[] };
+}
 
-  const config = extractTablesRelationalConfig<TablesRelationalConfig>(
-    schema,
-    createTableRelationsHelpers,
-  );
-  relationalConfigs.set(schema, config);
+const loadModule = <T>(id: string, member: string): T | undefined => {
+  try {
+    const loaded = require(id) as Record<string, unknown>;
+    return typeof loaded[member] === "function" ? (loaded as T) : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
-  return config;
+/** `relations()` lives in the root module before 1.0 and in `drizzle-orm/_relations` from it. */
+const legacyRelationsApi = (): LegacyRelationsApi | undefined =>
+  loadModule<LegacyRelationsApi>("drizzle-orm", "extractTablesRelationalConfig") ??
+  loadModule<LegacyRelationsApi>("drizzle-orm/_relations", "extractTablesRelationalConfig");
+
+interface RelationV2Column {
+  _: { column: unknown };
+}
+
+interface RelationV2 {
+  relationType: "one" | "many";
+  sourceColumns: RelationV2Column[];
+  targetColumns: RelationV2Column[];
+  targetTable: Table;
+  through?: unknown;
+  where?: unknown;
+  isFilterReversed?: boolean;
+}
+
+interface TableRelationsV2 {
+  table: Table;
+  relations: Record<string, RelationV2>;
+}
+
+const isTableRelationsV2 = (value: unknown): value is TableRelationsV2 =>
+  typeof value === "object" &&
+  value !== null &&
+  "table" in value &&
+  "relations" in value &&
+  is((value as { table: unknown }).table, Table);
+
+const relationsV2Of = (schema: Record<string, unknown>): TableRelationsV2[] =>
+  Object.values(schema).filter(isTableRelationsV2);
+
+const legacyConfigs = new WeakMap<Record<string, unknown>, LegacyRelationalConfig>();
+
+const inferFromLegacyRelations = (
+  api: LegacyRelationsApi,
+  source: Table,
+  name: string,
+  schema: Record<string, unknown>,
+  what: string,
+): Inferred => {
+  const config =
+    legacyConfigs.get(schema) ??
+    api.extractTablesRelationalConfig(schema, api.createTableRelationsHelpers);
+  legacyConfigs.set(schema, config);
+
+  const { tables, tableNamesMap } = config;
+  const tsName = Object.entries(schema).find(([, value]) => value === source)?.[0];
+  const relation = tsName === undefined ? undefined : tables[tsName]?.relations[name];
+
+  if (relation === undefined) {
+    throw new Error(`${what} is not defined by any relations() in the schema`);
+  }
+
+  const normalized = api.normalizeRelation(tables, tableNamesMap, relation);
+
+  return {
+    type: relation instanceof api.One ? "one" : "many",
+    table: relation.referencedTable,
+    sourceColumn: singleColumn(normalized.fields, what),
+    targetColumn: singleColumn(normalized.references, what),
+  };
+};
+
+const relationColumn = (column: RelationV2Column, what: string): AnyColumn => {
+  if (!is(column._.column, Column)) {
+    throw new Error(`${what} joins on an expression, not a column`);
+  }
+
+  return column._.column as AnyColumn;
+};
+
+const hasFilter = (where: unknown): boolean =>
+  typeof where === "object" && where !== null && Object.keys(where).length > 0;
+
+/**
+ * A `defineRelations()` relation. Its `where` is the application's own narrowing of the rows it
+ * reads, so it becomes the subquery filter; a filter on the source side, or a many-to-many
+ * `through` a junction table, cannot be rendered as one hop and is refused.
+ */
+const inferFromRelationsV2 = (
+  tables: TableRelationsV2[],
+  source: Table,
+  name: string,
+  what: string,
+): Inferred => {
+  const relation = tables.find((entry) => entry.table === source)?.relations[name];
+
+  if (relation === undefined) {
+    throw new Error(`${what} is not defined by defineRelations()`);
+  }
+
+  if (relation.through !== undefined) {
+    throw new Error(
+      `${what} runs through a junction table: map it as two relations, the junction table and then the target`,
+    );
+  }
+
+  const inferred: Inferred = {
+    type: relation.relationType,
+    table: relation.targetTable,
+    sourceColumn: singleColumn(relation.sourceColumns.map((c) => relationColumn(c, what)), what),
+    targetColumn: singleColumn(relation.targetColumns.map((c) => relationColumn(c, what)), what),
+  };
+
+  if (!hasFilter(relation.where)) return inferred;
+
+  if (relation.isFilterReversed) {
+    throw new Error(`${what} is filtered on its source table, which a subquery over its target cannot apply`);
+  }
+
+  const api = loadModule<RelationsV2Api>("drizzle-orm", "relationsFilterToSQL");
+  const chunks = api?.relationsFilterToSQL(relation.targetTable, relation.where).sql;
+
+  if (chunks === undefined) {
+    throw new Error(`${what} declares a filter this drizzle version cannot render`);
+  }
+
+  return { ...inferred, subqueryFilter: new SQL(chunks as ConstructorParameters<typeof SQL>[0]) };
 };
 
 const inferFromRelations = (
@@ -126,27 +256,21 @@ const inferFromRelations = (
   const what = `Relation '${name}' of ${tableLabel(source)}`;
 
   if (schema === undefined) {
-    throw new Error(`${what} is declared by name, which needs the drizzle \`schema\` option`);
+    throw new Error(
+      `${what} is declared by name, which needs the \`schema\` option: the object holding your relations()` +
+        " or the result of defineRelations()",
+    );
   }
 
-  const { tables, tableNamesMap } = relationalConfig(schema);
-  const tsName = tableNamesMap[getTableUniqueName(source)];
-  const relation = tsName === undefined ? undefined : tables[tsName]?.relations[name];
+  const tablesV2 = relationsV2Of(schema);
+  if (tablesV2.length > 0) return inferFromRelationsV2(tablesV2, source, name, what);
 
-  if (relation === undefined) {
-    throw new Error(`${what} is not defined by any relations() in the schema`);
+  const legacy = legacyRelationsApi();
+  if (legacy === undefined) {
+    throw new Error(`${what} is declared by name, but \`schema\` holds no relations`);
   }
 
-  const normalized = normalizeRelation(tables, tableNamesMap, relation);
-  const sourceColumn = singleColumn(normalized.fields, what);
-  const targetColumn = singleColumn(normalized.references, what);
-
-  return {
-    type: is(relation, One) ? "one" : "many",
-    table: relation.referencedTable,
-    sourceColumn,
-    targetColumn,
-  };
+  return inferFromLegacyRelations(legacy, source, name, schema, what);
 };
 
 const inferFromForeignKeys = (
@@ -213,7 +337,7 @@ const infer = (
     return { type, table, sourceColumn, targetColumn };
   }
 
-  const from = declared.sourceColumn?.table ?? source;
+  const from = (declared.sourceColumn && columnTable(declared.sourceColumn)) ?? source;
 
   if (from === undefined) {
     throw new Error(
@@ -249,6 +373,7 @@ const infer = (
     table: inferred.table,
     sourceColumn: declared.sourceColumn ?? inferred.sourceColumn,
     targetColumn,
+    ...(inferred.subqueryFilter && { subqueryFilter: inferred.subqueryFilter }),
   };
 };
 
@@ -277,6 +402,7 @@ export const inferRelations = (
     const { name: _name, field, fields, ...rest } = declared;
     const inferred = infer(declared, source, schema);
     const relation: RelationMapping = { ...rest, ...inferred };
+    if (rest.subqueryFilter !== undefined) relation.subqueryFilter = rest.subqueryFilter;
     bySource.set(source, relation);
 
     if (field !== undefined) relation.field = resolveEntry(field, inferred.table);

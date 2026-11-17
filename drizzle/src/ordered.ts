@@ -3,6 +3,7 @@ import { aliasedTableColumn, sql } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { Param } from "drizzle-orm/sql";
 
+import { dataTypeOf } from "./compat";
 import { UnsupportedQueryPlanError } from "./errors";
 import {
   buildColumnExpression,
@@ -135,9 +136,9 @@ const bindElement = (value: Scalar, element: Element): Param => new Param(value,
 /** A list of scalars of the element column's type; anything else has no row to equal. */
 const typedList = (values: readonly Value[], element: Element, context: string): Scalar[] =>
   values.map((value) => {
-    if (!isScalar(value) || typeofValue(value) !== element.column.dataType) {
+    if (!isScalar(value) || typeofValue(value) !== dataTypeOf(element.column)) {
       throw new UnsupportedQueryPlanError(
-        `${context} supports only ${element.column.dataType} literals over '${element.column.name}'`,
+        `${context} supports only ${dataTypeOf(element.column)} literals over '${element.column.name}'`,
       );
     }
 
@@ -235,7 +236,7 @@ export const buildPositionedComparison = (
   const present = sql`exists (select 1 from ${positioned.source} where ${atPosition})`;
   let filter: SQL;
 
-  if (typeofValue(other.value) !== element.column.dataType) {
+  if (typeofValue(other.value) !== dataTypeOf(element.column)) {
     if (op !== "eq" && op !== "ne") return UNKNOWN_CONDITION;
     const guard = element.explicitNull ? sql`not ${present}` : sql`${value} is null`;
     filter = sql`(case when ${guard} then null else ${constantCondition(op === "ne")} end)`;
@@ -321,7 +322,7 @@ const orderedProjection = (
     const removesNull = removed.value.includes(null);
 
     const kept = removed.value.filter(
-      (value): value is Scalar => isScalar(value) && typeof value === element.column.dataType,
+      (value): value is Scalar => isScalar(value) && typeof value === dataTypeOf(element.column),
     );
 
     const notRemoved =

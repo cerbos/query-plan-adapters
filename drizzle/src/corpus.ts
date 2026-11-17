@@ -13,7 +13,7 @@ import { HTTP } from "@cerbos/http";
 import { Server, ServerCredentials } from "@grpc/grpc-js";
 import type { sendUnaryData, ServerUnaryCall } from "@grpc/grpc-js";
 import { afterAll } from "@jest/globals";
-import { relations } from "drizzle-orm";
+import * as drizzleOrm from "drizzle-orm";
 import type { AnyColumn, Table } from "drizzle-orm";
 import {
   boolean,
@@ -447,16 +447,68 @@ export interface AdversarialSchema {
   };
 }
 
+type RelationHelpers = {
+  one: (table: Table, config?: { fields: AnyColumn[]; references: AnyColumn[] }) => unknown;
+  many: (table: Table) => unknown;
+};
+
+type LegacyRelations = (table: Table, config: (helpers: RelationHelpers) => Record<string, unknown>) => unknown;
+
+type RelationsV2Builder = Record<
+  string,
+  Record<string, (config: { from: unknown; to: unknown }) => unknown> & Record<string, unknown>
+> & {
+  one: Record<string, (config: { from: unknown; to: unknown }) => unknown>;
+  many: Record<string, (config: { from: unknown; to: unknown }) => unknown>;
+};
+
+type DefineRelations = (
+  schema: Record<string, Table>,
+  config: (r: RelationsV2Builder) => Record<string, Record<string, unknown>>,
+) => Record<string, unknown>;
+
+const orm = drizzleOrm as unknown as Record<string, unknown>;
+
+/** `relations()` is in the root module before drizzle 1.0 and in `drizzle-orm/_relations` from it. */
+const legacyRelations = (): LegacyRelations =>
+  (orm["relations"] ?? (require("drizzle-orm/_relations") as Record<string, unknown>)["relations"]) as LegacyRelations;
+
 /**
- * The tables plus the `relations()` an application would pass to `drizzle(client, { schema })`.
- * The mapper names some relations and leaves others to the tables' foreign keys, so the corpus
- * proves both ways the adapter infers a relation's cardinality and join.
+ * The relations an application on this drizzle would declare: `defineRelations()` on 1.0 (unless
+ * QPA_DRIZZLE_RELATIONS=legacy), `relations()` before it. `relationsSchema` is what the
+ * application passes as the adapter's `schema` option. The mapper names some relations and leaves
+ * others to the tables' foreign keys, so the corpus proves both ways a relation is inferred.
  */
 function withRelations<T extends AdversarialSchema>(tables: T) {
   const { resources, parents, inners, tags, categories, subCategories, labels } = tables;
+  const defineRelations = orm["defineRelations"] as DefineRelations | undefined;
 
-  return {
-    ...tables,
+  if (defineRelations !== undefined && process.env["QPA_DRIZZLE_RELATIONS"] !== "legacy") {
+    const relationsSchema = defineRelations(
+      { resources, parents, inners, tags, categories, subCategories, labels },
+      (r) => ({
+        resources: {
+          parent: r.one["parents"]!({ from: r["resources"]!["id"], to: r["parents"]!["resourceId"] }),
+          tags: r.many["tags"]!({ from: r["resources"]!["id"], to: r["tags"]!["resourceId"] }),
+          categories: r.many["categories"]!({ from: r["resources"]!["id"], to: r["categories"]!["resourceId"] }),
+        },
+        parents: {
+          inner: r.one["inners"]!({ from: r["parents"]!["id"], to: r["inners"]!["parentId"] }),
+        },
+        categories: {
+          subCategories: r.many["subCategories"]!({ from: r["categories"]!["id"], to: r["subCategories"]!["categoryId"] }),
+        },
+        subCategories: {
+          labels: r.many["labels"]!({ from: r["subCategories"]!["id"], to: r["labels"]!["subCategoryId"] }),
+        },
+      }),
+    );
+
+    return { ...tables, relationsSchema };
+  }
+
+  const relations = legacyRelations();
+  const legacy = {
     resourcesRelations: relations(resources, ({ one, many }) => ({
       parent: one(parents),
       tags: many(tags),
@@ -484,6 +536,9 @@ function withRelations<T extends AdversarialSchema>(tables: T) {
       subCategory: one(subCategories, { fields: [labels.subCategoryId], references: [subCategories.id] }),
     })),
   };
+  const relationsSchema = { ...tables, ...legacy } as unknown as Record<string, unknown>;
+
+  return { ...tables, relationsSchema };
 }
 
 /** The SQLite tables the `sqlite` store seeds. */

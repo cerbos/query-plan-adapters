@@ -2,6 +2,7 @@ import type { PlanExpressionOperand } from "@cerbos/core";
 import { aliasedTableColumn } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 
+import { columnTable, dataTypeOf } from "./compat";
 import { exactString } from "./collation";
 import { UnsupportedQueryPlanError } from "./errors";
 import { isNameOperand } from "./operands";
@@ -328,7 +329,7 @@ const aliasElementMapping = (
   if (resolved.relations.length !== chainLength) refuse();
 
   const rebind = (column: AnyColumn): AnyColumn =>
-    column.table === primaryRelation.table
+    columnTable(column) === primaryRelation.table
       ? aliasedTableColumn(column, alias)
       : refuse();
 
@@ -520,5 +521,5 @@ export const isScalarColumnReference = (reference: string, mapper: Mapper): bool
   const { relations, mapping } = resolveFieldReference(reference, mapper);
   const column = isMappingConfig(mapping) ? mapping.column : isColumn(mapping) ? mapping : undefined;
 
-  return relations.length === 0 && ["string", "number", "boolean"].includes(column?.dataType ?? "");
+  return relations.length === 0 && ["string", "number", "boolean"].includes(dataTypeOf(column) ?? "");
 };

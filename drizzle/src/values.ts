@@ -5,6 +5,7 @@ import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { PgColumn } from "drizzle-orm/pg-core";
 import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
+import { dataTypeOf } from "./compat";
 import { UnsupportedQueryPlanError } from "./errors";
 import { ARITHMETIC_OPERATORS, resolveConstantNumber } from "./arithmetic";
 import { buildExceptCount, buildFilteredCount } from "./collections";
@@ -146,7 +147,7 @@ const booleanStringColumn = (
 
   const column = columnForOperand(inner, mapper);
 
-  return column?.dataType === "boolean" ? column : undefined;
+  return dataTypeOf(column) === "boolean" ? column : undefined;
 };
 
 /**
@@ -322,9 +323,9 @@ export const buildCheckedIntComparison = (
   const expr = () => buildValueExpression(inner, mapper, options);
 
   const converted =
-    column.dataType === "number"
+    dataTypeOf(column) === "number"
       ? buildDoubleToInt(column, expr())
-      : column.dataType === "string"
+      : dataTypeOf(column) === "string"
         ? buildStringToInt(column, expr())
         : undefined;
 
@@ -531,7 +532,7 @@ const isStringConcatenation = (
       return isStringConcatenation(operand.operands, mapper);
     }
 
-    return columnForOperand(operand, mapper)?.dataType === "string";
+    return dataTypeOf(columnForOperand(operand, mapper)) === "string";
   });
 
 type ConcatenationDialect = "pipes" | "concat";
@@ -623,7 +624,7 @@ const operandKind = (
   }
 
   if (!isNameOperand(operand)) return undefined;
-  const dataType = columnForOperand(operand, mapper)?.dataType;
+  const dataType = dataTypeOf(columnForOperand(operand, mapper));
 
   return dataType === "bigint" ? "number" : dataType;
 };
@@ -744,7 +745,7 @@ const buildSizeExpression = (
     if (primary.type === "one") {
       const scalarColumn = columnForOperand(operand, mapper);
 
-      if (scalarColumn && scalarColumn.dataType !== "string") return sql`null`;
+      if (scalarColumn && dataTypeOf(scalarColumn) !== "string") return sql`null`;
 
       const length = characterLength([scalarColumn])(
         buildColumnExpression(resolved.mapping, operand.name),
@@ -775,7 +776,7 @@ const buildSizeExpression = (
   // A non-string column has no CEL size(): the comparison is a no-overload error, so UNKNOWN.
   const scalarColumn = columnForOperand(operand, mapper);
 
-  if (scalarColumn && scalarColumn.dataType !== "string") return sql`null`;
+  if (scalarColumn && dataTypeOf(scalarColumn) !== "string") return sql`null`;
 
   return characterLength([scalarColumn])(
     buildColumnExpression(resolved.mapping, operand.name),
@@ -891,7 +892,7 @@ export const buildValueExpression = (
     if (
       operands.length === 1 &&
       inner !== undefined &&
-      columnForOperand(inner, mapper)?.dataType === "string"
+      dataTypeOf(columnForOperand(inner, mapper)) === "string"
     ) {
       return buildValueExpression(inner, mapper, options);
     }
@@ -957,7 +958,7 @@ export const buildValueExpression = (
 
       const receiverColumn = columnForOperand(receiver, mapper);
 
-      if (receiverColumn !== undefined && receiverColumn.dataType !== "string") {
+      if (receiverColumn !== undefined && dataTypeOf(receiverColumn) !== "string") {
         throw new UnsupportedQueryPlanError(
           "Cannot translate upperAscii() over a column that is not a string column",
         );

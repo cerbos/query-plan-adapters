@@ -1,5 +1,6 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, not, or, sql } from "drizzle-orm";
+import { and, or, sql } from "drizzle-orm";
+import { not } from "./compat";
 import type { SQL } from "drizzle-orm";
 
 import { UnsupportedQueryPlanError } from "./errors";

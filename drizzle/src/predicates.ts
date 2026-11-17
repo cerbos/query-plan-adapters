@@ -1,5 +1,6 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, is, isNull, not, or, sql } from "drizzle-orm";
+import { and, is, isNull, or, sql } from "drizzle-orm";
+import { dataTypeOf, not } from "./compat";
 import type { AnyColumn, SQL, SQLWrapper } from "drizzle-orm";
 import { MySqlColumn } from "drizzle-orm/mysql-core";
 import { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -455,7 +456,7 @@ const buildColumnMembership = (
   // column's scalar type cannot equal is dropped before it reaches the store.
   const nonNullValues = values.filter(
     (candidate) =>
-      candidate !== null && !isCrossTypeScalar(column.dataType, candidate),
+      candidate !== null && !isCrossTypeScalar(dataTypeOf(column), candidate),
   );
 
   if (nonNullValues.length === 0) {
