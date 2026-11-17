@@ -398,70 +398,71 @@ export interface ConformanceMapper {
   [reference: string]: MapperConfig;
 }
 
-export const MAPPER: ConformanceMapper = {
-  // The primary key, reached as `request.resource.id` rather than through `attr` (the
-  // `identifier/*` cases). An adapter that resolves references by stripping a `request.resource.attr.` prefix
-  // never sees this name.
-  //
-  // It maps to `resourceId`, the string field the harness carries the corpus id in, NOT to an
-  // ObjectId. That is a deliberate limit on what the corpus can prove here: the ObjectId coercion
-  // is a caller-supplied `valueParser` on the mapper entry, and three `identifier/*` cases
-  // compare the key against a STRING column (field-to-field, its negation, concatenation), so a single key
-  // mapping cannot be an ObjectId and satisfy them. The coercion is pinned where it belongs
-  // instead — against the `identifier/equals/literal` golden plan in `translator.test.ts`.
+// What only the application knows, which MAPPER and SCHEMA_MAPPER share.
+//
+// The primary key, reached as `request.resource.id` rather than through `attr` (the
+// `identifier/*` cases). An adapter that resolves references by stripping a `request.resource.attr.` prefix
+// never sees this name.
+//
+// It maps to `resourceId`, the string field the harness carries the corpus id in, NOT to an
+// ObjectId. That is a deliberate limit on what the corpus can prove here: the ObjectId coercion
+// is a caller-supplied `valueParser` on the mapper entry, and three `identifier/*` cases
+// compare the key against a STRING column (field-to-field, its negation, concatenation), so a single key
+// mapping cannot be an ObjectId and satisfy them. The coercion is pinned where it belongs
+// instead — against the `identifier/equals/literal` golden plan in `translator.test.ts`.
+//
+// The `nullable` columns are those seeds j1, j2 and j3 store a null in, which the corpus sends as a
+// missing attribute (conformance/README.md, "The dataset").
+//
+// `coOwner` aliases the `scope` field under the explicit-null convention: the oracle sends a
+// real null attribute for it rather than omitting it. Mongoose stores an explicit null, and
+// its query semantics already treat null as a value, so no `nullable` flag applies here — the
+// flag means the opposite (a stored null IS a missing attribute).
+//
+// obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
+// opposite: a real two-level to-one chain. The two are kept side by side on purpose.
+const APPLICATION_ATTRIBUTES = {
   "request.resource.id": { field: "resourceId" },
-  // The three scalar columns declare their schema type, as the README tells a caller to: Mongoose
-  // casts a query literal to it (`"true"` to `true`, `"5"` to `5`, `0` to `"0"`), and the
-  // declaration is what lets the adapter answer a literal of another type as CEL does instead
-  // (the `type-mismatch/*` scalar cases).
-  //
-  // All three are `nullable` as well: seeds j1, j2 and j3 store a null in one of them, which the
-  // corpus sends as a missing attribute (conformance/README.md, "The dataset").
-  "request.resource.attr.aBool": {
-    field: "aBool",
-    valueType: "boolean",
-    nullable: true,
-  },
-  "request.resource.attr.aString": {
-    field: "aString",
-    valueType: "string",
-    nullable: true,
-  },
-  "request.resource.attr.aNumber": {
-    field: "aNumber",
-    valueType: "number",
-    nullable: true,
-  },
-  "request.resource.attr.aDouble": {
-    field: "aDouble",
-    valueType: "number",
-    nullable: true,
-  },
-  "request.resource.attr.aOptionalString": {
-    field: "aOptionalString",
-    nullable: true,
-  },
-  "request.resource.attr.createdBy": { field: "createdBy" },
-  "request.resource.attr.scope": { field: "scope", nullable: true },
-  "request.resource.attr.createdAt": {
-    field: "createdAt",
-    valueType: "dateTime",
-    nullable: true,
-  },
-  "request.resource.attr.updatedAt": {
-    field: "updatedAt",
-    valueType: "dateTime",
-    nullable: true,
-  },
+  "request.resource.attr.aBool": { nullable: true },
+  "request.resource.attr.aString": { nullable: true },
+  "request.resource.attr.aNumber": { nullable: true },
+  "request.resource.attr.aDouble": { nullable: true },
+  "request.resource.attr.aOptionalString": { nullable: true },
+  "request.resource.attr.scope": { nullable: true },
+  "request.resource.attr.createdAt": { nullable: true },
+  "request.resource.attr.updatedAt": { nullable: true },
   "request.resource.attr.owner": { field: "aOptionalString" },
-  // `coOwner` aliases the `scope` field under the explicit-null convention: the oracle sends a
-  // real null attribute for it rather than omitting it. Mongoose stores an explicit null, and
-  // its query semantics already treat null as a value, so no `nullable` flag applies here — the
-  // flag means the opposite (a stored null IS a missing attribute).
   "request.resource.attr.coOwner": { field: "scope" },
-  // obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
-  // opposite: a real two-level to-one chain. The two are kept side by side on purpose.
   "request.resource.attr.obj.inner": { field: "aString", nullable: true },
+} satisfies ConformanceMapper;
+
+// What the schema says about each shared attribute, spelled out for MAPPER. The scalar columns
+// declare their schema type, as the README tells a caller to: Mongoose casts a query literal to it
+// (`"true"` to `true`, `"5"` to `5`, `0` to `"0"`), and the declaration is what lets the adapter
+// answer a literal of another type as CEL does instead (the `type-mismatch/*` scalar cases).
+const DECLARED_COLUMNS: Record<keyof typeof APPLICATION_ATTRIBUTES, MapperConfig> = {
+  "request.resource.id": {},
+  "request.resource.attr.aBool": { field: "aBool", valueType: "boolean" },
+  "request.resource.attr.aString": { field: "aString", valueType: "string" },
+  "request.resource.attr.aNumber": { field: "aNumber", valueType: "number" },
+  "request.resource.attr.aDouble": { field: "aDouble", valueType: "number" },
+  "request.resource.attr.aOptionalString": { field: "aOptionalString" },
+  "request.resource.attr.scope": { field: "scope" },
+  "request.resource.attr.createdAt": { field: "createdAt", valueType: "dateTime" },
+  "request.resource.attr.updatedAt": { field: "updatedAt", valueType: "dateTime" },
+  "request.resource.attr.owner": {},
+  "request.resource.attr.coOwner": {},
+  "request.resource.attr.obj.inner": {},
+};
+
+export const MAPPER: ConformanceMapper = {
+  ...Object.fromEntries(
+    Object.entries(APPLICATION_ATTRIBUTES).map(([key, config]) => [
+      key,
+      { ...DECLARED_COLUMNS[key as keyof typeof APPLICATION_ATTRIBUTES], ...config },
+    ]),
+  ),
+  "request.resource.attr.createdBy": { field: "createdBy" },
   // The corpus's one REAL to-one chain (the `relation/*` cases), stored as an embedded subdocument
   // per level rather than a joined collection. `type: "one"` flattens the path to `parent.aBool`
   // AND declares the level as absent-able, which is what makes the adapter require it outside
@@ -567,13 +568,6 @@ export const MAPPER: ConformanceMapper = {
   },
 };
 
-/**
- * `MAPPER` as a caller who passes the Model's schema writes it: only what the schema cannot say.
- * That is a resource attribute stored under another name, a stored null that means a missing
- * attribute, an element field a relation is read through, and a to-one on the `check()` side that
- * is stored as an array. Every relation type, element field and scalar `valueType` is read from
- * the schema, and the harness replays every case through both mappers.
- */
 const nullableLevel = {
   aBool: { nullable: true },
   aString: { nullable: true },
@@ -589,19 +583,15 @@ const schemaSubCategories: MapperConfig = {
   },
 };
 
+/**
+ * `MAPPER` as a caller who passes the Model's schema writes it: only what the schema cannot say.
+ * That is a resource attribute stored under another name, a stored null that means a missing
+ * attribute, an element field a relation is read through, and a to-one on the `check()` side that
+ * is stored as an array. Every relation type, element field and scalar `valueType` is read from
+ * the schema, and the harness replays every case through both mappers.
+ */
 export const SCHEMA_MAPPER: ConformanceMapper = {
-  "request.resource.id": { field: "resourceId" },
-  "request.resource.attr.aBool": { nullable: true },
-  "request.resource.attr.aString": { nullable: true },
-  "request.resource.attr.aNumber": { nullable: true },
-  "request.resource.attr.aDouble": { nullable: true },
-  "request.resource.attr.aOptionalString": { nullable: true },
-  "request.resource.attr.scope": { nullable: true },
-  "request.resource.attr.createdAt": { nullable: true },
-  "request.resource.attr.updatedAt": { nullable: true },
-  "request.resource.attr.owner": { field: "aOptionalString" },
-  "request.resource.attr.coOwner": { field: "scope" },
-  "request.resource.attr.obj.inner": { field: "aString", nullable: true },
+  ...APPLICATION_ATTRIBUTES,
   "request.resource.attr.parent": { relation: { name: "parent", fields: nullableLevel } },
   "request.resource.attr.parent.inner": { relation: { name: "parent.inner", fields: nullableLevel } },
   "request.resource.attr.tags": { relation: { name: "tags", fields: { name: { nullable: true } } } },
