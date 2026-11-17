@@ -123,7 +123,7 @@ function completeFields(
 function withInferred(
   declared: ElementMappings,
   infer: (key: string) => MapperConfig | undefined
-): ElementMappings {
+) {
   const inferred = new Map<string, MapperConfig | undefined>();
 
   const lookup = (key: string): MapperConfig | undefined => {

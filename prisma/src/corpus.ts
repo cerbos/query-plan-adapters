@@ -393,19 +393,33 @@ interface ConformanceMapper {
 // opposite: a real two-level join. The two are kept side by side on purpose.
 const OMITTED = { nullAttributeRepresentation: "omitted" } as const;
 
-const APPLICATION_ATTRIBUTES = {
-  "request.resource.attr.aBool": OMITTED,
-  "request.resource.attr.aString": OMITTED,
-  "request.resource.attr.aNumber": OMITTED,
-  "request.resource.attr.aDouble": OMITTED,
-  "request.resource.attr.aOptionalString": OMITTED,
-  "request.resource.attr.scope": OMITTED,
-  "request.resource.attr.createdAt": OMITTED,
-  "request.resource.attr.updatedAt": OMITTED,
-  "request.resource.attr.owner": { field: "aOptionalString", nullAttributeRepresentation: "explicit" },
-  "request.resource.attr.coOwner": { field: "scope", nullAttributeRepresentation: "explicit" },
-  "request.resource.attr.obj.inner": { field: "aString", ...OMITTED },
-} satisfies ConformanceMapper;
+// Each shared attribute: what the application knows, then what the schema says about its column,
+// which only DECLARED_MAPPER spells out.
+const SHARED_ATTRIBUTES: ReadonlyArray<readonly [string, MapperConfig, MapperConfig]> = [
+  ["request.resource.attr.aBool", OMITTED, { field: "aBool", valueType: "boolean", nullable: true }],
+  ["request.resource.attr.aString", OMITTED, { field: "aString", valueType: "string", nullable: true }],
+  ["request.resource.attr.aNumber", OMITTED, { field: "aNumber", valueType: "number", nullable: true }],
+  ["request.resource.attr.aDouble", OMITTED, { field: "aDouble", valueType: "number" }],
+  [
+    "request.resource.attr.aOptionalString",
+    OMITTED,
+    { field: "aOptionalString", valueType: "string", nullable: true },
+  ],
+  ["request.resource.attr.scope", OMITTED, { field: "scope", valueType: "string", nullable: true }],
+  ["request.resource.attr.createdAt", OMITTED, { field: "createdAt", valueType: "dateTime" }],
+  ["request.resource.attr.updatedAt", OMITTED, { field: "updatedAt", valueType: "dateTime" }],
+  [
+    "request.resource.attr.owner",
+    { field: "aOptionalString", nullAttributeRepresentation: "explicit" },
+    { valueType: "string", nullable: true },
+  ],
+  [
+    "request.resource.attr.coOwner",
+    { field: "scope", nullAttributeRepresentation: "explicit" },
+    { valueType: "string", nullable: true },
+  ],
+  ["request.resource.attr.obj.inner", { field: "aString", ...OMITTED }, { valueType: "string", nullable: true }],
+];
 
 // Everything the Prisma schema already says is left to the `datamodel` option: an attribute named
 // like its column (`request.resource.id` is the `@id` field, so `identifier/*` needs nothing),
@@ -413,7 +427,7 @@ const APPLICATION_ATTRIBUTES = {
 // and each column's type and nullability. What is left is what only the application knows: the
 // NULL convention, aliases, projections, a list's element type and a to-one relation's keys.
 export const INFERRED_MAPPER: ConformanceMapper = {
-  ...APPLICATION_ATTRIBUTES,
+  ...Object.fromEntries(SHARED_ATTRIBUTES.map(([reference, application]) => [reference, application])),
   // The corpus's one REAL to-one chain (the `relation/*` cases), `parent` and `parent.inner`, both
   // read from the schema. A column reached through a relation takes the relation entry's null
   // convention, so the one declaration here covers every `parent.*` and `parent.inner.*` field.
@@ -456,25 +470,6 @@ export const INFERRED_MAPPER: ConformanceMapper = {
   },
 };
 
-// What the schema says about each shared attribute's column, spelled out for DECLARED_MAPPER.
-const COLUMNS: Record<keyof typeof APPLICATION_ATTRIBUTES, MapperConfig> = {
-  "request.resource.attr.aBool": { field: "aBool", valueType: "boolean", nullable: true },
-  "request.resource.attr.aString": { field: "aString", valueType: "string", nullable: true },
-  "request.resource.attr.aNumber": { field: "aNumber", valueType: "number", nullable: true },
-  "request.resource.attr.aDouble": { field: "aDouble", valueType: "number" },
-  "request.resource.attr.aOptionalString": {
-    field: "aOptionalString",
-    valueType: "string",
-    nullable: true,
-  },
-  "request.resource.attr.scope": { field: "scope", valueType: "string", nullable: true },
-  "request.resource.attr.createdAt": { field: "createdAt", valueType: "dateTime" },
-  "request.resource.attr.updatedAt": { field: "updatedAt", valueType: "dateTime" },
-  "request.resource.attr.owner": { valueType: "string", nullable: true },
-  "request.resource.attr.coOwner": { valueType: "string", nullable: true },
-  "request.resource.attr.obj.inner": { valueType: "string", nullable: true },
-};
-
 // Every mapping spelled out, the way a caller without the `datamodel` option writes it. The harness
 // replays the corpus under both mappers, so the two must agree on every case.
 export const DECLARED_MAPPER: ConformanceMapper = {
@@ -483,10 +478,7 @@ export const DECLARED_MAPPER: ConformanceMapper = {
   // references by stripping a `request.resource.attr.` prefix never sees this name.
   "request.resource.id": { field: "id", valueType: "string" },
   ...Object.fromEntries(
-    Object.entries(APPLICATION_ATTRIBUTES).map(([key, config]) => [
-      key,
-      { ...COLUMNS[key as keyof typeof APPLICATION_ATTRIBUTES], ...config },
-    ])
+    SHARED_ATTRIBUTES.map(([reference, application, column]) => [reference, { ...column, ...application }])
   ),
   "request.resource.attr.createdBy": { field: "createdBy", valueType: "string" },
   // The corpus's one REAL to-one chain (the `relation/*` cases). `type: "one"` is what makes the
