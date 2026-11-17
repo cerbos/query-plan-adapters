@@ -237,8 +237,18 @@ export function resolveFieldReference(
   const relations = [toRelationConfig(activeConfig.relation)];
 
   // Walk the remaining segments through nested relation mappings; the first segment that is
-  // not a relation names the leaf column.
+  // not a relation names the leaf column. A segment past that one would be read from the wrong
+  // row: `parent.inner.x` with `inner` unmapped is not `parent.x`.
   let leafConfig: MapperConfig | undefined;
+  const rejectUnmappedHop = (unresolved: string[]) => {
+    if (unresolved.length > 1) {
+      throw new UnsupportedQueryPlanError(
+        `"${reference}" reads "${unresolved.join(".")}" beneath a relation, but "${unresolved[0]}" is not mapped as a relation; map it under \`relation.fields\``
+      );
+    }
+  };
+
+  if (!fields) rejectUnmappedHop(remainingParts);
 
   if (fields) {
     let currentMapper: Record<string, MapperConfig> = fields;
@@ -254,6 +264,7 @@ export function resolveFieldReference(
       const nextConfig: MapperConfig | undefined = currentMapper[currentPart];
 
       if (!nextConfig?.relation) {
+        rejectUnmappedHop(currentParts);
         const leafPart = currentParts[currentParts.length - 1];
 
         if (leafPart) {
