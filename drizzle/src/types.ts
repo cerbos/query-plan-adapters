@@ -116,7 +116,17 @@ export type NullAttributeRepresentation = "explicit" | "omitted";
 
 export interface QueryPlanToDrizzleArgs {
   queryPlan: PlanResourcesResponse;
-  mapper: Mapper;
+  mapper: DeclaredMapper;
+  /**
+   * The table the plan's resource lives in: the source of every top-level relation that leaves
+   * `sourceColumn` undeclared.
+   */
+  table?: Table;
+  /**
+   * The schema object passed to `drizzle(client, { schema })`. A relation declared by `name` is
+   * looked up in the `relations()` it contains.
+   */
+  schema?: Record<string, unknown>;
   /**
    * Which NULL-column representation the caller uses when building `check()` attributes.
    * Defaults to `"omitted"`, which never selects NULL rows for an undeclared column.
@@ -153,7 +163,7 @@ export interface RelationMapping {
    * flag, a tenant column, a subtype discriminator, whatever narrows the rows that became the
    * resource attributes.
    *
-   * The adapter reads `table` directly. Drizzle has no association metadata to consult, so
+   * The adapter reads `table` directly. Drizzle's relations() carry no filter to consult, so
    * nothing that narrows the application's own read reaches the generated `EXISTS`, and any
    * such narrowing makes the subquery see rows the application never serialised — a filter that
    * returns rows the PDP denies. Declaring the predicate here restores the equality; the adapter
@@ -192,3 +202,32 @@ export type BuildFilterOptions = {
    */
   openTables?: readonly string[];
 };
+
+/**
+ * A relation as the caller declares it. Any of `type`, `table`, `sourceColumn` and
+ * `targetColumn` left out is inferred: from the `relations()` entry called `name` on the source
+ * table, or else from the single foreign key between the source table and `table`. A declared
+ * value always wins over an inferred one.
+ */
+export type DeclaredRelation = Omit<
+  RelationMapping,
+  "type" | "table" | "sourceColumn" | "targetColumn" | "field" | "fields"
+> & {
+  name?: string;
+  type?: "one" | "many";
+  table?: Table;
+  sourceColumn?: AnyColumn;
+  targetColumn?: AnyColumn;
+  field?: DeclaredMapperEntry;
+  fields?: { [key: string]: DeclaredMapperEntry };
+};
+
+export type DeclaredMappingConfig = Omit<MappingConfig, "relation"> & {
+  relation?: DeclaredRelation;
+};
+
+export type DeclaredMapperEntry = MapperEntry | DeclaredMappingConfig;
+
+export type DeclaredMapper =
+  | { [key: string]: DeclaredMapperEntry | undefined }
+  | ((reference: string) => DeclaredMapperEntry | undefined);

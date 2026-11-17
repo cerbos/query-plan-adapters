@@ -51,10 +51,23 @@ type Store = "sqlite" | "postgresql" | "mysql";
 
 const STORES: Store[] = ["sqlite", "postgresql", "mysql"];
 
+const SCHEMAS = {
+  sqlite: sqliteSchema(),
+  postgresql: postgresSchema(),
+  mysql: mysqlSchema(),
+};
+
 const MAPPERS: Record<Store, Record<string, MapperEntry>> = {
-  sqlite: buildMapper(sqliteSchema()),
-  postgresql: buildMapper(postgresSchema()),
-  mysql: buildMapper(mysqlSchema()),
+  sqlite: buildMapper(SCHEMAS.sqlite),
+  postgresql: buildMapper(SCHEMAS.postgresql),
+  mysql: buildMapper(SCHEMAS.mysql),
+};
+
+/** The resource table and `relations()` the mapper's undeclared relation halves are inferred from. */
+const ROOTS = {
+  sqlite: { table: SCHEMAS.sqlite.resources, schema: SCHEMAS.sqlite },
+  postgresql: { table: SCHEMAS.postgresql.resources, schema: SCHEMAS.postgresql },
+  mysql: { table: SCHEMAS.mysql.resources, schema: SCHEMAS.mysql },
 };
 
 const DIALECTS = {
@@ -90,6 +103,7 @@ async function translate(
   } = {},
 ): Promise<QueryPlanToDrizzleResult> {
   return queryPlanToDrizzle({
+    ...ROOTS[store],
     queryPlan: await planOf(golden(id), options.now),
     mapper: options.mapper ?? MAPPERS[store],
     // Varied explicitly below; the adapter's own default is pinned under "nullAttributeRepresentation".
@@ -291,6 +305,7 @@ describe("nullAttributeRepresentation", () => {
   test("unset: the default is omitted", async () => {
     // The default is the convention whose wrong guess fails closed (ADR 0011).
     const result = queryPlanToDrizzle({
+      ...ROOTS.postgresql,
       queryPlan: await planOf(golden(NULL_EQ_MISSING)),
       mapper: UNDECLARED,
     });
@@ -357,6 +372,7 @@ describe("nullAttributeRepresentation", () => {
 
     const mapper: Mapper = (reference) => {
       queryPlanToDrizzle({
+        ...ROOTS.postgresql,
         queryPlan: nested,
         mapper: MAPPERS.postgresql,
         nullAttributeRepresentation: "explicit",
@@ -415,6 +431,7 @@ describe("nullAttributeRepresentation", () => {
 
       try {
         result = queryPlanToDrizzle({
+          ...ROOTS.postgresql,
           queryPlan: plans[index]!,
           mapper: UNDECLARED,
           nullAttributeRepresentation: "omitted",
@@ -485,6 +502,7 @@ describe("timestamp literals", () => {
       const plan = timestampPlan("lt", "2020-03-15T10:30:00Z");
       expect(() =>
         queryPlanToDrizzle({
+          ...ROOTS.postgresql,
           queryPlan: plan,
           mapper: { "request.resource.attr.createdAt": { column: table.at, valueType: "timestamp" } },
         }),
@@ -499,6 +517,7 @@ describe("timestamp literals", () => {
     ["ge", ">=", "2026-08-11T09:13:39.123457Z"],
   ])("`%s` against an off-grid instant compares with the grid point on its side", (operator, symbol, bound) => {
     const filter = queryPlanToDrizzle({
+      ...ROOTS.postgresql,
       queryPlan: timestampPlan(operator, "2026-08-11T09:13:39.123456789Z"),
       mapper: MAPPERS.postgresql,
     });
@@ -511,6 +530,7 @@ describe("timestamp literals", () => {
 
   test.each(["eq", "ne"])("`%s` against an off-grid instant binds no instant at all", (operator) => {
     const filter = queryPlanToDrizzle({
+      ...ROOTS.postgresql,
       queryPlan: timestampPlan(operator, "2026-08-11T09:13:39.123456789Z"),
       mapper: MAPPERS.postgresql,
     });
@@ -540,10 +560,10 @@ describe("what the stores cannot show", () => {
     plans = await Promise.all(goldens.map((g) => planOf(g)));
   });
 
-  const translatedBy = (mapper: Mapper) =>
+  const translatedBy = (store: Store) =>
     goldens.flatMap((g, index) => {
       try {
-        const result = queryPlanToDrizzle({ queryPlan: plans[index]!, mapper });
+        const result = queryPlanToDrizzle({ ...ROOTS[store], queryPlan: plans[index]!, mapper: MAPPERS[store] });
 
         return result.kind === PlanKind.CONDITIONAL ? [[g.id, result.filter] as const] : [];
       } catch (error) {
@@ -555,7 +575,7 @@ describe("what the stores cannot show", () => {
   // `real` is single precision on PostgreSQL: it would round a CEL double on the way through a
   // division, and whether a seed's value survives that is an accident of the seeds.
   test("casts to 53-bit floating point, never to single precision", () => {
-    const rendered = translatedBy(MAPPERS.mysql).map(
+    const rendered = translatedBy("mysql").map(
       ([id, filter]) => [id, render("mysql", filter).sql] as const,
     );
 
@@ -566,7 +586,7 @@ describe("what the stores cannot show", () => {
   // PostgreSQL parses 'NaN' and 'Infinity' as double precision inputs and every comparison against
   // them is false — the same rows a folded translation returns, so only the parameters tell.
   test.each(STORES)("binds no non-finite number (%s)", (store) => {
-    const offenders = translatedBy(MAPPERS[store]).filter(([, filter]) =>
+    const offenders = translatedBy(store).filter(([, filter]) =>
       render(store, filter).params.some(
         (param) => isNumber(param) && !Number.isFinite(param),
       ),
@@ -630,7 +650,7 @@ describe("plans the planner cannot produce", () => {
       'Cannot resolve "t.missing"',
     ],
   ] as const)("%s is refused", (_label, queryPlan, message) => {
-    const run = () => queryPlanToDrizzle({ queryPlan, mapper: MAPPERS.postgresql });
+    const run = () => queryPlanToDrizzle({ ...ROOTS.postgresql, queryPlan, mapper: MAPPERS.postgresql });
     expect(run).toThrow(UnsupportedQueryPlanError);
     expect(run).toThrow(message);
   });

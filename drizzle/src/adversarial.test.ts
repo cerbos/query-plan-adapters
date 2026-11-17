@@ -4,7 +4,7 @@ import * as path from "path";
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import Database from "better-sqlite3";
 import { sql } from "drizzle-orm";
-import type { AnyColumn, SQL } from "drizzle-orm";
+import type { AnyColumn, SQL, Table } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
 import type { MySql2Database } from "drizzle-orm/mysql2";
@@ -349,6 +349,8 @@ const STORE_ENGINES: Record<StoreName, string> = {
 interface AdversarialStore {
   readonly name: StoreName;
   readonly mapper: ConformanceMapper;
+  /** The resource table and the schema holding the `relations()` the mapper names. */
+  readonly root: { table: Table; schema: Record<string, unknown> };
   readonly indexMappers?: ConformanceMapper[];
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -380,6 +382,7 @@ function sqliteStore(): AdversarialStore {
   return {
     name: "sqlite",
     mapper: buildMapper(schema),
+    root: { table: schema.resources, schema },
 
     async start(): Promise<void> {
       sqlite.exec(`
@@ -523,6 +526,7 @@ function postgresStore(): AdversarialStore {
   return {
     name: "postgres",
     mapper: buildMapper(schema),
+    root: { table: schema.resources, schema },
     // The same mapper with the three ordered lists stored two other ways: a native array rebased to
     // a zero lower bound, and plain `json`. A caller chooses the storage, so the corpus cannot vary
     // it; the harness replays every case that reads these lists under each one.
@@ -787,6 +791,7 @@ function mysqlStore(): AdversarialStore {
   return {
     name: "mysql",
     mapper: buildMapper(schema),
+    root: { table: schema.resources, schema },
 
     async start(): Promise<void> {
       // The image's entrypoint prepends `mysqld` to arguments that begin with a dash, which is
@@ -948,7 +953,7 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 // option covers what is left, list elements and principal-side literals, which the dataset sends as
 // values; the adapter's own default is pinned in translator.test.ts.
 const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) =>
-  queryPlanToDrizzle({ queryPlan, mapper, nullAttributeRepresentation: "explicit" });
+  queryPlanToDrizzle({ ...store.root, queryPlan, mapper, nullAttributeRepresentation: "explicit" });
 
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
   const result = translatePlan(await planOf(golden), mapper);

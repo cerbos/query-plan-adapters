@@ -145,6 +145,34 @@ const mapper: Mapper = {
 `request.resource.attr.owner.email` and `request.resource.attr.tags.name` now translate into
 `EXISTS` subqueries over `owners` and `tags`.
 
+#### Inferring a relation from the schema
+
+Pass the resource's `table` and the `schema` you give `drizzle(client, { schema })`, and a relation
+needs only what the schema cannot say. `type`, `table`, `sourceColumn` and `targetColumn` are
+inferred, and any of them you declare wins:
+
+- `name` reads the `relations()` entry of that name on the source table: `one` or `many`, the
+  target table and the join columns.
+- `table` alone reads the single foreign key between the source table and `table`. A foreign key
+  on the source is to-one; one on the target is to-one when its column is unique, else to-many.
+
+```ts
+queryPlanToDrizzle({
+  queryPlan,
+  table: resources,
+  schema,
+  mapper: {
+    "request.resource.attr.owner": { relation: { name: "owner", fields: { email: owners.email } } },
+    "request.resource.attr.tags": { relation: { table: resourceTags, field: resourceTags.name } },
+  },
+});
+```
+
+A nested relation's source is its parent's table. An inferred to-one whose target column carries no
+unique constraint, a composite key, an unknown name and several candidate foreign keys each throw:
+declare the relation in full instead. `field`, `fields`, `position` and `subqueryFilter` are never
+inferred.
+
 The subquery reads the table **bare**. If your own reads of that table filter it (soft delete,
 tenant, subtype), declare the same predicate as [`subqueryFilter`](#declaring-the-applications-own-predicate).
 See [Mapping hazards](#mapping-hazards).
@@ -486,7 +514,7 @@ subquery reads must be the rows your application put into the resource attribute
 corpus catalogues six ways that can break.
 
 This adapter builds a **bare-table subquery**: a relation mapping is a table plus two columns, and
-Drizzle has no association metadata, so nothing your own reads apply reaches the `EXISTS`. Declare
+Drizzle's `relations()` carry no filter, so nothing your own reads apply reaches the `EXISTS`. Declare
 that narrowing as [`subqueryFilter`](#declaring-the-applications-own-predicate). The adapter cannot
 detect a missing one.
 
@@ -529,6 +557,9 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- A relation can be declared by `name` (from `relations()`) or by `table` alone (from the foreign
+  key), with `type` and the join columns inferred; the call takes the resource's `table` and the
+  drizzle `schema` for it. A fully declared relation behaves as before.
 - Fixed over-grants: a string, number, date or array column read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, which denies under both polarities, where it was compared with `true`; and arithmetic over a ternary whose arms are an `int()` and a double (`(c ? R.attr.d : int(x)) + int(x)`) now throws `UnsupportedQueryPlanError` (**breaking**), where it was computed as a sum on every row.
 - A relation may declare [`position`](#relations), the column holding each row's zero-based
   index in the list sent to Cerbos. With it, `R.attr.tags[0].name == "public"` (a `get-field` over

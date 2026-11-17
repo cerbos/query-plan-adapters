@@ -9,6 +9,8 @@ import { resolveTableName } from "./relations";
 import { SCOPED_RELATION } from "./types";
 import type {
   BaseMapperEntry,
+  DeclaredMapperEntry,
+  DeclaredMappingConfig,
   Mapper,
   MapperEntry,
   MappingConfig,
@@ -28,20 +30,25 @@ import { isFunction } from "./narrowing";
 // -- entry shapes --------------------------------------------------------------------------------
 
 const isScopedRelationEntry = (
-  entry: MapperEntry,
+  entry: DeclaredMapperEntry,
 ): entry is ScopedRelationEntry =>
   typeof entry === "object" && entry !== null && SCOPED_RELATION in entry;
 
-export const isMappingConfig = (entry: MapperEntry): entry is MappingConfig =>
-  typeof entry === "object" &&
-  entry !== null &&
-  !isScopedRelationEntry(entry) &&
-  ("column" in entry ||
-    "transform" in entry ||
-    "relation" in entry ||
-    "valueType" in entry ||
-    "indexable" in entry ||
-    "collectionValueType" in entry);
+export function isMappingConfig(entry: MapperEntry): entry is MappingConfig;
+export function isMappingConfig(entry: DeclaredMapperEntry): entry is DeclaredMappingConfig;
+export function isMappingConfig(entry: DeclaredMapperEntry): boolean {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    !isScopedRelationEntry(entry) &&
+    ("column" in entry ||
+      "transform" in entry ||
+      "relation" in entry ||
+      "valueType" in entry ||
+      "indexable" in entry ||
+      "collectionValueType" in entry)
+  );
+}
 
 export const isRelationValue = (
   entry: BaseMapperEntry,

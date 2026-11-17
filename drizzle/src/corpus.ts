@@ -13,6 +13,7 @@ import { HTTP } from "@cerbos/http";
 import { Server, ServerCredentials } from "@grpc/grpc-js";
 import type { sendUnaryData, ServerUnaryCall } from "@grpc/grpc-js";
 import { afterAll } from "@jest/globals";
+import { relations } from "drizzle-orm";
 import type { AnyColumn, Table } from "drizzle-orm";
 import {
   boolean,
@@ -35,7 +36,7 @@ import {
 } from "drizzle-orm/mysql-core";
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-import type { MapperEntry, RelationMapping } from ".";
+import type { DeclaredRelation, MapperEntry } from ".";
 import { isObject, isString } from "./narrowing";
 
 /**
@@ -446,71 +447,110 @@ export interface AdversarialSchema {
   };
 }
 
+/**
+ * The tables plus the `relations()` an application would pass to `drizzle(client, { schema })`.
+ * The mapper names some relations and leaves others to the tables' foreign keys, so the corpus
+ * proves both ways the adapter infers a relation's cardinality and join.
+ */
+function withRelations<T extends AdversarialSchema>(tables: T) {
+  const { resources, parents, inners, tags, categories, subCategories, labels } = tables;
+
+  return {
+    ...tables,
+    resourcesRelations: relations(resources, ({ one, many }) => ({
+      parent: one(parents),
+      tags: many(tags),
+      categories: many(categories),
+    })),
+    parentsRelations: relations(parents, ({ one }) => ({
+      resource: one(resources, { fields: [parents.resourceId], references: [resources.id] }),
+      inner: one(inners),
+    })),
+    innersRelations: relations(inners, ({ one }) => ({
+      parent: one(parents, { fields: [inners.parentId], references: [parents.id] }),
+    })),
+    tagsRelations: relations(tags, ({ one }) => ({
+      resource: one(resources, { fields: [tags.resourceId], references: [resources.id] }),
+    })),
+    categoriesRelations: relations(categories, ({ one, many }) => ({
+      resource: one(resources, { fields: [categories.resourceId], references: [resources.id] }),
+      subCategories: many(subCategories),
+    })),
+    subCategoriesRelations: relations(subCategories, ({ one, many }) => ({
+      category: one(categories, { fields: [subCategories.categoryId], references: [categories.id] }),
+      labels: many(labels),
+    })),
+    labelsRelations: relations(labels, ({ one }) => ({
+      subCategory: one(subCategories, { fields: [labels.subCategoryId], references: [subCategories.id] }),
+    })),
+  };
+}
+
 /** The SQLite tables the `sqlite` store seeds. */
 export function sqliteSchema() {
-  return {
-    resources: sqliteTable("adversarial_resources", {
-      id: text("id").primaryKey(),
-      aBool: integer("a_bool", { mode: "boolean" }),
-      aString: text("a_string"),
-      aNumber: integer("a_number"),
-      aDouble: real("a_double"),
-      aOptionalString: text("a_optional_string"),
-      createdBy: text("created_by").notNull(),
-      scope: text("scope"),
-      createdAt: text("created_at"),
-      updatedAt: text("updated_at"),
-      tagNamesJson: text("tag_names_json", { mode: "json" }).$type<(string | null)[]>(),
-      aNumberListJson: text("a_number_list_json", { mode: "json" }).$type<(number | null)[]>(),
-      aBoolListJson: text("a_bool_list_json", { mode: "json" }).$type<(boolean | null)[]>(),
-    }),
+  const resources = sqliteTable("adversarial_resources", {
+    id: text("id").primaryKey(),
+    aBool: integer("a_bool", { mode: "boolean" }),
+    aString: text("a_string"),
+    aNumber: integer("a_number"),
+    aDouble: real("a_double"),
+    aOptionalString: text("a_optional_string"),
+    createdBy: text("created_by").notNull(),
+    scope: text("scope"),
+    createdAt: text("created_at"),
+    updatedAt: text("updated_at"),
+    tagNamesJson: text("tag_names_json", { mode: "json" }).$type<(string | null)[]>(),
+    aNumberListJson: text("a_number_list_json", { mode: "json" }).$type<(number | null)[]>(),
+    aBoolListJson: text("a_bool_list_json", { mode: "json" }).$type<(boolean | null)[]>(),
+  });
 
-    // The corpus's one real to-one chain, one owned row per level and per resource.
-    parents: sqliteTable("adversarial_parents", {
-      id: text("id").primaryKey(),
-      aBool: integer("a_bool", { mode: "boolean" }),
-      aString: text("a_string"),
-      aNumber: integer("a_number"),
-      aOptionalString: text("a_optional_string"),
-      resourceId: text("resource_id").notNull().unique(),
-    }),
+  // The corpus's one real to-one chain, one owned row per level and per resource.
+  const parents = sqliteTable("adversarial_parents", {
+    id: text("id").primaryKey(),
+    aBool: integer("a_bool", { mode: "boolean" }),
+    aString: text("a_string"),
+    aNumber: integer("a_number"),
+    aOptionalString: text("a_optional_string"),
+    resourceId: text("resource_id").notNull().unique().references(() => resources.id),
+  });
 
-    inners: sqliteTable("adversarial_inners", {
-      id: text("id").primaryKey(),
-      aBool: integer("a_bool", { mode: "boolean" }),
-      aString: text("a_string"),
-      aNumber: integer("a_number"),
-      aOptionalString: text("a_optional_string"),
-      parentId: text("parent_id").notNull().unique(),
-    }),
+  const inners = sqliteTable("adversarial_inners", {
+    id: text("id").primaryKey(),
+    aBool: integer("a_bool", { mode: "boolean" }),
+    aString: text("a_string"),
+    aNumber: integer("a_number"),
+    aOptionalString: text("a_optional_string"),
+    parentId: text("parent_id").notNull().unique().references(() => parents.id),
+  });
 
-    tags: sqliteTable("adversarial_tags", {
-      tagId: text("tag_id").primaryKey(),
-      // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
-      // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
-      name: text("name"),
-      position: integer("position").notNull(),
-      resourceId: text("resource_id").notNull(),
-    }),
+  const tags = sqliteTable("adversarial_tags", {
+    tagId: text("tag_id").primaryKey(),
+    // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
+    // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
+    name: text("name"),
+    position: integer("position").notNull(),
+    resourceId: text("resource_id").notNull().references(() => resources.id),
+  });
 
-    categories: sqliteTable("adversarial_categories", {
-      id: text("id").primaryKey(),
-      name: text("name").notNull(),
-      resourceId: text("resource_id").notNull(),
-    }),
+  const categories = sqliteTable("adversarial_categories", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    resourceId: text("resource_id").notNull().references(() => resources.id),
+  });
 
-    subCategories: sqliteTable("adversarial_sub_categories", {
-      id: text("id").primaryKey(),
-      name: text("name").notNull(),
-      categoryId: text("category_id").notNull(),
-    }),
+  const subCategories = sqliteTable("adversarial_sub_categories", {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    categoryId: text("category_id").notNull().references(() => categories.id),
+  });
 
-    labels: sqliteTable("adversarial_labels", {
-      id: text("id").primaryKey(),
-      name: text("name"),
-      subCategoryId: text("sub_category_id").notNull(),
-    }),
-  };
+  const labels = sqliteTable("adversarial_labels", {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    subCategoryId: text("sub_category_id").notNull().references(() => subCategories.id),
+  });
+
+  return withRelations({ resources, parents, inners, tags, categories, subCategories, labels });
 }
 
 /**
@@ -522,81 +562,81 @@ export function sqliteSchema() {
  * layout PostgreSQL cannot parse, passes there and fails here.
  */
 export function postgresSchema() {
-  return {
-    resources: pgTable("adversarial_resources", {
-      id: pgText("id").primaryKey(),
-      aBool: boolean("a_bool"),
-      aString: pgText("a_string"),
-      aNumber: pgInteger("a_number"),
-      aDouble: doublePrecision("a_double"),
-      aOptionalString: pgText("a_optional_string"),
-      createdBy: pgText("created_by").notNull(),
-      scope: pgText("scope"),
-      createdAt: timestamp("created_at", {
-        withTimezone: true,
-        mode: "string",
-      }),
-      tagNamesJson: jsonb("tag_names_json").$type<(string | null)[]>(),
-      tagNamesPlainJson: pgJson("tag_names_plain_json").$type<(string | null)[]>(),
-      tagNamesArray: pgText("tag_names_array").array(),
-      aNumberListJson: jsonb("a_number_list_json").$type<(number | null)[]>(),
-      aNumberListPlainJson: pgJson("a_number_list_plain_json").$type<(number | null)[]>(),
-      aNumberListArray: pgInteger("a_number_list_array").array(),
-      aBoolListJson: jsonb("a_bool_list_json").$type<(boolean | null)[]>(),
-      aBoolListPlainJson: pgJson("a_bool_list_plain_json").$type<(boolean | null)[]>(),
-      aBoolListArray: boolean("a_bool_list_array").array(),
-      updatedAt: timestamp("updated_at", {
-        withTimezone: true,
-        mode: "string",
-      }),
+  const resources = pgTable("adversarial_resources", {
+    id: pgText("id").primaryKey(),
+    aBool: boolean("a_bool"),
+    aString: pgText("a_string"),
+    aNumber: pgInteger("a_number"),
+    aDouble: doublePrecision("a_double"),
+    aOptionalString: pgText("a_optional_string"),
+    createdBy: pgText("created_by").notNull(),
+    scope: pgText("scope"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
     }),
+    tagNamesJson: jsonb("tag_names_json").$type<(string | null)[]>(),
+    tagNamesPlainJson: pgJson("tag_names_plain_json").$type<(string | null)[]>(),
+    tagNamesArray: pgText("tag_names_array").array(),
+    aNumberListJson: jsonb("a_number_list_json").$type<(number | null)[]>(),
+    aNumberListPlainJson: pgJson("a_number_list_plain_json").$type<(number | null)[]>(),
+    aNumberListArray: pgInteger("a_number_list_array").array(),
+    aBoolListJson: jsonb("a_bool_list_json").$type<(boolean | null)[]>(),
+    aBoolListPlainJson: pgJson("a_bool_list_plain_json").$type<(boolean | null)[]>(),
+    aBoolListArray: boolean("a_bool_list_array").array(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  });
 
-    // The corpus's one real to-one chain, one owned row per level and per resource.
-    parents: pgTable("adversarial_parents", {
-      id: pgText("id").primaryKey(),
-      aBool: boolean("a_bool"),
-      aString: pgText("a_string"),
-      aNumber: pgInteger("a_number"),
-      aOptionalString: pgText("a_optional_string"),
-      resourceId: pgText("resource_id").notNull().unique(),
-    }),
+  // The corpus's one real to-one chain, one owned row per level and per resource.
+  const parents = pgTable("adversarial_parents", {
+    id: pgText("id").primaryKey(),
+    aBool: boolean("a_bool"),
+    aString: pgText("a_string"),
+    aNumber: pgInteger("a_number"),
+    aOptionalString: pgText("a_optional_string"),
+    resourceId: pgText("resource_id").notNull().unique().references(() => resources.id),
+  });
 
-    inners: pgTable("adversarial_inners", {
-      id: pgText("id").primaryKey(),
-      aBool: boolean("a_bool"),
-      aString: pgText("a_string"),
-      aNumber: pgInteger("a_number"),
-      aOptionalString: pgText("a_optional_string"),
-      parentId: pgText("parent_id").notNull().unique(),
-    }),
+  const inners = pgTable("adversarial_inners", {
+    id: pgText("id").primaryKey(),
+    aBool: boolean("a_bool"),
+    aString: pgText("a_string"),
+    aNumber: pgInteger("a_number"),
+    aOptionalString: pgText("a_optional_string"),
+    parentId: pgText("parent_id").notNull().unique().references(() => parents.id),
+  });
 
-    tags: pgTable("adversarial_tags", {
-      tagId: pgText("tag_id").primaryKey(),
-      // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
-      // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
-      name: pgText("name"),
-      position: pgInteger("position").notNull(),
-      resourceId: pgText("resource_id").notNull(),
-    }),
+  const tags = pgTable("adversarial_tags", {
+    tagId: pgText("tag_id").primaryKey(),
+    // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
+    // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
+    name: pgText("name"),
+    position: pgInteger("position").notNull(),
+    resourceId: pgText("resource_id").notNull().references(() => resources.id),
+  });
 
-    categories: pgTable("adversarial_categories", {
-      id: pgText("id").primaryKey(),
-      name: pgText("name").notNull(),
-      resourceId: pgText("resource_id").notNull(),
-    }),
+  const categories = pgTable("adversarial_categories", {
+    id: pgText("id").primaryKey(),
+    name: pgText("name").notNull(),
+    resourceId: pgText("resource_id").notNull().references(() => resources.id),
+  });
 
-    subCategories: pgTable("adversarial_sub_categories", {
-      id: pgText("id").primaryKey(),
-      name: pgText("name").notNull(),
-      categoryId: pgText("category_id").notNull(),
-    }),
+  const subCategories = pgTable("adversarial_sub_categories", {
+    id: pgText("id").primaryKey(),
+    name: pgText("name").notNull(),
+    categoryId: pgText("category_id").notNull().references(() => categories.id),
+  });
 
-    labels: pgTable("adversarial_labels", {
-      id: pgText("id").primaryKey(),
-      name: pgText("name"),
-      subCategoryId: pgText("sub_category_id").notNull(),
-    }),
-  };
+  const labels = pgTable("adversarial_labels", {
+    id: pgText("id").primaryKey(),
+    name: pgText("name"),
+    subCategoryId: pgText("sub_category_id").notNull().references(() => subCategories.id),
+  });
+
+  return withRelations({ resources, parents, inners, tags, categories, subCategories, labels });
 }
 
 /**
@@ -623,69 +663,69 @@ export function postgresSchema() {
  * a requirement either way — see `adversarial.test.ts`, `MYSQL_COLLATION`.
  */
 export function mysqlSchema() {
-  return {
-    resources: mysqlTable("adversarial_resources", {
-      id: varchar("id", { length: 64 }).primaryKey(),
-      aBool: mysqlBoolean("a_bool"),
-      aString: varchar("a_string", { length: 255 }),
-      aNumber: mysqlInt("a_number"),
-      aDouble: double("a_double"),
-      aOptionalString: varchar("a_optional_string", { length: 255 }),
-      createdBy: varchar("created_by", { length: 64 }).notNull(),
-      scope: varchar("scope", { length: 255 }),
-      createdAt: datetime("created_at", { mode: "string", fsp: 6 }),
-      updatedAt: datetime("updated_at", { mode: "string", fsp: 6 }),
-      tagNamesJson: mysqlJson("tag_names_json").$type<(string | null)[]>(),
-      aNumberListJson: mysqlJson("a_number_list_json").$type<(number | null)[]>(),
-      aBoolListJson: mysqlJson("a_bool_list_json").$type<(boolean | null)[]>(),
-    }),
+  const resources = mysqlTable("adversarial_resources", {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    aBool: mysqlBoolean("a_bool"),
+    aString: varchar("a_string", { length: 255 }),
+    aNumber: mysqlInt("a_number"),
+    aDouble: double("a_double"),
+    aOptionalString: varchar("a_optional_string", { length: 255 }),
+    createdBy: varchar("created_by", { length: 64 }).notNull(),
+    scope: varchar("scope", { length: 255 }),
+    createdAt: datetime("created_at", { mode: "string", fsp: 6 }),
+    updatedAt: datetime("updated_at", { mode: "string", fsp: 6 }),
+    tagNamesJson: mysqlJson("tag_names_json").$type<(string | null)[]>(),
+    aNumberListJson: mysqlJson("a_number_list_json").$type<(number | null)[]>(),
+    aBoolListJson: mysqlJson("a_bool_list_json").$type<(boolean | null)[]>(),
+  });
 
-    // The corpus's one real to-one chain, one owned row per level and per resource.
-    parents: mysqlTable("adversarial_parents", {
-      id: varchar("id", { length: 64 }).primaryKey(),
-      aBool: mysqlBoolean("a_bool"),
-      aString: varchar("a_string", { length: 255 }),
-      aNumber: mysqlInt("a_number"),
-      aOptionalString: varchar("a_optional_string", { length: 255 }),
-      resourceId: varchar("resource_id", { length: 64 }).notNull().unique(),
-    }),
+  // The corpus's one real to-one chain, one owned row per level and per resource.
+  const parents = mysqlTable("adversarial_parents", {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    aBool: mysqlBoolean("a_bool"),
+    aString: varchar("a_string", { length: 255 }),
+    aNumber: mysqlInt("a_number"),
+    aOptionalString: varchar("a_optional_string", { length: 255 }),
+    resourceId: varchar("resource_id", { length: 64 }).notNull().unique().references(() => resources.id),
+  });
 
-    inners: mysqlTable("adversarial_inners", {
-      id: varchar("id", { length: 64 }).primaryKey(),
-      aBool: mysqlBoolean("a_bool"),
-      aString: varchar("a_string", { length: 255 }),
-      aNumber: mysqlInt("a_number"),
-      aOptionalString: varchar("a_optional_string", { length: 255 }),
-      parentId: varchar("parent_id", { length: 64 }).notNull().unique(),
-    }),
+  const inners = mysqlTable("adversarial_inners", {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    aBool: mysqlBoolean("a_bool"),
+    aString: varchar("a_string", { length: 255 }),
+    aNumber: mysqlInt("a_number"),
+    aOptionalString: varchar("a_optional_string", { length: 255 }),
+    parentId: varchar("parent_id", { length: 64 }).notNull().unique().references(() => parents.id),
+  });
 
-    tags: mysqlTable("adversarial_tags", {
-      tagId: varchar("tag_id", { length: 64 }).primaryKey(),
-      // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
-      // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
-      name: varchar("name", { length: 255 }),
-      position: mysqlInt("position").notNull(),
-      resourceId: varchar("resource_id", { length: 64 }).notNull(),
-    }),
+  const tags = mysqlTable("adversarial_tags", {
+    tagId: varchar("tag_id", { length: 64 }).primaryKey(),
+    // NULLABLE on purpose: a NULL tag name is a missing element attribute on the check
+    // side (a CEL error → deny) and must stay UNKNOWN — never FALSE — in SQL.
+    name: varchar("name", { length: 255 }),
+    position: mysqlInt("position").notNull(),
+    resourceId: varchar("resource_id", { length: 64 }).notNull().references(() => resources.id),
+  });
 
-    categories: mysqlTable("adversarial_categories", {
-      id: varchar("id", { length: 64 }).primaryKey(),
-      name: varchar("name", { length: 255 }).notNull(),
-      resourceId: varchar("resource_id", { length: 64 }).notNull(),
-    }),
+  const categories = mysqlTable("adversarial_categories", {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    name: varchar("name", { length: 255 }).notNull(),
+    resourceId: varchar("resource_id", { length: 64 }).notNull().references(() => resources.id),
+  });
 
-    subCategories: mysqlTable("adversarial_sub_categories", {
-      id: varchar("id", { length: 64 }).primaryKey(),
-      name: varchar("name", { length: 255 }).notNull(),
-      categoryId: varchar("category_id", { length: 64 }).notNull(),
-    }),
+  const subCategories = mysqlTable("adversarial_sub_categories", {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    name: varchar("name", { length: 255 }).notNull(),
+    categoryId: varchar("category_id", { length: 64 }).notNull().references(() => categories.id),
+  });
 
-    labels: mysqlTable("adversarial_labels", {
-      id: varchar("id", { length: 64 }).primaryKey(),
-      name: varchar("name", { length: 255 }),
-      subCategoryId: varchar("sub_category_id", { length: 64 }).notNull(),
-    }),
-  };
+  const labels = mysqlTable("adversarial_labels", {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    name: varchar("name", { length: 255 }),
+    subCategoryId: varchar("sub_category_id", { length: 64 }).notNull().references(() => subCategories.id),
+  });
+
+  return withRelations({ resources, parents, inners, tags, categories, subCategories, labels });
 }
 
 export interface ConformanceMapper {
@@ -695,22 +735,16 @@ export interface ConformanceMapper {
 export function buildMapper(
   schema: AdversarialSchema,
 ): ConformanceMapper {
-  const labelsRelation: RelationMapping = {
-    type: "many",
-    table: schema.labels,
-    sourceColumn: schema.subCategories.id,
-    targetColumn: schema.labels.subCategoryId,
+  const labelsRelation: DeclaredRelation = {
+    name: "labels",
     field: schema.labels.name,
     fields: {
       name: schema.labels.name,
     },
   };
 
-  const subCategoriesRelation: RelationMapping = {
-    type: "many",
+  const subCategoriesRelation: DeclaredRelation = {
     table: schema.subCategories,
-    sourceColumn: schema.categories.id,
-    targetColumn: schema.subCategories.categoryId,
     field: schema.subCategories.name,
     fields: {
       name: schema.subCategories.name,
@@ -784,17 +818,14 @@ export function buildMapper(
       column: schema.resources.aString,
       nullAttributeRepresentation: "omitted",
     },
-    // The corpus's one REAL to-one chain (the `relation/*` cases). `type: "one"` is what tells the
-    // adapter this hop can be ABSENT, which is what the negated shapes discriminate: an absent
+    // The corpus's one REAL to-one chain (the `relation/*` cases). `type: "one"`, inferred from
+    // relations() and the unique `resourceId`, is what tells the adapter this hop can be ABSENT, which is what the negated shapes discriminate: an absent
     // parent sends no attribute, so CEL raises a missing-path error and the PDP denies, while an
     // unguarded `NOT EXISTS` over the join is TRUE for exactly those rows. `inner` nests the same
     // declaration one level further out.
     "request.resource.attr.parent": {
       relation: {
-        type: "one",
-        table: schema.parents,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.parents.resourceId,
+        name: "parent",
         fields: {
           aBool: { column: schema.parents.aBool, nullAttributeRepresentation: "omitted" },
           aString: { column: schema.parents.aString, nullAttributeRepresentation: "omitted" },
@@ -802,10 +833,7 @@ export function buildMapper(
           aOptionalString: { column: schema.parents.aOptionalString, nullAttributeRepresentation: "omitted" },
           inner: {
             relation: {
-              type: "one",
-              table: schema.inners,
-              sourceColumn: schema.parents.id,
-              targetColumn: schema.inners.parentId,
+              name: "inner",
               fields: {
                 aBool: { column: schema.inners.aBool, nullAttributeRepresentation: "omitted" },
                 aString: { column: schema.inners.aString, nullAttributeRepresentation: "omitted" },
@@ -819,10 +847,7 @@ export function buildMapper(
     },
     "request.resource.attr.tags": {
       relation: {
-        type: "many",
-        table: schema.tags,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.tags.resourceId,
+        name: "tags",
         position: schema.tags.position,
         field: schema.tags.name,
         fields: {
@@ -836,10 +861,7 @@ export function buildMapper(
       indexable: "json",
       collectionValueType: "scalar",
       relation: {
-        type: "many",
         table: schema.tags,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.tags.resourceId,
         position: schema.tags.position,
         field: schema.tags.name,
       },
@@ -863,10 +885,7 @@ export function buildMapper(
     },
     "request.resource.attr.categories": {
       relation: {
-        type: "many",
-        table: schema.categories,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.categories.resourceId,
+        name: "categories",
         fields: {
           name: schema.categories.name,
           subCategories: { relation: subCategoriesRelation },
@@ -879,10 +898,7 @@ export function buildMapper(
     // off the root. subNames flattens the tail's name column for plain `in` membership.
     "request.resource.attr.mainCategory": {
       relation: {
-        type: "many",
         table: schema.categories,
-        sourceColumn: schema.resources.id,
-        targetColumn: schema.categories.resourceId,
         fields: {
           name: schema.categories.name,
           subCategories: { relation: subCategoriesRelation },
