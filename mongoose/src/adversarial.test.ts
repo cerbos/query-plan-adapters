@@ -12,6 +12,7 @@ import {
   fuzzThrown,
   fuzzVerdict,
   MAPPER,
+  SCHEMA_MAPPER,
   pdpTags,
   planOf,
   readCorpusJson,
@@ -333,10 +334,26 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 
 // -- the replay -----------------------------------------------------------------------------------
 
-async function selectAllowed(golden: Golden): Promise<string[]> {
+/** The two ways a caller maps the corpus: every entry declared, or the schema read for the rest. */
+const MAPPINGS = {
+  declared: { mapper: MAPPER },
+  schema: { mapper: SCHEMA_MAPPER, schema: resourceSchema },
+} as const;
+
+type Mapping = keyof typeof MAPPINGS;
+
+const MAPPING_NAMES = Object.keys(MAPPINGS) as Mapping[];
+
+async function eachMapping<T>(run: (mapping: Mapping) => Promise<T>): Promise<Record<Mapping, T>> {
+  return Object.fromEntries(
+    await Promise.all(MAPPING_NAMES.map(async (mapping) => [mapping, await run(mapping)])),
+  );
+}
+
+async function selectAllowed(golden: Golden, mapping: Mapping = "declared"): Promise<string[]> {
   const result = queryPlanToMongoose({
     queryPlan: await planOf(golden),
-    mapper: MAPPER,
+    ...MAPPINGS[mapping],
     // The dataset stores what it sends: `owner` as an explicit null, the rest declared `nullable`.
     nullAttributeRepresentation: "explicit",
   });
@@ -425,22 +442,25 @@ describe("conformance (mongodb)", () => {
 
         if (entry?.status === "unsupported") {
           const queryPlan = await planOf(golden);
-          expect(() =>
-            queryPlanToMongoose({ queryPlan, mapper: MAPPER }),
-          ).toThrow(UnsupportedQueryPlanError);
+
+          for (const mapping of MAPPING_NAMES) {
+            expect(() =>
+              queryPlanToMongoose({ queryPlan, ...MAPPINGS[mapping] }),
+            ).toThrow(UnsupportedQueryPlanError);
+          }
 
           return;
         }
 
-        const ids = await selectAllowed(golden);
+        const ids = await eachMapping((mapping) => selectAllowed(golden, mapping));
 
         if (entry?.status === "divergent") {
-          expect(ids).not.toEqual(golden.allowed);
+          for (const mapping of MAPPING_NAMES) expect(ids[mapping]).not.toEqual(golden.allowed);
 
           return;
         }
 
-        expect(ids).toEqual(golden.allowed);
+        expect(ids).toEqual({ declared: golden.allowed, schema: golden.allowed });
         (passed[tag] ??= {})[golden.tier] =
           (passed[tag]?.[golden.tier] ?? 0) + 1;
       },

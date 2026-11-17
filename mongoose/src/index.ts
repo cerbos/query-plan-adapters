@@ -4,6 +4,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 import type { TranslateContext } from "./context";
 import { translateCondition } from "./filter";
 import { rootMapper } from "./mapper";
+import type { SchemaSource } from "./schema";
 import { isMongoDocument } from "./expression";
 import type { MongoValue, MongooseFilter } from "./expression";
 import { isBoolean, isObject } from "./narrowing";
@@ -13,6 +14,7 @@ export { PlanKind };
 export { UnsupportedQueryPlanError };
 
 export type { MongoValue, MongooseFilter } from "./expression";
+export type { SchemaLike, SchemaSource, SchemaTypeLike } from "./schema";
 
 export type MapperConfig = {
   field?: string;
@@ -27,7 +29,8 @@ export type MapperConfig = {
   valueType?: "number" | "string" | "boolean" | "dateTime";
   relation?: {
     name: string;
-    type: "one" | "many";
+    /** Left out, it is read from the schema passed as `schema`: a subdocument is `"one"`, a document array `"many"`. */
+    type?: "one" | "many";
     field?: string;
     /**
      * The document path of an optional to-ONE parent this collection is reached through.
@@ -83,6 +86,13 @@ export interface QueryPlanToMongooseArgs {
    * Defaults to `"omitted"`, which refuses every null comparison operand.
    */
   nullAttributeRepresentation?: NullAttributeRepresentation;
+  /**
+   * The Model (or its Schema) the filter will query. Relation types, element fields and the
+   * `valueType` of `String`, `Number`, `Boolean` and `Date` paths are read from it, and a resource
+   * attribute with no mapper entry resolves to the schema path of the same name. A mapper entry
+   * still overrides what the schema says.
+   */
+  schema?: SchemaSource;
 }
 
 /**
@@ -106,9 +116,10 @@ export function queryPlanToMongoose({
   queryPlan,
   mapper = {},
   nullAttributeRepresentation = "omitted",
+  schema,
 }: QueryPlanToMongooseArgs): QueryPlanToMongooseResult {
   const ctx: TranslateContext = {
-    mapper: rootMapper(mapper, nullAttributeRepresentation === "omitted"),
+    mapper: rootMapper(mapper, nullAttributeRepresentation === "omitted", schema),
     nullRepresentation: nullAttributeRepresentation,
     scope: { kind: "root" },
   };
