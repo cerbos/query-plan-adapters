@@ -21,7 +21,7 @@ import {
   constantExpression,
 } from "./predicates";
 import { wrapRelationChain } from "./relations";
-import type { BuildFilterOptions, Mapper, ResolvedMapping } from "./types";
+import type { BuildFilterOptions, ResolvedMapper, ResolvedMapping } from "./types";
 import { isString } from "./narrowing";
 
 /**
@@ -66,7 +66,7 @@ type ResolvedHierarchy = ConstantHierarchy | FieldHierarchy | SegmentedHierarchy
  */
 const resolveSegments = (
   listOperand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): Segment[] | "error" => {
   if (isValueOperand(listOperand) && Array.isArray(listOperand.value)) {
     const segments = listOperand.value.filter(isString);
@@ -124,7 +124,7 @@ const resolveSegments = (
 
 const resolveHierarchy = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): ResolvedHierarchy | "error" => {
   if (!isOperatorCall(operand, "hierarchy")) {
     throw new UnsupportedQueryPlanError("Hierarchy operators require hierarchy(...) operands");
@@ -400,7 +400,7 @@ const buildCharacterHierarchyFilter = (
 export const buildHierarchyFilter = (
   operator: HierarchyOperator,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (operands.length !== 2) {

@@ -36,6 +36,7 @@ import {
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import type { DeclaredRelation, MapperEntry } from ".";
+import { loadModule } from "./compat";
 import type { LegacyRelationsDeclaration, RelationV2, RelationV2Column, RelationsSchema } from "./types";
 import { isObject, isString } from "./narrowing";
 
@@ -476,13 +477,7 @@ interface RelationsModule {
   readonly defineRelations?: DefineRelations;
 }
 
-const loadRelationsModule = (id: string): RelationsModule => {
-  try {
-    return require(id);
-  } catch {
-    return {};
-  }
-};
+const loadRelationsModule = (id: string): RelationsModule => loadModule<RelationsModule>(id) ?? {};
 
 const isRelationFactory = (
   entry: RelationV2Column | RelationFactoryV2 | undefined,

@@ -8,7 +8,7 @@ import {
   isValueOperand,
 } from "./operands";
 import type { ExpressionOperand } from "./operands";
-import type { Mapper } from "./types";
+import type { ResolvedMapper } from "./types";
 import { isBoolean, isString, lookup, pair, single, triple, typeofValue } from "./narrowing";
 
 /**
@@ -255,7 +255,7 @@ const rewriteMembership = (node: ExpressionOperand): PlanExpressionOperand => {
  * where the dotted reference is mapped directly and the receiver itself is not, so a list or a
  * relation is never read as a map.
  */
-const rewriteConstantKeyIndex = (node: ExpressionOperand, mapper: Mapper): PlanExpressionOperand => {
+const rewriteConstantKeyIndex = (node: ExpressionOperand, mapper: ResolvedMapper): PlanExpressionOperand => {
   if (node.operator !== "index" || node.operands.length !== 2) return node;
   const [receiver, key] = pair(node.operands);
 
@@ -371,7 +371,7 @@ const rewriteShiftedTimestamp = (node: ExpressionOperand): PlanExpressionOperand
 /** Apply every rewrite, bottom up. */
 export const rewritePlan = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): PlanExpressionOperand => {
   if (!isExpressionOperand(operand)) return operand;
 

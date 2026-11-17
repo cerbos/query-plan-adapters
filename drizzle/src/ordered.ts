@@ -18,7 +18,7 @@ import type { CollectionScope } from "./mapper";
 import { extractLambdaComponents, isNameOperand, isOperatorCall, isValueOperand } from "./operands";
 import { constantCondition, UNKNOWN_CONDITION, withPolarity } from "./predicates";
 import { chainCorrelation, relationSource, requireLeadingHops } from "./relations";
-import type { BuildFilterOptions, Mapper } from "./types";
+import type { BuildFilterOptions, ResolvedMapper } from "./types";
 import { isNumber, typeofValue } from "./narrowing";
 
 /**
@@ -52,7 +52,7 @@ interface PositionedScope {
 /** The positioned scope a collection reference iterates, or `undefined` when it declares no order. */
 const resolvePositionedScope = (
   reference: string,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): PositionedScope | undefined => {
   const entry = getMappingEntry(reference, mapper);
@@ -148,7 +148,7 @@ const typedList = (values: readonly Value[], element: Element, context: string):
 /** A `get-field(index(coll, k), f)` or `index(coll, k)` read of a positioned relation. */
 const positionedRead = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): { positioned: PositionedScope; index: number; field: string | undefined } | undefined => {
   let field: string | undefined;
@@ -206,7 +206,7 @@ export const buildPositionedComparison = (
   operator: "eq" | "ne" | "lt" | "le" | "gt" | "ge",
   left: PlanExpressionOperand,
   right: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL | undefined => {
@@ -264,7 +264,7 @@ export const buildPositionedComparison = (
 /** The ordered projection one side of a list equality names, if it names one. */
 const orderedProjection = (
   operand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ):
   | { positioned: PositionedScope; element: Element; survivors: SQL | undefined }
@@ -358,7 +358,7 @@ export const buildOrderedListEquality = (
   operator: "eq" | "ne",
   left: PlanExpressionOperand,
   right: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL | undefined => {

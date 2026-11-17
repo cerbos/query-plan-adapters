@@ -29,7 +29,7 @@ import {
   resolveTableName,
   wrapWithRelations,
 } from "./relations";
-import type { BuildFilterOptions, Mapper, RelationMapping } from "./types";
+import type { BuildFilterOptions, ResolvedMapper, RelationMapping } from "./types";
 import { isObject } from "./narrowing";
 
 /**
@@ -64,7 +64,7 @@ const resolveMacroScope = (
   collectionOperand: PlanExpressionOperand,
   lambdaOperand: PlanExpressionOperand,
   context: string,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): MacroScope => {
   if (!isNameOperand(collectionOperand)) {
@@ -139,7 +139,7 @@ const primaryAlias = (
 const buildKnownValueFilteredCount = (
   elements: Value[],
   lambdaOperand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   const { variable, expression } = extractLambdaComponents(lambdaOperand, "'filter' lambda operand");
@@ -209,7 +209,7 @@ const EXCEPT_ELEMENT = "__cerbos_except_element";
  */
 export const buildExceptCount = (
   exceptOperand: ExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   const [collection, removed] = exceptOperand.operands;
@@ -255,7 +255,7 @@ export const buildExceptCount = (
 
 export const buildFilteredCount = (
   filterOperand: ExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (filterOperand.operands.length !== 2) {
@@ -464,7 +464,7 @@ const buildKnownValueCollectionFilter = (
   operator: CollectionOperator,
   collectionValue: Value,
   lambdaOperand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {
@@ -532,7 +532,7 @@ const buildKnownValueExistsOne = (
   elements: Value[],
   variableName: string,
   bodyOperand: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): SQL => {
   if (elements.length === 0) {
@@ -575,7 +575,7 @@ const buildKnownValueExistsOne = (
 export const buildCollectionOperatorFilter = (
   operator: CollectionOperator,
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   negated: boolean,
   options: BuildFilterOptions,
 ): SQL => {

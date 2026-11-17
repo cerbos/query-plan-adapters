@@ -9,7 +9,7 @@ import { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { UnsupportedQueryPlanError } from "./errors";
 import { getMappingEntry, isMappingConfig, resolveFieldReference } from "./mapper";
 import { isNameOperand, isValueOperand } from "./operands";
-import type { BuildFilterOptions, Mapper } from "./types";
+import type { BuildFilterOptions, ResolvedMapper } from "./types";
 import { UNKNOWN_CONDITION } from "./predicates";
 import { isBoolean, isNumber, isString } from "./narrowing";
 
@@ -262,7 +262,7 @@ export function indexedMembership({
  */
 export const resolveIndexedMembership = (
   reference: string,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): { column: AnyColumn; indexable: Indexable } | undefined => {
   const direct = getMappingEntry(reference, mapper);
@@ -296,7 +296,7 @@ export const resolveIndexedMembership = (
  */
 export const resolveIndexedList = (
   reference: string,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
 ): { column: AnyColumn; indexable: Indexable } | undefined => {
   const mapping = getMappingEntry(reference, mapper);
 
@@ -316,7 +316,7 @@ type IndexedColumn = { column: AnyColumn; indexable: Indexable; index: number };
 /** Resolve the opt-in column separately from a relation used for collection predicates. */
 export const resolveIndexedColumn = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
 ): IndexedColumn => {
   const [collection, position] = operands;
@@ -378,7 +378,7 @@ export const buildIndexedComparison = (
   operator: string,
   indexed: PlanExpressionOperand & { operands: PlanExpressionOperand[] },
   other: PlanExpressionOperand,
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {

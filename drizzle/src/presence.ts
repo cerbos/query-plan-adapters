@@ -12,7 +12,7 @@ import {
 import { isNameOperand } from "./operands";
 import { TRUE_CONDITION, withPolarity } from "./predicates";
 import { requireLeadingHops, wrapWithRelations } from "./relations";
-import type { BuildFilterOptions, Mapper } from "./types";
+import type { BuildFilterOptions, ResolvedMapper } from "./types";
 
 /**
  * `has()`, the presence test the planner emits from Cerbos 0.57.0 for an attribute it does not
@@ -31,7 +31,7 @@ import type { BuildFilterOptions, Mapper } from "./types";
  */
 export const buildHasFilter = (
   operands: PlanExpressionOperand[],
-  mapper: Mapper,
+  mapper: ResolvedMapper,
   options: BuildFilterOptions,
   negated: boolean,
 ): SQL => {

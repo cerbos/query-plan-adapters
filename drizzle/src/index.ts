@@ -27,8 +27,8 @@ export type { Indexable } from "./indexed";
 
 export type {
   DeclaredRelation,
-  DeclaredMapper as Mapper,
-  DeclaredMapperEntry as MapperEntry,
+  Mapper,
+  MapperEntry,
   DrizzleFilter,
   NullAttributeRepresentation,
   QueryPlanToDrizzleArgs,
