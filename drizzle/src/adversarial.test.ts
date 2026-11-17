@@ -352,6 +352,8 @@ const STORE_ENGINES: Record<StoreName, string> = {
 interface AdversarialStore {
   readonly name: StoreName;
   readonly mapper: ConformanceMapper;
+  /** The same mapper with every relation spelled out, translated without `root`. */
+  readonly declaredMapper: ConformanceMapper;
   /** The resource table and the schema holding the `relations()` the mapper names. */
   readonly root: { table: Table; schema: Record<string, unknown> };
   readonly indexMappers?: ConformanceMapper[];
@@ -385,6 +387,7 @@ function sqliteStore(): AdversarialStore {
   return {
     name: "sqlite",
     mapper: buildMapper(schema),
+    declaredMapper: buildMapper(schema, "declared"),
     root: { table: schema.resources, schema: schema.relationsSchema },
 
     async start(): Promise<void> {
@@ -529,6 +532,7 @@ function postgresStore(): AdversarialStore {
   return {
     name: "postgres",
     mapper: buildMapper(schema),
+    declaredMapper: buildMapper(schema, "declared"),
     root: { table: schema.resources, schema: schema.relationsSchema },
     // The same mapper with the three ordered lists stored two other ways: a native array rebased to
     // a zero lower bound, and plain `json`. A caller chooses the storage, so the corpus cannot vary
@@ -794,6 +798,7 @@ function mysqlStore(): AdversarialStore {
   return {
     name: "mysql",
     mapper: buildMapper(schema),
+    declaredMapper: buildMapper(schema, "declared"),
     root: { table: schema.resources, schema: schema.relationsSchema },
 
     async start(): Promise<void> {
@@ -909,7 +914,8 @@ const STORE_FACTORIES: Record<StoreName, () => AdversarialStore> = {
 };
 
 const store: AdversarialStore = STORE_FACTORIES[STORE_NAME]();
-const MAPPER = store.mapper;
+/** Every case is replayed with the relations inferred from the schema and with them declared. */
+const MAPPERS: ConformanceMapper[] = [store.mapper, store.declaredMapper];
 
 /** `base` with the three ordered lists moved to other columns, every other declaration kept. */
 function withListColumns(
@@ -961,7 +967,12 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 // option covers what is left, list elements and principal-side literals, which the dataset sends as
 // values; the adapter's own default is pinned in translator.test.ts.
 const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) =>
-  queryPlanToDrizzle({ ...store.root, queryPlan, mapper, nullAttributeRepresentation: "explicit" });
+  queryPlanToDrizzle({
+    ...(mapper === store.declaredMapper ? {} : store.root),
+    queryPlan,
+    mapper,
+    nullAttributeRepresentation: "explicit",
+  });
 
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
   const result = translatePlan(await planOf(golden), mapper);
@@ -977,8 +988,8 @@ const LIST_REFERENCE = /"request\.resource\.attr\.(tagNames|aNumberList|aBoolLis
 /** A fuzz case replayed under every mapper a corpus case would be; the first failure is its verdict. */
 async function fuzzReplay(golden: Golden): Promise<FuzzVerdict> {
   const mappers = LIST_REFERENCE.test(JSON.stringify(golden.plan))
-    ? [MAPPER, ...(store.indexMappers ?? [])]
-    : [MAPPER];
+    ? [...MAPPERS, ...(store.indexMappers ?? [])]
+    : MAPPERS;
 
   const verdicts: FuzzVerdict[] = [];
 
@@ -1066,24 +1077,18 @@ describe(`conformance (${STORE_NAME})`, () => {
 
         const entry = ledgerEntry(golden, tag);
 
-        if (entry?.status === "unsupported") {
-          const queryPlan = await planOf(golden);
-          expect(() => translatePlan(queryPlan, MAPPER)).toThrow(
-            UnsupportedQueryPlanError,
-          );
-
-          return;
+        for (const mapper of MAPPERS) {
+          if (entry?.status === "unsupported") {
+            const queryPlan = await planOf(golden);
+            expect(() => translatePlan(queryPlan, mapper)).toThrow(UnsupportedQueryPlanError);
+          } else if (entry?.status === "divergent") {
+            expect(await selectAllowed(golden, mapper)).not.toEqual(golden.allowed);
+          } else {
+            expect(await selectAllowed(golden, mapper)).toEqual(golden.allowed);
+          }
         }
 
-        const ids = await selectAllowed(golden, MAPPER);
-
-        if (entry?.status === "divergent") {
-          expect(ids).not.toEqual(golden.allowed);
-
-          return;
-        }
-
-        expect(ids).toEqual(golden.allowed);
+        if (entry !== undefined) return;
 
         if (LIST_REFERENCE.test(JSON.stringify(golden.plan))) {
           for (const mapper of store.indexMappers ?? []) {

@@ -787,11 +787,34 @@ export interface ConformanceMapper {
   [reference: string]: MapperEntry;
 }
 
+/**
+ * How the corpus mapper declares its relations. `inferred` names each one, by `relations()` name or
+ * by target table, and leaves cardinality and join columns to the schema; `declared` spells every
+ * relation out in full and is translated with no `table` or `schema` option. Each harness replays
+ * every case under both.
+ */
+export type MappingMode = "inferred" | "declared";
+
+const SCHEMA_ONLY_REFERENCES = [
+  "request.resource.id",
+  "request.resource.attr.createdBy",
+];
+
 export function buildMapper(
   schema: AdversarialSchema,
+  mode: MappingMode = "inferred",
 ): ConformanceMapper {
+  const join = (
+    inferred: { name: string } | { table: Table },
+    type: "one" | "many",
+    table: Table,
+    sourceColumn: AnyColumn,
+    targetColumn: AnyColumn,
+  ): DeclaredRelation =>
+    mode === "inferred" ? inferred : { type, table, sourceColumn, targetColumn };
+
   const labelsRelation: DeclaredRelation = {
-    name: "labels",
+    ...join({ name: "labels" }, "many", schema.labels, schema.subCategories.id, schema.labels.subCategoryId),
     field: schema.labels.name,
     fields: {
       name: schema.labels.name,
@@ -799,7 +822,7 @@ export function buildMapper(
   };
 
   const subCategoriesRelation: DeclaredRelation = {
-    table: schema.subCategories,
+    ...join({ table: schema.subCategories }, "many", schema.subCategories, schema.categories.id, schema.subCategories.categoryId),
     field: schema.subCategories.name,
     fields: {
       name: schema.subCategories.name,
@@ -807,7 +830,7 @@ export function buildMapper(
     },
   };
 
-  return {
+  const mapper: ConformanceMapper = {
     // The primary key, reached as `request.resource.id` rather than through `attr` (the `identifier/*`
     // cases). It is a mapping like any other here, which is the point: an adapter that resolves
     // references by stripping a `request.resource.attr.` prefix never sees this name.
@@ -873,14 +896,14 @@ export function buildMapper(
       column: schema.resources.aString,
       nullAttributeRepresentation: "omitted",
     },
-    // The corpus's one REAL to-one chain (the `relation/*` cases). `type: "one"`, inferred from
-    // relations() and the unique `resourceId`, is what tells the adapter this hop can be ABSENT, which is what the negated shapes discriminate: an absent
+    // The corpus's one REAL to-one chain (the `relation/*` cases). `type: "one"` (inferred from
+    // the unique `resourceId`) is what tells the adapter this hop can be ABSENT, which is what the negated shapes discriminate: an absent
     // parent sends no attribute, so CEL raises a missing-path error and the PDP denies, while an
     // unguarded `NOT EXISTS` over the join is TRUE for exactly those rows. `inner` nests the same
     // declaration one level further out.
     "request.resource.attr.parent": {
       relation: {
-        name: "parent",
+        ...join({ name: "parent" }, "one", schema.parents, schema.resources.id, schema.parents.resourceId),
         fields: {
           aBool: { column: schema.parents.aBool, nullAttributeRepresentation: "omitted" },
           aString: { column: schema.parents.aString, nullAttributeRepresentation: "omitted" },
@@ -888,7 +911,7 @@ export function buildMapper(
           aOptionalString: { column: schema.parents.aOptionalString, nullAttributeRepresentation: "omitted" },
           inner: {
             relation: {
-              name: "inner",
+              ...join({ name: "inner" }, "one", schema.inners, schema.parents.id, schema.inners.parentId),
               fields: {
                 aBool: { column: schema.inners.aBool, nullAttributeRepresentation: "omitted" },
                 aString: { column: schema.inners.aString, nullAttributeRepresentation: "omitted" },
@@ -902,7 +925,7 @@ export function buildMapper(
     },
     "request.resource.attr.tags": {
       relation: {
-        name: "tags",
+        ...join({ name: "tags" }, "many", schema.tags, schema.resources.id, schema.tags.resourceId),
         position: schema.tags.position,
         field: schema.tags.name,
         fields: {
@@ -916,7 +939,7 @@ export function buildMapper(
       indexable: "json",
       collectionValueType: "scalar",
       relation: {
-        table: schema.tags,
+        ...join({ table: schema.tags }, "many", schema.tags, schema.resources.id, schema.tags.resourceId),
         position: schema.tags.position,
         field: schema.tags.name,
       },
@@ -940,7 +963,7 @@ export function buildMapper(
     },
     "request.resource.attr.categories": {
       relation: {
-        name: "categories",
+        ...join({ name: "categories" }, "many", schema.categories, schema.resources.id, schema.categories.resourceId),
         fields: {
           name: schema.categories.name,
           subCategories: { relation: subCategoriesRelation },
@@ -953,7 +976,7 @@ export function buildMapper(
     // off the root. subNames flattens the tail's name column for plain `in` membership.
     "request.resource.attr.mainCategory": {
       relation: {
-        table: schema.categories,
+        ...join({ table: schema.categories }, "many", schema.categories, schema.resources.id, schema.categories.resourceId),
         fields: {
           name: schema.categories.name,
           subCategories: { relation: subCategoriesRelation },
@@ -962,4 +985,13 @@ export function buildMapper(
       },
     },
   };
+
+  // What the schema already says, left to the adapter in the inferred mode: the primary key and a
+  // column read under the call's NULL convention. Every other entry overrides something the schema
+  // cannot say: a NULL convention, a list column, an order, or a default field.
+  if (mode === "inferred") {
+    for (const reference of SCHEMA_ONLY_REFERENCES) delete mapper[reference];
+  }
+
+  return mapper;
 }

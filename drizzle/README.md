@@ -22,19 +22,18 @@ npm install @cerbos/grpc   # or @cerbos/http — any Cerbos client that can call
 
 ## Quick start
 
+Pass the plan, the resource's table and your drizzle relations. Nothing else is needed while your
+Cerbos attribute names are the table's column and relation keys:
+
 ```ts
 import { GRPC } from "@cerbos/grpc";
-import { PlanKind, queryPlanToDrizzle, type Mapper } from "@cerbos/orm-drizzle";
+import { PlanKind, queryPlanToDrizzle } from "@cerbos/orm-drizzle";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db";
+import { relations } from "./relations"; // defineRelations(...), or your tables + relations()
 import { resources } from "./schema";
 
 const cerbos = new GRPC("localhost:3593", { tls: false });
-
-const mapper: Mapper = {
-  "request.resource.attr.status": resources.status,
-  "request.resource.attr.owner": resources.ownerId,
-};
 
 const queryPlan = await cerbos.planResources({
   principal: { id: "user1", roles: ["user"] },
@@ -42,7 +41,7 @@ const queryPlan = await cerbos.planResources({
   action: "view",
 });
 
-const result = queryPlanToDrizzle({ queryPlan, mapper });
+const result = queryPlanToDrizzle({ queryPlan, table: resources, schema: relations });
 
 let rows;
 switch (result.kind) {
@@ -61,17 +60,31 @@ switch (result.kind) {
 }
 ```
 
+With `table` and `schema`:
+
+- `request.resource.attr.status` reads `resources.status`, the column keyed `status`.
+- `request.resource.attr.owner.email` reads `email` through the relation keyed `owner`: one-or-many,
+  the target table and the join columns all come from `relations()` (drizzle 0.44/0.45) or
+  `defineRelations()` (drizzle 1.0). A `defineRelations()` relation's `where` narrows the subquery
+  exactly as it narrows your own reads.
+- `request.resource.id` reads the table's primary key.
+
 `queryPlanToDrizzle` returns `{ kind }`, plus a `filter` (a Drizzle `SQL`) when the kind is
 `CONDITIONAL`. Compose `filter` with your own predicates using `and()`. Handle `ALWAYS_DENIED` by
 returning nothing: if you turn it into `undefined` and pass it to `and()`, Drizzle drops it and your
-query returns rows the PDP denied. Any attribute the plan references but the mapper does not resolve
-throws.
+query returns rows the PDP denied. Any attribute the plan references that resolves to neither a
+mapper entry nor a column or relation of `table` throws.
 
-## Mapping attributes
+Add a [`mapper`](#overrides-the-mapper) only for what the schema cannot say: an attribute named
+differently from its column, how you send NULL columns to Cerbos, list columns, list order, a
+relation's default field, a custom SQL rendering.
+
+## Overrides: the mapper
 
 The mapper maps Cerbos attribute references (`request.resource.attr.*`, `request.principal.attr.*`,
 including nested paths such as `request.resource.attr.owner.email`) to Drizzle columns. It is either
-an object keyed by reference, or a function `(reference) => MapperEntry | undefined`.
+an object keyed by reference, or a function `(reference) => MapperEntry | undefined`. An entry wins
+over what `table` and `schema` would infer; without `table`, the mapper is the whole mapping.
 
 Each entry is one of:
 
@@ -105,21 +118,41 @@ field-to-field comparison) or with index access; those throw.
 
 ### Relations
 
-Relations become correlated `EXISTS` subqueries. `type` is `"one"` or `"many"`; name the related
-table and the join columns, then either a single `field` or a `fields` map. A path segment that is
-not in `fields` falls back to the related table's column of that name.
+A relation reached through `table` and `schema` needs no entry. Declare one to add what the schema
+cannot say (`field`, `fields`, `position`, `subqueryFilter`, a NULL convention on a field), naming the
+relation and leaving the rest to the schema:
+
+- `name` reads the relation of that name on the source table: `one` or `many`, the target table
+  and the join columns. A `defineRelations()` relation's `where` becomes its `subqueryFilter`,
+  unless you declare one.
+- `table` alone reads the single foreign key between the source table and `table`. A foreign key
+  on the source is to-one; one on the target is to-one when its column is unique, else to-many.
+
+```ts
+queryPlanToDrizzle({
+  queryPlan,
+  table: resources,
+  schema: relations,
+  mapper: {
+    "request.resource.attr.owner": { relation: { name: "owner", fields: { mail: owners.email } } },
+    "request.resource.attr.tagNames": { relation: { table: resourceTags, field: resourceTags.name } },
+  },
+});
+```
+
+A nested relation's source is its parent's table, and a path segment not in `fields` reads the
+related table's column, or relation, of that name. An inferred to-one whose target column carries no
+unique constraint, a composite key, an unknown name, several candidate foreign keys, a
+`defineRelations()` relation `through` a junction table and one filtered on its source side each
+throw: declare those in full.
+
+#### Declaring a relation in full
+
+`type` (`"one"` or `"many"`), `table`, `sourceColumn` and `targetColumn` together need no schema and
+override anything inferred:
 
 ```ts
 const mapper: Mapper = {
-  "request.resource.attr.owner": {
-    relation: {
-      type: "one",
-      table: owners,
-      sourceColumn: resources.ownerId,
-      targetColumn: owners.id,
-      fields: { email: owners.email },
-    },
-  },
   "request.resource.attr.tags": {
     relation: {
       type: "many",
@@ -141,40 +174,6 @@ const mapper: Mapper = {
   },
 };
 ```
-
-`request.resource.attr.owner.email` and `request.resource.attr.tags.name` now translate into
-`EXISTS` subqueries over `owners` and `tags`.
-
-#### Inferring a relation from the schema
-
-Pass the resource's `table` and your relations as `schema`, and a relation needs only what the
-schema cannot say. `type`, `table`, `sourceColumn` and `targetColumn` are inferred, and any of them
-you declare wins. `schema` is the object you give `drizzle()`: the tables and their `relations()`
-before drizzle 1.0, or the result of `defineRelations()` from it.
-
-- `name` reads the relation of that name on the source table: `one` or `many`, the target table
-  and the join columns. A `defineRelations()` relation's `where` becomes its `subqueryFilter`,
-  unless you declare one.
-- `table` alone reads the single foreign key between the source table and `table`. A foreign key
-  on the source is to-one; one on the target is to-one when its column is unique, else to-many.
-
-```ts
-queryPlanToDrizzle({
-  queryPlan,
-  table: resources,
-  schema,
-  mapper: {
-    "request.resource.attr.owner": { relation: { name: "owner", fields: { email: owners.email } } },
-    "request.resource.attr.tags": { relation: { table: resourceTags, field: resourceTags.name } },
-  },
-});
-```
-
-A nested relation's source is its parent's table. An inferred to-one whose target column carries no
-unique constraint, a composite key, an unknown name, several candidate foreign keys, a
-`defineRelations()` relation `through` a junction table and one filtered on its source side each
-throw: declare the relation in full instead, a junction as two relations. `field`, `fields`, `position` and `subqueryFilter` are never
-inferred.
 
 The subquery reads the table **bare**. If your own reads of that table filter it (soft delete,
 tenant, subtype), declare the same predicate as [`subqueryFilter`](#declaring-the-applications-own-predicate).
@@ -561,9 +560,10 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 ## Behaviour changes
 
 - Supports drizzle 1.0 (from `1.0.0-rc.5`) as well as 0.44 and 0.45.
-- A relation can be declared by `name` (from `relations()` or `defineRelations()`) or by `table`
-  alone (from the foreign key), with `type` and the join columns inferred; the call takes the
-  resource's `table` and the relations as `schema`. A fully declared relation behaves as before.
+- `table` and `schema` options: with them, an attribute the mapper leaves out reads the resource
+  table's column or relation of the same name and `request.resource.id` its primary key, and a
+  relation entry may give only a `name` (from `relations()` or `defineRelations()`) or a `table`
+  (from the foreign key). `mapper` is optional. A call without `table` behaves as before.
 - Fixed over-grants: a string, number, date or array column read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, which denies under both polarities, where it was compared with `true`; and arithmetic over a ternary whose arms are an `int()` and a double (`(c ? R.attr.d : int(x)) + int(x)`) now throws `UnsupportedQueryPlanError` (**breaking**), where it was computed as a sum on every row.
 - A relation may declare [`position`](#relations), the column holding each row's zero-based
   index in the list sent to Cerbos. With it, `R.attr.tags[0].name == "public"` (a `get-field` over

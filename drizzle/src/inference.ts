@@ -248,6 +248,33 @@ const inferFromRelationsV2 = (
   return { ...inferred, subqueryFilter: new SQL(chunks as ConstructorParameters<typeof SQL>[0]) };
 };
 
+/** The names of the relations `schema` defines on `table`, in either drizzle's style. */
+const relationNames = (table: Table, schema: Record<string, unknown> | undefined): string[] => {
+  if (schema === undefined) return [];
+
+  const tablesV2 = relationsV2Of(schema);
+  if (tablesV2.length > 0) {
+    return Object.keys(tablesV2.find((entry) => entry.table === table)?.relations ?? {});
+  }
+
+  const legacy = legacyRelationsApi();
+  if (legacy === undefined) return [];
+
+  const config =
+    legacyConfigs.get(schema) ??
+    legacy.extractTablesRelationalConfig(schema, legacy.createTableRelationsHelpers);
+  legacyConfigs.set(schema, config);
+  const tsName = Object.entries(schema).find(([, value]) => value === table)?.[0];
+
+  return Object.keys((tsName === undefined ? undefined : config.tables[tsName]?.relations) ?? {});
+};
+
+const tableColumns = (table: Table): Record<string, AnyColumn> =>
+  Object.fromEntries(Object.entries(table).filter(([, value]) => is(value, Column))) as Record<
+    string,
+    AnyColumn
+  >;
+
 const inferFromRelations = (
   source: Table,
   name: string,
@@ -385,12 +412,45 @@ const isDeclaredConfig = (entry: DeclaredMapperEntry): entry is DeclaredMappingC
  * one `RelationMapping` per source table for the whole call, because the translator tells
  * relations apart by identity.
  */
+const ATTR = "request.resource.attr.";
+
+/** The table's single-column primary key, which `request.resource.id` reads unless mapped. */
+const primaryKey = (table: Table): AnyColumn | undefined => {
+  const keys = Object.values(tableColumns(table)).filter((column) => column.primary);
+  return keys.length === 1 ? keys[0] : undefined;
+};
+
 export const inferRelations = (
   mapper: DeclaredMapper,
   root: Table | undefined,
   schema: Record<string, unknown> | undefined,
 ): Mapper => {
   const resolved = new Map<DeclaredRelation, Map<Table | undefined, RelationMapping>>();
+  const implicit = new Map<Table, Map<string, DeclaredRelation>>();
+
+  /** The relation `name` of `table` when the mapper does not mention it: inferred whole. */
+  const implicitRelation = (table: Table, name: string): DeclaredRelation => {
+    const byName = implicit.get(table) ?? new Map<string, DeclaredRelation>();
+    implicit.set(table, byName);
+
+    const relation = byName.get(name) ?? { name };
+    byName.set(name, relation);
+
+    return relation;
+  };
+
+  /**
+   * A path segment under `table` that the mapper does not declare: the table's column of that
+   * name, else its relation of that name.
+   */
+  const implicitEntry = (table: Table, segment: string): MapperEntry | undefined => {
+    const column = tableColumns(table)[segment];
+    if (column !== undefined) return column;
+
+    return relationNames(table, schema).includes(segment)
+      ? resolveEntry({ relation: implicitRelation(table, segment) }, table)
+      : undefined;
+  };
 
   const resolveRelation = (declared: DeclaredRelation, source: Table | undefined): RelationMapping => {
     const bySource = resolved.get(declared) ?? new Map<Table | undefined, RelationMapping>();
@@ -406,10 +466,18 @@ export const inferRelations = (
     bySource.set(source, relation);
 
     if (field !== undefined) relation.field = resolveEntry(field, inferred.table);
-    if (fields !== undefined) {
-      relation.fields = Object.fromEntries(
-        Object.entries(fields).map(([key, entry]) => [key, resolveEntry(entry, inferred.table)]),
-      );
+    const nested = Object.fromEntries(
+      relationNames(inferred.table, schema)
+        .filter((name) => fields?.[name] === undefined && tableColumns(inferred.table)[name] === undefined)
+        .map((name) => [name, resolveEntry({ relation: implicitRelation(inferred.table, name) }, inferred.table)]),
+    );
+    if (fields !== undefined || Object.keys(nested).length > 0) {
+      relation.fields = {
+        ...nested,
+        ...Object.fromEntries(
+          Object.entries(fields ?? {}).map(([key, entry]) => [key, resolveEntry(entry, inferred.table)]),
+        ),
+      };
     }
 
     return relation;
@@ -426,7 +494,16 @@ export const inferRelations = (
     if (entries.has(reference)) return entries.get(reference);
 
     const declared = isFunction(mapper) ? mapper(reference) : mapper[reference];
-    const entry = declared === undefined ? undefined : resolveEntry(declared, root);
+    const entry =
+      declared !== undefined
+        ? resolveEntry(declared, root)
+        : root === undefined
+          ? undefined
+          : reference === "request.resource.id"
+            ? primaryKey(root)
+            : reference.startsWith(ATTR) && !reference.slice(ATTR.length).includes(".")
+              ? implicitEntry(root, reference.slice(ATTR.length))
+              : undefined;
     entries.set(reference, entry);
 
     return entry;

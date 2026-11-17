@@ -42,7 +42,7 @@ export { UnsupportedQueryPlanError };
 
 export function queryPlanToDrizzle({
   queryPlan,
-  mapper: declaredMapper,
+  mapper: declaredMapper = {},
   table,
   schema,
   nullAttributeRepresentation = "omitted",

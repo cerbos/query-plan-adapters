@@ -116,10 +116,15 @@ export type NullAttributeRepresentation = "explicit" | "omitted";
 
 export interface QueryPlanToDrizzleArgs {
   queryPlan: PlanResourcesResponse;
-  mapper: DeclaredMapper;
   /**
-   * The table the plan's resource lives in: the source of every top-level relation that leaves
-   * `sourceColumn` undeclared.
+   * Overrides for what the schema cannot say. With `table`, an attribute the mapper leaves out
+   * reads the resource table's column or relation of the same name.
+   */
+  mapper?: DeclaredMapper;
+  /**
+   * The table the plan's resource lives in. `request.resource.attr.<name>` reads its column or
+   * relation `<name>` unless the mapper declares it, `request.resource.id` its single-column
+   * primary key, and every top-level relation that leaves `sourceColumn` undeclared starts here.
    */
   table?: Table;
   /**

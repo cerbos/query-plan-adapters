@@ -142,7 +142,8 @@ describe("the refusal type", () => {
     let caught: unknown;
 
     try {
-      await translate("postgresql", "string/equals/case-sensitive", { mapper: {} });
+      // Without `table`, nothing falls back to a column of the same name.
+      queryPlanToDrizzle({ queryPlan: await planOf(golden("string/equals/case-sensitive")), mapper: {} });
     } catch (error) {
       caught = error;
     }
