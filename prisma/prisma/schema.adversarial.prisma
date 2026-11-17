@@ -10,6 +10,11 @@ generator client {
   moduleFormat = "cjs"
 }
 
+generator cerbos {
+  provider = "node generator/index.cjs"
+  output   = "../src/generated/cerbos-datamodel"
+}
+
 datasource db {
   provider = "sqlite"
 }

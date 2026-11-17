@@ -26,7 +26,7 @@ import {
   writeFuzzResults,
 } from "./corpus";
 import type { FuzzVerdict, Golden } from "./corpus";
-import { prisma } from "./test-setup.adversarial";
+import { datamodel, prisma } from "./test-setup.adversarial";
 
 /**
  * The conformance harness (conformance/README.md, "The harness contract"). It loads the corpus
@@ -286,6 +286,7 @@ const translatePlan = (queryPlan: PlanResourcesResponse) =>
     queryPlan,
     mapper: MAPPER,
     model: MODEL,
+    datamodel,
     nullAttributeRepresentation: "explicit",
   });
 

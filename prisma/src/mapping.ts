@@ -164,6 +164,10 @@ export function namesToOneRelation(mapper: Mapper, reference: string): boolean {
 function toRelationConfig(
   relation: NonNullable<MapperConfig["relation"]>
 ): RelationConfig {
+  if (relation.type === undefined) {
+    throw new Error(`Relation "${relation.name}" has no type`);
+  }
+
   return {
     name: relation.name,
     type: relation.type,
@@ -243,7 +247,7 @@ export function resolveFieldReference(
   const rejectUnmappedHop = (unresolved: string[]) => {
     if (unresolved.length > 1) {
       throw new UnsupportedQueryPlanError(
-        `"${reference}" reads "${unresolved.join(".")}" beneath a relation, but "${unresolved[0]}" is not mapped as a relation; map it under \`relation.fields\``
+        `"${reference}" reads "${unresolved.join(".")}" beneath a relation, but "${unresolved[0]}" is not mapped as a relation; map it under \`relation.fields\` or pass \`datamodel\``
       );
     }
   };

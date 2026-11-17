@@ -22,6 +22,7 @@
     }
   },
   "files": [
+    "generator/index.cjs",
     "lib/**/*.d.ts",
     "lib/**/*.d.ts.map",
     "lib/**/*.js",
@@ -34,7 +35,7 @@
     "access": "public",
     "provenance": true
   },
-  "//test": "`test` is the translator unit test: offline, so no Cerbos sidecar, no `db push`, and no generated client. It is also engine-agnostic — it produces where-inputs and never hands one to a Prisma client — which is why it has no v6/v7 split. Only `test:adversarial*` needs a store; it replays the recorded goldens and starts no PDP.",
+  "//test": "`test` is the translator unit test: offline, so no Cerbos sidecar, no `db push`, and no generated client, though it reads the datamodel `prisma:generate` writes. It is also engine-agnostic — it produces where-inputs and never hands one to a Prisma client — which is why it has no v6/v7 split. Only `test:adversarial*` needs a store; it replays the recorded goldens and starts no PDP.",
   "scripts": {
     "build": "tsc --build",
     "typecheck": "npm run typecheck:v7 && npm run typecheck:v6",
@@ -103,6 +104,10 @@
     "permissions"
   ],
   "dependencies": {
+    "@prisma/generator-helper": "^7.10.1",
     "re2js": "^2.9.1"
+  },
+  "bin": {
+    "cerbos-prisma-datamodel": "generator/index.cjs"
   }
 }

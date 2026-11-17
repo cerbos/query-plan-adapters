@@ -1,4 +1,5 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { datamodel } from "./generated/cerbos-datamodel/datamodel";
 import {
   Prisma,
   PrismaClient,
@@ -10,4 +11,4 @@ const adapter = new PrismaBetterSqlite3({
 
 const prisma = new PrismaClient({ adapter });
 
-export { prisma, Prisma };
+export { prisma, Prisma, datamodel };

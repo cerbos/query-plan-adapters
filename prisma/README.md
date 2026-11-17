@@ -74,7 +74,8 @@ returns a broader filter.
 | --- | --- | --- |
 | `queryPlan` | yes | The `PlanResourcesResponse` from `planResources`. |
 | `mapper` | no | Maps Cerbos attribute paths to Prisma fields and relations. Defaults to `{}`. |
-| `model` | no | Prisma model name of the queried model (e.g. `"Resource"`). Needed only for [field-to-field comparisons](#field-to-field-comparisons) between root columns. |
+| `model` | no | Prisma model name of the queried model (e.g. `"Resource"`). Needed for `datamodel`, and otherwise only for [field-to-field comparisons](#field-to-field-comparisons) between root columns. |
+| `datamodel` | no | The Prisma schema's datamodel, which fills in what the schema already says. See [Reading the Prisma schema](#reading-the-prisma-schema). |
 | `nullAttributeRepresentation` | no | `"omitted"` (default) or `"explicit"`. See [NULL attribute representation](#null-attribute-representation). |
 
 Exported types: `QueryPlanToPrismaArgs`, `QueryPlanToPrismaResult`, `Mapper`, `MapperConfig`,
@@ -105,11 +106,11 @@ relation; a key read beneath a prefix mapped to a scalar field throws `Unsupport
 | Key | Description |
 | --- | --- |
 | `field` | Prisma field name. |
-| `valueType` | `"string"`, `"number"`, `"boolean"` or `"dateTime"`. Lets the adapter settle comparisons the type already decides before Prisma sees them: CEL answers `R.attr.aNumber == "5"` false for every row and `R.attr.aNumber.contains("2")` with an error, so neither literal is bound for the store to coerce. Required (`"dateTime"`) for `timestamp()` comparisons. Undeclared keeps the untyped behaviour; the adapter cannot read your schema. |
+| `valueType` | `"string"`, `"number"`, `"boolean"` or `"dateTime"`. Lets the adapter settle comparisons the type already decides before Prisma sees them: CEL answers `R.attr.aNumber == "5"` false for every row and `R.attr.aNumber.contains("2")` with an error, so neither literal is bound for the store to coerce. Required (`"dateTime"`) for `timestamp()` comparisons. Read from the schema when `datamodel` is passed; otherwise undeclared keeps the untyped behaviour. |
 | `nullable` | `false` declares the column cannot be NULL, which drops the NULL guards on [relation elements](#relation-element-nullability) and hierarchy segments. |
 | `nullAttributeRepresentation` | Per-attribute NULL convention. See [Declare the convention per attribute](#declare-the-convention-per-attribute). |
 | `relation.name` | Prisma relation field name. |
-| `relation.type` | `"one"` (compiles to `is`/`isNot`) or `"many"` (`some`/`every`/`none`). |
+| `relation.type` | `"one"` (compiles to `is`/`isNot`) or `"many"` (`some`/`every`/`none`). Read from the schema when `datamodel` is passed. |
 | `relation.field` | Column to compare when the policy compares the relation itself (e.g. `"x" in R.attr.tags`). |
 | `relation.fields` | Mappings for fields of the related model, recursively (a nested entry can itself have a `relation`). Unmapped fields are inferred from the path. |
 | `relation.model` | Prisma model name of the related model. Needed only for field-to-field comparisons inside a collection expression. |
@@ -156,6 +157,54 @@ translates to:
 The nested filters read the related model **unfiltered**. If your own reads of that model apply a
 predicate (soft delete, tenant, subtype), declare it as `subqueryFilter`. See
 [Mapping hazards](#mapping-hazards).
+
+### Reading the Prisma schema
+
+Pass the schema's datamodel and the root `model`, and the mapper only says what the schema cannot:
+
+```ts
+import { Prisma } from "@prisma/client"; // prisma-client-js (Prisma 5 and 6)
+
+queryPlanToPrisma({
+  queryPlan,
+  model: "Resource",
+  datamodel: Prisma.dmmf.datamodel,
+  mapper: {
+    "request.resource.attr.status": { field: "status" },
+    "request.resource.attr.owner": { field: "owner" },
+    "request.resource.attr.tags": { relation: { name: "tags", field: "name" } },
+    "request.resource.attr.comments": { field: "comments" },
+  },
+});
+```
+
+From the schema, the adapter reads:
+
+- whether a relation is to-one or to-many, and the model it reaches. A `field` that names a
+  relation field is a relation. A declared `type` or `model` the schema contradicts throws.
+- every segment beneath a relation that the mapper leaves out, by name: `comments.author.name`
+  joins through `author` without `author` being mapped.
+- a scalar column's `valueType` (`String`, `Int`, `Float`, `Boolean`, `DateTime`) and `nullable`
+  (from `?`), unless the mapping declares them.
+
+What it cannot read stays in the mapper: which attribute is which column, the
+[NULL convention](#null-attribute-representation), `relation.field` projections,
+`subqueryFilter`, a projected list's element `valueType`, and which keys of a to-one relation the
+application sends (the `relation.fields` keys that `"key" in R.attr.owner` tests).
+
+The `prisma-client` generator (the default from Prisma 7) ships no `Prisma.dmmf`. Add this
+package's generator next to it, and pass the `datamodel` it writes:
+
+```prisma
+generator cerbos {
+  provider = "cerbos-prisma-datamodel"
+  output   = "../src/generated/cerbos"
+}
+```
+
+```ts
+import { datamodel } from "./generated/cerbos/datamodel";
+```
 
 ### Field-to-field comparisons
 
@@ -500,8 +549,13 @@ vacuously true, matching the empty list your application would send to `check()`
 
 ## Behaviour changes
 
+- A `datamodel` option reads relation cardinality and target model, unmapped nested segments, and
+  scalar `valueType`/`nullable` from the Prisma schema; `relation.type` is optional when it is
+  passed. A `cerbos-prisma-datamodel` generator writes the datamodel for the `prisma-client`
+  generator, which ships no `Prisma.dmmf`. `@prisma/generator-helper` is a new dependency.
 - A reference that continues past an unmapped segment beneath a relation (`parent.inner.x` with
   `inner` not mapped) throws `UnsupportedQueryPlanError`. It used to read `x` from `parent`.
+
 - **Breaking:** a field declared with a `valueType` other than `"boolean"` read where CEL needs a boolean (`!R.attr.aString`) throws `UnsupportedQueryPlanError`: it is CEL's type error under both polarities, which no Prisma filter keeps out. Prisma rejected the filter before.
 - Whether `matches()` raises an error on a pattern (which denies every row) is now decided by
   re2js, a port of RE2, where a hand-written check read `\1`–`\9` as a backreference. RE2 reads

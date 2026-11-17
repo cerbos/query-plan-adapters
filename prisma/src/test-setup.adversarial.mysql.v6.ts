@@ -10,4 +10,6 @@ const prisma = new PrismaClient({
   datasources: { db: { url: adversarialDatabaseUrl() } },
 });
 
-export { prisma, Prisma };
+const datamodel = Prisma.dmmf.datamodel;
+
+export { prisma, Prisma, datamodel };

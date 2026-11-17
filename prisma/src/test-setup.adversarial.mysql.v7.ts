@@ -2,6 +2,7 @@ import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { Prisma, PrismaClient } from "./generated/prisma-adversarial-mysql/client";
 
 import { adversarialDatabaseUrl } from "./test-setup.adversarial-url";
+import { datamodel } from "./generated/cerbos-datamodel/datamodel";
 
 // Prisma 7 reaches a database only through a driver adapter, and `@prisma/adapter-mariadb` is the
 // one Prisma ships for the MySQL provider — the MariaDB connector speaks the MySQL protocol,
@@ -9,4 +10,4 @@ import { adversarialDatabaseUrl } from "./test-setup.adversarial-url";
 const adapter = new PrismaMariaDb(adversarialDatabaseUrl());
 const prisma = new PrismaClient({ adapter });
 
-export { prisma, Prisma };
+export { prisma, Prisma, datamodel };
