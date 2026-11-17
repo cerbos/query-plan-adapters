@@ -236,9 +236,8 @@ val mapping = cerbosMapping {
 - **A dotted reference resolves against the longest mapped prefix**, and the remainder is walked
   through that relation's nested entries. So `request.resource.attr.parent.inner.aBool` above is one
   mapping entry reached in three steps, not a third top-level key.
-- **Cardinality is declared, not inferred.** `one` is read as a scalar through a correlated scalar
-  subquery: no matching row yields NULL, which is already CEL's missing-attribute error, so both
-  polarities deny. `many` is a collection.
+- **`one` is read as a scalar** through a correlated scalar subquery: no matching row yields NULL,
+  which is already CEL's missing-attribute error, so both polarities deny. `many` is a collection.
 - **A list read by position needs `orderBy`.** Without it a relation's rows have no order, and
   `tags[0]`, `tags[0].name`, `tagNames == ["a", "b"]` and `tags.map(t, t.id) == [...]` are refused.
   With it, `tags[0]` is the row at `OFFSET 0` of the subquery in that order, and a comparison around
@@ -260,6 +259,43 @@ val mapping = cerbosMapping {
   unique index on `to` enforces it. Without one the scalar subquery can return several rows, which
   PostgreSQL, MySQL and H2 raise on and **SQLite silently answers from the first row** — so a schema
   that passes your SQLite tests can fail, or quietly answer from an arbitrary row, in production.
+
+### Inferring relations from the schema
+
+When your tables declare their keys with `references(...)` (or DAO `reference(...)`), `relation(...)`
+reads the keys and the cardinality from them, so a relation names only the related table:
+
+```kotlin
+val mapping = cerbosMapping(root = Documents) {
+    "request.resource.attr.tags" to relation(Tags) { "name" to Tags.name }
+    "request.resource.attr.tagNames" to relation(Tags, element = Tags.name, orderBy = Tags.position)
+    "request.resource.attr.parent" to relation(Parents) {
+        "inner" to relation(Inners) { "aBool" to Inners.aBool }
+    }
+    // Two keys reach the same table: name the one this attribute means.
+    "request.resource.attr.reviewer" to relation(via = Documents.reviewerId)
+}
+```
+
+- **The root is named once.** A top-level `relation(...)` needs `cerbosMapping(root = ...)`, the
+  table the filter is applied to; a nested one infers against its enclosing relation's table.
+  Naming the root also checks every top-level `one(...)`/`many(...)` `from` against it.
+- **The key is the single-column foreign key between the two tables, in either direction.** A key
+  on the related table that points back at the scope is a child (`Tags.documentId`); a key on the
+  scope that points at the related table is a reference (`Documents.reviewerId`, read through the
+  column it references).
+- **`one` is inferred only from a key the schema proves unique**: a single-column primary key, or a
+  unique index on that column alone with no `filterCondition`. Anything else is `many`, so a to-one
+  your database keeps unique without telling Exposed reads as a collection, and a member read
+  through it (`parent.label`) is refused, never answered from an arbitrary row. Add the unique
+  index, or declare it with `one(...)`.
+- **What the schema cannot settle is a construction error**, not a guess: no key, a composite key,
+  or several keys between the same two tables (including a self reference by table name). Use
+  `relation(via = column)` or the explicit `one(...)`/`many(...)`, which stay the override for
+  everything inference does not cover: an aliased table, a correlation on columns with no foreign
+  key, or a to-one the schema does not prove unique.
+- **`references(...)` is metadata here, not a filter.** Inference reads keys, never a DAO's
+  conditions, so `visibleWhen` is still how a soft-delete or tenant predicate reaches the subquery.
 
 ### The operand's type has to match the column's
 

@@ -171,11 +171,22 @@ public annotation class CerbosMappingDsl
  * ```
  */
 public fun cerbosMapping(block: MappingBuilder.() -> Unit): AttributeMappings =
-    AttributeMappings(MappingBuilder().apply(block).entries)
+    AttributeMappings(MappingBuilder(null).apply(block).entries)
+
+/**
+ * Builds a static mapping whose top-level references read [root], the table the filter is applied
+ * to. Naming it lets a top-level [MappingBuilder.relation] infer its keys from [root]'s foreign keys,
+ * and lets every top-level relation's `from` be checked against it.
+ */
+public fun cerbosMapping(root: Table, block: MappingBuilder.() -> Unit): AttributeMappings =
+    AttributeMappings(MappingBuilder(root).apply(block).entries)
 
 /** Shared by the top-level mapping and every nested relation: the entries and their factories. */
 @CerbosMappingDsl
-public open class MappingBuilder internal constructor() {
+public open class MappingBuilder internal constructor(
+    /** The table this scope's columns belong to, when known: the root, or the enclosing relation's table. */
+    internal val scope: Table?,
+) {
     internal val entries: MutableMap<String, AttributeMapping> = LinkedHashMap()
 
     /**
@@ -201,8 +212,11 @@ public open class MappingBuilder internal constructor() {
         from: Column<*>,
         to: Column<*>,
         block: RelationBuilder<T>.() -> Unit = {},
-    ): AttributeMapping.Relation =
-        RelationBuilder<T>().apply(block).build(AttributeMapping.Relation.Cardinality.ONE, table, from, to, null, null)
+    ): AttributeMapping.Relation {
+        requireFromInScope(from)
+        return RelationBuilder<T>(table).apply(block)
+            .build(AttributeMapping.Relation.Cardinality.ONE, table, from, to, null, null)
+    }
 
     /**
      * A to-many relation: `table.to = parent.from`. Pass [element] for a scalar collection, where
@@ -216,9 +230,64 @@ public open class MappingBuilder internal constructor() {
         element: Column<*>? = null,
         orderBy: Column<*>? = null,
         block: RelationBuilder<T>.() -> Unit = {},
-    ): AttributeMapping.Relation =
-        RelationBuilder<T>().apply(block)
+    ): AttributeMapping.Relation {
+        requireFromInScope(from)
+        return RelationBuilder<T>(table).apply(block)
             .build(AttributeMapping.Relation.Cardinality.MANY, table, from, to, element, orderBy)
+    }
+
+    /**
+     * A relation to [table] whose keys and cardinality come from the schema: the single-column
+     * foreign key between this scope's table and [table], in either direction. It is
+     * [AttributeMapping.Relation.Cardinality.ONE] only when the related key column is provably unique
+     * (a single-column primary key, or a unique index on that column alone with no filter), and
+     * [AttributeMapping.Relation.Cardinality.MANY] otherwise. No such key, more than one, or a
+     * composite one is an [IllegalArgumentException]: name the key with `relation(via = ...)`, or
+     * declare the relation with [one] or [many].
+     */
+    public fun <T : Table> relation(
+        table: T,
+        element: Column<*>? = null,
+        orderBy: Column<*>? = null,
+        block: RelationBuilder<T>.() -> Unit = {},
+    ): AttributeMapping.Relation =
+        inferred(inferRelationKeys(scope, table), table, element, orderBy, block)
+
+    /**
+     * A relation through the foreign key [via], a column of either this scope's table (a to-one
+     * reference, read from the column it references) or the related table (whose rows point back at
+     * this scope). Cardinality is inferred as for `relation(table)`.
+     */
+    public fun relation(
+        via: Column<*>,
+        element: Column<*>? = null,
+        orderBy: Column<*>? = null,
+        block: RelationBuilder<Table>.() -> Unit = {},
+    ): AttributeMapping.Relation {
+        val keys = inferRelationKeys(scope, via)
+        return inferred(keys, keys.to.table, element, orderBy, block)
+    }
+
+    private fun <T : Table> inferred(
+        keys: InferredKeys,
+        table: T,
+        element: Column<*>?,
+        orderBy: Column<*>?,
+        block: RelationBuilder<T>.() -> Unit,
+    ): AttributeMapping.Relation {
+        require(keys.cardinality == AttributeMapping.Relation.Cardinality.MANY || (element == null && orderBy == null)) {
+            "${keys.describe()} is to-one, so it takes no element or orderBy"
+        }
+        return RelationBuilder<T>(table).apply(block).build(keys.cardinality, table, keys.from, keys.to, element, orderBy)
+    }
+
+    private fun requireFromInScope(from: Column<*>) {
+        if (this is RelationBuilder<*>) return
+        val table = scope ?: return
+        require(from.table === table) {
+            "Relation key ${from.table.tableName}.${from.name} is not a column of ${table.tableName}"
+        }
+    }
 
     private fun put(reference: String, mapping: AttributeMapping) {
         require(reference.isNotEmpty()) { "An attribute reference must not be empty" }
@@ -228,7 +297,7 @@ public open class MappingBuilder internal constructor() {
 
 /** The body of a [MappingBuilder.one] or [MappingBuilder.many] block. */
 @CerbosMappingDsl
-public class RelationBuilder<T : Table> internal constructor() : MappingBuilder() {
+public class RelationBuilder<T : Table> internal constructor(table: T) : MappingBuilder(table) {
     private var visibleWhen: ((Alias<T>) -> Op<Boolean>)? = null
 
     /**
