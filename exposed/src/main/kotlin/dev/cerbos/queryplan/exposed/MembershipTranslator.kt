@@ -1,6 +1,7 @@
 package dev.cerbos.queryplan.exposed
 
 import dev.cerbos.queryplan.exposed.sql.ExactString
+import dev.cerbos.queryplan.exposed.sql.IndexedOnMysql
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 import dev.cerbos.queryplan.exposed.sql.Params
@@ -259,7 +260,7 @@ internal class MembershipTranslator(private val translation: Translation) {
                 ScalarColumnTypes.knownMismatch(element, value) -> null
                 !ScalarColumnTypes.accepts(element, value) ->
                     throw ScalarRefusals.constantTypeMismatch("in", reference, element, value)
-                else -> EqOp(element, Params.of(value))
+                else -> EqOp(element, Params.of(value)).let { if (value is String) IndexedOnMysql.eq(element, value, it) else it }
             }
         }
         return if (arms.isEmpty()) Op.FALSE else TriLogic.or(arms)

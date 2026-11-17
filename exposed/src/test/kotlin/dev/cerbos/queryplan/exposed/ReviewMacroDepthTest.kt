@@ -52,7 +52,7 @@ class ReviewMacroDepthTest {
         // it is taken at the bound those three levels need. Raising it is what keeps this a
         // measurement of the fold's cost rather than a second copy of the refusal.
         val op = buildOp(nestedFold(), Options.of(MAPPING).withMaxMacroDepth(3))
-        assertEquals(9, Regex("NULLIF").findAll(render(op)).count(), render(op))
+        assertEquals(9, Regex("SELECT").findAll(render(op)).count(), render(op))
         // …and one level lower is the refusal, so the three levels really are what it costs.
         assertThrows<UnsupportedPlanShapeException> {
             buildOp(nestedFold(), Options.of(MAPPING).withMaxMacroDepth(2))

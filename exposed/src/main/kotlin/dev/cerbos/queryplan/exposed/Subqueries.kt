@@ -83,7 +83,17 @@ internal class Subqueries(private val translation: Translation) {
         select: (Alias<Table>) -> Expression<*>,
     ): Expression<T?> {
         val chain = chain(collection.owner, collection.hops)
-        val aggregate = wrapAsExpression<T>(chain.source.select(select(chain.tail)).where(chain.correlation))
+        return aggregateOver(collection, chain, columnType, select(chain.tail))
+    }
+
+    /** [chainAggregate] over a [chain] already built for [collection]. */
+    fun <T : Any> aggregateOver(
+        collection: Resolution.Collection,
+        chain: Chain,
+        columnType: IColumnType<T>,
+        select: Expression<*>,
+    ): Expression<T?> {
+        val aggregate = wrapAsExpression<T>(chain.source.select(select).where(chain.correlation))
         return requireLeadingHops(collection, aggregate, columnType)
     }
 

@@ -3,6 +3,7 @@ package dev.cerbos.queryplan.exposed
 import com.google.protobuf.Value
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
+import dev.cerbos.queryplan.exposed.sql.NeverNull
 import dev.cerbos.queryplan.exposed.sql.ScoreCase
 import dev.cerbos.queryplan.exposed.sql.nullIfUndetermined
 import org.jetbrains.exposed.v1.core.Alias
@@ -10,6 +11,7 @@ import org.jetbrains.exposed.v1.core.Coalesce
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.IntegerColumnType
 import org.jetbrains.exposed.v1.core.Max
+import org.jetbrains.exposed.v1.core.NotOp
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.PlusOp
 import org.jetbrains.exposed.v1.core.Sum
@@ -96,16 +98,24 @@ internal class CollectionTranslator(private val translation: Translation) {
         falseScore: Int,
         witness: Int,
     ): Op<Boolean> {
-        val fold = translation.subqueries.chainAggregate(collection, IntegerColumnType()) { alias ->
-            val body = translateBody(collection, lambda, scope, alias)
-            nullIfUndetermined(
-                Coalesce<Int, Int?>(
-                    Max<Int, Int>(ScoreCase(body, trueScore, falseScore, 1), IntegerColumnType()),
-                    intLiteral(0),
-                ),
-            )
+        val subqueries = translation.subqueries
+        val chain = subqueries.chain(collection.owner, collection.hops)
+        val body = translateBody(collection, lambda, scope, chain.tail)
+        // A body that is never NULL has no undetermined element: a plain EXISTS, which an index serves.
+        if (collection.leadingHops.isEmpty() && NeverNull.of(body)) {
+            return if (trueScore > falseScore) {
+                subqueries.existsOver(chain, body)
+            } else {
+                NotOp(subqueries.existsOver(chain, NotOp(body)))
+            }
         }
-        return EqOp(fold, intLiteral(witness))
+        val score = nullIfUndetermined(
+            Coalesce<Int, Int?>(
+                Max<Int, Int>(ScoreCase(body, trueScore, falseScore, 1), IntegerColumnType()),
+                intLiteral(0),
+            ),
+        )
+        return EqOp(subqueries.aggregateOver(collection, chain, IntegerColumnType(), score), intLiteral(witness))
     }
 
     /**
