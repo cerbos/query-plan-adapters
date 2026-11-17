@@ -19,22 +19,17 @@ npm install @cerbos/grpc   # or @cerbos/http — whichever client your deploymen
 
 ## Quick start
 
+Pass the Model. In a basic setup that is all the adapter needs: it reads the relations and field
+types from the Model's schema.
+
 ```ts
 import { GRPC as Cerbos } from "@cerbos/grpc";
 import mongoose from "mongoose";
-import { queryPlanToMongoose, PlanKind, type Mapper } from "@cerbos/orm-mongoose";
+import { queryPlanToMongoose, PlanKind } from "@cerbos/orm-mongoose";
 
 await mongoose.connect("mongodb://127.0.0.1:27017/test");
 const cerbos = new Cerbos("localhost:3593", { tls: false });
 const Document = mongoose.model("Document", /* ... schema ... */);
-
-const mapper: Mapper = {
-  "request.resource.attr.title": { field: "title" },
-  "request.resource.attr.owner": { relation: { name: "owner", type: "one", field: "id" } },
-  "request.resource.attr.tags": {
-    relation: { name: "tags", type: "many", fields: { name: { field: "name" } } },
-  },
-};
 
 async function listDocuments(principalId: string) {
   const queryPlan = await cerbos.planResources({
@@ -43,7 +38,7 @@ async function listDocuments(principalId: string) {
     action: "view",
   });
 
-  const result = queryPlanToMongoose({ queryPlan, mapper });
+  const result = queryPlanToMongoose({ queryPlan, schema: Document });
 
   switch (result.kind) {
     case PlanKind.ALWAYS_DENIED:
@@ -64,8 +59,49 @@ under `$and`, as above. Unsupported shapes throw rather than returning a weaker 
 
 ## Mapping attributes
 
-The plan names attributes by path (`request.resource.attr.title`). The mapper tells the adapter
-where each lives in your documents.
+The plan names attributes by path (`request.resource.attr.title`). With `schema`, the adapter
+resolves each to the document path of the same name and reads the rest from the schema:
+
+| Read from the schema | |
+| --- | --- |
+| Where an attribute lives | `request.resource.attr.x` resolves to the schema path `x`, through a to-one relation if a prefix of it is one. A name the schema does not hold is refused, so a typo cannot reach `$ne` as an absent path. |
+| Relations | A single-nested subdocument or nested object is to-one (dotted paths); a document array is to-many (`$elemMatch`). |
+| Element fields | Every path inside a relation, document arrays nested in its elements included. |
+| `valueType` | `String`, `Number`, `Boolean` and `Date` paths, top-level and inside relations, so Mongoose cannot cast a mismatched CEL literal into a match. |
+
+Null handling needs nothing either under the default
+[`nullAttributeRepresentation`](#null-attribute-representation), `"omitted"`: a stored null is a
+missing attribute everywhere.
+
+Add a `mapper` only where your setup differs from that. Its entries override what the schema says,
+one attribute at a time:
+
+```ts
+const result = queryPlanToMongoose({
+  queryPlan,
+  schema: Document,
+  mapper: {
+    "request.resource.id": { field: "resourceId" },
+    "request.resource.attr.owner": { field: "ownerId" },
+  },
+});
+```
+
+## Overrides
+
+You need an entry for:
+
+- **Renamed attributes.** An attribute stored under another name, the `request.resource.id` key
+  included.
+- **Null handling.** `nullable` under `"explicit"`, or `nullable: false` to drop a guard under
+  `"omitted"`. The schema cannot say how `check()` attributes are built.
+- **A to-one stored as an array.** `relation.requiresParent`.
+- **A collection of scalars projected from objects.** `relation.field`.
+- **Literal conversion.** `valueParser`, and the type of a `Mixed`, `ObjectId`, `Map` or
+  scalar-array path.
+
+Without `schema`, the mapper is the whole mapping: every attribute needs an entry and every
+relation its `type`.
 
 ```ts
 type MapperConfig = {
@@ -90,50 +126,17 @@ type Mapper = Record<string, MapperConfig> | ((key: string) => MapperConfig);
 | `field` | Document path for this attribute. |
 | `nullable` | A stored `null` means a *missing* Cerbos attribute. Comparisons add a non-null guard, so a CEL evaluation error is not turned into a match. Do not set it where `null` is an explicit Cerbos value. Left undeclared, it follows the call's [`nullAttributeRepresentation`](#null-attribute-representation): off under `"explicit"`, on under `"omitted"`. |
 | `valueParser` | Converts plan literals before they reach the filter (for example string → `ObjectId`). Applied to `eq`, `ne`, `lt`, `le`, `gt`, `ge` and `in` values, and inside relation `fields`. |
-| `valueType` | The stored scalar type. Declare number, string and boolean fields — top-level, and inside relation `fields` — so Mongoose does not cast a mismatched CEL literal into the field's type: without it, `R.attr.flag == "true"` is sent as `true` and matches. Declare stored `Date` fields as `dateTime` (see [Timestamps](#timestamps-and-conversions)). `valueParser` still overrides. |
-| `relation` | An embedded document (`type: "one"`, dotted paths) or an array (`type: "many"`, `$elemMatch`). `relation.field` names the property compared inside it (e.g. `createdBy.id`). `type` may be left out when you pass `schema`. |
-| `relation.fields` | Mappings for properties inside the relation, as referenced by lambda variables (`tag.name`). |
+| `valueType` | The stored scalar type, read from the schema when you pass one. Without it, Mongoose casts a mismatched CEL literal into the field's type: `R.attr.flag == "true"` is sent as `true` and matches. Stored `Date` fields are `dateTime` (see [Timestamps](#timestamps-and-conversions)). `valueParser` still overrides. |
+| `relation` | An embedded document (`type: "one"`, dotted paths) or an array (`type: "many"`, `$elemMatch`). `relation.field` names the property compared inside it (e.g. `createdBy.id`). `type` is read from the schema when you pass one. |
+| `relation.fields` | Mappings for properties inside the relation, as referenced by lambda variables (`tag.name`). Only the ones that override the schema. |
 | `relation.requiresParent` | Document path of an optional to-one parent an array is reached through, so `size(chain)` on a document with no parent yields null instead of 0 ([#309](https://github.com/cerbos/query-plan-adapters/issues/309)). A `type: "one"` relation needs no declaration. |
 
-**Every attribute a plan references needs a mapper entry** — its own, or the relation it is reached
-through — or translation throws `No mapper entry for <reference>`. If your documents really are
-shaped like the plan paths, opt in per reference with an entry that names no `field` (`{}` or
-`{ nullable: true }`), or a function mapper that returns one.
+**Every attribute a plan references needs a mapper entry or a schema path** — its own, or the
+relation it is reached through — or translation throws `No mapper entry for <reference>`. Without a
+schema, if your documents really are shaped like the plan paths, opt in per reference with an entry
+that names no `field` (`{}` or `{ nullable: true }`), or a function mapper that returns one.
 
-### Reading the schema
-
-Pass the Model (or its `Schema`) as `schema` and the adapter reads what the schema already says, so
-the mapper only declares what it cannot:
-
-```ts
-const result = queryPlanToMongoose({
-  queryPlan,
-  schema: Document,
-  mapper: {
-    "request.resource.attr.owner": { field: "ownerId" },
-    "request.resource.attr.parent": { relation: { name: "parent", fields: { title: { nullable: true } } } },
-  },
-});
-```
-
-| Read from the schema | |
-| --- | --- |
-| Relation `type` | A single-nested subdocument or nested object is `"one"`, a document array `"many"`. |
-| Relations named by `field` | An entry whose `field` holds a subdocument or document array becomes that relation. |
-| Element `fields` | Every path inside a relation, document arrays nested in its elements included. |
-| `valueType` | `String`, `Number`, `Boolean` and `Date` paths, top-level and inside relations. |
-| Unmapped resource attributes | `request.resource.attr.x` with no entry resolves to the schema path `x` (through a to-one relation if a prefix of it is one). A name the schema does not hold is still refused. |
-
-A declared value always wins. These stay declared, because a schema cannot say them:
-
-- **`nullable`.** Whether the application sends a stored null as `null` or leaves the attribute out
-  is a property of how `check()` attributes are built, not of the schema.
-- **`requiresParent`.** A to-one on the `check()` side may be stored as an array.
-- **Renames.** An attribute stored under another name, the `request.resource.id` key included.
-- **`relation.field`.** Which element property a collection of scalars is projected from.
-- **`valueParser`**, and the type of a `Mixed`, `ObjectId`, `Map` or scalar-array path.
-
-Without `schema`, a relation must declare `type`.
+The examples below spell every entry out, as a mapper without `schema` must.
 
 ### Direct fields
 
