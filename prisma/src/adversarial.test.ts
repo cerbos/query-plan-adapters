@@ -358,8 +358,8 @@ afterAll(async () => {
   await prisma.$disconnect();
   const leg = `${STORE_NAME}-v${process.env["PRISMA_VERSION"] ?? "7"}`;
 
-  writeFuzzResults("prisma", leg, fuzzResults.inferred);
-  writeFuzzResults("prisma", `${leg}-declared`, fuzzResults.declared);
+  writeFuzzResults("prisma", leg, fuzzResults.declared);
+  writeFuzzResults("prisma", `${leg}+schema`, fuzzResults.inferred);
 
   const lines = TAGS.flatMap((tag) => {
     const tiers = Object.keys(totals[tag] ?? {}).sort();

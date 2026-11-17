@@ -37,8 +37,8 @@ Three kinds of material live only there, and they are not equal:
    proof, because `dyn()` defers the check to runtime and the planner drops the wrapper. Plans the
    planner cannot produce at all (an unknown kind, a malformed operand list) belong here too.
    Permanent.
-2. **A caller-supplied argument the corpus structurally cannot vary.** Each harness uses *one*
-   mapping, so an operator override, a second mapper form, `allowPostFilter`, a per-call
+2. **A caller-supplied argument the corpus structurally cannot vary.** Each harness uses fixed
+   mappings, so an operator override, a second mapper form, `allowPostFilter`, a per-call
    `nullAttributeRepresentation`, or `maxMacroDepth` has no case spelling. The adapter's refusal
    *type* belongs here too. Permanent.
 3. **A corpus gap wearing a unit test**: policy-reachable, and the corpus simply does not carry it
@@ -51,9 +51,10 @@ Three kinds of material live only there, and they are not equal:
 
 ## The conformance corpus and its harnesses
 
-- A harness passes corpus data through verbatim: one mapping and one set of options for every case,
-  over the whole dataset. Drizzle also replays list-reading cases under `indexMappers`, on top of the
-  single-mapper pass.
+- A harness passes corpus data through verbatim: the same mappings and one set of options for every
+  case, over the whole dataset. An adapter that infers its mapping from the ORM replays every case
+  twice, through the inferred mapping and through a fully declared one, and each must match the
+  ledger. Drizzle also replays list-reading cases under `indexMappers`.
 - **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/src/corpus.ts`,
   `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`,
   `sequel/spec/support/conformance_corpus.rb`, `mongodb-ruby/spec/support/conformance_corpus.rb`,
