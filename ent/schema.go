@@ -5,7 +5,6 @@ package cerbosent
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/cerbos/query-plan-adapters/ent/internal/queryplan"
@@ -26,7 +25,6 @@ type SchemaType struct {
 	// Fields maps each ent field name, the id's included, to its column.
 	Fields map[string]string
 	Name   string
-	Table  string
 	// ID is the id column, empty for a composite id.
 	ID    string
 	Edges []SchemaEdge
@@ -37,6 +35,8 @@ type SchemaEdge struct {
 	Name string
 	// Type is the name of the type the edge reaches.
 	Type string
+	// Unsupported says why Join is empty: ent joins the edge in a way the adapter cannot lower.
+	Unsupported string
 	// Join is the path from the owner's row to the target's row: one step, or two through an
 	// M2M join table.
 	Join []SchemaJoin
@@ -130,7 +130,9 @@ func (s *Schema) Mapper(root string, overrides SchemaMap, opts ...SchemaOption) 
 	}), nil
 }
 
-const elementDepth = 3
+// collectionDepth is how many to-many edges deep an inferred collection's elements expose their
+// own collections.
+const collectionDepth = 3
 
 func (s *Schema) infer(typ *SchemaType, reference string, o schemaOptions) (Entry, bool) {
 	if reference == "request.resource.id" {
@@ -148,18 +150,17 @@ func (s *Schema) infer(typ *SchemaType, reference string, o schemaOptions) (Entr
 	var edges []string
 	cur := typ
 	for i, segment := range segments {
-		edge, edgeOK := matchEdge(cur, segment)
-		col, colOK := matchColumn(cur, segment)
+		named, ok := namesOf(cur)[segment]
 		switch {
-		case edgeOK && !colOK:
-			edges = append(edges, edge.Name)
-			next, err := s.typeNamed(edge.Type)
+		case ok && named.edge != nil:
+			edges = append(edges, named.edge.Name)
+			next, err := s.typeNamed(named.edge.Type)
 			if err != nil {
 				return Entry{}, false
 			}
 			cur = next
-		case colOK && !edgeOK && i == len(segments)-1:
-			entry := SchemaEntry{Edge: strings.Join(edges, "."), Column: col, NullConvention: o.nullConvention}
+		case ok && i == len(segments)-1:
+			entry := SchemaEntry{Edge: strings.Join(edges, "."), Column: named.column, NullConvention: o.nullConvention}
 			e, err := s.resolve(typ, entry)
 			return e, err == nil
 		default:
@@ -167,44 +168,75 @@ func (s *Schema) infer(typ *SchemaType, reference string, o schemaOptions) (Entr
 		}
 	}
 
-	target, rel, unique, err := s.walk(typ, strings.Join(edges, "."))
+	e, err := s.resolve(typ, SchemaEntry{Edge: strings.Join(edges, "."), NullConvention: o.nullConvention})
 	if err != nil {
 		return Entry{}, false
 	}
-	if unique {
-		return Entry{ScalarRelation: rel, NullConvention: o.nullConvention}, true
+	if e.Relation != nil {
+		e.Relation.Fields = s.elementFields(cur, collectionDepth)
 	}
-	rel.Fields = s.elementFields(target, elementDepth)
-	return Entry{Relation: rel}, true
+	return e, true
 }
 
-// elementFields exposes a collection element's columns and to-many edges under both spellings of
-// their names.
+// elementFields exposes a collection element's columns and, depth levels down, its to-many edges,
+// under the names namesOf gives them.
 func (s *Schema) elementFields(typ *SchemaType, depth int) map[string]Entry {
 	fields := map[string]Entry{}
-	for name, col := range typ.Fields {
-		e, _ := column(typ, SchemaEntry{Column: col})
-		for _, spelling := range spellings(name) {
+	collections := map[*SchemaEdge]*Entry{}
+	for spelling, named := range namesOf(typ) {
+		if named.edge == nil {
+			e, _ := column(typ, SchemaEntry{Column: named.column})
 			fields[spelling] = e
-		}
-	}
-	if depth == 0 {
-		return fields
-	}
-	for _, edge := range typ.Edges {
-		if edge.Unique {
 			continue
 		}
-		target, rel, _, err := s.walk(typ, edge.Name)
-		if err != nil {
+		if named.edge.Unique || depth == 0 {
 			continue
 		}
-		rel.Fields = s.elementFields(target, depth-1)
-		for _, name := range spellings(edge.Name) {
-			fields[name] = Entry{Relation: rel}
+		collection, seen := collections[named.edge]
+		if !seen {
+			if target, rel, _, err := s.walk(typ, named.edge.Name); err == nil {
+				rel.Fields = s.elementFields(target, depth-1)
+				collection = &Entry{Relation: rel}
+			}
+			collections[named.edge] = collection
+		}
+		if collection != nil {
+			fields[spelling] = *collection
 		}
 	}
 	return fields
+}
+
+// schemaName is what one spelling of a name reaches on a type: a column or an edge.
+type schemaName struct {
+	edge   *SchemaEdge
+	column string
+}
+
+// namesOf indexes a type's fields and edges by their ent name and its lower camel case. A
+// spelling two of them share is left out, so it resolves to nothing.
+func namesOf(typ *SchemaType) map[string]schemaName {
+	names := map[string]schemaName{}
+	shared := map[string]bool{}
+	add := func(spelling string, named schemaName) {
+		if _, taken := names[spelling]; taken || shared[spelling] {
+			delete(names, spelling)
+			shared[spelling] = true
+			return
+		}
+		names[spelling] = named
+	}
+	for name, col := range typ.Fields {
+		for _, spelling := range spellings(name) {
+			add(spelling, schemaName{column: col})
+		}
+	}
+	for i := range typ.Edges {
+		for _, spelling := range spellings(typ.Edges[i].Name) {
+			add(spelling, schemaName{edge: &typ.Edges[i]})
+		}
+	}
+	return names
 }
 
 func spellings(name string) []string {
@@ -222,32 +254,6 @@ func lowerCamel(name string) string {
 		}
 	}
 	return strings.Join(parts, "")
-}
-
-func matchEdge(typ *SchemaType, segment string) (*SchemaEdge, bool) {
-	var found *SchemaEdge
-	for i := range typ.Edges {
-		if slices.Contains(spellings(typ.Edges[i].Name), segment) {
-			if found != nil {
-				return nil, false
-			}
-			found = &typ.Edges[i]
-		}
-	}
-	return found, found != nil
-}
-
-func matchColumn(typ *SchemaType, segment string) (string, bool) {
-	found := ""
-	for name, col := range typ.Fields {
-		if slices.Contains(spellings(name), segment) {
-			if found != "" {
-				return "", false
-			}
-			found = col
-		}
-	}
-	return found, found != ""
 }
 
 func (s *Schema) typeNamed(name string) (*SchemaType, error) {
@@ -334,7 +340,7 @@ func (s *Schema) walk(typ *SchemaType, path string) (*SchemaType, *Relation, boo
 			return nil, nil, false, err
 		}
 		if len(edge.Join) == 0 {
-			return nil, nil, false, fmt.Errorf("edge %s.%s has no join", typ.Name, name)
+			return nil, nil, false, fmt.Errorf("edge %s.%s has no join: %s", typ.Name, name, edge.Unsupported)
 		}
 		steps = append(steps, edge.Join...)
 		unique = unique && edge.Unique
