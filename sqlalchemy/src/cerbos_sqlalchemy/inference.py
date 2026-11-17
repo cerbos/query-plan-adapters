@@ -7,16 +7,29 @@ See "Collections in a related table" in the README.
 """
 
 import itertools
+import re
 from typing import Any
 
-from sqlalchemy import and_, select
-from sqlalchemy.orm import RelationshipProperty, configure_mappers
+from sqlalchemy import and_, inspect, select
+from sqlalchemy.orm import (
+    ColumnProperty,
+    Mapper,
+    RelationshipProperty,
+    configure_mappers,
+)
 from sqlalchemy.orm.attributes import QueryableAttribute
 from sqlalchemy.orm.interfaces import MANYTOMANY
 from sqlalchemy.sql import operators
 from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 from sqlalchemy.sql.schema import Column, Index, UniqueConstraint
 
+from cerbos_sqlalchemy._plan import (
+    LAMBDA_BINDING_OPERATORS,
+    Expr,
+    Operand,
+    Value,
+    Variable,
+)
 from cerbos_sqlalchemy.errors import UnsupportedPlanError
 from cerbos_sqlalchemy.relations import Relation
 
@@ -187,6 +200,7 @@ def related(*path: Any) -> Any:
             hop_correlation=[p for hop in hops[:-1] for p in hop.predicates],
         )
         relation._own = tuple(own)
+        relation._target = tail.prop.mapper
         relation._hop_own = tuple(hop_own)
         return relation
 
@@ -200,3 +214,172 @@ def related(*path: Any) -> Any:
 
 def infer(value: Any) -> Any:
     return related(value) if is_relationship(value) else value
+
+
+_ROOT = "request.resource.attr."
+
+
+def _mapper(table: Any) -> Any:
+    mapper = inspect(table, raiseerr=False)
+    return mapper if isinstance(mapper, Mapper) else None
+
+
+def _snake(name: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
+
+
+def _mapped_property(mapper: Any, segment: str) -> Any:
+    found = {
+        key: mapper.attrs[key]
+        for key in (segment, _snake(segment))
+        if key in mapper.attrs
+    }
+    if len(found) > 1:
+        raise UnsupportedPlanError(
+            f"{segment!r} names both {' and '.join(sorted(found))} on "
+            f"{mapper.class_.__name__}; map it in attr_map"
+        )
+    return next(iter(found.values()), None)
+
+
+def _resolve(mapper: Any, segments: list[str]) -> Any:
+    relationships = []
+    for position, segment in enumerate(segments):
+        prop = _mapped_property(mapper, segment)
+        last = position == len(segments) - 1
+        attribute = getattr(mapper.class_, prop.key) if prop is not None else None
+        if isinstance(prop, RelationshipProperty):
+            relationships.append(attribute)
+            mapper = prop.mapper
+            if last:
+                return related(*relationships)
+        elif isinstance(prop, ColumnProperty) and last and len(prop.columns) == 1:
+            return related(*relationships, attribute) if relationships else attribute
+        else:
+            return None
+    return None
+
+
+def _root_segments(name: str) -> list[str] | None:
+    if name.startswith(_ROOT):
+        return name[len(_ROOT) :].split(".")
+    if name == "request.resource.id":
+        return ["id"]
+    return None
+
+
+def _element(collection: Any) -> tuple[Any, Any] | None:
+    target = getattr(collection, "_target", None)
+    if not isinstance(collection, Relation) or target is None:
+        return None
+    if collection.member is not None:
+        return collection.member, None
+    return collection, target
+
+
+def resolvable(table: Any, name: str) -> bool:
+    """Whether ``name`` could be read from ``table``'s mapping, for option checks."""
+    mapper = _mapper(table)
+    if mapper is None:
+        return False
+    segments = _root_segments(name)
+    if segments is None:
+        return not name.startswith("request.")
+    try:
+        return _resolve(mapper, segments) is not None
+    except UnsupportedPlanError:
+        return False
+
+
+def infer_attributes(
+    condition: Operand,
+    table: Any,
+    attr_map: dict[str, Any],
+    skip: frozenset[str],
+) -> dict[str, Any]:
+    """The plan's attributes ``attr_map`` leaves out, read from ``table``'s mapping.
+
+    ``request.resource.attr.a.b`` follows ``a`` then ``b`` through the model's columns
+    and relationships, by name or its snake_case. A lambda variable takes the element
+    of the collection it ranges over: the member column of a list of scalars, else the
+    related row, whose fields resolve on its model. A name that resolves nowhere is
+    left out, so the plan fails as it would without inference. A name in ``skip``
+    (a declared collection column) is added only as a relation.
+    """
+    mapper = _mapper(table)
+    if mapper is None:
+        return {}
+    added: dict[str, Any] = {}
+    origin: dict[str, str] = {}
+
+    def lookup(name: str) -> Any:
+        return attr_map[name] if name in attr_map else added.get(name)
+
+    def resolve(name: str, scope: dict[str, tuple[str, Any, Any]]) -> None:
+        if name in attr_map:
+            return
+        head, _, rest = name.partition(".")
+        if head in scope:
+            collection, element, target = scope[head]
+            if name in origin and origin[name] != collection:
+                raise UnsupportedPlanError(
+                    f"{head!r} ranges over both {origin[name]} and {collection}; "
+                    f"map {name!r} in attr_map"
+                )
+            origin[name] = collection
+            if name in added:
+                return
+            value = element if not rest else None
+            if rest and target is not None:
+                value = _resolve(target, rest.split("."))
+        else:
+            if name in added:
+                return
+            segments = _root_segments(name)
+            value = _resolve(mapper, segments) if segments is not None else None
+            if value is not None and name.startswith(_ROOT):
+                # Map each hop too, so has() below one sees a parent that can be absent.
+                for end in range(1, len(segments)):
+                    resolve(_ROOT + ".".join(segments[:end]), scope)
+        if value is not None and (name not in skip or isinstance(value, Relation)):
+            added[name] = value
+
+    def walk(operand: Operand, scope: dict[str, tuple[str, Any, Any]]) -> None:
+        if isinstance(operand, Variable):
+            resolve(operand.name, scope)
+            return
+        if not isinstance(operand, Expr):
+            return
+        children = operand.operands
+        if (
+            operand.operator in LAMBDA_BINDING_OPERATORS
+            and len(children) == 2
+            and isinstance(children[1], Expr)
+            and children[1].operator == "lambda"
+            and len(children[1].operands) == 2
+            and isinstance(children[1].operands[1], Variable)
+        ):
+            collection, (body, variable) = children[0], children[1].operands
+            walk(collection, scope)
+            inner = {k: v for k, v in scope.items() if k != variable.name}
+            if isinstance(collection, Variable):
+                element = _element(lookup(collection.name))
+                if element is not None:
+                    inner[variable.name] = (collection.name, *element)
+            resolve(variable.name, inner)
+            walk(body, inner)
+            return
+        if (
+            operand.operator == "index"
+            and len(children) == 2
+            and isinstance(children[0], Variable)
+            and isinstance(children[1], Value)
+            and isinstance(children[1].value, str)
+            and "." not in children[1].value
+        ):
+            resolve(f"{children[0].name}.{children[1].value}", scope)
+        for child in children:
+            walk(child, scope)
+
+    walk(condition, {})
+    return added

@@ -20,8 +20,8 @@ pip install cerbos-sqlalchemy
 ```python
 from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.model import Principal, ResourceDesc
-from sqlalchemy import Column, Integer, String, create_engine
-from sqlalchemy.orm import Session, declarative_base
+from sqlalchemy import Column, ForeignKey, Integer, String, create_engine
+from sqlalchemy.orm import Session, declarative_base, relationship
 
 from cerbos_sqlalchemy import get_query
 
@@ -35,6 +35,10 @@ class LeaveRequest(Base):
     department = Column(String(225))
     geography = Column(String(225))
     priority = Column(Integer)
+    owner_id = Column(ForeignKey("employee.id"))
+
+    owner = relationship("Employee")
+    approvers = relationship("Employee", secondary="leave_request_approver")
 
 
 with CerbosClient(host="http://localhost:3592") as c:
@@ -45,16 +49,10 @@ with CerbosClient(host="http://localhost:3592") as c:
     )
     plan = c.plan_resources("view", principal, ResourceDesc("leave_request"))
 
-attr_map = {
-    "request.resource.attr.department": LeaveRequest.department,
-    "request.resource.attr.geography": LeaveRequest.geography,
-    "request.resource.attr.priority": LeaveRequest.priority,
-}
-
 # ALWAYS_ALLOWED -> select(LeaveRequest)
 # ALWAYS_DENIED  -> select(LeaveRequest).where(False)
 # CONDITIONAL    -> select(LeaveRequest).where(<translated condition>)
-query = get_query(plan, LeaveRequest, attr_map)
+query = get_query(plan, LeaveRequest)
 
 # Compose with your own predicates; a denied plan stays denied.
 query = query.where(LeaveRequest.priority < 5).limit(20)
@@ -62,6 +60,12 @@ query = query.where(LeaveRequest.priority < 5).limit(20)
 with Session(create_engine("sqlite:///app.db")) as session:
     rows = session.execute(query).scalars().all()
 ```
+
+With nothing but the model, every attribute is read from its mapping:
+`R.attr.department` is the `department` column, `R.attr.owner.name` follows the `owner`
+relationship, and `R.attr.approvers.exists(a, a.name == "x")` ranges over the `approvers`
+relationship with `a.name` read from `Employee`. Pass an `attr_map` only for what the mapping
+cannot say; see [Mapping attributes](#mapping-attributes).
 
 `get_query` returns a `Select` for all three plan kinds, so you don't need to branch on the kind.
 If you want to skip the round trip on a denial, check
@@ -72,10 +76,39 @@ To debug, print the SQL: `print(query.compile(compile_kwargs={"literal_binds": T
 
 ## Mapping attributes
 
-`attr_map` maps each Cerbos attribute reference to a column. Values can be an ORM attribute
-(`LeaveRequest.department`), a Core column (`LeaveRequest.__table__.c.department`), or any SQLAlchemy
-column expression — for example a correlated scalar subquery for a value read through a to-one
-relation.
+### By default: the model's own mapping
+
+For an ORM model, an attribute `attr_map` leaves out is read from the model:
+
+- `request.resource.attr.a.b.c` follows `a` and `b` as relationships and reads `c` as a column, or
+  as a relationship (a collection, or a to-one read whole). Each segment matches a mapped attribute
+  by its own name or its snake_case (`createdAt` reads `created_at`). A name matching two different
+  attributes is refused.
+- A relationship is read as [`related()`](#collections-in-a-related-table) reads it: its own
+  `primaryjoin` and `secondaryjoin`, subtype discriminator, and to-one hops proved by a unique key.
+- A lambda variable takes the element of the collection it ranges over, and its fields resolve on
+  the related model: in `R.attr.tags.exists(t, t.name == "x")`, `t.name` is `Tag.name`.
+- `request.resource.id` reads the `id` column.
+
+An attribute that resolves nowhere raises `KeyError`, as an unmapped one always has. A Core `Table`
+has no mapping to read, so every attribute must be in `attr_map`.
+
+**The contract inference relies on:** the value your application sends for `R.attr.x` is the value
+of the column or relationship named `x`. When it is not (the attribute is computed, renamed, or
+comes from another table without a relationship), map it.
+
+### Overrides: `attr_map`
+
+`attr_map` maps a Cerbos attribute reference to a column, and wins over inference. Use it for an
+attribute named differently from its column, a list of scalars (`related(Model.tags, Tag.name)`),
+a relation the mapping does not hold, or a lambda field named differently. Values can be an ORM
+attribute (`LeaveRequest.department`), a Core column (`LeaveRequest.__table__.c.department`), a
+`relationship()` attribute, [`related(...)`](#collections-in-a-related-table), a hand-written
+[`Relation`](#a-hand-written-relation), or any SQLAlchemy column expression.
+
+The other options cover what no mapping can say: the [NULL convention](#null-attribute-representation)
+your application sends, [collection storage](#collection-storage) in one column, and
+[operator overrides](#operator-overrides).
 
 ### Model styles
 
@@ -113,9 +146,9 @@ If your models use `relationship()`, consider `query.with_only_columns(...)` to 
 
 - **A collection stored in one column** (JSON or PostgreSQL array) — declare it in
   [`collection_columns`](#collection-storage) to get `size()` and constant indexing.
-- **A collection in a related table** — map it to a [`Relation`](#collections-in-a-related-table)
-  and pass `relation_overrides()` as `operator_override_fns`. Read
-  [Mapping hazards](#mapping-hazards) before you do.
+- **A collection in a related table** — read from its `relationship()` with no configuration, or
+  named with [`related()`](#collections-in-a-related-table). Read
+  [Mapping hazards](#mapping-hazards).
 - **A collection the PDP already knows** (usually a principal attribute) — translated with no
   configuration; see [Collection macros over known values](#collection-macros-over-known-values).
 
@@ -124,7 +157,7 @@ If your models use `relationship()`, consider `query.with_only_columns(...)` to 
 | Option | Default | Use it when |
 | --- | --- | --- |
 | `table_mapping` | `None` | `attr_map` spans more than one table |
-| `operator_override_fns` | `None` | you need a dialect-specific operator, or `relation_overrides()` for a collection in a related table |
+| `operator_override_fns` | `None` | you need a dialect-specific operator. `relation_overrides()` is merged in for you whenever a collection is mapped |
 | `null_attribute_representation` | `"omitted"` | your app sends explicit nulls for NULL columns (`"explicit"`) |
 | `attribute_null_representation` | `None` | the NULL convention differs per attribute |
 | `collection_columns` | `None` | a policy calls `size()`, indexes, or tests literal membership in a JSON / PostgreSQL array column |
@@ -311,8 +344,9 @@ index or map key has no SQL lowering. Macros over a related table (`R.attr.tags.
 
 ### Collections in a related table
 
-Map the collection attribute to the model's `relationship()` and each lambda variable's fields to
-the element table's columns. The adapter reads the join and the cardinality from the mapping:
+A collection whose `relationship()` carries its name needs no mapping. To name one explicitly, map
+the attribute to the `relationship()` or to `related(...)`. The adapter reads the join and the
+cardinality from the mapping:
 
 ```python
 from cerbos_sqlalchemy import get_query, related
@@ -629,10 +663,17 @@ It must also keep a NULL body NULL, as `relation_overrides()` does; nothing chec
 
 ## Behaviour changes
 
+- Added: `attr_map` is optional for an ORM model. An attribute it leaves out, lambda variables
+  included, is read from the model's columns and relationships by name; see
+  [By default: the model's own mapping](#by-default-the-models-own-mapping). It used to raise
+  `KeyError`. A widening.
 - Added: an `attr_map` value may be a `relationship()` attribute or `related(...)`, which read the
   join, cardinality and to-one hop guards from the mapping, and mapping a collection merges
   `relation_overrides()` in. A relationship attribute used to be refused with
   `UnsupportedPlanError`. A widening.
+- **Breaking:** `has()` over an attribute mapped to a correlated scalar subquery raises
+  `UnsupportedPlanError` unless an override answers `has`. The subquery is NULL for a missing parent
+  as well as a missing value, so `!has(parent.x)` selected parentless rows the PDP denies.
 - Added ([#527](https://github.com/cerbos/query-plan-adapters/issues/527)): `Relation` and
   `relation_overrides()`, the conformance harness's three-valued relation macros, now shipped. This
   README used to show a hand-written `exists` override that put the body in `.where(body)`, which
@@ -726,7 +767,7 @@ demo/scripts/run-example.sh sqlalchemy
 | --- | --- | --- |
 | `tests/test_translator.py` | caller options over recorded corpus plans: null representation, overrides, collection storage, transports, model styles | nothing — plans from `conformance/golden/` |
 | `tests/test_query.py`, `tests/test_relations.py` | plans the planner cannot produce; options no policy can reach | nothing |
-| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised: every case on SQLite (sync and async), PostgreSQL and MySQL, and the cases that read a `collection_columns` declaration once more on PostgreSQL with the collections stored as native arrays. CI runs it under SQLAlchemy 1.4 and 2.x | SQLite, and Docker for PostgreSQL and MySQL, pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE) |
+| `tests/test_adversarial_conformance.py` | returned rows match the recorded decisions, or the ledger's refusal is raised: every case on SQLite (sync and async), PostgreSQL and MySQL, and the cases that read a `collection_columns` declaration once more on PostgreSQL with the collections stored as native arrays. Every leg runs twice: with the attributes inferred from the models' mapping, and with every attribute written out in `attr_map` (hand-written `Relation`s and subqueries), and a fuzz replay reports the second as `<store>-declared`. CI runs it under SQLAlchemy 1.4 and 2.x | SQLite, and Docker for PostgreSQL and MySQL, pinned in [`POSTGRES_IMAGE`](POSTGRES_IMAGE) and [`MYSQL_IMAGE`](MYSQL_IMAGE) |
 
 ```bash
 pdm install -G :all

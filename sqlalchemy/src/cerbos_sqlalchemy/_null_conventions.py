@@ -6,6 +6,7 @@
 The plan is the same under either convention, so the caller declares it. See #302 and #308.
 """
 
+from collections.abc import Callable
 from typing import Any, Literal
 
 from sqlalchemy import and_, case, literal, not_, or_
@@ -29,6 +30,7 @@ def validate_representations(
     null_attribute_representation: Any,
     attribute_null_representation: dict[str, Any] | None,
     attr_map: dict[str, Any],
+    resolvable: Callable[[str], bool] = lambda _: False,
 ) -> dict[str, NullAttributeRepresentation]:
     """Validate both options and return the per-attribute declarations."""
     if null_attribute_representation not in _REPRESENTATIONS:
@@ -43,7 +45,7 @@ def validate_representations(
                 "attribute_null_representation values must be 'explicit' or "
                 f"'omitted', got {convention!r} for {attribute!r}"
             )
-        if attribute not in attr_map:
+        if attribute not in attr_map and not resolvable(attribute):
             raise ValueError(
                 f"attribute_null_representation names {attribute!r}, which is not "
                 "in the attribute column map"

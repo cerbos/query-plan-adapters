@@ -231,20 +231,26 @@ HAZARDS = [
 ]
 
 
+@pytest.mark.parametrize("mapped", [True, False], ids=["named", "unmapped"])
 @pytest.mark.parametrize(
     "collection,relationship_attribute,field,column,operator,value",
     HAZARDS,
     ids=[h[0] for h in HAZARDS],
 )
 def test_the_relationship_join_decides_which_rows_are_elements(
-    engine, collection, relationship_attribute, field, column, operator, value
+    engine, collection, relationship_attribute, field, column, operator, value, mapped
 ):
-    # Doc 1's only candidate element is the one the relationship excludes.
-    attr_map = {
-        f"request.resource.attr.{collection}": relationship_attribute,
-        "e": relationship_attribute,
-        f"e.{field}": column,
-    }
+    # Doc 1's only candidate element is the one the relationship excludes. Unmapped,
+    # the collection and the lambda's field resolve through Doc's mapping by name.
+    attr_map = (
+        {
+            f"request.resource.attr.{collection}": relationship_attribute,
+            "e": relationship_attribute,
+            f"e.{field}": column,
+        }
+        if mapped
+        else None
+    )
     expression = _exists(collection, field, operator, value)
     assert _ids(engine, expression, attr_map) == {2}
     assert _ids(
@@ -271,3 +277,27 @@ def test_a_self_referential_relationship_is_refused():
 def test_a_to_many_hop_before_the_last_is_refused():
     with pytest.raises(UnsupportedPlanError, match="only the last hop"):
         related(Doc.live_tags, Tag.doc, Doc.id)
+
+
+class Ambiguous(Base):
+    __tablename__ = "inf_ambiguous"
+    id = Column(Integer, primary_key=True)
+    aValue = Column(String)
+    a_value = Column(String)
+
+
+def test_a_name_matching_two_attributes_is_refused():
+    plan = _plan(
+        {
+            "expression": {
+                "operator": "eq",
+                "operands": [
+                    {"variable": "request.resource.attr.aValue"},
+                    {"value": "x"},
+                ],
+            }
+        }
+    )
+    with pytest.raises(UnsupportedPlanError, match="names both"):
+        get_query(plan, Ambiguous)
+    get_query(plan, Ambiguous, {"request.resource.attr.aValue": Ambiguous.a_value})
