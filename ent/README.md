@@ -126,6 +126,42 @@ position for its parent, `0, 1, 2, …` with no gaps. `list[k]` then reads the e
 and a position past the end, negative or fractional is CEL's error: UNKNOWN, so the row is
 excluded under both polarities. Without `Position` those shapes are refused.
 
+### Reading relations from the ent schema
+
+Instead of declaring each `Relation` and `ScalarRelation`, name the ent edge and let the adapter
+read its cardinality, tables and join columns from your schema. `entcerbos` builds a
+`cerbosent.Schema` from the graph entc resolves, either at code generation or at runtime:
+
+```go
+// ent/entc.go: writes ent/cerbos_schema.go, declaring ent.CerbosSchema
+entc.Generate("./schema", &gen.Config{}, entc.Extensions(entcerbos.Extension{}))
+
+// or at runtime, from the schema types (this links ent's code generator)
+schema, err := entcerbos.Load(schema.Contact{}, schema.Tag{}, schema.Company{})
+```
+
+```go
+mapper, err := ent.CerbosSchema.Mapper("Contact", cerbosent.SchemaMap{
+    "request.resource.attr.ownerId":     {Column: contact.FieldOwnerID},
+    "request.resource.attr.tags":        {Edge: "tags", Element: &cerbosent.SchemaEntry{Column: tag.FieldName}},
+    "request.resource.attr.company.name": {Edge: "company", Column: company.FieldName},
+    "request.resource.attr.team.members": {Edge: "team.members", Fields: map[string]cerbosent.SchemaEntry{
+        "id": {Column: user.FieldID},
+    }},
+})
+```
+
+- A unique edge (O2O, M2O) becomes a `ScalarRelation`; any other edge, or a path through one,
+  becomes a `Relation`. An M2M edge joins through its join table. A dotted path becomes `Via` hops.
+- Mapping a column through a to-many edge, or a list option on a to-one edge, is an error, as is
+  an edge or column the schema does not have.
+- A column left at `ValueDefault` takes its type from the ent field: `bool`, `time.Time`, `string`
+  and enum, and the numeric types. Bytes, JSON, UUID and `field.Other` stay undeclared.
+- What the schema cannot say is still yours to declare: `NullConvention`, `Position`,
+  `SubqueryFilter`, and a scalar list's element column. The result is an ordinary `MapperMap`, so
+  an entry ent cannot express can be set on it directly.
+- Composite ids (edge schemas with `field.ID`) are not read; map those edges explicitly.
+
 ### Declaring value types
 
 - `ValueTimestamp` on every timestamp column.
