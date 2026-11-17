@@ -224,6 +224,12 @@ module Cerbos
           raise UnmappedAttributeError, "#{model.name} has no column #{name.to_s.inspect} to map an attribute onto"
         end
 
+        if model.columns_hash[name.to_s].try(:array)
+          raise UnmappedAttributeError,
+            "#{model.name}##{name} is an array column: CEL reads a list there, which a filter " \
+            "comparing one value per row would not"
+        end
+
         decoration = decoration_of(model, name.to_s)
         return table[name] if decoration.nil?
 

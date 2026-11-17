@@ -234,9 +234,7 @@ internal class SizeTranslator(private val translation: Translation) {
                 if (argument.nodeCase != Operand.NodeCase.EXPRESSION) {
                     throw RelationRefusals.sizeOperand()
                 }
-                if (argument.expression.operator == "except") {
-                    throw RelationRefusals.exceptUnsupported()
-                }
+                PlanRewrites.differenceAsFilter(argument)?.let { return of(it) }
                 if (argument.expression.operator == "intersect") {
                     throw RelationRefusals.intersectSizeUnsupported()
                 }

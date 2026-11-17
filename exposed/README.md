@@ -312,6 +312,9 @@ the plan is fine, and the fix is in your mapping.
 - in an alternative anchored at both ends, `.*` and `.+` become `%` and `_%`, with
   `NOT LIKE '%\n%'`, because RE2's `.` excludes a newline;
 - `^[set]*$` and `^[set]+$` hold when deleting every member of the set with `REPLACE` leaves `''`;
+- `^.{n,}$` and `^.{n,m}$`, for n of 2 or more, are a length in code points with no newline;
+- an end without an anchor keeps only a repetition's minimum there, since a match may start or stop
+  anywhere: `x*a+b` is `LIKE '%ab%'`, and `^a.*` is `LIKE 'a%'`;
 - a leading `(?i)` expands each ASCII letter to its case-fold orbit, as RE2 does (`k` also matches
   U+212A KELVIN SIGN, `s` also U+017F LONG S).
 
@@ -559,23 +562,25 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 32 / 32 |
-| extended | 104 / 110 |
-| adversarial | 473 / 550 |
+| extended | 106 / 110 |
+| adversarial | 493 / 550 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
 that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-68 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+47 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
 - a regex `matches()` pattern `LIKE`, `=` and `REPLACE` cannot spell exactly (an unbounded
   repetition of a literal, a lone `.`, a negated class, an inline flag other than a leading `(?i)`):
   CEL matches with RE2, which no SQL engine implements. See [Regular expressions](#regular-expressions);
-- `except()`, `filter()` or `map()` used as a value rather than inside `size()`,
+- `except()`, `filter()` or `map()` compared as a whole list rather than inside `size()`,
   `hasIntersection()` or `in`. `rel.except([...]) == []`
-  translates, as every element of the relation being in the list, and so do `rel.isSubset([...])`
-  and `intersect(a, b) == []` (as `!hasIntersection(a, b)`); `size(intersect(...))` is refused,
-  since Cerbos's `intersect()` keeps duplicates from whichever list is shorter;
+  translates, as every element of the relation being in the list, and so do `rel.isSubset([...])`,
+  `intersect(a, b) == []` (as `!hasIntersection(a, b)`) and `size(x.except(y))` (as
+  `size(x.filter(e, !(e in y)))`, which keeps the same elements); `size(intersect(...))` is
+  refused, since Cerbos's `intersect()` keeps duplicates from whichever list is shorter. As a
+  condition, a list (one of these, or a relation-mapped attribute) has no overload and is UNKNOWN;
 - a two-variable comprehension (`list.exists(i, v, ...)`, `map.all(k, v, ...)`): its first
   variable is a list index or a map key, and no mapped column holds either;
 - `double()` and `timestamp()` over a string: SQL `CAST` reads a numeric prefix where CEL

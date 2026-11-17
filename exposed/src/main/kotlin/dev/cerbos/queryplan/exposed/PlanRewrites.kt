@@ -200,6 +200,34 @@ internal object PlanRewrites {
         return null
     }
 
+    /** The plan with every `dyn(x)` replaced by `x`: the wrapper only quiets the type checker. */
+    fun withoutDyn(operand: Operand): Operand {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return operand
+        val expression = operand.expression
+        if (expression.operator == "dyn" && expression.operandsCount == 1) return withoutDyn(expression.getOperands(0))
+        if (expression.operandsList.none(::holdsDyn)) return operand
+        val rebuilt = expression.toBuilder().clearOperands().addAllOperands(expression.operandsList.map(::withoutDyn))
+        return Operand.newBuilder().setExpression(rebuilt).build()
+    }
+
+    private fun holdsDyn(operand: Operand): Boolean = operand.nodeCase == Operand.NodeCase.EXPRESSION &&
+        (operand.expression.operator == "dyn" || operand.expression.operandsList.any(::holdsDyn))
+
+    /**
+     * `x.except(y)` as `x.filter(e, !(e in y))`: Cerbos keeps each element of `x` that `y` does not
+     * contain, duplicates included, by the same equality `in` uses.
+     */
+    fun differenceAsFilter(difference: Operand): Operand? {
+        if (difference.nodeCase != Operand.NodeCase.EXPRESSION || difference.expression.operator != "except" ||
+            difference.expression.operandsCount != 2
+        ) {
+            return null
+        }
+        val (receiver, removed) = difference.expression.operandsList
+        val element = variable(ELEMENT)
+        return expression("filter", receiver, expression("lambda", expression("not", expression("in", element, removed)), element))
+    }
+
     private fun everyElementIn(collection: Operand, list: Operand): Operand {
         val element = variable(ELEMENT)
         return expression("all", collection, expression("lambda", expression("in", element, list), element))

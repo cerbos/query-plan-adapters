@@ -10,6 +10,7 @@ module Cerbos
         private
 
         def compare(operator, left, right)
+          return cel_type_error if cel_error?(left) || cel_error?(right)
           if left.is_a?(Values::DoubleText) || right.is_a?(Values::DoubleText)
             return compare_double_text(operator, left, right)
           end
@@ -117,7 +118,9 @@ module Cerbos
         # column is always a scalar here: a relation was refused above.
         def compare_list_literal(operator, left, right)
           literals = [left, right].select { |value| value.is_a?(Array) || value.is_a?(Hash) }
-          unless literals.all? { |literal| deep_constant?(literal) } && %w[eq ne].include?(operator)
+          # No ordering overload takes a list or a map, whatever the other operand holds.
+          return cel_type_error unless %w[eq ne].include?(operator)
+          unless literals.all? { |literal| deep_constant?(literal) }
             raise UnsupportedOperatorError,
               "#{operator} with a list or map literal: only eq and ne against constants are translated"
           end

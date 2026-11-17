@@ -19,15 +19,19 @@ internal class TernaryTranslator(private val translation: Translation) {
      * substitute into the comparison as written. Under list or string `+` the substitution is still exact.
      */
     fun tryTernaryComparison(operator: String, operands: List<Operand>, scope: Scope): Op<Boolean>? {
-        if ((operator !in ComparisonTranslator.COMPARISON_OPERATORS && operator != "in") || operands.size != 2) {
+        val distributes = operator in ComparisonTranslator.COMPARISON_OPERATORS || operator == "in" ||
+            operator in ComparisonTranslator.STRING_MATCH_OPERATORS
+        if (!distributes || operands.size != 2) {
             return null
         }
         for (index in 0..1) {
-            val path = ternaryUnderAdd(operands[index]) ?: continue
+            val path = ternaryUnderArithmetic(operands[index]) ?: continue
             val ternary = at(operands[index], path)
             return translateTernary(ternary.expression.operandsList, scope) { branch ->
                 val substituted = PlanRewrites.foldListConcatenation(replaceAt(operands[index], path, 0, branch))
-                translation.walker.traverseExpression(substitute(operator, operands, index, substituted), scope)
+                val rebuilt = substitute(operator, operands, index, substituted)
+                constantStringMatch(operator, rebuilt.operandsList)
+                    ?: translation.walker.traverseExpression(rebuilt, scope)
             }
         }
         return null
@@ -35,13 +39,13 @@ internal class TernaryTranslator(private val translation: Translation) {
 
     /**
      * The operand indices from [operand] down to the first `if` that is [operand] or is reached
-     * from it through `add` alone; `null` when there is none.
+     * from it through [DISTRIBUTING] operators alone; `null` when there is none.
      */
-    private fun ternaryUnderAdd(operand: Operand): List<Int>? {
+    private fun ternaryUnderArithmetic(operand: Operand): List<Int>? {
         if (isTernary(operand)) return emptyList()
-        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operator != "add") return null
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION || operand.expression.operator !in DISTRIBUTING) return null
         operand.expression.operandsList.forEachIndexed { i, nested ->
-            ternaryUnderAdd(nested)?.let { return listOf(i) + it }
+            ternaryUnderArithmetic(nested)?.let { return listOf(i) + it }
         }
         return null
     }
@@ -82,6 +86,20 @@ internal class TernaryTranslator(private val translation: Translation) {
         )
     }
 
+    /** A string match whose receiver and needle a branch left as constants, decided here. */
+    private fun constantStringMatch(operator: String, operands: List<Operand>): Op<Boolean>? {
+        if (operator !in ComparisonTranslator.STRING_MATCH_OPERATORS) return null
+        if (operands.any { it.nodeCase != Operand.NodeCase.VALUE }) return null
+        val receiver = PlanValues.toKotlin(operands[0].value) as? String ?: return TriLogic.unknown()
+        val needle = PlanValues.toKotlin(operands[1].value) as? String ?: return TriLogic.unknown()
+        val holds = when (operator) {
+            "contains" -> receiver.contains(needle)
+            "startsWith" -> receiver.startsWith(needle)
+            else -> receiver.endsWith(needle)
+        }
+        return if (holds) Op.TRUE else Op.FALSE
+    }
+
     private fun isTernary(operand: Operand): Boolean =
         operand.nodeCase == Operand.NodeCase.EXPRESSION && operand.expression.operator == "if"
 
@@ -97,5 +115,10 @@ internal class TernaryTranslator(private val translation: Translation) {
             builder.addOperands(if (position == index) replacement else operand)
         }
         return builder.build()
+    }
+
+    private companion object {
+        /** Strict operators a ternary operand distributes out of: `f(c ? a : b)` is `c ? f(a) : f(b)`. */
+        val DISTRIBUTING = setOf("add", "sub", "mult", "div", "mod")
     }
 }
