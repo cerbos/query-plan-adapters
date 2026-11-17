@@ -421,46 +421,31 @@ export interface ConformanceMapper {
 //
 // obj.inner is not a real nested path — it mirrors aString. `parent.inner` below is the
 // opposite: a real two-level to-one chain. The two are kept side by side on purpose.
-const APPLICATION_ATTRIBUTES = {
-  "request.resource.id": { field: "resourceId" },
-  "request.resource.attr.aBool": { nullable: true },
-  "request.resource.attr.aString": { nullable: true },
-  "request.resource.attr.aNumber": { nullable: true },
-  "request.resource.attr.aDouble": { nullable: true },
-  "request.resource.attr.aOptionalString": { nullable: true },
-  "request.resource.attr.scope": { nullable: true },
-  "request.resource.attr.createdAt": { nullable: true },
-  "request.resource.attr.updatedAt": { nullable: true },
-  "request.resource.attr.owner": { field: "aOptionalString" },
-  "request.resource.attr.coOwner": { field: "scope" },
-  "request.resource.attr.obj.inner": { field: "aString", nullable: true },
-} satisfies ConformanceMapper;
-
-// What the schema says about each shared attribute, spelled out for MAPPER. The scalar columns
-// declare their schema type, as the README tells a caller to: Mongoose casts a query literal to it
-// (`"true"` to `true`, `"5"` to `5`, `0` to `"0"`), and the declaration is what lets the adapter
-// answer a literal of another type as CEL does instead (the `type-mismatch/*` scalar cases).
-const DECLARED_COLUMNS: Record<keyof typeof APPLICATION_ATTRIBUTES, MapperConfig> = {
-  "request.resource.id": {},
-  "request.resource.attr.aBool": { field: "aBool", valueType: "boolean" },
-  "request.resource.attr.aString": { field: "aString", valueType: "string" },
-  "request.resource.attr.aNumber": { field: "aNumber", valueType: "number" },
-  "request.resource.attr.aDouble": { field: "aDouble", valueType: "number" },
-  "request.resource.attr.aOptionalString": { field: "aOptionalString" },
-  "request.resource.attr.scope": { field: "scope" },
-  "request.resource.attr.createdAt": { field: "createdAt", valueType: "dateTime" },
-  "request.resource.attr.updatedAt": { field: "updatedAt", valueType: "dateTime" },
-  "request.resource.attr.owner": {},
-  "request.resource.attr.coOwner": {},
-  "request.resource.attr.obj.inner": {},
-};
+//
+// MAPPER also declares each scalar column's schema type, as the README tells a caller to: Mongoose
+// casts a query literal to it (`"true"` to `true`, `"5"` to `5`, `0` to `"0"`), and the declaration
+// is what lets the adapter answer a literal of another type as CEL does instead (the
+// `type-mismatch/*` scalar cases).
+//
+// Each shared attribute: what the application knows, then what only MAPPER spells out.
+const SHARED_ATTRIBUTES: ReadonlyArray<readonly [string, MapperConfig, MapperConfig]> = [
+  ["request.resource.id", { field: "resourceId" }, {}],
+  ["request.resource.attr.aBool", { nullable: true }, { field: "aBool", valueType: "boolean" }],
+  ["request.resource.attr.aString", { nullable: true }, { field: "aString", valueType: "string" }],
+  ["request.resource.attr.aNumber", { nullable: true }, { field: "aNumber", valueType: "number" }],
+  ["request.resource.attr.aDouble", { nullable: true }, { field: "aDouble", valueType: "number" }],
+  ["request.resource.attr.aOptionalString", { nullable: true }, { field: "aOptionalString" }],
+  ["request.resource.attr.scope", { nullable: true }, { field: "scope" }],
+  ["request.resource.attr.createdAt", { nullable: true }, { field: "createdAt", valueType: "dateTime" }],
+  ["request.resource.attr.updatedAt", { nullable: true }, { field: "updatedAt", valueType: "dateTime" }],
+  ["request.resource.attr.owner", { field: "aOptionalString" }, {}],
+  ["request.resource.attr.coOwner", { field: "scope" }, {}],
+  ["request.resource.attr.obj.inner", { field: "aString", nullable: true }, {}],
+];
 
 export const MAPPER: ConformanceMapper = {
   ...Object.fromEntries(
-    Object.entries(APPLICATION_ATTRIBUTES).map(([key, config]) => [
-      key,
-      { ...DECLARED_COLUMNS[key as keyof typeof APPLICATION_ATTRIBUTES], ...config },
-    ]),
+    SHARED_ATTRIBUTES.map(([reference, application, declared]) => [reference, { ...declared, ...application }]),
   ),
   "request.resource.attr.createdBy": { field: "createdBy" },
   // The corpus's one REAL to-one chain (the `relation/*` cases), stored as an embedded subdocument
@@ -591,7 +576,7 @@ const schemaSubCategories: MapperConfig = {
  * the schema, and the harness replays every case through both mappers.
  */
 export const SCHEMA_MAPPER: ConformanceMapper = {
-  ...APPLICATION_ATTRIBUTES,
+  ...Object.fromEntries(SHARED_ATTRIBUTES.map(([reference, application]) => [reference, application])),
   "request.resource.attr.parent": { relation: { name: "parent", fields: nullableLevel } },
   "request.resource.attr.parent.inner": { relation: { name: "parent.inner", fields: nullableLevel } },
   "request.resource.attr.tags": { relation: { name: "tags", fields: { name: { nullable: true } } } },
