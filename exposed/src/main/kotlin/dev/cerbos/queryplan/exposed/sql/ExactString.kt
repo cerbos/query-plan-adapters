@@ -18,7 +18,7 @@ import org.jetbrains.exposed.v1.core.vendors.currentDialect
  * code point order on PostgreSQL (#489). Unchanged elsewhere and on MariaDB. Read at render time.
  */
 internal class ExactString<T>(
-    private val expression: Expression<T>,
+    internal val expression: Expression<T>,
     private val ordering: Boolean,
     override val columnType: IColumnType<T & Any>,
 ) : ExpressionWithColumnType<T>() {

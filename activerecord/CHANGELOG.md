@@ -6,13 +6,19 @@
 
 - **Breaking:** a model whose connection is not SQLite, PostgreSQL, MySQL 8.0 or later, or MariaDB 11.4.5 or later raises `Cerbos::ActiveRecord::UnsupportedDatabaseError` at translation time, where it fell through to generic SQL. SQL Server and Oracle compare strings under case-folding default collations, so `R.attr.dept == "finance"` matched `"Finance"`; MariaDB before 11.4.5 has no `utf8mb4_0900_bin` and failed every string comparison at query time. MariaDB 11.4.5 and later is now covered by the conformance suite.
 
-- Fixed over-grants on a default-configured database: every MySQL string comparison runs under `utf8mb4_0900_bin` and every PostgreSQL string ordering under `"C"`, so MySQL's `utf8mb4_0900_ai_ci` no longer matches `"Finance"` for `== "finance"`, and a linguistic PostgreSQL collation no longer orders strings out of code-point order. A MySQL string comparison over a column with another collation can no longer use that column's index.
+- Fixed over-grants on a default-configured database: every MySQL string comparison runs under `utf8mb4_0900_bin` and every PostgreSQL string ordering under `"C"`, so MySQL's `utf8mb4_0900_ai_ci` no longer matches `"Finance"` for `== "finance"`, and a linguistic PostgreSQL collation no longer orders strings out of code-point order.
 - Fixed over-grants: a string, number or temporal column read where CEL needs a boolean (`!R.attr.aString`) is CEL's type error, UNKNOWN under both polarities, where it was read as a number; and a ternary whose arms are an `int()` and a double is kept as branches, so arithmetic over it is CEL's int-beside-double error on the rows that select the double arm.
 - **Breaking:** `null_attribute_representation:` defaults to `:omitted`, where it defaulted to `:explicit`. A caller that sends explicit nulls and set nothing now gets `col == null` matching no row where it rendered `IS NULL`, and a refusal for the other null constants; pass `null_attribute_representation: :explicit` to keep the old output ([#499](https://github.com/cerbos/query-plan-adapters/issues/499), [ADR 0011](../docs/adr/0011-denial-fails-closed-in-the-result.md)).
 
 - **Breaking:** under `null_attribute_representation: :explicit`, `==` and `!=` give an undeclared attribute the call's convention, as `in` already did, so a NULL column compares as a null value: `NULL != 'x'` and two NULL columns under `==` now match, where they were UNKNOWN. A field of a relation's struct elements is undeclared too, so declare `null_representation: :omitted` on one your application leaves out of the element when NULL. Under the `:omitted` default nothing changes ([#592](https://github.com/cerbos/query-plan-adapters/issues/592)).
 
 - `in` between columns under mixed NULL conventions answers each side as its convention says, as `==` does, where it raised `Cerbos::ActiveRecord::UnsupportedOperatorError` ([#592](https://github.com/cerbos/query-plan-adapters/issues/592)).
+
+### Performance
+
+- On MySQL and MariaDB, `==`, `in` and `startsWith` against a literal are also written under the column's own collation, so an index on a string column serves them again, and its order serves `ORDER BY ... LIMIT`. A list page over 1M rows took 2 ms where it took 28 to 141 ms.
+- `exists`, `all` and `exists_one` over a relation drop the subquery that looks for an erroring element when the body cannot be NULL (NOT NULL columns, or members guarded by `IS NOT NULL`). That subquery scanned the whole child table on PostgreSQL: `R.attr.tags.exists(t, t in [...])` over 2M tag rows took 55 ms where it took 633 ms.
+- An integer column compared with a whole number from a principal attribute (`R.attr.level <= P.attr.clearance`) is compared as an integer, where PostgreSQL cast the column to `numeric` and could not use its index.
 
 ### Added
 
