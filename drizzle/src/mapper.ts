@@ -37,7 +37,7 @@ const isScopedRelationEntry = (
 
 export function isMappingConfig(entry: MapperEntry): entry is MappingConfig;
 export function isMappingConfig(entry: DeclaredMapperEntry): entry is DeclaredMappingConfig;
-export function isMappingConfig(entry: DeclaredMapperEntry): boolean {
+export function isMappingConfig(entry: DeclaredMapperEntry): entry is DeclaredMappingConfig {
   return (
     typeof entry === "object" &&
     entry !== null &&

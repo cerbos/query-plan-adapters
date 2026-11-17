@@ -7,7 +7,6 @@ import * as drizzleOrm from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import type { AnyColumn, SQL, Table } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
-import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
 import { MySqlContainer } from "@testcontainers/mysql";
@@ -19,7 +18,8 @@ import { Pool } from "pg";
 
 import type { PlanResourcesResponse } from "@cerbos/core";
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
-import type { Mapper } from ".";
+import type { Mapper, QueryPlanToDrizzleArgs } from ".";
+import type { RelationsSchema } from "./types";
 import {
   assertFuzzVerdict,
   buildMapper,
@@ -38,6 +38,16 @@ import {
 import type { ConformanceMapper, FuzzVerdict, Golden } from "./corpus";
 import { isMappingConfig } from "./mapper";
 import { isObject, isString } from "./narrowing";
+
+/** drizzle 1.0 takes only `{ client }`; 0.45 reads only the positional client and `mode`. */
+interface MysqlDriver {
+  drizzle(config: { client: mysql.Pool }): MySql2Database;
+  drizzle(client: mysql.Pool, config: { mode: "default" }): MySql2Database;
+}
+
+function mysqlDriver(): MysqlDriver {
+  return require("drizzle-orm/mysql2");
+}
 
 const IS_DRIZZLE_1 = "defineRelations" in drizzleOrm;
 
@@ -355,7 +365,7 @@ interface AdversarialStore {
   /** The same mapper with every relation spelled out, translated without `root`. */
   readonly declaredMapper: ConformanceMapper;
   /** The resource table and the schema holding the `relations()` the mapper names. */
-  readonly root: { table: Table; schema: Record<string, unknown> };
+  readonly root: { table: Table; schema: RelationsSchema };
   readonly indexMappers?: ConformanceMapper[];
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -817,10 +827,8 @@ function mysqlStore(): AdversarialStore {
         // out of the comparison.
         timezone: "Z",
       });
-      // drizzle 1.0 dropped `mode` and the positional form; 0.45 reads only the positional one.
-      db = (drizzleMysql as unknown as (...args: unknown[]) => MySql2Database)(
-        ...(IS_DRIZZLE_1 ? [{ client: pool }] : [pool, { mode: "default" }]),
-      );
+
+      db = IS_DRIZZLE_1 ? mysqlDriver().drizzle({ client: pool }) : mysqlDriver().drizzle(pool, { mode: "default" });
 
       for (const statement of DDL) {
         await db.execute(sql.raw(statement));
@@ -859,7 +867,7 @@ function mysqlStore(): AdversarialStore {
       const [rows] = await connected().execute(sql`select @@version_comment as version`);
       const first = Array.isArray(rows) ? rows[0] : undefined;
 
-      const version = isObject(first) ? (first as Record<string, unknown>)["version"] : undefined;
+      const version = isObject(first) && "version" in first ? first["version"] : undefined;
 
       return isString(version) ? version : "";
     },
@@ -914,6 +922,7 @@ const STORE_FACTORIES: Record<StoreName, () => AdversarialStore> = {
 };
 
 const store: AdversarialStore = STORE_FACTORIES[STORE_NAME]();
+
 /** Every case is replayed with the relations inferred from the schema and with them declared. */
 const MAPPERS: ConformanceMapper[] = [store.mapper, store.declaredMapper];
 
@@ -966,13 +975,13 @@ function ledgerEntry(golden: Golden, tag: string): LedgerEntry | undefined {
 // Every column the dataset omits when NULL is declared `omitted` in the mapping. The call-level
 // option covers what is left, list elements and principal-side literals, which the dataset sends as
 // values; the adapter's own default is pinned in translator.test.ts.
-const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) =>
-  queryPlanToDrizzle({
-    ...(mapper === store.declaredMapper ? {} : store.root),
-    queryPlan,
-    mapper,
-    nullAttributeRepresentation: "explicit",
-  });
+const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) => {
+  const args: QueryPlanToDrizzleArgs = { queryPlan, mapper, nullAttributeRepresentation: "explicit" };
+
+  if (mapper !== store.declaredMapper) Object.assign(args, store.root);
+
+  return queryPlanToDrizzle(args);
+};
 
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
   const result = translatePlan(await planOf(golden), mapper);

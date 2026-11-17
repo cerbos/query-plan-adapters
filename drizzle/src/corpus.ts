@@ -13,7 +13,6 @@ import { HTTP } from "@cerbos/http";
 import { Server, ServerCredentials } from "@grpc/grpc-js";
 import type { sendUnaryData, ServerUnaryCall } from "@grpc/grpc-js";
 import { afterAll } from "@jest/globals";
-import * as drizzleOrm from "drizzle-orm";
 import type { AnyColumn, Table } from "drizzle-orm";
 import {
   boolean,
@@ -37,6 +36,7 @@ import {
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import type { DeclaredRelation, MapperEntry } from ".";
+import type { LegacyRelationsDeclaration, RelationV2, RelationV2Column, RelationsSchema } from "./types";
 import { isObject, isString } from "./narrowing";
 
 /**
@@ -447,31 +447,69 @@ export interface AdversarialSchema {
   };
 }
 
-type RelationHelpers = {
-  one: (table: Table, config?: { fields: AnyColumn[]; references: AnyColumn[] }) => unknown;
-  many: (table: Table) => unknown;
-};
+interface LegacyRelationRef {
+  readonly referencedTable: Table;
+}
 
-type LegacyRelations = (table: Table, config: (helpers: RelationHelpers) => Record<string, unknown>) => unknown;
+interface LegacyRelationHelpers {
+  one(table: Table, config?: { fields: AnyColumn[]; references: AnyColumn[] }): LegacyRelationRef;
+  many(table: Table): LegacyRelationRef;
+}
 
-type RelationsV2Builder = Record<
-  string,
-  Record<string, (config: { from: unknown; to: unknown }) => unknown> & Record<string, unknown>
-> & {
-  one: Record<string, (config: { from: unknown; to: unknown }) => unknown>;
-  many: Record<string, (config: { from: unknown; to: unknown }) => unknown>;
-};
+type LegacyRelations = (
+  table: Table,
+  config: (helpers: LegacyRelationHelpers) => Readonly<Record<string, LegacyRelationRef>>,
+) => LegacyRelationsDeclaration;
+
+type RelationFactoryV2 = (config: { from: RelationV2Column; to: RelationV2Column }) => RelationV2;
+
+/** `defineRelations()`'s builder: `r.<table>.<column>`, `r.one.<table>(…)` and `r.many.<table>(…)`. */
+type RelationsBuilderV2 = Readonly<Record<string, Readonly<Record<string, RelationV2Column | RelationFactoryV2>>>>;
 
 type DefineRelations = (
-  schema: Record<string, Table>,
-  config: (r: RelationsV2Builder) => Record<string, Record<string, unknown>>,
-) => Record<string, unknown>;
+  tables: Readonly<Record<string, Table>>,
+  config: (r: RelationsBuilderV2) => Readonly<Record<string, Readonly<Record<string, RelationV2>>>>,
+) => RelationsSchema;
 
-const orm = drizzleOrm as unknown as Record<string, unknown>;
+interface RelationsModule {
+  readonly relations?: LegacyRelations;
+  readonly defineRelations?: DefineRelations;
+}
 
-/** `relations()` is in the root module before drizzle 1.0 and in `drizzle-orm/_relations` from it. */
-const legacyRelations = (): LegacyRelations =>
-  (orm["relations"] ?? (require("drizzle-orm/_relations") as Record<string, unknown>)["relations"]) as LegacyRelations;
+const loadRelationsModule = (id: string): RelationsModule => {
+  try {
+    return require(id);
+  } catch {
+    return {};
+  }
+};
+
+const isRelationFactory = (
+  entry: RelationV2Column | RelationFactoryV2 | undefined,
+): entry is RelationFactoryV2 => typeof entry === "function";
+
+const isRelationColumn = (
+  entry: RelationV2Column | RelationFactoryV2 | undefined,
+): entry is RelationV2Column => entry !== undefined && !isRelationFactory(entry);
+
+/** `r.one.parents({ from: r.resources.id, to: r.parents.resourceId })`, spelled out of a string-keyed builder. */
+const relationV2 = (
+  r: RelationsBuilderV2,
+  kind: "one" | "many",
+  target: string,
+  from: [string, string],
+  to: [string, string],
+): RelationV2 => {
+  const factory = r[kind]?.[target];
+  const source = r[from[0]]?.[from[1]];
+  const destination = r[to[0]]?.[to[1]];
+
+  if (!isRelationFactory(factory) || !isRelationColumn(source) || !isRelationColumn(destination)) {
+    throw new Error(`defineRelations() builder has no ${kind}.${target}`);
+  }
+
+  return factory({ from: source, to: destination });
+};
 
 /**
  * The relations an application on this drizzle would declare: `defineRelations()` on 1.0 (unless
@@ -481,25 +519,25 @@ const legacyRelations = (): LegacyRelations =>
  */
 function withRelations<T extends AdversarialSchema>(tables: T) {
   const { resources, parents, inners, tags, categories, subCategories, labels } = tables;
-  const defineRelations = orm["defineRelations"] as DefineRelations | undefined;
+  const { defineRelations } = loadRelationsModule("drizzle-orm");
 
   if (defineRelations !== undefined && process.env["QPA_DRIZZLE_RELATIONS"] !== "legacy") {
     const relationsSchema = defineRelations(
       { resources, parents, inners, tags, categories, subCategories, labels },
       (r) => ({
         resources: {
-          parent: r.one["parents"]!({ from: r["resources"]!["id"], to: r["parents"]!["resourceId"] }),
-          tags: r.many["tags"]!({ from: r["resources"]!["id"], to: r["tags"]!["resourceId"] }),
-          categories: r.many["categories"]!({ from: r["resources"]!["id"], to: r["categories"]!["resourceId"] }),
+          parent: relationV2(r, "one", "parents", ["resources", "id"], ["parents", "resourceId"]),
+          tags: relationV2(r, "many", "tags", ["resources", "id"], ["tags", "resourceId"]),
+          categories: relationV2(r, "many", "categories", ["resources", "id"], ["categories", "resourceId"]),
         },
         parents: {
-          inner: r.one["inners"]!({ from: r["parents"]!["id"], to: r["inners"]!["parentId"] }),
+          inner: relationV2(r, "one", "inners", ["parents", "id"], ["inners", "parentId"]),
         },
         categories: {
-          subCategories: r.many["subCategories"]!({ from: r["categories"]!["id"], to: r["subCategories"]!["categoryId"] }),
+          subCategories: relationV2(r, "many", "subCategories", ["categories", "id"], ["subCategories", "categoryId"]),
         },
         subCategories: {
-          labels: r.many["labels"]!({ from: r["subCategories"]!["id"], to: r["labels"]!["subCategoryId"] }),
+          labels: relationV2(r, "many", "labels", ["subCategories", "id"], ["labels", "subCategoryId"]),
         },
       }),
     );
@@ -507,8 +545,19 @@ function withRelations<T extends AdversarialSchema>(tables: T) {
     return { ...tables, relationsSchema };
   }
 
-  const relations = legacyRelations();
-  const legacy = {
+  const relations =
+    loadRelationsModule("drizzle-orm").relations ?? loadRelationsModule("drizzle-orm/_relations").relations;
+
+  if (relations === undefined) throw new Error("this drizzle-orm exports no relations()");
+
+  const relationsSchema: RelationsSchema = {
+    resources,
+    parents,
+    inners,
+    tags,
+    categories,
+    subCategories,
+    labels,
     resourcesRelations: relations(resources, ({ one, many }) => ({
       parent: one(parents),
       tags: many(tags),
@@ -536,7 +585,6 @@ function withRelations<T extends AdversarialSchema>(tables: T) {
       subCategory: one(subCategories, { fields: [labels.subCategoryId], references: [subCategories.id] }),
     })),
   };
-  const relationsSchema = { ...tables, ...legacy } as unknown as Record<string, unknown>;
 
   return { ...tables, relationsSchema };
 }

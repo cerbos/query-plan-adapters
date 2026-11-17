@@ -48,6 +48,7 @@ export function queryPlanToDrizzle({
   nullAttributeRepresentation = "omitted",
 }: QueryPlanToDrizzleArgs): QueryPlanToDrizzleResult {
   const mapper = inferRelations(declaredMapper, table, schema);
+
   const options: BuildFilterOptions = {
     nullRepresentation: nullAttributeRepresentation,
   };

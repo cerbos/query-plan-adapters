@@ -128,10 +128,10 @@ export interface QueryPlanToDrizzleArgs {
    */
   table?: Table;
   /**
-   * The schema object passed to `drizzle(client, { schema })`. A relation declared by `name` is
-   * looked up in the `relations()` it contains.
+   * Your relations: the tables and their `relations()` you pass to `drizzle()` before drizzle 1.0,
+   * or the result of `defineRelations()` from 1.0. A relation reached by name is read from them.
    */
-  schema?: Record<string, unknown>;
+  schema?: RelationsSchema;
   /**
    * Which NULL-column representation the caller uses when building `check()` attributes.
    * Defaults to `"omitted"`, which never selects NULL rows for an undeclared column.
@@ -236,3 +236,35 @@ export type DeclaredMapperEntry = MapperEntry | DeclaredMappingConfig;
 export type DeclaredMapper =
   | { [key: string]: DeclaredMapperEntry | undefined }
   | ((reference: string) => DeclaredMapperEntry | undefined);
+
+/** A drizzle `relations()` declaration (before 1.0, or from `drizzle-orm/_relations`). */
+export interface LegacyRelationsDeclaration {
+  readonly table: Table;
+  readonly config: (helpers: never) => object;
+}
+
+/** The column side of a `defineRelations()` relation. */
+export interface RelationV2Column {
+  readonly _: { readonly column: object };
+}
+
+/** One relation of a `defineRelations()` result, as the adapter reads it. */
+export interface RelationV2 {
+  readonly relationType: "one" | "many";
+  readonly sourceColumns: readonly RelationV2Column[];
+  readonly targetColumns: readonly RelationV2Column[];
+  readonly targetTable: Table;
+  readonly through?: object;
+  readonly where?: object | symbol;
+  readonly isFilterReversed?: boolean;
+}
+
+/** One table's entry in a `defineRelations()` result. */
+export interface TableRelationsV2 {
+  readonly table: Table;
+  readonly relations: Readonly<Record<string, RelationV2>>;
+}
+
+export type RelationsSchemaEntry = Table | LegacyRelationsDeclaration | TableRelationsV2;
+
+export type RelationsSchema = Readonly<Record<string, RelationsSchemaEntry>>;

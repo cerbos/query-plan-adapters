@@ -7,7 +7,6 @@ import { MySqlDialect } from "drizzle-orm/mysql-core/dialect";
 import { PgDialect } from "drizzle-orm/pg-core/dialect";
 import { bigint, doublePrecision, numeric, pgTable } from "drizzle-orm/pg-core";
 import { integer, sqliteTable } from "drizzle-orm/sqlite-core";
-import * as sqliteDialects from "drizzle-orm/sqlite-core/dialect";
 
 import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from ".";
 import type {
@@ -70,11 +69,25 @@ const ROOTS = {
   mysql: { table: SCHEMAS.mysql.resources, schema: SCHEMAS.mysql.relationsSchema },
 };
 
-const DIALECTS = {
+interface Dialect {
+  sqlToQuery(sql: SQL): { sql: string; params: unknown[] };
+}
+
+/** SQLiteSyncDialect before drizzle 1.0, SQLiteDialect from it. */
+function sqliteDialect(): Dialect {
+  const dialects: { SQLiteSyncDialect?: new () => Dialect; SQLiteDialect?: new () => Dialect } =
+    require("drizzle-orm/sqlite-core/dialect");
+
+  const SqliteDialect = dialects.SQLiteSyncDialect ?? dialects.SQLiteDialect;
+
+  if (SqliteDialect === undefined) throw new Error("drizzle-orm exports no SQLite dialect");
+
+  return new SqliteDialect();
+}
+
+const DIALECTS: Record<"postgresql" | "sqlite" | "mysql", Dialect> = {
   postgresql: new PgDialect(),
-  // SQLiteSyncDialect before drizzle 1.0, SQLiteDialect from it.
-  sqlite: new ((sqliteDialects as unknown as Record<string, typeof MySqlDialect>)["SQLiteSyncDialect"] ??
-    (sqliteDialects as unknown as Record<string, typeof MySqlDialect>)["SQLiteDialect"]!)(),
+  sqlite: sqliteDialect(),
   mysql: new MySqlDialect(),
 };
 
