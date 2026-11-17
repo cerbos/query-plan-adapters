@@ -26,6 +26,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	cerbosent "github.com/cerbos/query-plan-adapters/ent"
+	"github.com/cerbos/query-plan-adapters/ent/internal/conformanceschema"
 )
 
 // Conformance suite (../conformance/README.md, "The harness contract").
@@ -369,13 +370,54 @@ func openPostgres(t *testing.T) *sql.DB {
 	return db
 }
 
-// buildMapper wires the corpus's attribute references onto the schema above.
+// inferredMapper maps the corpus through the ent schema types in internal/conformanceschema, the
+// way an application passes its ent schema: every attribute whose name is an ent field or edge
+// (aBool, parent.inner.aString, categories, request.resource.id) is inferred, with its
+// relation, joins and value type. The overrides are the shapes no ent schema says: the aliases
+// declared under the other null convention (owner, coOwner, obj.inner, tagNames), the ordered
+// lists' Position and element column, the flattened mainCategory chain, and `t.id` reading tag_id
+// rather than the tag's primary key.
+func inferredMapper(tb testing.TB) cerbosent.Mapper {
+	tb.Helper()
+
+	const omitted, explicit = cerbosent.NullConventionOmitted, cerbosent.NullConventionExplicit
+	tagFields := map[string]cerbosent.SchemaEntry{"id": {Column: "tag_id"}, "name": {Column: "name"}}
+	subCategoryFields := map[string]cerbosent.SchemaEntry{
+		"name":   {Column: "name"},
+		"labels": {Edge: "labels", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: map[string]cerbosent.SchemaEntry{"name": {Column: "name"}}},
+	}
+	elements := func(edge string) cerbosent.SchemaEntry {
+		return cerbosent.SchemaEntry{Edge: edge, Position: "position", Element: &cerbosent.SchemaEntry{Column: "value", NullConvention: explicit}}
+	}
+
+	mapper, err := conformanceschema.CerbosSchema.Mapper("Resource", cerbosent.SchemaMap{
+		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: explicit},
+		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: explicit},
+		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: omitted},
+
+		"request.resource.attr.tags": {Edge: "tags", Position: "position", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: tagFields},
+		"request.resource.attr.tagNames": {
+			Edge: "tags", Position: "position", Fields: tagFields,
+			Element: &cerbosent.SchemaEntry{Column: "name", NullConvention: explicit},
+		},
+		"request.resource.attr.aNumberList": elements("number_elems"),
+		"request.resource.attr.aBoolList":   elements("bool_elems"),
+
+		"request.resource.attr.mainCategory.subCategories": {Edge: "categories.sub_categories", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: subCategoryFields},
+		"request.resource.attr.mainCategory.subNames":      {Edge: "categories.sub_categories", Element: &cerbosent.SchemaEntry{Column: "name"}, Fields: subCategoryFields},
+	}, cerbosent.WithInferredNullConvention(omitted))
+	require.NoError(tb, err)
+	return mapper
+}
+
+// declaredMapper wires the corpus's attribute references onto the schema above with every
+// relation, hop and value type written out, the way a mapper without an ent schema does.
 //
 // `owner` and `tagNames` deliberately alias columns that `aOptionalString` and `tags[].name`
 // already cover: the corpus sends those two as EXPLICIT nulls while the originals are omitted when
 // NULL, and CEL membership distinguishes null from missing. Mapping both is what lets a single
 // schema exercise both conventions.
-func buildMapper() cerbosent.Mapper {
+func declaredMapper() cerbosent.Mapper {
 	tags := &cerbosent.Relation{
 		Table:        tagTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
@@ -652,13 +694,6 @@ func nullableFloat(v *float64) any {
 	return *v
 }
 
-func nullableBool(v *bool) any {
-	if v == nil {
-		return nil
-	}
-	return *v
-}
-
 // elementList maps a scalar list stored one element per row of table.
 // element.ValueType declares the element type; the column and the explicit-null convention are
 // the same for both lists.
@@ -671,6 +706,13 @@ func elementList(table string, element cerbosent.Entry) *cerbosent.Relation {
 		Position: "position",
 		Field:    &element,
 	}
+}
+
+func nullableBool(v *bool) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // filteredIDs translates the golden's plan for this store's dialect and executes it, returning the
@@ -746,55 +788,68 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 // -- the suite ----------------------------------------------------------------------------------
 
 func TestAdversarialConformance(t *testing.T) {
-	mapper := buildMapper()
+	// Both ways of mapping are replayed against every store: written out by hand, and read from
+	// the ent schema by Schema.Mapper. Each writes its own fuzz results, as <store>-<mapping>.
+	mappers := []struct {
+		mapper cerbosent.Mapper
+		name   string
+	}{{declaredMapper(), "declared"}, {inferredMapper(t), "inferred"}}
 
 	for _, tgt := range targets() {
 		t.Run(tgt.name, func(t *testing.T) {
 			corpus := loadCorpus(t, tgt.name)
 			s := openStore(t, tgt, corpus)
-			var fuzzResults []FuzzVerdict
-			defer func() { writeFuzzResults(t, "ent", tgt.name, fuzzResults) }()
-			for _, tag := range corpus.Tags {
-				t.Run(tag, func(t *testing.T) {
-					// passed[tier] and total[tier] feed the summary logged at the end.
-					passed, total := map[string]int{}, map[string]int{}
-					for _, golden := range corpus.Goldens[tag] {
-						total[golden.Tier]++
-						entry, listed := corpus.Ledger[golden.ID]
-						listed = listed && entry.AppliesTo(tag)
+			for _, m := range mappers {
+				t.Run(m.name, func(t *testing.T) { s.replay(t, corpus, m.mapper, tgt.name+"-"+m.name) })
+			}
+		})
+	}
+}
 
-						ok := t.Run(golden.ID, func(t *testing.T) {
-							if golden.Skipped() {
-								t.Skip("plannerDivergence: the recorded plan and check() disagree under this PDP")
-							}
-							ids, err := s.filteredIDs(t.Context(), mapper, golden)
-							if fuzzDir != "" {
-								v := fuzzVerdict(golden, ids, err, cerbosent.ErrUnsupported)
-								fuzzResults = append(fuzzResults, v)
-								require.True(t, v.OK(), "%+v", v)
-								return
-							}
-							switch {
-							case !listed:
-								require.NoError(t, err)
-								require.Equal(t, sortedCopy(golden.Allowed), ids)
-							case entry.Status == "unsupported":
-								require.ErrorIs(t, err, cerbosent.ErrUnsupported,
-									"ledger says unsupported (%s): translation must refuse", entry.Reason)
-							default: // divergent
-								require.NoError(t, err)
-								require.NotEqual(t, sortedCopy(golden.Allowed), ids,
-									"ledger says divergent (%s), but the result matches: remove the entry", entry.Issue)
-							}
-						})
-						if ok && !listed && !golden.Skipped() {
-							passed[golden.Tier]++
-						}
+// replay runs every golden of the corpus through mapper against the store.
+func (s *store) replay(t *testing.T, corpus *Corpus, mapper cerbosent.Mapper, leg string) {
+	t.Helper()
+	var fuzzResults []FuzzVerdict
+	defer func() { writeFuzzResults(t, "ent", leg, fuzzResults) }()
+	for _, tag := range corpus.Tags {
+		t.Run(tag, func(t *testing.T) {
+			// passed[tier] and total[tier] feed the summary logged at the end.
+			passed, total := map[string]int{}, map[string]int{}
+			for _, golden := range corpus.Goldens[tag] {
+				total[golden.Tier]++
+				entry, listed := corpus.Ledger[golden.ID]
+				listed = listed && entry.AppliesTo(tag)
+
+				ok := t.Run(golden.ID, func(t *testing.T) {
+					if golden.Skipped() {
+						t.Skip("plannerDivergence: the recorded plan and check() disagree under this PDP")
 					}
-					for _, tier := range []string{"core", "extended", "adversarial"} {
-						t.Logf("%s, PDP %s, %s: %d / %d passed", tgt.name, tag, tier, passed[tier], total[tier])
+					ids, err := s.filteredIDs(t.Context(), mapper, golden)
+					if fuzzDir != "" {
+						v := fuzzVerdict(golden, ids, err, cerbosent.ErrUnsupported)
+						fuzzResults = append(fuzzResults, v)
+						require.True(t, v.OK(), "%+v", v)
+						return
+					}
+					switch {
+					case !listed:
+						require.NoError(t, err)
+						require.Equal(t, sortedCopy(golden.Allowed), ids)
+					case entry.Status == "unsupported":
+						require.ErrorIs(t, err, cerbosent.ErrUnsupported,
+							"ledger says unsupported (%s): translation must refuse", entry.Reason)
+					default: // divergent
+						require.NoError(t, err)
+						require.NotEqual(t, sortedCopy(golden.Allowed), ids,
+							"ledger says divergent (%s), but the result matches: remove the entry", entry.Issue)
 					}
 				})
+				if ok && !listed && !golden.Skipped() {
+					passed[golden.Tier]++
+				}
+			}
+			for _, tier := range []string{"core", "extended", "adversarial"} {
+				t.Logf("%s, PDP %s, %s: %d / %d passed", leg, tag, tier, passed[tier], total[tier])
 			}
 		})
 	}
