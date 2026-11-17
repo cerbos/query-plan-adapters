@@ -42,6 +42,8 @@ module Cerbos
         # * `all` ignores errors if any element is false;
         # * `exists_one` never ignores them, since it counts every element.
         def quantifier(operator, scope, body)
+          return scope.guarded(total_quantifier(operator, scope, body)) if ArelSupport.never_null?(body)
+
           error_witness = scope.exists(ArelSupport.is_null(body))
 
           quantified =
@@ -67,6 +69,16 @@ module Cerbos
           # Require the parent hops, or `all` over a missing parent is TRUE and returns a
           # denied row. See {Relations::Scope#guarded}.
           scope.guarded(quantified)
+        end
+
+        # A body that is never NULL has no erroring element to look for.
+        def total_quantifier(operator, scope, body)
+          case operator
+          when "exists" then scope.exists(body)
+          when "all" then ArelSupport.not_node(scope.exists(ArelSupport.not_node(body)))
+          when "exists_one" then ArelSupport.comparison("eq", scope.count(body), 1)
+          else raise UnsupportedOperatorError, "Unsupported collection macro: #{operator}"
+          end
         end
 
         # A macro over a constant list, such as a principal attribute the planner inlined.
@@ -157,7 +169,7 @@ module Cerbos
               removes_null ? ArelSupport.comparison("ne", member, nil) : true
             else
               outside = ArelSupport.not_node(
-                Arel::Nodes::In.new(member, present.map { |value| ArelSupport.quote(value) })
+                ArelSupport.indexable(Arel::Nodes::In.new(member, present.map { |value| ArelSupport.quote(value) }))
               )
               if removes_null
                 ArelSupport.and_node([ArelSupport.comparison("ne", member, nil), outside])

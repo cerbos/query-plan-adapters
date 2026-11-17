@@ -242,7 +242,7 @@ module Cerbos
         @cel_errors = {}.compare_by_identity
         @position_guards = {}.compare_by_identity
         environment = Environment.new(translator: self, bindings: {})
-        ArelSupport.with_dialect(dialect, method(:column_type)) do
+        ArelSupport.with_dialect(dialect, method(:column_type), method(:schema_column)) do
           model.where(predicate(normalised.condition, environment))
         end
       end
@@ -255,6 +255,15 @@ module Cerbos
         type = owner_model.columns_hash[column_name.to_s]&.type
         @column_types[node] = type if type
         node
+      end
+
+      # @private
+      def schema_column(attribute)
+        table = attribute.relation
+        table = table.left if table.is_a?(Arel::Nodes::TableAlias)
+        return unless table.is_a?(Arel::Table)
+
+        @model.connection.schema_cache.columns_hash(table.name)[attribute.name.to_s]
       end
 
       # @private

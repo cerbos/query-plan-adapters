@@ -570,8 +570,9 @@ The adapter does not trust the column's collation for that:
   `in`, `contains`, `startsWith`, `endsWith`, hierarchy and ordering are byte-exact and NO PAD even
   under the default `utf8mb4_0900_ai_ci`, which folds case and accents, and `utf8mb4_0900_as_cs`,
   which gives a soft hyphen no weight ([#474](https://github.com/cerbos/query-plan-adapters/issues/474)).
-  String columns must use the `utf8mb4` character set, and a comparison over a column whose own
-  collation differs cannot use that column's index. MariaDB has no `utf8mb4_0900_bin`, so nothing
+  String columns must use the `utf8mb4` character set. An `==`, `in` or `startsWith` of a column
+  against a constant is preceded by the same test under the column's own collation, which every
+  byte-equal value passes, so an index on the column still serves it. MariaDB has no `utf8mb4_0900_bin`, so nothing
   is collated there: give its string columns a byte-exact NO PAD collation such as
   `utf8mb4_nopad_bin`.
 - **PostgreSQL.** `=` is exact under any deterministic collation and is left alone. Every ordering

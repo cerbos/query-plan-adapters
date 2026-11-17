@@ -40,9 +40,9 @@ module Cerbos
       # The dialect of the translation in progress, so every string literal and string ordering
       # is built for it: CEL compares strings byte for byte and orders them by code point, which
       # MySQL's default collation and PostgreSQL's linguistic ones do not.
-      def with_dialect(dialect, column_type)
+      def with_dialect(dialect, column_type, schema_column = nil)
         previous = Thread.current[:cerbos_active_record_dialect]
-        Thread.current[:cerbos_active_record_dialect] = [dialect, column_type]
+        Thread.current[:cerbos_active_record_dialect] = [dialect, column_type, schema_column]
         yield
       ensure
         Thread.current[:cerbos_active_record_dialect] = previous
@@ -72,7 +72,7 @@ module Cerbos
         return true if collated?(node)
         return true if node.is_a?(Arel::Nodes::Quoted) && node.value.is_a?(::String)
 
-        column_type = Thread.current[:cerbos_active_record_dialect]&.last
+        column_type = Thread.current[:cerbos_active_record_dialect]&.[](1)
         %i[string text].include?(column_type&.call(node))
       end
 
@@ -164,7 +164,8 @@ module Cerbos
         node_class = COMPARISON_NODES.fetch(operator) do
           raise UnsupportedOperatorError, "Unsupported comparison operator: #{operator}"
         end
-        node_class.new(*exact_operands(operator, quote(left), quote(right)))
+        node = node_class.new(*exact_operands(operator, quote(left), quote(right)))
+        (operator == "eq") ? indexable(node) : node
       end
 
       def infix(operator, left, right)
@@ -179,6 +180,99 @@ module Cerbos
 
       def function(name, args)
         Arel::Nodes::NamedFunction.new(name, args.map { |arg| quote(arg) })
+      end
+
+      # MySQL reads a string column against a utf8mb4_0900_bin literal with no index on a column of
+      # another collation, and loses the index's order for ORDER BY ... LIMIT. Equal under the
+      # column's own collation holds whenever byte-equal does, so that test goes first, where the
+      # index serves it, and the byte-exact one keeps only CEL's rows. Each of `=`, `IN` and a
+      # LIKE prefix gets this; the pair has the same three-valued result as the exact test alone.
+      def indexable(node)
+        return node unless current_dialect&.mysql?
+
+        column, exact = node.left, node.right
+        column, exact = exact, column if node.is_a?(Arel::Nodes::Equality) && !column.is_a?(Arel::Attributes::Attribute)
+        collation = schema_column(column)&.collation
+        return node unless collation&.start_with?("utf8mb4_") && collation != MYSQL_EXACT_COLLATION.to_s
+
+        literals = exact.is_a?(Array) ? exact : [exact]
+        relaxed = literals.map { |literal| relaxed_literal(literal, collation) }
+        return node if relaxed.any?(&:nil?)
+
+        prefilter =
+          case node
+          when Arel::Nodes::In then Arel::Nodes::In.new(column, relaxed)
+          when Arel::Nodes::Equality then Arel::Nodes::Equality.new(column, relaxed.first)
+          when Arel::Nodes::Matches
+            return node if literals.first.expr.left.expressions.first.left.value.match?(/\A[%_]/)
+
+            Arel::Nodes::Matches.new(column, relaxed.first, node.escape, true)
+          else return node
+          end
+        Arel::Nodes::Grouping.new(Arel::Nodes::And.new([prefilter, node]))
+      end
+
+      # True when a predicate can be proven never to be NULL, so a quantifier needs no subquery
+      # looking for an element whose body errored. Conservative: an unrecognised node may be.
+      # Inside an AND, a conjunct may be NULL only where an `IS NOT NULL` before it is false.
+      def never_null?(node, known = [])
+        case node
+        when Arel::Nodes::Grouping then never_null?(node.expr, known)
+        when Arel::Nodes::SqlLiteral then node.equal?(TRUE_SQL) || node.equal?(FALSE_SQL)
+        when Arel::Nodes::Exists then true
+        when Arel::Nodes::Not then never_null?(node.expr, known)
+        when Arel::Nodes::And
+          known = known.dup
+          node.children.all? do |child|
+            never_null?(child, known).tap { known << bare(child.left) if child.is_a?(Arel::Nodes::NotEqual) && child.right.nil? }
+          end
+        when Arel::Nodes::Or
+          (node.respond_to?(:children) ? node.children : [node.left, node.right]).all? { |child| never_null?(child, known) }
+        when Arel::Nodes::In
+          value_never_null?(node.left, known) && Array(node.right).all? { |value| value_never_null?(value, known) }
+        when Arel::Nodes::Equality, Arel::Nodes::NotEqual, Arel::Nodes::LessThan, Arel::Nodes::GreaterThan,
+          Arel::Nodes::LessThanOrEqual, Arel::Nodes::GreaterThanOrEqual, Arel::Nodes::Matches
+          node.right.nil? || (value_never_null?(node.left, known) && value_never_null?(node.right, known))
+        else false
+        end
+      end
+
+      def value_never_null?(value, known)
+        value = bare(value)
+        case value
+        when Arel::Attributes::Attribute then known.include?(value) || schema_column(value)&.null == false
+        when Arel::Nodes::Quoted, Arel::Nodes::Casted then !value.value.nil?
+        when Arel::Nodes::NamedFunction
+          value.name == "CONVERT" && value_never_null?(value.expressions.first.left, known)
+        else false
+        end
+      end
+
+      # A node without the groupings and COLLATE this module wraps around it.
+      def bare(node)
+        loop do
+          if collated?(node) then node = node.expr.left
+          elsif node.is_a?(Arel::Nodes::Grouping) then node = node.expr
+          else return node
+          end
+        end
+      end
+
+      # The bare column a node reads, as the schema declares it, or nil for anything else.
+      def schema_column(node)
+        return unless node.is_a?(Arel::Attributes::Attribute)
+
+        Thread.current[:cerbos_active_record_dialect]&.[](2)&.call(node)
+      end
+
+      # `quote`'s `(CONVERT('x' USING utf8mb4) COLLATE utf8mb4_0900_bin)` under another collation.
+      def relaxed_literal(literal, collation)
+        return unless collated?(literal) && literal.expr.right == MYSQL_EXACT_COLLATION
+
+        converted = literal.expr.left
+        return unless converted.is_a?(Arel::Nodes::NamedFunction) && converted.name == "CONVERT"
+
+        collate(converted, Arel.sql(collation))
       end
 
       # `IS NULL` for any expression. Collection macros use it to find elements whose lambda

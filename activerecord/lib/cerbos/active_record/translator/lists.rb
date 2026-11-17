@@ -148,7 +148,7 @@ module Cerbos
           unless present.empty?
             tests << ArelSupport.and_node([
               ArelSupport.comparison("ne", member, nil),
-              Arel::Nodes::In.new(member, present.map { |value| ArelSupport.quote(value) })
+              ArelSupport.indexable(Arel::Nodes::In.new(member, present.map { |value| ArelSupport.quote(value) }))
             ])
           end
           tests << ArelSupport.comparison("eq", member, nil) if values.include?(nil)

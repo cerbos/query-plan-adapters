@@ -2,6 +2,7 @@ package dev.cerbos.queryplan.exposed
 
 import dev.cerbos.queryplan.exposed.sql.CodePointOrdering
 import dev.cerbos.queryplan.exposed.sql.ExactString
+import dev.cerbos.queryplan.exposed.sql.IndexedOnMysql
 import dev.cerbos.queryplan.exposed.sql.IeeeDoubleCast
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
 import dev.cerbos.queryplan.exposed.sql.NulSafeMatch
@@ -179,7 +180,7 @@ internal class LeafTranslator(private val translation: Translation) {
             throw ScalarRefusals.nulNeedle(operator)
         }
         return when (operator) {
-            "eq" -> EqOp(expression, constant)
+            "eq" -> EqOp(expression, constant).let { if (value is String) IndexedOnMysql.eq(target.expression, value, it) else it }
             "ne" -> NeqOp(expression, constant)
             "lt" -> LessOp(expression, constant)
             "le" -> LessEqOp(expression, constant)
@@ -205,13 +206,14 @@ internal class LeafTranslator(private val translation: Translation) {
             append(escaped)
             if (trailingWildcard) append('%')
         }
-        return NulSafeMatch(
+        val match = NulSafeMatch(
             LikeEscapeOp(haystack, ExactString.param(pattern), true, LikeEscaping.ESCAPE_CHAR),
             haystack,
             stringParam(needle.toString()),
             leadingWildcard,
             trailingWildcard,
         )
+        return if (leadingWildcard) match else IndexedOnMysql.like(haystack, pattern, match)
     }
 
     /** The target cast to IEEE double when the constant is fractional or too large for a `Long`, as CEL compares. */
