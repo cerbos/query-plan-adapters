@@ -789,18 +789,20 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 
 func TestAdversarialConformance(t *testing.T) {
 	// Both ways of mapping are replayed against every store: written out by hand, and read from
-	// the ent schema by Schema.Mapper. Each writes its own fuzz results, as <store>-<mapping>.
+	// the ent schema by Schema.Mapper. Each writes its own fuzz results: <store> for the declared
+	// mapper, <store>+schema for the inferred one.
 	mappers := []struct {
 		mapper cerbosent.Mapper
 		name   string
-	}{{declaredMapper(), "declared"}, {inferredMapper(t), "inferred"}}
+		leg    string
+	}{{declaredMapper(), "declared", ""}, {inferredMapper(t), "inferred", "+schema"}}
 
 	for _, tgt := range targets() {
 		t.Run(tgt.name, func(t *testing.T) {
 			corpus := loadCorpus(t, tgt.name)
 			s := openStore(t, tgt, corpus)
 			for _, m := range mappers {
-				t.Run(m.name, func(t *testing.T) { s.replay(t, corpus, m.mapper, tgt.name+"-"+m.name) })
+				t.Run(m.name, func(t *testing.T) { s.replay(t, corpus, m.mapper, tgt.name+m.leg) })
 			}
 		})
 	}

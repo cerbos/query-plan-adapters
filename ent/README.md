@@ -351,8 +351,8 @@ Cerbos PDP 0.57.0 recorded for each case are translated, run against the corpus 
 Ent-built queries on **SQLite, PostgreSQL and MySQL**, and the returned ids are compared with the
 recorded `check()` decisions. Every store is replayed twice: once through a mapper inferred from ent schema
 types with only the overrides the corpus needs, and once through a fully declared mapper. Both
-must give the same result, and each writes its own fuzz results (`<store>-inferred`,
-`<store>-declared`). The previous PDP's goldens (0.56.0) are replayed too. The counts are
+must give the same result, and each writes its own fuzz results (`<store>` for the declared
+mapper, `<store>+schema` for the inferred one). The previous PDP's goldens (0.56.0) are replayed too. The counts are
 the same on all three databases. The total is every golden case in the tier; a case whose golden
 records a planner divergence (the plan and `check()` disagree, so no adapter can pass) is skipped
 and counts toward the total but not toward passed — on 0.57.0 that is three extended cases and four

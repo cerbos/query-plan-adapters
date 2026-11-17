@@ -406,7 +406,7 @@ def test_case(store, mapping, tag, case, request):
             )
         except Exception as error:  # noqa: BLE001 - every throw is judged, not raised
             verdict = fuzz_thrown(case, error, UnsupportedPlanError)
-        leg = store if mapping == "inferred" else f"{store}-{mapping}"
+        leg = store if mapping == "declared" else f"{store}+schema"
         FUZZ_RESULTS.setdefault(leg, []).append(verdict)
         assert verdict["verdict"] in ("match", "refused"), verdict
         return
