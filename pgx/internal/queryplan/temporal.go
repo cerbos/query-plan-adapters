@@ -215,3 +215,32 @@ func yieldsTimestamp(n *node) bool {
 	}
 	return false
 }
+
+// OnMicrosecondGrid rewrites a comparison against a timestamp constant finer than a microsecond
+// for a store whose timestamps hold whole microseconds, where binding the constant would
+// truncate it: x >= 10.0000005 is x > 10.000000, and no stored value equals the constant.
+func OnMicrosecondGrid(c Cmp) Cmp {
+	x, op := c.L, c.Op
+	lit, ok := c.R.(Lit)
+	if !ok {
+		if lit, ok = c.L.(Lit); !ok {
+			return c
+		}
+		x, op = c.R, op.Mirror()
+	}
+	t, ok := lit.V.(time.Time)
+	if !ok || t.Nanosecond()%int(time.Microsecond) == 0 {
+		return c
+	}
+	floor := Lit{V: t.Truncate(time.Microsecond)}
+	switch op {
+	case OpEq:
+		return Cmp{Op: OpNe, L: x, R: x}
+	case OpNe:
+		return Cmp{Op: OpEq, L: x, R: x}
+	case OpGt, OpGe:
+		return Cmp{Op: OpGt, L: x, R: floor}
+	default:
+		return Cmp{Op: OpLe, L: x, R: floor}
+	}
+}

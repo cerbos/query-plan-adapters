@@ -148,6 +148,7 @@ func (r *renderer) write(e queryplan.Expr) error {
 		return nil
 
 	case queryplan.Cmp:
+		t = queryplan.OnMicrosecondGrid(t)
 		op, err := symbol(cmpSymbols, "comparison", t.Op)
 		if err != nil {
 			return err
