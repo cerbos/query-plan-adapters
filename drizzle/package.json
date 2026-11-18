@@ -43,7 +43,11 @@
     "test": "jest",
     "test:adversarial": "jest --config jest.adversarial.config.js",
     "test:adversarial:postgres": "ADAPTER_TEST_DB=postgres npm run test:adversarial",
-    "test:adversarial:mysql": "ADAPTER_TEST_DB=mysql npm run test:adversarial"
+    "test:adversarial:mysql": "ADAPTER_TEST_DB=mysql npm run test:adversarial",
+    "test:domains": "npm run test:domains:sqlite && npm run test:domains:postgres && npm run test:domains:mysql",
+    "test:domains:sqlite": "DOMAIN_STORE=sqlite jest --config jest.domains.config.js",
+    "test:domains:postgres": "DOMAIN_STORE=postgres jest --config jest.domains.config.js",
+    "test:domains:mysql": "DOMAIN_STORE=mysql jest --config jest.domains.config.js"
   },
   "engines": {
     "node": ">=22.0.0"

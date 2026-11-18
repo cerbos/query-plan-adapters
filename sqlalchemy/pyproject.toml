@@ -60,6 +60,7 @@ isort = {cmd = "isort src tests example"}
 ruff_format = {cmd = "ruff format src tests example"}
 lint = {cmd = "ruff check --fix src tests example"}
 format = {composite = ["isort", "ruff_format"]}
+domains = {cmd = "python domain_harness/harness.py", help = "Replay domains/ goldens: pdm run domains <sqlite|postgresql|mysql> [domain...]"}
 
 [tool.pyprojectx]
 pdm = "pdm"

@@ -1,0 +1,66 @@
+model Client {
+  id       String   @id
+  name     String
+  industry String?
+  matters  Matter[]
+
+  @@map("clients")
+}
+
+model Matter {
+  id            String         @id
+  clientId      String         @map("client_id")
+  practiceArea  String         @map("practice_area")
+  status        String
+  openedAt      DateTime       @map("opened_at")
+  leadPartnerId String?        @map("lead_partner_id")
+  client        Client         @relation(fields: [clientId], references: [id])
+  team          MatterTeam[]
+  screened      MatterScreen[]
+  documents     Document[]
+
+  @@map("matters")
+}
+
+model MatterTeam {
+  matterId String @map("matter_id")
+  userId   String @map("user_id")
+  matter   Matter @relation(fields: [matterId], references: [id])
+
+  @@id([matterId, userId])
+  @@map("matter_team")
+}
+
+model MatterScreen {
+  matterId String @map("matter_id")
+  userId   String @map("user_id")
+  matter   Matter @relation(fields: [matterId], references: [id])
+
+  @@id([matterId, userId])
+  @@map("matter_screens")
+}
+
+model Document {
+  id             String          @id
+  matterId       String          @map("matter_id")
+  title          String
+  privilege      String?
+  classification Int
+  legalHold      Boolean         @map("legal_hold")
+  createdBy      String          @map("created_by")
+  retentionUntil DateTime?       @map("retention_until")
+  matter         Matter          @relation(fields: [matterId], references: [id])
+  shares         DocumentShare[]
+
+  @@map("documents")
+}
+
+model DocumentShare {
+  id         String   @id
+  documentId String   @map("document_id")
+  partyType  String   @map("party_type")
+  partyId    String   @map("party_id")
+  document   Document @relation(fields: [documentId], references: [id])
+
+  @@map("document_shares")
+}

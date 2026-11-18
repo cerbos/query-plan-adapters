@@ -40,7 +40,8 @@
     "prepare": "npm run build",
     "test": "jest",
     "test:adversarial": "jest --config jest.adversarial.config.js",
-    "chroma": "docker run --rm -p 8234:8000 \"$(cat CHROMA_IMAGE)\""
+    "chroma": "docker run --rm -p 8234:8000 \"$(cat CHROMA_IMAGE)\"",
+    "test:domains": "jest --config jest.domains.config.js --runInBand"
   },
   "engines": {
     "node": ">=22.0.0"

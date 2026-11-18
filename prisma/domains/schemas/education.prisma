@@ -1,0 +1,67 @@
+model Department {
+  id      String   @id
+  name    String
+  courses Course[]
+
+  @@map("departments")
+}
+
+model Course {
+  id           String        @id
+  code         String
+  term         String
+  departmentId String        @map("department_id")
+  department   Department    @relation(fields: [departmentId], references: [id])
+  staff        CourseStaff[]
+  assignments  Assignment[]
+
+  @@map("courses")
+}
+
+model CourseStaff {
+  id       String @id
+  courseId String @map("course_id")
+  userId   String @map("user_id")
+  role     String
+  course   Course @relation(fields: [courseId], references: [id])
+
+  @@map("course_staff")
+}
+
+model Assignment {
+  id          String       @id
+  courseId    String       @map("course_id")
+  title       String
+  dueAt       DateTime     @map("due_at")
+  maxPoints   Int          @map("max_points")
+  groupWork   Boolean      @map("group_work")
+  course      Course       @relation(fields: [courseId], references: [id])
+  submissions Submission[]
+
+  @@map("assignments")
+}
+
+model Submission {
+  id              String             @id
+  assignmentId    String             @map("assignment_id")
+  studentId       String             @map("student_id")
+  submittedAt     DateTime?          @map("submitted_at")
+  score           Float?
+  late            Boolean
+  plagiarismScore Float?             @map("plagiarism_score")
+  status          String
+  locked          Boolean
+  assignment      Assignment         @relation(fields: [assignmentId], references: [id])
+  members         SubmissionMember[]
+
+  @@map("submissions")
+}
+
+model SubmissionMember {
+  submissionId String     @map("submission_id")
+  studentId    String     @map("student_id")
+  submission   Submission @relation(fields: [submissionId], references: [id])
+
+  @@id([submissionId, studentId])
+  @@map("submission_members")
+}

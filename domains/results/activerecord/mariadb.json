@@ -1,0 +1,5177 @@
+{
+  "adapter": "activerecord",
+  "store": "mariadb",
+  "results": [
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "admin_kim",
+      "action": "delete",
+      "verdict": "under-grant",
+      "returned": [
+        "n01",
+        "n09",
+        "n11"
+      ],
+      "allowed": [
+        "n01",
+        "n02",
+        "n08",
+        "n09",
+        "n11",
+        "n13"
+      ],
+      "detail": "SELECT `clinical_notes`.* FROM `clinical_notes` WHERE (`clinical_notes`.`signed_at` < '2022-01-01 00:00:00' AND (SELECT `cerbos_patients_1`.`birth_year` FROM `patients` `cerbos_patients_1` WHERE `cerbos_patients_1`.`id` = `clinical_notes`.`patient_id`) < 1960)"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "admin_kim",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "admin_kim",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "admin_kim",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ng",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ng",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ng",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ng",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "n03",
+        "n05",
+        "n06",
+        "n07",
+        "n12"
+      ],
+      "allowed": [
+        "n03",
+        "n05",
+        "n06",
+        "n07",
+        "n12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ortiz",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ortiz",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ortiz",
+      "action": "sign",
+      "verdict": "under-grant",
+      "returned": [],
+      "allowed": [
+        "n02"
+      ],
+      "detail": "SELECT `clinical_notes`.* FROM `clinical_notes` WHERE (1=0)"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ortiz",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n02",
+        "n05",
+        "n10",
+        "n12",
+        "n14"
+      ],
+      "allowed": [
+        "n01",
+        "n02",
+        "n05",
+        "n10",
+        "n12",
+        "n14"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "nurse_ana",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "nurse_ana",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "nurse_ana",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "nurse_ana",
+      "action": "view",
+      "verdict": "under-grant",
+      "returned": [
+        "n01",
+        "n10"
+      ],
+      "allowed": [
+        "n01",
+        "n02",
+        "n10"
+      ],
+      "detail": "SELECT `clinical_notes`.* FROM `clinical_notes` WHERE (NOT ((EXISTS (SELECT 1 FROM `note_codes` `cerbos_note_codes_1` WHERE `cerbos_note_codes_1`.`note_id` = `clinical_notes`.`note_id` AND ((`cerbos_note_codes_1`.`system` = (CONVERT('ICD-10' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_note_codes_1`.`system` = (CONVERT('ICD-10' USING utf8mb4) COLLATE utf8mb4_0900_bin)) AND (`cerbos_note_codes_1`.`code` LIKE (CONVERT('F%' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) ESCAPE '\\\\' AND `cerbos_note_codes_1`.`code` LIKE (CONVERT('F%' USING utf8mb4) COLLATE utf8mb4_0900_bin) ESCAPE '\\\\'))))) AND ((NOT ((`clinical_notes`.`is_deleted` = TRUE)) AND EXISTS (SELECT 1 FROM `note_care_team` `cerbos_note_care_team_2` WHERE `cerbos_note_care_team_2`.`note_id` = `clinical_notes`.`note_id` AND (`cerbos_note_care_team_2`.`clinician_id` = (CONVERT('u-ana' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_note_care_team_2`.`clinician_id` = (CONVERT('u-ana' USING utf8mb4) COLLATE utf8mb4_0900_bin)))) OR ((NOT ((`clinical_notes`.`is_deleted` = TRUE)) AND `clinical_notes`.`type` != (CONVERT('psychotherapy' USING utf8mb4) COLLATE utf8mb4_0900_bin) AND NOT (((SELECT `cerbos_patients_3`.`vip` FROM `patients` `cerbos_patients_3` WHERE `cerbos_patients_3`.`id` = `clinical_notes`.`patient_id`) = TRUE)) AND NOT (((SELECT `cerbos_wards_5`.`secure` FROM `patients` `cerbos_patients_4` INNER JOIN `wards` `cerbos_wards_5` ON `cerbos_wards_5`.`id` = `cerbos_patients_4`.`ward_id` WHERE `cerbos_patients_4`.`id` = `clinical_notes`.`patient_id`) = TRUE))) AND (SELECT `cerbos_wards_7`.`id` FROM `patients` `cerbos_patients_6` INNER JOIN `wards` `cerbos_wards_7` ON `cerbos_wards_7`.`id` = `cerbos_patients_6`.`ward_id` WHERE `cerbos_patients_6`.`id` = `clinical_notes`.`patient_id`) IN ((CONVERT('w1' USING utf8mb4) COLLATE utf8mb4_0900_bin), (CONVERT('w2' USING utf8mb4) COLLATE utf8mb4_0900_bin)))))"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "patient_p3",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "patient_p3",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "patient_p3",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "patient_p3",
+      "action": "view",
+      "verdict": "over-grant",
+      "returned": [
+        "n05",
+        "n13"
+      ],
+      "allowed": [
+        "n05"
+      ],
+      "detail": "SELECT `clinical_notes`.* FROM `clinical_notes` WHERE (NOT ((EXISTS (SELECT 1 FROM `note_codes` `cerbos_note_codes_1` WHERE `cerbos_note_codes_1`.`note_id` = `clinical_notes`.`note_id` AND ((`cerbos_note_codes_1`.`system` = (CONVERT('ICD-10' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_note_codes_1`.`system` = (CONVERT('ICD-10' USING utf8mb4) COLLATE utf8mb4_0900_bin)) AND (`cerbos_note_codes_1`.`code` LIKE (CONVERT('F%' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) ESCAPE '\\\\' AND `cerbos_note_codes_1`.`code` LIKE (CONVERT('F%' USING utf8mb4) COLLATE utf8mb4_0900_bin) ESCAPE '\\\\'))))) AND ((SELECT `cerbos_patients_2`.`mrn` FROM `patients` `cerbos_patients_2` WHERE `cerbos_patients_2`.`id` = `clinical_notes`.`patient_id`) = (CONVERT('MRN-0003' USING utf8mb4) COLLATE utf8mb4_0900_bin) AND `clinical_notes`.`type` != (CONVERT('psychotherapy' USING utf8mb4) COLLATE utf8mb4_0900_bin) AND NOT ((`clinical_notes`.`is_deleted` = TRUE))))"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "researcher_li",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "researcher_li",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n10",
+        "n11"
+      ],
+      "allowed": [
+        "n01",
+        "n10",
+        "n11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "researcher_li",
+      "action": "sign",
+      "verdict": "under-grant",
+      "returned": [],
+      "allowed": [
+        "n13"
+      ],
+      "detail": "SELECT `clinical_notes`.* FROM `clinical_notes` WHERE (1=0)"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "researcher_li",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n07",
+        "n10"
+      ],
+      "allowed": [
+        "n01",
+        "n07",
+        "n10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "admin_kim",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n02",
+        "n08",
+        "n09",
+        "n11",
+        "n13"
+      ],
+      "allowed": [
+        "n01",
+        "n02",
+        "n08",
+        "n09",
+        "n11",
+        "n13"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "admin_kim",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "admin_kim",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "admin_kim",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ng",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ng",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ng",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ng",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "n03",
+        "n05",
+        "n06",
+        "n07",
+        "n12"
+      ],
+      "allowed": [
+        "n03",
+        "n05",
+        "n06",
+        "n07",
+        "n12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ortiz",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ortiz",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ortiz",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [
+        "n02"
+      ],
+      "allowed": [
+        "n02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ortiz",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n02",
+        "n05",
+        "n10",
+        "n12",
+        "n14"
+      ],
+      "allowed": [
+        "n01",
+        "n02",
+        "n05",
+        "n10",
+        "n12",
+        "n14"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "nurse_ana",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "nurse_ana",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "nurse_ana",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "nurse_ana",
+      "action": "view",
+      "verdict": "under-grant",
+      "returned": [
+        "n01",
+        "n10"
+      ],
+      "allowed": [
+        "n01",
+        "n02",
+        "n10"
+      ],
+      "detail": "SELECT `clinical_notes`.* FROM `clinical_notes` WHERE (NOT ((EXISTS (SELECT 1 FROM `note_codes` `cerbos_note_codes_1` WHERE `cerbos_note_codes_1`.`note_id` = `clinical_notes`.`note_id` AND ((`cerbos_note_codes_1`.`system` = (CONVERT('ICD-10' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_note_codes_1`.`system` = (CONVERT('ICD-10' USING utf8mb4) COLLATE utf8mb4_0900_bin)) AND (`cerbos_note_codes_1`.`code` LIKE (CONVERT('F%' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) ESCAPE '\\\\' AND `cerbos_note_codes_1`.`code` LIKE (CONVERT('F%' USING utf8mb4) COLLATE utf8mb4_0900_bin) ESCAPE '\\\\'))))) AND ((NOT ((`clinical_notes`.`is_deleted` = TRUE)) AND EXISTS (SELECT 1 FROM `note_care_team` `cerbos_note_care_team_2` WHERE `cerbos_note_care_team_2`.`note_id` = `clinical_notes`.`note_id` AND (`cerbos_note_care_team_2`.`clinician_id` = (CONVERT('u-ana' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_note_care_team_2`.`clinician_id` = (CONVERT('u-ana' USING utf8mb4) COLLATE utf8mb4_0900_bin)))) OR ((NOT ((`clinical_notes`.`is_deleted` = TRUE)) AND `clinical_notes`.`type` != (CONVERT('psychotherapy' USING utf8mb4) COLLATE utf8mb4_0900_bin) AND NOT (((SELECT `cerbos_patients_3`.`vip` FROM `patients` `cerbos_patients_3` WHERE `cerbos_patients_3`.`id` = `clinical_notes`.`patient_id`) = TRUE)) AND NOT (((SELECT `cerbos_wards_5`.`secure` FROM `patients` `cerbos_patients_4` INNER JOIN `wards` `cerbos_wards_5` ON `cerbos_wards_5`.`id` = `cerbos_patients_4`.`ward_id` WHERE `cerbos_patients_4`.`id` = `clinical_notes`.`patient_id`) = TRUE))) AND (SELECT `cerbos_wards_7`.`id` FROM `patients` `cerbos_patients_6` INNER JOIN `wards` `cerbos_wards_7` ON `cerbos_wards_7`.`id` = `cerbos_patients_6`.`ward_id` WHERE `cerbos_patients_6`.`id` = `clinical_notes`.`patient_id`) IN ((CONVERT('w1' USING utf8mb4) COLLATE utf8mb4_0900_bin), (CONVERT('w2' USING utf8mb4) COLLATE utf8mb4_0900_bin)))))"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "patient_p3",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "patient_p3",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "patient_p3",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "patient_p3",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "n05"
+      ],
+      "allowed": [
+        "n05"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "researcher_li",
+      "action": "delete",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "researcher_li",
+      "action": "export",
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n10",
+        "n11"
+      ],
+      "allowed": [
+        "n01",
+        "n10",
+        "n11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "researcher_li",
+      "action": "sign",
+      "verdict": "pass",
+      "returned": [
+        "n13"
+      ],
+      "allowed": [
+        "n13"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "researcher_li",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n07",
+        "n10"
+      ],
+      "allowed": [
+        "n01",
+        "n07",
+        "n10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_mia",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02"
+      ],
+      "allowed": [
+        "pay01",
+        "pay02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_mia",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_mia",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay10"
+      ],
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_raj",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08"
+      ],
+      "allowed": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_raj",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_raj",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "allowed": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "compliance_eve",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "compliance_eve",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [
+        "pay04",
+        "pay07",
+        "pay10"
+      ],
+      "allowed": [
+        "pay04",
+        "pay07",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "compliance_eve",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay02",
+        "pay04",
+        "pay06",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "allowed": [
+        "pay02",
+        "pay04",
+        "pay06",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "holder_c1",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "holder_c1",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "holder_c1",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay11",
+        "pay12"
+      ],
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay11",
+        "pay12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "teller_lon",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "teller_lon",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "teller_lon",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay06",
+        "pay11",
+        "pay12"
+      ],
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay06",
+        "pay11",
+        "pay12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_mia",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02"
+      ],
+      "allowed": [
+        "pay01",
+        "pay02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_mia",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_mia",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay10"
+      ],
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_raj",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08"
+      ],
+      "allowed": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_raj",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_raj",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "allowed": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "compliance_eve",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "compliance_eve",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [
+        "pay04",
+        "pay07",
+        "pay10"
+      ],
+      "allowed": [
+        "pay04",
+        "pay07",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "compliance_eve",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay02",
+        "pay04",
+        "pay06",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "allowed": [
+        "pay02",
+        "pay04",
+        "pay06",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "holder_c1",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "holder_c1",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "holder_c1",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay11",
+        "pay12"
+      ],
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay11",
+        "pay12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "teller_lon",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "teller_lon",
+      "action": "file_sar",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "teller_lon",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay06",
+        "pay11",
+        "pay12"
+      ],
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay06",
+        "pay11",
+        "pay12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_dhlx",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_dhlx",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "allowed": [
+        "s01",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_dhlx",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "allowed": [
+        "s01",
+        "s02",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_upsn",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_upsn",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [
+        "s05",
+        "s07"
+      ],
+      "allowed": [
+        "s05",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_upsn",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s04",
+        "s05",
+        "s07"
+      ],
+      "allowed": [
+        "s04",
+        "s05",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customer_acme",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customer_acme",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customer_acme",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s07"
+      ],
+      "allowed": [
+        "s01",
+        "s02",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customs_us",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s08"
+      ],
+      "allowed": [
+        "s01",
+        "s04",
+        "s08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customs_us",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customs_us",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
+      "allowed": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "hubop_lhr",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "hubop_lhr",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "hubop_lhr",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s04"
+      ],
+      "allowed": [
+        "s01",
+        "s02",
+        "s04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_dhlx",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_dhlx",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "allowed": [
+        "s01",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_dhlx",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "allowed": [
+        "s01",
+        "s02",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_upsn",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_upsn",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [
+        "s05",
+        "s07"
+      ],
+      "allowed": [
+        "s05",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_upsn",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s04",
+        "s05",
+        "s07"
+      ],
+      "allowed": [
+        "s04",
+        "s05",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customer_acme",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customer_acme",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customer_acme",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s07"
+      ],
+      "allowed": [
+        "s01",
+        "s02",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customs_us",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s08"
+      ],
+      "allowed": [
+        "s01",
+        "s04",
+        "s08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customs_us",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customs_us",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
+      "allowed": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "hubop_lhr",
+      "action": "release_customs",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "hubop_lhr",
+      "action": "update_status",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "hubop_lhr",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s04"
+      ],
+      "allowed": [
+        "s01",
+        "s02",
+        "s04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "integrity_kay",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "integrity_kay",
+      "action": "grade",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "integrity_kay",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [
+        "sb02",
+        "sb05",
+        "sb10"
+      ],
+      "allowed": [
+        "sb02",
+        "sb05",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "integrity_kay",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "prof_jones",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [
+        "sb04",
+        "sb06"
+      ],
+      "allowed": [
+        "sb04",
+        "sb06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "prof_jones",
+      "action": "grade",
+      "verdict": "under-grant",
+      "returned": [
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb09"
+      ],
+      "allowed": [
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": "SELECT `submissions`.* FROM `submissions` WHERE (NOT ((`submissions`.`locked` = TRUE)) AND EXISTS (SELECT 1 FROM `assignments` `cerbos_assignments_1` INNER JOIN `courses` `cerbos_courses_2` ON `cerbos_courses_2`.`id` = `cerbos_assignments_1`.`course_id` INNER JOIN `course_staff` `cerbos_course_staff_3` ON `cerbos_course_staff_3`.`course_id` = `cerbos_courses_2`.`id` WHERE `cerbos_assignments_1`.`id` = `submissions`.`assignment_id` AND ((`cerbos_course_staff_3`.`user_id` = (CONVERT('f-jones' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_course_staff_3`.`user_id` = (CONVERT('f-jones' USING utf8mb4) COLLATE utf8mb4_0900_bin)) AND (`cerbos_course_staff_3`.`role` = (CONVERT('instructor' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_course_staff_3`.`role` = (CONVERT('instructor' USING utf8mb4) COLLATE utf8mb4_0900_bin)))))"
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "prof_jones",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "prof_jones",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "registrar_ro",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "registrar_ro",
+      "action": "grade",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "registrar_ro",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "registrar_ro",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "student_sam",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "student_sam",
+      "action": "grade",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "student_sam",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "student_sam",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb03",
+        "sb05",
+        "sb08"
+      ],
+      "allowed": [
+        "sb01",
+        "sb03",
+        "sb05",
+        "sb08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "ta_lee",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [
+        "sb04",
+        "sb06"
+      ],
+      "allowed": [
+        "sb04",
+        "sb06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "ta_lee",
+      "action": "grade",
+      "verdict": "under-grant",
+      "returned": [
+        "sb05",
+        "sb06"
+      ],
+      "allowed": [
+        "sb02",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": "SELECT `submissions`.* FROM `submissions` WHERE (NOT ((`submissions`.`locked` = TRUE)) AND EXISTS (SELECT 1 FROM `assignments` `cerbos_assignments_1` INNER JOIN `courses` `cerbos_courses_2` ON `cerbos_courses_2`.`id` = `cerbos_assignments_1`.`course_id` INNER JOIN `course_staff` `cerbos_course_staff_3` ON `cerbos_course_staff_3`.`course_id` = `cerbos_courses_2`.`id` WHERE `cerbos_assignments_1`.`id` = `submissions`.`assignment_id` AND ((`cerbos_course_staff_3`.`user_id` = (CONVERT('ta-lee' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_course_staff_3`.`user_id` = (CONVERT('ta-lee' USING utf8mb4) COLLATE utf8mb4_0900_bin)) AND (`cerbos_course_staff_3`.`role` = (CONVERT('instructor' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_course_staff_3`.`role` = (CONVERT('instructor' USING utf8mb4) COLLATE utf8mb4_0900_bin)))))"
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "ta_lee",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "ta_lee",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "integrity_kay",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "integrity_kay",
+      "action": "grade",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "integrity_kay",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [
+        "sb02",
+        "sb05",
+        "sb10"
+      ],
+      "allowed": [
+        "sb02",
+        "sb05",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "integrity_kay",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "prof_jones",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [
+        "sb04",
+        "sb06"
+      ],
+      "allowed": [
+        "sb04",
+        "sb06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "prof_jones",
+      "action": "grade",
+      "verdict": "pass",
+      "returned": [
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "allowed": [
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "prof_jones",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "prof_jones",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "registrar_ro",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "registrar_ro",
+      "action": "grade",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "registrar_ro",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "registrar_ro",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "student_sam",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "student_sam",
+      "action": "grade",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "student_sam",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "student_sam",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb03",
+        "sb05",
+        "sb08"
+      ],
+      "allowed": [
+        "sb01",
+        "sb03",
+        "sb05",
+        "sb08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "ta_lee",
+      "action": "flag_late",
+      "verdict": "pass",
+      "returned": [
+        "sb04",
+        "sb06"
+      ],
+      "allowed": [
+        "sb04",
+        "sb06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "ta_lee",
+      "action": "grade",
+      "verdict": "pass",
+      "returned": [
+        "sb02",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "allowed": [
+        "sb02",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "ta_lee",
+      "action": "review_integrity",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "ta_lee",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "client_globex",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "client_globex",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "client_globex",
+      "action": "view",
+      "verdict": "under-grant",
+      "returned": [
+        "d05"
+      ],
+      "allowed": [
+        "d05",
+        "d06"
+      ],
+      "detail": "SELECT `documents`.* FROM `documents` WHERE (NOT ((EXISTS (SELECT 1 FROM `matters` `cerbos_matters_1` INNER JOIN `matter_screens` `cerbos_matter_screens_2` ON `cerbos_matter_screens_2`.`matter_id` = `cerbos_matters_1`.`id` WHERE `cerbos_matters_1`.`id` = `documents`.`matter_id` AND (`cerbos_matter_screens_2`.`user_id` = (CONVERT('cu-1' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_matter_screens_2`.`user_id` = (CONVERT('cu-1' USING utf8mb4) COLLATE utf8mb4_0900_bin))))) AND ((CASE WHEN EXISTS (SELECT 1 FROM `matters` `cerbos_matters_3` INNER JOIN `clients` `cerbos_clients_4` ON `cerbos_clients_4`.`id` = `cerbos_matters_3`.`client_id` WHERE `cerbos_matters_3`.`id` = `documents`.`matter_id`) THEN (((SELECT `cerbos_clients_4`.`id` FROM `matters` `cerbos_matters_3` INNER JOIN `clients` `cerbos_clients_4` ON `cerbos_clients_4`.`id` = `cerbos_matters_3`.`client_id` WHERE `cerbos_matters_3`.`id` = `documents`.`matter_id`) COLLATE utf8mb4_0900_bin) IS NOT NULL AND (SELECT `cerbos_clients_4`.`id` FROM `matters` `cerbos_matters_3` INNER JOIN `clients` `cerbos_clients_4` ON `cerbos_clients_4`.`id` = `cerbos_matters_3`.`client_id` WHERE `cerbos_matters_3`.`id` = `documents`.`matter_id`) = (CONVERT('cl2' USING utf8mb4) COLLATE utf8mb4_0900_bin)) END) AND EXISTS (SELECT 1 FROM `document_shares` `cerbos_document_shares_5` WHERE `cerbos_document_shares_5`.`document_id` = `documents`.`id` AND (((`cerbos_document_shares_5`.`party_type` COLLATE utf8mb4_0900_bin) IS NOT NULL AND (`cerbos_document_shares_5`.`party_type` = (CONVERT('client' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_document_shares_5`.`party_type` = (CONVERT('client' USING utf8mb4) COLLATE utf8mb4_0900_bin))) AND ((`cerbos_document_shares_5`.`party_id` COLLATE utf8mb4_0900_bin) IS NOT NULL AND (`cerbos_document_shares_5`.`party_id` = (CONVERT('cl2' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_document_shares_5`.`party_id` = (CONVERT('cl2' USING utf8mb4) COLLATE utf8mb4_0900_bin))))) AND (`documents`.`privilege` COLLATE utf8mb4_0900_bin) IS NULL))"
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_ali",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_ali",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02"
+      ],
+      "allowed": [
+        "d01",
+        "d02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_ali",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_bea",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_bea",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_bea",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d06",
+        "d07"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d06",
+        "d07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "paralegal_dan",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "paralegal_dan",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "paralegal_dan",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "d02",
+        "d05",
+        "d10"
+      ],
+      "allowed": [
+        "d02",
+        "d05",
+        "d10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "partner_cho",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "partner_cho",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "partner_cho",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "records_eli",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [
+        "d06",
+        "d09"
+      ],
+      "allowed": [
+        "d06",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "records_eli",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "records_eli",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "client_globex",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "client_globex",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "client_globex",
+      "action": "view",
+      "verdict": "under-grant",
+      "returned": [
+        "d05"
+      ],
+      "allowed": [
+        "d05",
+        "d06"
+      ],
+      "detail": "SELECT `documents`.* FROM `documents` WHERE (NOT ((EXISTS (SELECT 1 FROM `matters` `cerbos_matters_1` INNER JOIN `matter_screens` `cerbos_matter_screens_2` ON `cerbos_matter_screens_2`.`matter_id` = `cerbos_matters_1`.`id` WHERE `cerbos_matters_1`.`id` = `documents`.`matter_id` AND (`cerbos_matter_screens_2`.`user_id` = (CONVERT('cu-1' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_matter_screens_2`.`user_id` = (CONVERT('cu-1' USING utf8mb4) COLLATE utf8mb4_0900_bin))))) AND ((CASE WHEN EXISTS (SELECT 1 FROM `matters` `cerbos_matters_3` INNER JOIN `clients` `cerbos_clients_4` ON `cerbos_clients_4`.`id` = `cerbos_matters_3`.`client_id` WHERE `cerbos_matters_3`.`id` = `documents`.`matter_id`) THEN (((SELECT `cerbos_clients_4`.`id` FROM `matters` `cerbos_matters_3` INNER JOIN `clients` `cerbos_clients_4` ON `cerbos_clients_4`.`id` = `cerbos_matters_3`.`client_id` WHERE `cerbos_matters_3`.`id` = `documents`.`matter_id`) COLLATE utf8mb4_0900_bin) IS NOT NULL AND (SELECT `cerbos_clients_4`.`id` FROM `matters` `cerbos_matters_3` INNER JOIN `clients` `cerbos_clients_4` ON `cerbos_clients_4`.`id` = `cerbos_matters_3`.`client_id` WHERE `cerbos_matters_3`.`id` = `documents`.`matter_id`) = (CONVERT('cl2' USING utf8mb4) COLLATE utf8mb4_0900_bin)) END) AND EXISTS (SELECT 1 FROM `document_shares` `cerbos_document_shares_5` WHERE `cerbos_document_shares_5`.`document_id` = `documents`.`id` AND (((`cerbos_document_shares_5`.`party_type` COLLATE utf8mb4_0900_bin) IS NOT NULL AND (`cerbos_document_shares_5`.`party_type` = (CONVERT('client' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_document_shares_5`.`party_type` = (CONVERT('client' USING utf8mb4) COLLATE utf8mb4_0900_bin))) AND ((`cerbos_document_shares_5`.`party_id` COLLATE utf8mb4_0900_bin) IS NOT NULL AND (`cerbos_document_shares_5`.`party_id` = (CONVERT('cl2' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `cerbos_document_shares_5`.`party_id` = (CONVERT('cl2' USING utf8mb4) COLLATE utf8mb4_0900_bin))))) AND (`documents`.`privilege` COLLATE utf8mb4_0900_bin) IS NULL))"
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_ali",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_ali",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02"
+      ],
+      "allowed": [
+        "d01",
+        "d02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_ali",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_bea",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_bea",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_bea",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d06",
+        "d07"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d06",
+        "d07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "paralegal_dan",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "paralegal_dan",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "paralegal_dan",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "d02",
+        "d05",
+        "d10"
+      ],
+      "allowed": [
+        "d02",
+        "d05",
+        "d10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "partner_cho",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "partner_cho",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "partner_cho",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "records_eli",
+      "action": "destroy",
+      "verdict": "pass",
+      "returned": [
+        "d06",
+        "d09"
+      ],
+      "allowed": [
+        "d06",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "records_eli",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "records_eli",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "agent_sue",
+      "action": "cancel",
+      "verdict": "pass",
+      "returned": [
+        "o08"
+      ],
+      "allowed": [
+        "o08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "agent_sue",
+      "action": "flag_fraud",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "agent_sue",
+      "action": "refund",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "agent_sue",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07"
+      ],
+      "allowed": [
+        "o02",
+        "o03",
+        "o07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "fraud_fin",
+      "action": "cancel",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "fraud_fin",
+      "action": "flag_fraud",
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "allowed": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "fraud_fin",
+      "action": "refund",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "fraud_fin",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "allowed": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "manager_west",
+      "action": "cancel",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "manager_west",
+      "action": "flag_fraud",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "manager_west",
+      "action": "refund",
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o04"
+      ],
+      "allowed": [
+        "o01",
+        "o04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "manager_west",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o04",
+        "o09"
+      ],
+      "allowed": [
+        "o01",
+        "o04",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "shopper_c1",
+      "action": "cancel",
+      "verdict": "pass",
+      "returned": [
+        "o02"
+      ],
+      "allowed": [
+        "o02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "shopper_c1",
+      "action": "flag_fraud",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "shopper_c1",
+      "action": "refund",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "shopper_c1",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o02",
+        "o07",
+        "o09"
+      ],
+      "allowed": [
+        "o01",
+        "o02",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "agent_sue",
+      "action": "cancel",
+      "verdict": "pass",
+      "returned": [
+        "o08"
+      ],
+      "allowed": [
+        "o08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "agent_sue",
+      "action": "flag_fraud",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "agent_sue",
+      "action": "refund",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "agent_sue",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07"
+      ],
+      "allowed": [
+        "o02",
+        "o03",
+        "o07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "fraud_fin",
+      "action": "cancel",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "fraud_fin",
+      "action": "flag_fraud",
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "allowed": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "fraud_fin",
+      "action": "refund",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "fraud_fin",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "allowed": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "manager_west",
+      "action": "cancel",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "manager_west",
+      "action": "flag_fraud",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "manager_west",
+      "action": "refund",
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o04"
+      ],
+      "allowed": [
+        "o01",
+        "o04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "manager_west",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o04",
+        "o09"
+      ],
+      "allowed": [
+        "o01",
+        "o04",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "shopper_c1",
+      "action": "cancel",
+      "verdict": "pass",
+      "returned": [
+        "o02"
+      ],
+      "allowed": [
+        "o02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "shopper_c1",
+      "action": "flag_fraud",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "shopper_c1",
+      "action": "refund",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "shopper_c1",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o02",
+        "o07",
+        "o09"
+      ],
+      "allowed": [
+        "o01",
+        "o02",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "ceo_e01",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "ceo_e01",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "ceo_e01",
+      "action": "view",
+      "verdict": "under-grant",
+      "returned": [
+        "e01"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e07"
+      ],
+      "detail": "SELECT `employees`.* FROM `employees` WHERE (`employees`.`id` = (CONVERT('e01' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `employees`.`id` = (CONVERT('e01' USING utf8mb4) COLLATE utf8mb4_0900_bin))"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "ceo_e01",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [
+        "e02",
+        "e03"
+      ],
+      "allowed": [
+        "e02",
+        "e03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "emp_e05",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "emp_e05",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "emp_e05",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e05"
+      ],
+      "allowed": [
+        "e05"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "emp_e05",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hr_admin",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hr_admin",
+      "action": "terminate",
+      "verdict": "under-grant",
+      "returned": [],
+      "allowed": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e08"
+      ],
+      "detail": "SELECT `employees`.* FROM `employees` WHERE (1=0)"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hr_admin",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e07"
+      ],
+      "allowed": [
+        "e07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hr_admin",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hrbp_uk",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hrbp_uk",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hrbp_uk",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hrbp_uk",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "mgr_e02",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "mgr_e02",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "mgr_e02",
+      "action": "view",
+      "verdict": "under-grant",
+      "returned": [
+        "e02"
+      ],
+      "allowed": [
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "detail": "SELECT `employees`.* FROM `employees` WHERE (`employees`.`id` = (CONVERT('e02' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `employees`.`id` = (CONVERT('e02' USING utf8mb4) COLLATE utf8mb4_0900_bin))"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "mgr_e02",
+      "action": "view_compensation",
+      "verdict": "over-grant",
+      "returned": [
+        "e04",
+        "e05"
+      ],
+      "allowed": [
+        "e04"
+      ],
+      "detail": "SELECT `employees`.* FROM `employees` WHERE ((SELECT `cerbos_employees_1`.`id` FROM `employees` `cerbos_employees_1` WHERE `cerbos_employees_1`.`id` = `employees`.`manager_id`) = (CONVERT('e02' USING utf8mb4) COLLATE utf8mb4_0900_bin) AND `employees`.`level` < 6)"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "recruiter",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "recruiter",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "recruiter",
+      "action": "view",
+      "verdict": "under-grant",
+      "returned": [],
+      "allowed": [
+        "e08"
+      ],
+      "detail": "SELECT `employees`.* FROM `employees` WHERE (1=0)"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "recruiter",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "ceo_e01",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "ceo_e01",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "ceo_e01",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e07"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "ceo_e01",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [
+        "e02",
+        "e03"
+      ],
+      "allowed": [
+        "e02",
+        "e03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "emp_e05",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "emp_e05",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "emp_e05",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e05"
+      ],
+      "allowed": [
+        "e05"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "emp_e05",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hr_admin",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hr_admin",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e08"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hr_admin",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e07"
+      ],
+      "allowed": [
+        "e07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hr_admin",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hrbp_uk",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hrbp_uk",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hrbp_uk",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hrbp_uk",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "mgr_e02",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "mgr_e02",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "mgr_e02",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "allowed": [
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "mgr_e02",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [
+        "e04"
+      ],
+      "allowed": [
+        "e04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "recruiter",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "recruiter",
+      "action": "terminate",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "recruiter",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "e08"
+      ],
+      "allowed": [
+        "e08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "recruiter",
+      "action": "view_compensation",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "editor_pat",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "allowed": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "editor_pat",
+      "action": "legal_review",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "editor_pat",
+      "action": "publish",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "ar11"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnsupportedOperatorError: Cannot translate matches(\"^[a-z0-9]+(-[a-z0-9]+)*$\"): what it matches is not a finite set of literals. The adapter lowers only patterns whose matches are a finite set of literals under anchors, every character from a small set, or a prefix and suffix around non-newline characters, because no store's regex dialect is RE2"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "editor_pat",
+      "action": "read",
+      "verdict": "pass",
+      "returned": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "allowed": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "lawyer_quinn",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "lawyer_quinn",
+      "action": "legal_review",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnmappedAttributeError: exists needs a collection, but its operand resolved to #<struct Arel::Attributes::Attribute relation=#<Arel::Table:0x00007f67ce72e6f0 @name=\"articles\", @klass=ArDomains::Media::Article(id: string, slug: string, section_slug: string, author_id: string, status: string, language: string, embargo_until: datetime, published_at: datetime, paywalled: boolean, word_count: integer, keywords: text), @type_caster=#<ActiveRecord::TypeCaster::Map:0x00007f67c5a5ea40 @klass=ArDomains::Media::Article(id: string, slug: string, section_slug: string, author_id: string, status: string, language: string, embargo_until: datetime, published_at: datetime, paywalled: boolean, word_count: integer, keywords: text)>, @table_alias=nil>, name=\"keywords\"> (Arel::Attributes::Attribute); map that attribute with Cerbos::ActiveRecord.relation"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "lawyer_quinn",
+      "action": "publish",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "lawyer_quinn",
+      "action": "read",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnmappedAttributeError: exists needs a collection, but its operand resolved to #<struct Arel::Attributes::Attribute relation=#<Arel::Table:0x00007f67ce72e6f0 @name=\"articles\", @klass=ArDomains::Media::Article(id: string, slug: string, section_slug: string, author_id: string, status: string, language: string, embargo_until: datetime, published_at: datetime, paywalled: boolean, word_count: integer, keywords: text), @type_caster=#<ActiveRecord::TypeCaster::Map:0x00007f67c5a5ea40 @klass=ArDomains::Media::Article(id: string, slug: string, section_slug: string, author_id: string, status: string, language: string, embargo_until: datetime, published_at: datetime, paywalled: boolean, word_count: integer, keywords: text)>, @table_alias=nil>, name=\"keywords\"> (Arel::Attributes::Attribute); map that attribute with Cerbos::ActiveRecord.relation"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_free",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_free",
+      "action": "legal_review",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_free",
+      "action": "publish",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_free",
+      "action": "read",
+      "verdict": "under-grant",
+      "returned": [],
+      "allowed": [
+        "ar01"
+      ],
+      "detail": "SELECT `articles`.* FROM `articles` WHERE ((`articles`.`status` = (CONVERT('published' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `articles`.`status` = (CONVERT('published' USING utf8mb4) COLLATE utf8mb4_0900_bin)) AND `articles`.`embargo_until` < '2026-11-18 12:21:34.474842' AND NOT ((`articles`.`paywalled` = TRUE)) AND (`articles`.`language` = (CONVERT('en' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `articles`.`language` = (CONVERT('en' USING utf8mb4) COLLATE utf8mb4_0900_bin)))"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_sub",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_sub",
+      "action": "legal_review",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_sub",
+      "action": "publish",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_sub",
+      "action": "read",
+      "verdict": "under-grant",
+      "returned": [
+        "ar04"
+      ],
+      "allowed": [
+        "ar01",
+        "ar02",
+        "ar04"
+      ],
+      "detail": "SELECT `articles`.* FROM `articles` WHERE ((`articles`.`status` = (CONVERT('published' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci) AND `articles`.`status` = (CONVERT('published' USING utf8mb4) COLLATE utf8mb4_0900_bin)) AND `articles`.`embargo_until` < '2026-11-18 12:21:34.497993' AND (`articles`.`language` IN ((CONVERT('en' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci), (CONVERT('fr' USING utf8mb4) COLLATE utf8mb4_uca1400_ai_ci)) AND `articles`.`language` IN ((CONVERT('en' USING utf8mb4) COLLATE utf8mb4_0900_bin), (CONVERT('fr' USING utf8mb4) COLLATE utf8mb4_0900_bin))))"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "writer_ola",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "ar05",
+        "ar11"
+      ],
+      "allowed": [
+        "ar05",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "writer_ola",
+      "action": "legal_review",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "writer_ola",
+      "action": "publish",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "writer_ola",
+      "action": "read",
+      "verdict": "pass",
+      "returned": [
+        "ar05",
+        "ar11"
+      ],
+      "allowed": [
+        "ar05",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "editor_pat",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "allowed": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "editor_pat",
+      "action": "legal_review",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "editor_pat",
+      "action": "publish",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "ar11"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnsupportedOperatorError: Cannot translate matches(\"^[a-z0-9]+(-[a-z0-9]+)*$\"): what it matches is not a finite set of literals. The adapter lowers only patterns whose matches are a finite set of literals under anchors, every character from a small set, or a prefix and suffix around non-newline characters, because no store's regex dialect is RE2"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "editor_pat",
+      "action": "read",
+      "verdict": "pass",
+      "returned": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "allowed": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "lawyer_quinn",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "lawyer_quinn",
+      "action": "legal_review",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnmappedAttributeError: exists needs a collection, but its operand resolved to #<struct Arel::Attributes::Attribute relation=#<Arel::Table:0x00007f67ce72e6f0 @name=\"articles\", @klass=ArDomains::Media::Article(id: string, slug: string, section_slug: string, author_id: string, status: string, language: string, embargo_until: datetime, published_at: datetime, paywalled: boolean, word_count: integer, keywords: text), @type_caster=#<ActiveRecord::TypeCaster::Map:0x00007f67c5a5ea40 @klass=ArDomains::Media::Article(id: string, slug: string, section_slug: string, author_id: string, status: string, language: string, embargo_until: datetime, published_at: datetime, paywalled: boolean, word_count: integer, keywords: text)>, @table_alias=nil>, name=\"keywords\"> (Arel::Attributes::Attribute); map that attribute with Cerbos::ActiveRecord.relation"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "lawyer_quinn",
+      "action": "publish",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "lawyer_quinn",
+      "action": "read",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnmappedAttributeError: exists needs a collection, but its operand resolved to #<struct Arel::Attributes::Attribute relation=#<Arel::Table:0x00007f67ce72e6f0 @name=\"articles\", @klass=ArDomains::Media::Article(id: string, slug: string, section_slug: string, author_id: string, status: string, language: string, embargo_until: datetime, published_at: datetime, paywalled: boolean, word_count: integer, keywords: text), @type_caster=#<ActiveRecord::TypeCaster::Map:0x00007f67c5a5ea40 @klass=ArDomains::Media::Article(id: string, slug: string, section_slug: string, author_id: string, status: string, language: string, embargo_until: datetime, published_at: datetime, paywalled: boolean, word_count: integer, keywords: text)>, @table_alias=nil>, name=\"keywords\"> (Arel::Attributes::Attribute); map that attribute with Cerbos::ActiveRecord.relation"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_free",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_free",
+      "action": "legal_review",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_free",
+      "action": "publish",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_free",
+      "action": "read",
+      "verdict": "pass",
+      "returned": [
+        "ar01"
+      ],
+      "allowed": [
+        "ar01"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_sub",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_sub",
+      "action": "legal_review",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_sub",
+      "action": "publish",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_sub",
+      "action": "read",
+      "verdict": "pass",
+      "returned": [
+        "ar01",
+        "ar02",
+        "ar04"
+      ],
+      "allowed": [
+        "ar01",
+        "ar02",
+        "ar04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "writer_ola",
+      "action": "edit",
+      "verdict": "pass",
+      "returned": [
+        "ar05",
+        "ar11"
+      ],
+      "allowed": [
+        "ar05",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "writer_ola",
+      "action": "legal_review",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "writer_ola",
+      "action": "publish",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "writer_ola",
+      "action": "read",
+      "verdict": "pass",
+      "returned": [
+        "ar05",
+        "ar11"
+      ],
+      "allowed": [
+        "ar05",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "admin_acme",
+      "action": "decommission",
+      "verdict": "under-grant",
+      "returned": [],
+      "allowed": [
+        "dv02",
+        "dv03"
+      ],
+      "detail": "SELECT `devices`.* FROM `devices` WHERE ((SELECT `cerbos_orgs_2`.`id` FROM `sites` `cerbos_sites_1` INNER JOIN `orgs` `cerbos_orgs_2` ON `cerbos_orgs_2`.`id` = `cerbos_sites_1`.`org_id` WHERE `cerbos_sites_1`.`id` = `devices`.`site_id`) = (CONVERT('org-acme' USING utf8mb4) COLLATE utf8mb4_0900_bin) AND NOT ((`devices`.`online` = TRUE)) AND NOT ((NULL)))"
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "admin_acme",
+      "action": "reboot",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "admin_acme",
+      "action": "update_firmware",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "admin_acme",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "member_acme",
+      "action": "decommission",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "member_acme",
+      "action": "reboot",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "member_acme",
+      "action": "update_firmware",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "member_acme",
+      "action": "view",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnmappedAttributeError: No mapping for attribute \"request.resource.attr.labels.restricted\". Add it to the attributes hash passed to Cerbos::ActiveRecord.query_plan_to_relation."
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "operator_acme",
+      "action": "decommission",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "operator_acme",
+      "action": "reboot",
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv04",
+        "dv08"
+      ],
+      "allowed": [
+        "dv01",
+        "dv04",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "operator_acme",
+      "action": "update_firmware",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "operator_acme",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "tech_eu",
+      "action": "decommission",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "tech_eu",
+      "action": "reboot",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "tech_eu",
+      "action": "update_firmware",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "dv02"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnmappedAttributeError: No mapping for attribute \"request.resource.attr.labels.env\". Add it to the attributes hash passed to Cerbos::ActiveRecord.query_plan_to_relation."
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "tech_eu",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "admin_acme",
+      "action": "decommission",
+      "verdict": "under-grant",
+      "returned": [],
+      "allowed": [
+        "dv02",
+        "dv03"
+      ],
+      "detail": "SELECT `devices`.* FROM `devices` WHERE ((SELECT `cerbos_orgs_2`.`id` FROM `sites` `cerbos_sites_1` INNER JOIN `orgs` `cerbos_orgs_2` ON `cerbos_orgs_2`.`id` = `cerbos_sites_1`.`org_id` WHERE `cerbos_sites_1`.`id` = `devices`.`site_id`) = (CONVERT('org-acme' USING utf8mb4) COLLATE utf8mb4_0900_bin) AND NOT ((`devices`.`online` = TRUE)) AND NOT ((NULL)))"
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "admin_acme",
+      "action": "reboot",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "admin_acme",
+      "action": "update_firmware",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "admin_acme",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "member_acme",
+      "action": "decommission",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "member_acme",
+      "action": "reboot",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "member_acme",
+      "action": "update_firmware",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "member_acme",
+      "action": "view",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnmappedAttributeError: No mapping for attribute \"request.resource.attr.labels.restricted\". Add it to the attributes hash passed to Cerbos::ActiveRecord.query_plan_to_relation."
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "operator_acme",
+      "action": "decommission",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "operator_acme",
+      "action": "reboot",
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv04",
+        "dv08"
+      ],
+      "allowed": [
+        "dv01",
+        "dv04",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "operator_acme",
+      "action": "update_firmware",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "operator_acme",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "tech_eu",
+      "action": "decommission",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "tech_eu",
+      "action": "reboot",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "tech_eu",
+      "action": "update_firmware",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "dv02"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnmappedAttributeError: No mapping for attribute \"request.resource.attr.labels.env\". Add it to the attributes hash passed to Cerbos::ActiveRecord.query_plan_to_relation."
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "tech_eu",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "auditor_cy",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "auditor_cy",
+      "action": "audit",
+      "verdict": "pass",
+      "returned": [
+        "k04",
+        "k05",
+        "k06"
+      ],
+      "allowed": [
+        "k04",
+        "k05",
+        "k06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "auditor_cy",
+      "action": "foia_release",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "auditor_cy",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "foia_dee",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "foia_dee",
+      "action": "audit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "foia_dee",
+      "action": "foia_release",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "k03",
+        "k06"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnsupportedOperatorError: Cannot translate matches(\"^[A-Z]{2}-[0-9]{4}-[0-9]+$\"): what it matches is not a finite set of literals. The adapter lowers only patterns whose matches are a finite set of literals under anchors, every character from a small set, or a prefix and suffix around non-newline characters, because no store's regex dialect is RE2"
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "foia_dee",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "supervisor_bo",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [
+        "k01"
+      ],
+      "allowed": [
+        "k01"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "supervisor_bo",
+      "action": "audit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "supervisor_bo",
+      "action": "foia_release",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "supervisor_bo",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "k01",
+        "k04",
+        "k07",
+        "k08"
+      ],
+      "allowed": [
+        "k01",
+        "k04",
+        "k07",
+        "k08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "worker_ann",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "worker_ann",
+      "action": "audit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "worker_ann",
+      "action": "foia_release",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "worker_ann",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "k01",
+        "k02",
+        "k04",
+        "k08"
+      ],
+      "allowed": [
+        "k01",
+        "k02",
+        "k04",
+        "k08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "auditor_cy",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "auditor_cy",
+      "action": "audit",
+      "verdict": "pass",
+      "returned": [
+        "k04",
+        "k05",
+        "k06"
+      ],
+      "allowed": [
+        "k04",
+        "k05",
+        "k06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "auditor_cy",
+      "action": "foia_release",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "auditor_cy",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "foia_dee",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "foia_dee",
+      "action": "audit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "foia_dee",
+      "action": "foia_release",
+      "verdict": "refused",
+      "returned": [],
+      "allowed": [
+        "k03",
+        "k06"
+      ],
+      "detail": "Cerbos::ActiveRecord::UnsupportedOperatorError: Cannot translate matches(\"^[A-Z]{2}-[0-9]{4}-[0-9]+$\"): what it matches is not a finite set of literals. The adapter lowers only patterns whose matches are a finite set of literals under anchors, every character from a small set, or a prefix and suffix around non-newline characters, because no store's regex dialect is RE2"
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "foia_dee",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "supervisor_bo",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [
+        "k01"
+      ],
+      "allowed": [
+        "k01"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "supervisor_bo",
+      "action": "audit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "supervisor_bo",
+      "action": "foia_release",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "supervisor_bo",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "k01",
+        "k04",
+        "k07",
+        "k08"
+      ],
+      "allowed": [
+        "k01",
+        "k04",
+        "k07",
+        "k08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "worker_ann",
+      "action": "approve",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "worker_ann",
+      "action": "audit",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "worker_ann",
+      "action": "foia_release",
+      "verdict": "pass",
+      "returned": [],
+      "allowed": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "worker_ann",
+      "action": "view",
+      "verdict": "pass",
+      "returned": [
+        "k01",
+        "k02",
+        "k04",
+        "k08"
+      ],
+      "allowed": [
+        "k01",
+        "k02",
+        "k04",
+        "k08"
+      ],
+      "detail": ""
+    }
+  ]
+}

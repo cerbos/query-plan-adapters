@@ -127,3 +127,23 @@ publishing {
         }
     }
 }
+
+// Domain stress harness over ../domains, outside `test`: ./gradlew domainTest (H2). It reuses the
+// jpa domain mappings, since this adapter takes jpa's AttributeMapping as is.
+val domainTest: SourceSet by sourceSets.creating {
+    java.srcDir("../jpa/src/domainTest/java")
+    java.exclude("**/DomainHarnessTest.java")
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().output
+}
+configurations[domainTest.implementationConfigurationName].extendsFrom(configurations.testImplementation.get())
+configurations[domainTest.runtimeOnlyConfigurationName].extendsFrom(configurations.testRuntimeOnly.get())
+
+tasks.register<Test>("domainTest") {
+    testClassesDirs = domainTest.output.classesDirs
+    classpath = domainTest.runtimeClasspath
+    useJUnitPlatform()
+    maxHeapSize = "1g"
+    systemProperty("user.timezone", "UTC")
+    outputs.upToDateWhen { false }
+}

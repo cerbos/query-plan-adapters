@@ -41,7 +41,8 @@
     "prepare": "npm run build",
     "mongo": "docker run --rm -p 27017:27017 --name test-mongo -v ./data:/data/db \"$(cat MONGO_IMAGE)\"",
     "test": "jest",
-    "test:adversarial": "jest --config jest.adversarial.config.js"
+    "test:adversarial": "jest --config jest.adversarial.config.js",
+    "test:domains": "jest --config jest.domains.config.js --runInBand"
   },
   "engines": {
     "node": ">=22.0.0"

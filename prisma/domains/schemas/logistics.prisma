@@ -1,0 +1,63 @@
+model Hub {
+  id                   String       @id
+  code                 String
+  country              String
+  region               String
+  originShipments      Shipment[]   @relation("origin")
+  destinationShipments Shipment[]   @relation("destination")
+  checkpoints          Checkpoint[]
+
+  @@map("hubs")
+}
+
+model Carrier {
+  id        String     @id
+  name      String
+  scac      String
+  shipments Shipment[]
+
+  @@map("carriers")
+}
+
+model Shipment {
+  id               String             @id
+  trackingNo       String             @map("tracking_no")
+  status           String
+  originHubId      String             @map("origin_hub_id")
+  destinationHubId String             @map("destination_hub_id")
+  carrierId        String?            @map("carrier_id")
+  weightKg         Float              @map("weight_kg")
+  hazmat           Boolean
+  customsHold      Boolean?           @map("customs_hold")
+  shipperAccount   String             @map("shipper_account")
+  eta              DateTime?
+  declaredValue    Decimal            @map("declared_value")
+  origin           Hub                @relation("origin", fields: [originHubId], references: [id])
+  destination      Hub                @relation("destination", fields: [destinationHubId], references: [id])
+  carrier          Carrier?           @relation(fields: [carrierId], references: [id])
+  handling         ShipmentHandling[]
+  checkpoints      Checkpoint[]
+
+  @@map("shipments")
+}
+
+model ShipmentHandling {
+  shipmentId String   @map("shipment_id")
+  code       String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+
+  @@id([shipmentId, code])
+  @@map("shipment_handling")
+}
+
+model Checkpoint {
+  id         String   @id
+  shipmentId String   @map("shipment_id")
+  hubId      String   @map("hub_id")
+  event      String
+  scannedAt  DateTime @map("scanned_at")
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+  hub        Hub      @relation(fields: [hubId], references: [id])
+
+  @@map("checkpoints")
+}

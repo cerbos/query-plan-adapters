@@ -1,0 +1,47 @@
+model Agency {
+  code  String @id
+  name  String
+  state String
+  cases Case[]
+
+  @@map("agencies")
+}
+
+model Applicant {
+  id            String  @id
+  countyFips    String  @map("county_fips")
+  householdSize Int     @map("household_size")
+  citizenship   String?
+  cases         Case[]
+
+  @@map("applicants")
+}
+
+model Case {
+  id             String     @id
+  caseNumber     String     @map("case_number")
+  agencyCode     String     @map("agency_code")
+  applicantId    String     @map("applicant_id")
+  status         String
+  clearanceLevel Int        @map("clearance_level")
+  program        String
+  openedOn       DateTime   @map("opened_on")
+  closedOn       DateTime?  @map("closed_on")
+  pii            Boolean
+  assignedTo     String?    @map("assigned_to")
+  monthlyAmount  Decimal?   @map("monthly_amount")
+  agency         Agency     @relation(fields: [agencyCode], references: [code])
+  applicant      Applicant  @relation(fields: [applicantId], references: [id])
+  flags          CaseFlag[]
+
+  @@map("cases")
+}
+
+model CaseFlag {
+  caseId String @map("case_id")
+  flag   String
+  case   Case   @relation(fields: [caseId], references: [id])
+
+  @@id([caseId, flag])
+  @@map("case_flags")
+}

@@ -43,7 +43,8 @@
     "test:adversarial": "jest --config jest.adversarial.config.js --runInBand",
     "convex:deploy": "npx convex deploy --url ${CONVEX_URL:-http://127.0.0.1:3210} --admin-key ${CONVEX_ADMIN_KEY}",
     "convex:up": "docker compose up -d && echo 'Waiting for Convex backend...' && sleep 5",
-    "convex:down": "docker compose down -v"
+    "convex:down": "docker compose down -v",
+    "test:domains": "jest --config jest.domains.config.js --runInBand"
   },
   "engines": {
     "node": ">=22.0.0"

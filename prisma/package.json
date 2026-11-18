@@ -54,7 +54,11 @@
     "test:adversarial:postgres:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=7 jest --config jest.adversarial.config.js",
     "test:adversarial:mysql": "npm run test:adversarial:mysql:v7",
     "test:adversarial:mysql:v6": "npm run prisma:generate:v6 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=6 jest --config jest.adversarial.config.js",
-    "test:adversarial:mysql:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=7 jest --config jest.adversarial.config.js"
+    "test:adversarial:mysql:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=7 jest --config jest.adversarial.config.js",
+    "test:domains": "npm run test:domains:sqlite && npm run test:domains:postgres && npm run test:domains:mysql",
+    "test:domains:sqlite": "node domains/generate.mjs ${PRISMA_VERSION:-7} sqlite && DOMAIN_STORE=sqlite jest --config jest.domains.config.js",
+    "test:domains:postgres": "node domains/generate.mjs ${PRISMA_VERSION:-7} postgres && DOMAIN_STORE=postgres jest --config jest.domains.config.js",
+    "test:domains:mysql": "node domains/generate.mjs ${PRISMA_VERSION:-7} mysql && DOMAIN_STORE=mysql jest --config jest.domains.config.js"
   },
   "engines": {
     "node": ">=22.0.0"
