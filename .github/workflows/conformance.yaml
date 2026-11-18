@@ -56,10 +56,11 @@ jobs:
           go-version-file: conformance/generator/go.mod
           cache-dependency-path: conformance/generator/go.sum
 
-      - name: Vet and format-check the generator
+      - name: Vet and format-check the generator and the mutation runner
         run: |
           go -C conformance/generator vet ./...
-          unformatted="$(gofmt -l conformance/generator)"
+          go -C conformance/mutation vet ./...
+          unformatted="$(gofmt -l conformance/generator conformance/mutation)"
           if [[ -n "${unformatted}" ]]; then
             echo "::error::gofmt would reformat these files:"
             echo "${unformatted}"
