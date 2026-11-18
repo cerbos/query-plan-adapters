@@ -28,6 +28,10 @@
     "lib/**/*.js",
     "lib/**/*.js.map",
     "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/corpus.ts",
+    "!src/test-setup.*.ts",
+    "!src/generated/**",
     "README.md",
     "LICENSE"
   ],

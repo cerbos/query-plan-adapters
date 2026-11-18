@@ -35,6 +35,10 @@ build-backend = "pdm.backend"
 [tool.pdm.version]
 source = "scm"
 
+# The sdist ships the package only: the test suites and the conformance harness stay in the repository.
+[tool.pdm.build]
+excludes = ["tests"]
+
 [tool.pdm.dev-dependencies]
 test = [
     "pytest>=7.1.2",
