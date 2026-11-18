@@ -137,6 +137,10 @@
       "status": "unsupported",
       "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all, and here the divisor is itself computed from a document field"
     },
+    "arithmetic/modulo/literal-zero-divisor-negated": {
+      "status": "unsupported",
+      "reason": "A Query DSL leaf compares one document field against a literal; computing % over a field needs a script."
+    },
     "arithmetic/modulo/negated-double-operand": {
       "status": "unsupported",
       "reason": "Same missing computed operand as arithmetic/modulo/negative-dividend: mod is not in the leaf resolver, so the negated disjunct is refused and the whole disjunction with it"
@@ -501,6 +505,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL has no script-free computed operand for ordered array indexing."
     },
+    "collection/index/integral-double-position": {
+      "status": "unsupported",
+      "reason": "A Query DSL leaf compares one document field against a literal; reading a list element at a position needs a script."
+    },
     "collection/index/negated-first-element-of-boolean-list": {
       "status": "unsupported",
       "reason": "Same positional read as collection/index/first-element-of-boolean-list under negation: the index operand is refused at the same site whatever the polarity, so a must_not over an any-position match is never emitted"
@@ -672,6 +680,10 @@
     "hierarchy/ancestor-of/empty-path-negated": {
       "status": "unsupported",
       "reason": "Negated strict ancestry is refused: a bool.must_not over the terms query it lowers to matches documents with no scope, where CEL errors and denies."
+    },
+    "hierarchy/ancestor-of/mismatched-delimiters-negated": {
+      "status": "unsupported",
+      "reason": "A bool.must_not over the prefix, terms and term queries a hierarchy relation lowers to matches every document with no value for the field, so a negated ancestorOf is refused."
     },
     "hierarchy/ancestor-of/single-segment-constant-negated": {
       "status": "unsupported",
@@ -926,6 +938,10 @@
       "status": "unsupported",
       "reason": "Lucene regexp . matches a newline where RE2's does not, so the RE2-to-Lucene translator refuses the . in ^a.*."
     },
+    "regex/matches/anchors-inside-group": {
+      "status": "unsupported",
+      "reason": "An anchor inside a group is outside the RE2 subset that Lucene regular expressions match the same way."
+    },
     "regex/matches/brace-without-count-is-literal": {
       "status": "unsupported",
       "reason": "matches regex has a brace at index 1 that does not begin a {n}, {n,} or {n,m} repetition, which Lucene rejects at query time: a{,2}"
@@ -1069,6 +1085,10 @@
     "regex/matches/unanchored": {
       "status": "unsupported",
       "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix"
+    },
+    "regex/matches/unanchored-bounded-repetition": {
+      "status": "unsupported",
+      "reason": "\\d is outside the RE2 subset that Lucene regular expressions match the same way; Lucene has no Perl character classes."
     },
     "regex/matches/unanchored-dot": {
       "status": "unsupported",

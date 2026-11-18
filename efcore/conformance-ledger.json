@@ -101,6 +101,10 @@
       "status": "unsupported",
       "reason": "Comparing a whole list built from a computed element (`aDouble / 0.0`) has no translation: the translator compares whole lists only as related rows, which have no order or multiplicity a single comparison can read."
     },
+    "hierarchy/ancestor-of/mismatched-delimiters-negated": {
+      "status": "unsupported",
+      "reason": "The literal path's segment dept:eng holds the column's delimiter, and ancestorOf() against such a segment has no translation."
+    },
     "hierarchy/overlaps/field-to-field": {
       "status": "unsupported",
       "reason": "Both hierarchies are read from columns, so there is no constant path to expand into prefixes, and EF Core cannot translate splitting a column on a delimiter."
@@ -124,6 +128,10 @@
     "principal/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "regex/matches/anchors-inside-group": {
+      "status": "unsupported",
+      "reason": "The anchors sit inside a group, so what the pattern matches is not a finite set of literals under anchors, a character set, or a prefix and suffix; no provider's regex dialect is RE2, so only those shapes are lowered."
     },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",

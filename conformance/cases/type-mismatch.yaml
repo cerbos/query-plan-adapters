@@ -591,3 +591,10 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString - R.attr.aNumber == -5.0 || R.attr.aNumber == 2'
+- id: 'type-mismatch/matches/number-receiver-negated'
+  tier: adversarial
+  intent: 'matches() on a number attribute under negation (!aNumber.matches("5")), beside aString == "one".'
+  trap: 'CEL has no matches() overload for a number, an error that denies under both polarities, so only a1 is allowed; casting the number to text matches a1 and the negation grants the rest, and a store that rejects a regex on a number fails the query.'
+  condition:
+    match:
+      expr: '!R.attr.aNumber.matches("5") || R.attr.aString == "one"'

@@ -37,6 +37,10 @@
       "status": "unsupported",
       "reason": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
     },
+    "arithmetic/modulo/literal-zero-divisor-negated": {
+      "status": "unsupported",
+      "reason": "CEL % is integer-only while attribute values are doubles at check time, so the policy needs int(), and int() has no faithful SQL lowering: CAST rounds where CEL truncates toward zero."
+    },
     "arithmetic/multiply/nan-times-zero-plus-column": {
       "status": "unsupported",
       "reason": "arithmetic between a column and the NaN or infinity a zero denominator produces is not supported: SQL has no literal for either value, and neither folds to one constant against a column, because an infinity times or divided by a column depends on that column's sign. Compare the division itself, or keep the composition constant."
@@ -185,9 +189,17 @@
       "status": "unsupported",
       "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors, and MySQL's LIKE stops reading the pattern at it."
     },
+    "timestamp/equals/bare-attribute-against-timestamp-literal": {
+      "status": "unsupported",
+      "reason": "A bare attribute compared with timestamp() is refused: CEL sees the attribute as its RFC 3339 string, which never equals a timestamp, and an Exposed datetime column compares instants."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Two instant columns compared WITHOUT timestamp(): CEL compares their RFC 3339 STRINGS, so one instant written two ways is unequal, while SQL compares instants. The operand-type guard refuses two temporal columns under a plain comparison"
+    },
+    "timestamp/not-equals/bare-attribute-against-timestamp-literal": {
+      "status": "unsupported",
+      "reason": "A bare attribute compared with timestamp() is refused: CEL sees the attribute as its RFC 3339 string, which never equals a timestamp, and an Exposed datetime column compares instants."
     },
     "type-mismatch/subtract/negated-string-minus-number": {
       "status": "unsupported",

@@ -468,6 +468,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aNumber) - P.attr.zero > 0 || R.attr.aNumber == 5
+    # arithmetic/modulo/literal-zero-divisor-negated
+    - actions:
+        - arithmetic/modulo/literal-zero-divisor-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(int(R.attr.aNumber) % 0 == 1) || R.attr.aString == "one"'
     # cast/double/malformed-string
     - actions:
         - cast/double/malformed-string
@@ -1497,6 +1506,15 @@ resourcePolicy:
       condition:
         match:
           expr: '[1] + [R.attr.aNumber] == [1, 5]'
+    # collection/index/integral-double-position
+    - actions:
+        - collection/index/integral-double-position
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList[1.0] == 3
     # comparison/equals/field-to-field
     - actions:
         - comparison/equals/field-to-field
@@ -2547,6 +2565,15 @@ resourcePolicy:
       condition:
         match:
           expr: hierarchy("dept", ".").overlaps(hierarchy(["dept", R.attr.scope]))
+    # hierarchy/ancestor-of/mismatched-delimiters-negated
+    - actions:
+        - hierarchy/ancestor-of/mismatched-delimiters-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!hierarchy(R.attr.scope, ":").ancestorOf(hierarchy("dept:eng", "."))'
     # identifier/equals/concatenation
     - actions:
         - identifier/equals/concatenation
@@ -4175,6 +4202,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!R.attr.aString.matches("^(|ab)$")'
+    # regex/matches/unanchored-bounded-repetition
+    - actions:
+        - regex/matches/unanchored-bounded-repetition
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("\\d{2}")
+    # regex/matches/anchors-inside-group
+    - actions:
+        - regex/matches/anchors-inside-group
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("(^o|e$)")
     # relation/all/negated-to-one-chain
     - actions:
         - relation/all/negated-to-one-chain
@@ -5723,6 +5768,24 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? timestamp("2024-01-01T00:00:00Z") : timestamp("2030-01-01T00:00:00Z")) > timestamp("2025-01-01T00:00:00Z")'
+    # timestamp/equals/bare-attribute-against-timestamp-literal
+    - actions:
+        - timestamp/equals/bare-attribute-against-timestamp-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.createdAt == timestamp("2024-06-01T00:00:00Z") || R.attr.aNumber == 5
+    # timestamp/not-equals/bare-attribute-against-timestamp-literal
+    - actions:
+        - timestamp/not-equals/bare-attribute-against-timestamp-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.createdAt != timestamp("2024-06-01T00:00:00Z")
     # type-mismatch/add/negated-boolean-plus-number
     - actions:
         - type-mismatch/add/negated-boolean-plus-number
@@ -6398,3 +6461,12 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString - R.attr.aNumber == -5.0 || R.attr.aNumber == 2
+    # type-mismatch/matches/number-receiver-negated
+    - actions:
+        - type-mismatch/matches/number-receiver-negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aNumber.matches("5") || R.attr.aString == "one"'

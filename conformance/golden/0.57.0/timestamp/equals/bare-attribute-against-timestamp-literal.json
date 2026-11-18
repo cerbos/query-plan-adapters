@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/equals/bare-attribute-against-timestamp-literal",
+  "intent": "A bare attribute compared == with a timestamp literal, without timestamp() on the attribute (createdAt == timestamp(\"2024-06-01T00:00:00Z\")), beside aNumber == 5.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "2024-06-01T00:00:00Z"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 5
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/equals/bare-attribute-against-timestamp-literal",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.createdAt == timestamp(\"2024-06-01T00:00:00Z\") || R.attr.aNumber == 5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "An attribute reaches the PDP as a string, never a CEL timestamp, so heterogeneous equality makes the comparison false on every row; comparing the stored column as an instant grants a4, whose createdAt is that instant."
+}

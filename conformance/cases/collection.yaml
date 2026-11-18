@@ -638,3 +638,10 @@ cases:
   condition:
     match:
       expr: '[1] + [R.attr.aNumber] == [1, 5]'
+- id: 'collection/index/integral-double-position'
+  tier: adversarial
+  intent: 'A list indexed by a double with no fractional part (aNumberList[1.0] == 3).'
+  trap: 'CEL accepts an integral double as a list index, so a3 [2, 3] is allowed; collection/index/fractional-position is the error case. Treating every double index as an error under-grants a3, and rounding a fractional one would over-grant.'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList[1.0] == 3'

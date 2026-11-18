@@ -1,0 +1,56 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a9",
+    "b1",
+    "c1",
+    "h6",
+    "k2",
+    "l1",
+    "l2"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/anchors-inside-group",
+  "intent": "matches(\"(^o|e$)\"), with each anchor inside one alternative of a group.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "(^o|e$)"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/anchors-inside-group",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"(^o|e$)\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The group is regex/matches/top-level-alternation-prefix-or-suffix in parentheses: o at the start or e at the end. Reading an anchor inside a group as literal text, or applying it to the whole group, matches other rows."
+}

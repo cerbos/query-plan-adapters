@@ -217,9 +217,17 @@
       "status": "unsupported",
       "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors, and MySQL's LIKE stops reading the pattern at it."
     },
+    "timestamp/equals/bare-attribute-against-timestamp-literal": {
+      "status": "unsupported",
+      "reason": "A bare attribute compared with timestamp() is refused: CEL sees the attribute as its RFC 3339 string, which never equals a timestamp, and a JPA timestamp path compares instants."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal comparison cannot preserve CEL string equality; use timestamp() explicitly"
+    },
+    "timestamp/not-equals/bare-attribute-against-timestamp-literal": {
+      "status": "unsupported",
+      "reason": "A bare attribute compared with timestamp() is refused: CEL sees the attribute as its RFC 3339 string, which never equals a timestamp, and a JPA timestamp path compares instants."
     },
     "type-mismatch/add/negated-boolean-plus-number": {
       "status": "unsupported",

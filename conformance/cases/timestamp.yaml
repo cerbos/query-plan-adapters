@@ -157,3 +157,17 @@ cases:
   condition:
     match:
       expr: '(R.attr.aBool ? timestamp("2024-01-01T00:00:00Z") : timestamp("2030-01-01T00:00:00Z")) > timestamp("2025-01-01T00:00:00Z")'
+- id: 'timestamp/equals/bare-attribute-against-timestamp-literal'
+  tier: adversarial
+  intent: 'A bare attribute compared == with a timestamp literal, without timestamp() on the attribute (createdAt == timestamp("2024-06-01T00:00:00Z")), beside aNumber == 5.'
+  trap: 'An attribute reaches the PDP as a string, never a CEL timestamp, so heterogeneous equality makes the comparison false on every row; comparing the stored column as an instant grants a4, whose createdAt is that instant.'
+  condition:
+    match:
+      expr: 'R.attr.createdAt == timestamp("2024-06-01T00:00:00Z") || R.attr.aNumber == 5'
+- id: 'timestamp/not-equals/bare-attribute-against-timestamp-literal'
+  tier: adversarial
+  intent: 'A bare attribute compared != with a timestamp literal (createdAt != timestamp("2024-06-01T00:00:00Z")).'
+  trap: 'A string never equals a timestamp, so every row with a createdAt is allowed, a4 included; comparing the column as an instant denies a4, and a3, with no createdAt, errors and must deny.'
+  condition:
+    match:
+      expr: 'R.attr.createdAt != timestamp("2024-06-01T00:00:00Z")'
