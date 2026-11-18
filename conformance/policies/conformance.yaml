@@ -5570,6 +5570,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.contains("\u0000")
+    # string/upper-ascii/equals-mixed-case-literal
+    - actions:
+        - string/upper-ascii/equals-mixed-case-literal
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.upperAscii() == "One" || R.attr.aNumber == 2
     # timestamp/equals/field-to-field-without-conversion
     - actions:
         - timestamp/equals/field-to-field-without-conversion
@@ -5786,6 +5795,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.createdAt != timestamp("2024-06-01T00:00:00Z")
+    # timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond
+    - actions:
+        - timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) >= timestamp("2020-03-15T10:30:00.123456001Z")
+    # timestamp/less-than/nanosecond-literal-past-stored-microsecond
+    - actions:
+        - timestamp/less-than/nanosecond-literal-past-stored-microsecond
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) < timestamp("2020-03-15T10:30:00.123456001Z")
     # type-mismatch/add/negated-boolean-plus-number
     - actions:
         - type-mismatch/add/negated-boolean-plus-number

@@ -511,6 +511,10 @@
       "status": "unsupported",
       "reason": "Bare temporal attributes compare RFC 3339 strings in CEL; a stored timestamp loses the original spelling, so both operands need timestamp()."
     },
+    "timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a microsecond is refused: SQL stores and binds instants to the microsecond, so the literal would be rounded to a different instant than the policy names."
+    },
     "timestamp/greater-than/relative-window-value-first": {
       "status": "unsupported",
       "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
@@ -518,6 +522,10 @@
     "timestamp/greater-than/time-since-duration": {
       "status": "unsupported",
       "reason": "timeSince() measures from the PDP's evaluation clock, and the plan carries no instant for it (the planner folds now() but leaves timeSince() unevaluated), so the database's clock would move the boundary."
+    },
+    "timestamp/less-than/nanosecond-literal-past-stored-microsecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a microsecond is refused: SQL stores and binds instants to the microsecond, so the literal would be rounded to a different instant than the policy names."
     },
     "timestamp/less-than/relative-window": {
       "status": "unsupported",

@@ -1385,6 +1385,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
     },
+    "timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a millisecond needs a date_nanos field mapping, which this adapter does not configure: a date field holds milliseconds."
+    },
     "timestamp/greater-than/relative-window-value-first": {
       "status": "unsupported",
       "reason": "The value-first runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"
@@ -1400,6 +1404,10 @@
     "timestamp/less-or-equal/sub-second-literal-before-stored-fraction": {
       "status": "unsupported",
       "reason": "A sub-millisecond timestamp literal needs a date_nanos field; an ordinary Elasticsearch date field keeps milliseconds, so the adapter refuses it"
+    },
+    "timestamp/less-than/nanosecond-literal-past-stored-microsecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a millisecond needs a date_nanos field mapping, which this adapter does not configure: a date field holds milliseconds."
     },
     "timestamp/less-than/relative-window": {
       "status": "unsupported",

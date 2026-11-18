@@ -1,0 +1,62 @@
+{
+  "allowed": [
+    "a1",
+    "a5"
+  ],
+  "degenerateReason": null,
+  "id": "timestamp/less-than/nanosecond-literal-past-stored-microsecond",
+  "intent": "timestamp(createdAt) < a literal one nanosecond past a5's stored microsecond (2020-03-15T10:30:00.123456001Z).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.createdAt"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "2020-03-15T10:30:00.123456001Z"
+                }
+              ],
+              "operator": "timestamp"
+            }
+          }
+        ],
+        "operator": "lt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "timestamp/less-than/nanosecond-literal-past-stored-microsecond",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "timestamp(R.attr.createdAt) < timestamp(\"2020-03-15T10:30:00.123456001Z\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a1 and a5 (.123456) are before the literal and allowed. Rounding or truncating the bound literal to .123456 makes < deny a5; solved for the store, the comparison is <= .123456."
+}

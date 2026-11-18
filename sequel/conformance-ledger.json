@@ -317,9 +317,17 @@
       "status": "unsupported",
       "reason": "SQL temporal columns preserve instants but discard the RFC-3339 spelling compared by bare CEL attributes; timestamp wrappers are required."
     },
+    "timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a microsecond is refused: Sequel truncates sub-microsecond digits when literalizing a Time into SQL, so the filter would compare against a different instant."
+    },
     "timestamp/greater-than/relative-window-value-first": {
       "status": "unsupported",
       "reason": "The same sub-microsecond now() literal as `timestamp/less-than/relative-window`, reached with the operands the other way round. Operand order does not change what a Time binds as, so the refusal is the same one"
+    },
+    "timestamp/less-than/nanosecond-literal-past-stored-microsecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a microsecond is refused: Sequel truncates sub-microsecond digits when literalizing a Time into SQL, so the filter would compare against a different instant."
     },
     "timestamp/less-than/relative-window": {
       "status": "unsupported",
