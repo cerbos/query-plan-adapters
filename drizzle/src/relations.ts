@@ -12,6 +12,7 @@ import {
 import type { AnyColumn, SQLChunk, Table } from "drizzle-orm";
 
 import { columnTable } from "./compat";
+import { isString } from "./narrowing";
 import { FALSE_CONDITION, TRUE_CONDITION } from "./predicates";
 import type { BuildFilterOptions, RelationMapping } from "./types";
 
@@ -26,11 +27,17 @@ import type { BuildFilterOptions, RelationMapping } from "./types";
 const ORIGINAL_NAME = Symbol.for("drizzle:OriginalName");
 const SCHEMA = Symbol.for("drizzle:Schema");
 
+const originalName = (table: Table): string | undefined =>
+  ORIGINAL_NAME in table && isString(table[ORIGINAL_NAME]) ? table[ORIGINAL_NAME] : undefined;
+
+const schemaName = (table: Table): string | undefined =>
+  SCHEMA in table && isString(table[SCHEMA]) ? table[SCHEMA] : undefined;
+
 /** The table's own name, also for a drizzle `alias()` of it. */
 export const resolveTableName = (table: Table, reference: string): string => {
-  const original: unknown = Reflect.get(table, ORIGINAL_NAME);
+  const original = originalName(table);
 
-  if (typeof original === "string") return original;
+  if (original !== undefined) return original;
 
   try {
     return getTableName(table);
@@ -40,8 +47,7 @@ export const resolveTableName = (table: Table, reference: string): string => {
 };
 
 const sameTable = (a: Table, b: Table): boolean =>
-  Reflect.get(a, ORIGINAL_NAME) === Reflect.get(b, ORIGINAL_NAME) &&
-  Reflect.get(a, SCHEMA) === Reflect.get(b, SCHEMA);
+  originalName(a) === originalName(b) && schemaName(a) === schemaName(b);
 
 /** `column` read from the row `alias` names, when it is a column of `table`. */
 export const rebindColumn = (column: AnyColumn, table: Table, alias: string): AnyColumn =>
@@ -49,7 +55,9 @@ export const rebindColumn = (column: AnyColumn, table: Table, alias: string): An
 
 const rebindChunk = (chunk: SQLChunk, table: Table, alias: string): SQLChunk => {
   if (Array.isArray(chunk)) return chunk.map((item: SQLChunk) => rebindChunk(item, table, alias));
+
   if (is(chunk, Column)) return rebindColumn(chunk, table, alias);
+
   if (is(chunk, SQL)) return rebindColumns(chunk, table, alias);
 
   return chunk;

@@ -280,7 +280,9 @@ function storedParent(seed: Seed): AdversarialParent | null {
 function storedLevel(id: string | undefined): AdversarialRelationLevel | null {
   if (id === undefined) return null;
   const level = SEEDS_BY_ID.get(id);
+
   if (level === undefined) throw new Error(`seeds.json: "${id}" is not a seed id`);
+
   return relationLevel(level);
 }
 

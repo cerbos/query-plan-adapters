@@ -499,9 +499,11 @@ function sqliteStore(): AdversarialStore {
       db.insert(resources).values(rows.resources).run();
       db.insert(parents).values(rows.parents).run();
       db.insert(inners).values(rows.inners).run();
+
       for (const { id, ...link } of rows.links) {
         db.update(resources).set(link).where(drizzleOrm.eq(resources.id, id)).run();
       }
+
       db.insert(tags).values(rows.tags).run();
       db.insert(categories).values(rows.categories).run();
       db.insert(subCategories).values(rows.subCategories).run();
@@ -698,9 +700,11 @@ function postgresStore(): AdversarialStore {
           when a_bool_list_json is not null then array[]::boolean[] end`);
       await db.insert(parents).values(rows.parents);
       await db.insert(inners).values(rows.inners);
+
       for (const { id, ...link } of rows.links) {
         await db.update(resources).set(link).where(drizzleOrm.eq(resources.id, id));
       }
+
       await db.insert(tags).values(rows.tags);
       await db.insert(categories).values(rows.categories);
       await db.insert(subCategories).values(rows.subCategories);
@@ -889,9 +893,11 @@ function mysqlStore(): AdversarialStore {
       await db.insert(resources).values(rows.resources.map(toMysqlResourceRow));
       await db.insert(parents).values(rows.parents);
       await db.insert(inners).values(rows.inners);
+
       for (const { id, ...link } of rows.links) {
         await db.update(resources).set(link).where(drizzleOrm.eq(resources.id, id));
       }
+
       await db.insert(tags).values(rows.tags);
       await db.insert(categories).values(rows.categories);
       await db.insert(subCategories).values(rows.subCategories);

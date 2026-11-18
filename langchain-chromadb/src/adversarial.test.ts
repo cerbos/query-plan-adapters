@@ -153,6 +153,7 @@ function metadataFor(seed: Seed): Metadata {
   const parent = parentSeedOf(seed);
 
   const peer = seed.peerSeedId === undefined ? undefined : SEEDS_BY_ID.get(seed.peerSeedId);
+
   const stepParent =
     seed.stepParentSeedId === undefined ? undefined : SEEDS_BY_ID.get(seed.stepParentSeedId);
 

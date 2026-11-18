@@ -133,7 +133,9 @@ const relationEntry = (relation: RelationMapping, entry: ResolvedMapperEntry, se
     const config: MappingConfig = { ...mapping };
 
     if (mapping.column !== undefined) config.column = rebindColumn(mapping.column, relation.table, alias);
+
     if (mapping.transform !== undefined) config.transform = transform(mapping.transform);
+
     if (mapping.relation !== undefined) config.relation = bindRelation(mapping.relation, relation, segment);
 
     return config;
