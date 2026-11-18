@@ -339,11 +339,6 @@ def pg_engine():
         engine.dispose()
 
 
-#: The server default, which folds case and accents, so the corpus proves the adapter compares
-#: strings byte for byte itself (#474).
-MYSQL_COLLATION = "utf8mb4_0900_ai_ci"
-
-
 @pytest.fixture(scope="module")
 def mysql_engine():
     from testcontainers.mysql import MySqlContainer
@@ -359,13 +354,15 @@ def mysql_engine():
         engine = create_engine(url)
         _seed(engine, "mysql")
         with engine.connect() as conn:
-            collations = conn.execute(
+            # A case-folding collation (the server default, or a store variant's), so the corpus
+            # proves the adapter compares strings byte for byte itself (#474).
+            [collation] = conn.execute(
                 text(
                     "SELECT DISTINCT collation_name FROM information_schema.columns "
                     "WHERE table_schema = DATABASE() AND collation_name IS NOT NULL"
                 )
             ).scalars()
-            assert set(collations) == {MYSQL_COLLATION}
+            assert collation.endswith("_ci"), collation
         yield engine
         engine.dispose()
 

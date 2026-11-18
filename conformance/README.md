@@ -313,13 +313,14 @@ takes. No harness knows about variants: for the leg, the script tags a derived i
 `ALTER SYSTEM` init script, a `conf.d` file, or the previous major) as the image name the harness
 already starts, from `*/POSTGRES_IMAGE` and `*/MYSQL_IMAGE`, and tags the original back afterwards,
 or on the next run if it was killed. A setting a harness passes itself, such as `--collation-server`
-or an initdb locale, still wins, so a variant never overrides a configuration an adapter's README
-requires. A fuzz leg's verdicts carry the variant, and `fuzz-shrink` replays a failure on it when
+or an initdb locale, still wins over the variant's. A harness that checks its store, as the MySQL
+harnesses check that columns fold case, accepts any variant that keeps what it checks. A fuzz leg's verdicts carry the variant, and `fuzz-shrink` replays a failure on it when
 `QPA_STORE_VARIANT` is set the same way.
 
 A corpus case that passes on the default configuration and fails on a variant is a finding like any
-other: a fix, a refusal, or, where the README already requires the setting the variant changes, a
-line in its configuration requirements.
+other: a fix, a refusal, or, where the store or driver rather than the adapter decides the SQL, a
+line in the adapter README's configuration requirements. A leg that errors on every case, or cannot
+seed its store, fails closed: name the setting in that README and move on.
 
 ## The dataset
 

@@ -98,6 +98,8 @@ npm_ready() { [[ -d node_modules ]] || npm ci --no-audit --no-fund; }
 
 gradle() { # <adapter> <gradle args...>, with the environment passed through
   local adapter="$1"; shift
+  # A leg's store image and fuzz directory are not task inputs, so Gradle would skip an unchanged leg.
+  set -- "$@" --rerun
   if command -v java >/dev/null 2>&1; then
     ./gradlew "$@" --no-daemon
     return
