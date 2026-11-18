@@ -24,6 +24,9 @@ import {
   readCorpusJson,
   readGolden,
   readGoldens,
+  readsClock,
+  rendered,
+  unrefusedMutants,
   writeFuzzResults,
 } from "./corpus";
 import type { FuzzVerdict, Golden } from "./corpus";
@@ -323,6 +326,20 @@ async function selectAllowed(queryPlan: PlanResourcesResponse, mode: MappingMode
   return selectIds(result.kind === PlanKind.CONDITIONAL ? result.filters : {});
 }
 
+// Two properties "refuse, never best-effort" rests on, checked without running a query
+// (conformance/README.md, "The harness contract").
+function assertFitness(queryPlan: PlanResourcesResponse, mode: MappingMode): void {
+  if (!readsClock(queryPlan)) {
+    expect(rendered(() => translatePlan(queryPlan, mode))).toEqual(
+      rendered(() => translatePlan(queryPlan, mode))
+    );
+  }
+
+  expect(
+    unrefusedMutants(queryPlan, (mutant) => translatePlan(mutant, mode), UnsupportedQueryPlanError)
+  ).toEqual([]);
+}
+
 // -- the ledger -----------------------------------------------------------------------------------
 
 interface LedgerEntry {
@@ -489,6 +506,8 @@ describe(`conformance (${STORE_NAME})`, () => {
 
         const entry = ledgerEntry(golden, tag);
         const queryPlan = await planOf(golden);
+
+        assertFitness(queryPlan, mode);
 
         if (entry?.status === "unsupported") {
           expect(() => translatePlan(queryPlan, mode)).toThrow(UnsupportedQueryPlanError);

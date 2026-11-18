@@ -72,6 +72,7 @@ from cerbos_sqlalchemy.errors import UnsupportedPlanError
 
 _BOOLEAN_OPERATORS = frozenset({"and", "or", "not"})
 _MEMBERSHIP_OPERATORS = frozenset({"in", "hasIntersection"})
+_LAMBDA_MACROS = frozenset({"exists", "all", "exists_one", "filter", "map"})
 
 # Operators whose CEL value is never null: an error, which SQL holds as NULL, must not reach an
 # IS NULL test.
@@ -229,6 +230,11 @@ class Translator:
         require_lowerable(operator, left)
         require_lowerable(operator, right)
         return default(left, right)
+
+    def _require_known(self, operator: str) -> None:
+        """Refuse an operator before its operands are resolved, which can fail otherwise."""
+        if operator not in self._overrides and operator not in OPERATOR_FNS:
+            raise UnsupportedPlanError(f"Unrecognised operator: {operator}")
 
     def _resolve(self, operand: Operand) -> Any:
         """Resolve a literal, mapped variable, or nested value expression."""
@@ -830,6 +836,7 @@ class Translator:
             delimiter = self._resolve(operands[1]) if len(operands) == 2 else None
             return self._apply(operator, target, delimiter)
 
+        self._require_known(operator)
         if operator in UNARY_VALUE_OPERATORS:
             return self._apply(operator, self._resolve(operands[0]), None)
 
@@ -917,11 +924,18 @@ class Translator:
         if membership is not None:
             return membership
 
+        self._require_known(operator)
         has_nested_expression = not _all_leaves(operands)
 
         # Anything but `leaf op leaf` goes straight to an override, e.g. size(tags).
         override = self._overrides.get(operator)
         if override is not None and (has_nested_expression or len(operands) != 2):
+            if operator in _LAMBDA_MACROS and (
+                len(operands) != 2
+                or not isinstance(operands[1], Expr)
+                or operands[1].operator != "lambda"
+            ):
+                raise UnsupportedPlanError(f"{operator} without a lambda")
             resolved = [self._resolve(o) for o in operands]
             if len(resolved) == 1:
                 resolved.append(None)
@@ -931,6 +945,9 @@ class Translator:
             left = self._resolve(operands[0])
             right = self._resolve(operands[1])
             return self._apply(operator, left, right)
+
+        if len(operands) != 2:
+            raise UnsupportedPlanError(f"{operator} with {len(operands)} operands")
 
         # Two leaves in source order: `1 < R.attr.x` arrives value-first.
         left_operand, right_operand = operands

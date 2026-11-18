@@ -8,6 +8,7 @@ package dev.cerbos.queryplan.springdata;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 
+import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.queryplan.jpa.JpaQueryPlanAdapter;
 import dev.cerbos.queryplan.jpa.NullAttributeRepresentation;
 import dev.cerbos.queryplan.jpa.UnmappedAttributeException;
@@ -28,6 +29,7 @@ import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 
+import org.hibernate.query.sqm.tree.select.SqmSelectStatement;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
@@ -40,12 +42,14 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -135,6 +139,8 @@ class AdversarialConformanceTest {
             assertTrue(verdict.ok(), verdict::toString);
             return;
         }
+        assertFitness(id, Corpus.plan(golden));
+
         LedgerEntry entry = LEDGER.get(id);
         String status = entry != null && entry.appliesTo(tag) ? entry.status() : "pass";
         switch (status) {
@@ -198,19 +204,68 @@ class AdversarialConformanceTest {
     private static List<String> executeIds(Specification<ResourceEntity> spec) {
         EntityManager em = emf.createEntityManager();
         try {
-            CriteriaBuilder cb = em.getCriteriaBuilder();
-            CriteriaQuery<String> cq = cb.createQuery(String.class);
-            Root<ResourceEntity> root = cq.from(ResourceEntity.class);
-            cq.select(root.get("id")).distinct(true);
-            Predicate p = spec.toPredicate(root, cq, cb);
-            if (p != null) {
-                cq.where(p);
-            }
             // Sorted in Java, as `allowed` is: the database's collation must not decide the order.
-            return em.createQuery(cq).getResultList().stream().sorted().toList();
+            return em.createQuery(criteria(em, spec)).getResultList().stream().sorted().toList();
         } finally {
             em.close();
         }
+    }
+
+    private static CriteriaQuery<String> criteria(EntityManager em, Specification<ResourceEntity> spec) {
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+        CriteriaQuery<String> cq = cb.createQuery(String.class);
+        Root<ResourceEntity> root = cq.from(ResourceEntity.class);
+        cq.select(root.get("id")).distinct(true);
+        Predicate p = spec.toPredicate(root, cq, cb);
+        if (p != null) {
+            cq.where(p);
+        }
+        return cq;
+    }
+
+    // -- fitness functions for "refuse, never best-effort" ------------------------------------
+    // conformance/README.md, "The harness contract". Neither runs a query.
+
+    /** Hibernate numbers the aliases it generates from a counter every query shares. */
+    private static final Pattern GENERATED_ALIAS = Pattern.compile("\\balias_\\d+\\b");
+
+    /** The query Hibernate holds for the plan's Specification, as HQL, its aliases numbered from 0. */
+    private static String hql(PlanResourcesResponse plan) {
+        EntityManager em = emf.createEntityManager();
+        try {
+            String hql = ((SqmSelectStatement<?>) criteria(em,
+                    SpringDataQueryPlanAdapter.toSpecification(plan, OPTIONS))).toHqlString();
+            Map<String, String> aliases = new HashMap<>();
+            return GENERATED_ALIAS.matcher(hql).replaceAll(
+                    match -> aliases.computeIfAbsent(match.group(), alias -> "alias_" + aliases.size()));
+        } finally {
+            em.close();
+        }
+    }
+
+    private static String rendered(PlanResourcesResponse plan) {
+        try {
+            return hql(plan);
+        } catch (RuntimeException e) {
+            return e.getClass().getName() + ": " + e.getMessage();
+        }
+    }
+
+    private static void assertFitness(String id, PlanResourcesResponse plan) {
+        if (!Corpus.readsClock(plan)) {
+            assertEquals(rendered(plan), rendered(plan), id + ": translating the same plan twice differed");
+        }
+        List<String> unrefused = new ArrayList<>();
+        for (PlanResourcesResponse mutant : Corpus.operatorMutants(plan)) {
+            try {
+                unrefused.add(mutant.getFilter().getCondition() + "\ntranslated to " + hql(mutant));
+            } catch (UnsupportedPlanShapeException | UnmappedAttributeException refused) {
+                // The adapter's refusal types, as an `unsupported` ledger entry expects.
+            } catch (RuntimeException e) {
+                unrefused.add(mutant.getFilter().getCondition() + "\nthrew " + e);
+            }
+        }
+        assertEquals(List.of(), unrefused, id + ": an operator the adapter cannot know must be refused");
     }
 
     // -- the store ----------------------------------------------------------------------------

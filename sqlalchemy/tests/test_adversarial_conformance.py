@@ -14,6 +14,8 @@ inferred from ``relationship()`` and relations written out by hand.
 import asyncio
 import json
 import os
+import subprocess
+import sys
 from collections import Counter
 from datetime import datetime
 from typing import Any
@@ -37,11 +39,14 @@ from corpus import (
     fuzz_thrown,
     fuzz_verdict,
     golden_cases,
+    operator_mutants,
     plan_from_golden,
     read_corpus_json,
+    reads_clock,
     reads_declared_collection,
 )
 from sqlalchemy import bindparam, create_engine, event, insert, text, update
+from sqlalchemy.dialects import sqlite
 from sqlalchemy.engine import make_url
 
 from cerbos_sqlalchemy import UnsupportedPlanError, get_query
@@ -401,9 +406,13 @@ def _execute_async(path: str, query) -> list[str]:
 
 
 def _translate(store: str, mapping: str, case: dict[str, Any]):
+    return _translate_plan(store, mapping, plan_from_golden(case))
+
+
+def _translate_plan(store: str, mapping: str, plan):
     attr_map, overrides = MAPPINGS[mapping]
     return get_query(
-        plan_from_golden(case),
+        plan,
         AdvResource,
         attr_map,
         operator_override_fns=overrides,
@@ -421,10 +430,79 @@ def _translate(store: str, mapping: str, case: dict[str, Any]):
     )
 
 
+# -- fitness functions for "refuse, never best-effort" ----------------------
+# conformance/README.md, "The harness contract". Neither runs a query.
+
+# A fixed instant for the relative-time placeholder, so two processes translate the same plan.
+_PLANNED_AT = "2026-01-01T00:00:00.123456789Z"
+
+
+def _rendered(mapping: str, case: dict[str, Any]) -> str:
+    try:
+        query = _translate_plan(
+            "sqlite", mapping, plan_from_golden(case, planned_at=_PLANNED_AT)
+        )
+    except Exception as error:  # noqa: BLE001 - a throw is compared like a query
+        return f"{type(error).__name__}: {error}"
+    compiled = query.compile(dialect=sqlite.dialect())
+    return f"{compiled}\n{compiled.params!r}"
+
+
+def renderings() -> dict[str, str]:
+    """Every case's translation, rendered as SQL and parameters."""
+    return {
+        f"{mapping} {tag} {case['id']}": _rendered(mapping, case)
+        for mapping in MAPPINGS
+        for tag in PDP_TAGS
+        for case in GOLDEN[tag]
+        if case["plannerDivergence"] is None and not reads_clock(case)
+    }
+
+
+# Set iteration order follows the string hash, which is fixed for a process and differs between
+# processes, so the second translation runs in a child process under another hash seed.
+@pytest.fixture(scope="session")
+def renderings_under_another_hash_seed() -> dict[str, str]:
+    seed = "1" if os.environ.get("PYTHONHASHSEED") != "1" else "2"
+    child = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import json, test_adversarial_conformance as t; print(json.dumps(t.renderings()))",
+        ],
+        cwd=os.path.dirname(__file__),
+        env={**os.environ, "PYTHONHASHSEED": seed},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(child.stdout.splitlines()[-1])
+
+
+def _assert_fitness(store, mapping, tag, case, renderings_under_another_hash_seed):
+    if store == "sqlite" and not reads_clock(case):
+        assert (
+            _rendered(mapping, case)
+            == renderings_under_another_hash_seed[f"{mapping} {tag} {case['id']}"]
+        ), "translating the same plan in another process gave different SQL"
+
+    unrefused = []
+    for mutant in operator_mutants(plan_from_golden(case)):
+        try:
+            query = _translate_plan(store, mapping, mutant)
+        except UnsupportedPlanError:
+            continue
+        except Exception as error:  # noqa: BLE001 - reported, not raised
+            unrefused.append(f"{mutant.filter.condition}\nthrew {error!r}")
+        else:
+            unrefused.append(f"{mutant.filter.condition}\ntranslated to {query}")
+    assert unrefused == [], "an operator the adapter cannot know must be refused"
+
+
 # A cartesian-product warning means a subquery failed to correlate: make it an error.
 @pytest.mark.filterwarnings("error::sqlalchemy.exc.SAWarning")
 @pytest.mark.parametrize("store,mapping,tag,case", _params())
-def test_case(store, mapping, tag, case, request):
+def test_case(store, mapping, tag, case, request, renderings_under_another_hash_seed):
     if FUZZ_DIR:
         try:
             verdict = fuzz_verdict(
@@ -444,6 +522,8 @@ def test_case(store, mapping, tag, case, request):
     if case["plannerDivergence"] is not None:
         tally[(case["tier"], "planner divergence")] += 1
         pytest.skip(f"planner divergence: {case['plannerDivergence']['reason']}")
+
+    _assert_fitness(store, mapping, tag, case, renderings_under_another_hash_seed)
 
     entry = LEDGER.get(case["id"])
     if entry is not None and tag not in entry.get("pdp", [tag]):

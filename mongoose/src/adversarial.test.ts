@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
+import type { PlanResourcesResponse } from "@cerbos/core";
 import mongoose, { model, Schema } from "mongoose";
 
 import { PlanKind, queryPlanToMongoose, UnsupportedQueryPlanError } from ".";
@@ -17,6 +18,9 @@ import {
   planOf,
   readCorpusJson,
   readGoldens,
+  readsClock,
+  rendered,
+  unrefusedMutants,
   writeFuzzResults,
 } from "./corpus";
 import type { FuzzVerdict, Golden } from "./corpus";
@@ -367,6 +371,19 @@ async function eachMapping<T>(run: (mapping: Mapping) => Promise<T>): Promise<Re
   );
 }
 
+// Two properties "refuse, never best-effort" rests on, checked without running a query
+// (conformance/README.md, "The harness contract").
+function assertFitness(queryPlan: PlanResourcesResponse, mapping: Mapping): void {
+  const translate = (plan: PlanResourcesResponse) =>
+    queryPlanToMongoose({ queryPlan: plan, ...MAPPINGS[mapping], nullAttributeRepresentation: "explicit" });
+
+  if (!readsClock(queryPlan)) {
+    expect(rendered(() => translate(queryPlan))).toEqual(rendered(() => translate(queryPlan)));
+  }
+
+  expect(unrefusedMutants(queryPlan, translate, UnsupportedQueryPlanError)).toEqual([]);
+}
+
 async function selectAllowed(golden: Golden, mapping: Mapping = "declared"): Promise<string[]> {
   const result = queryPlanToMongoose({
     queryPlan: await planOf(golden),
@@ -462,9 +479,11 @@ describe("conformance (mongodb)", () => {
         }
 
         const entry = ledgerEntry(golden, tag);
+        const queryPlan = await planOf(golden);
+
+        for (const mapping of MAPPING_NAMES) assertFitness(queryPlan, mapping);
 
         if (entry?.status === "unsupported") {
-          const queryPlan = await planOf(golden);
 
           for (const mapping of MAPPING_NAMES) {
             expect(() =>

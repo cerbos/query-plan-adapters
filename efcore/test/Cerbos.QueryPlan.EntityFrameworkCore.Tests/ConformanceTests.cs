@@ -99,6 +99,8 @@ public sealed class ConformanceTests(Store store)
             return;
         }
 
+        AssertFitness(golden);
+
         var status = Ledger.Cases.TryGetValue(id, out var entry) && entry.AppliesTo(tag) ? entry.Status : "pass";
         switch (status)
         {
@@ -139,6 +141,42 @@ public sealed class ConformanceTests(Store store)
         }
     }
 
+    /// <summary>
+    /// Translating the same plan twice renders the same query, and renaming any one operator to one no
+    /// plan holds is refused rather than translated around.
+    /// </summary>
+    private void AssertFitness(JsonNode golden)
+    {
+        var plan = Corpus.Plan(golden);
+        if (!Corpus.ReadsClock(golden)) Assert.Equal(Rendered(plan), Rendered(plan));
+        foreach (var mutant in Corpus.OperatorMutants(plan))
+        {
+            var rendered = Rendered(mutant);
+            Assert.True(rendered.StartsWith(nameof(QueryPlanRefusedException), StringComparison.Ordinal), "unknown operator not refused: " + mutant.Condition + " rendered " + rendered);
+        }
+    }
+
+    private string Rendered(Cerbos.Api.V1.Engine.PlanResourcesFilter plan)
+    {
+        QueryPlanFilter<Resource> filter;
+        try
+        {
+            filter = QueryPlanAdapter.ToFilter(plan, Options);
+        }
+        catch (QueryPlanRefusedException e)
+        {
+            return $"{nameof(QueryPlanRefusedException)}: {e.Message}";
+        }
+#pragma warning disable CA1031
+        catch (Exception e)
+#pragma warning restore CA1031
+        {
+            return $"{e.GetType().Name}: {e.Message}";
+        }
+        using var db = store.Context();
+        return db.Resources.AsNoTracking().Where(filter.Predicate).Select(r => r.Id).ToQueryString();
+    }
+
     /// <summary>The ids the filter selects, sorted ordinally: the database's collation must not decide the order.</summary>
     private List<string> Ids(JsonNode golden)
     {
@@ -148,8 +186,9 @@ public sealed class ConformanceTests(Store store)
     }
 
     /// <summary>The refusal comes from <c>ToFilter</c>, before any query exists: EF's own translation error is not one.</summary>
-    private QueryPlanFilter<Resource> Filter(JsonNode golden) =>
-        QueryPlanAdapter.ToFilter(Corpus.Plan(golden), new QueryPlanOptions<Resource>(store.Provider, Mapping) { Nulls = NullConvention.Explicit });
+    private QueryPlanFilter<Resource> Filter(JsonNode golden) => QueryPlanAdapter.ToFilter(Corpus.Plan(golden), Options);
+
+    private QueryPlanOptions<Resource> Options => new(store.Provider, Mapping) { Nulls = NullConvention.Explicit };
 
     private Corpus.FuzzVerdict FuzzVerdict(string tag, string id, List<string> expected, JsonNode golden)
     {

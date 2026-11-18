@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Cerbos.Api.V1.Engine;
 using Google.Protobuf;
+using Operand = Cerbos.Api.V1.Engine.PlanResourcesFilter.Types.Expression.Types.Operand;
 
 namespace Cerbos.QueryPlan.EntityFrameworkCore.Tests;
 
@@ -151,5 +152,43 @@ public static class Corpus
         var sorted = results.OrderBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Pdp, StringComparer.Ordinal).ToList();
         var json = JsonSerializer.Serialize(new { adapter, store, results = sorted }, ResultOptions);
         File.WriteAllText(Path.Combine(dir, $"{adapter}-{store}.json"), json + "\n");
+    }
+
+    // -- fitness checks ---------------------------------------------------------------------------
+
+    /// <summary>An operator no Cerbos plan holds: an adapter must refuse it wherever it stands.</summary>
+    public const string UnknownOperator = "qpa-unknown-operator";
+
+    /// <summary>One copy of the plan per operator node, with that node renamed to <see cref="UnknownOperator"/>.</summary>
+    public static List<PlanResourcesFilter> OperatorMutants(PlanResourcesFilter plan)
+    {
+        var mutants = new List<PlanResourcesFilter>();
+        if (plan.Condition is null) return mutants;
+        for (var n = ExpressionCount(plan.Condition); n > 0; n--)
+        {
+            var mutant = plan.Clone();
+            var remaining = n;
+            Rename(mutant.Condition, ref remaining);
+            mutants.Add(mutant);
+        }
+        mutants.Reverse();
+        return mutants;
+    }
+
+    /// <summary>A plan whose translation reads the clock, so two translations differ by design.</summary>
+    public static bool ReadsClock(JsonNode golden) => golden["plan"]!.ToJsonString().Contains("\"timeSince\"", StringComparison.Ordinal);
+
+    private static int ExpressionCount(Operand operand) =>
+        operand.NodeCase != Operand.NodeOneofCase.Expression ? 0 : 1 + operand.Expression.Operands.Sum(ExpressionCount);
+
+    private static void Rename(Operand operand, ref int remaining)
+    {
+        if (operand.NodeCase != Operand.NodeOneofCase.Expression || remaining == 0) return;
+        if (--remaining == 0)
+        {
+            operand.Expression.Operator = UnknownOperator;
+            return;
+        }
+        foreach (var child in operand.Expression.Operands) Rename(child, ref remaining);
     }
 }

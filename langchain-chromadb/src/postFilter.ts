@@ -751,8 +751,12 @@ type LambdaComponents = {
 
 /** The planner does not fix the order of a lambda's operands: the variable is the bare name. */
 function lambdaComponents(lambda: PlanExpressionOperand | undefined): LambdaComponents {
-  if (!lambda || !isExpression(lambda) || lambda.operator !== "lambda") {
+  if (!lambda || !isExpression(lambda)) {
     throw Error("Expected a lambda operand");
+  }
+
+  if (lambda.operator !== "lambda") {
+    throw new UnsupportedOperatorError(lambda.operator, `Unsupported operator in place of a lambda: ${lambda.operator}`);
   }
 
   if (lambda.operands.length !== 2 && lambda.operands.length !== 3) {

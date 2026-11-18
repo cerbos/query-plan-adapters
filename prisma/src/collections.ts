@@ -191,7 +191,7 @@ function buildCollectionLambdaParts(
     );
   }
 
-  if (!isOperatorOperand(lambda)) {
+  if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
     throw new UnsupportedQueryPlanError(
       `Second operand of ${operator} must be a lambda expression`
     );
@@ -643,8 +643,8 @@ function handleMapIntersection(
     throw new UnsupportedQueryPlanError("First operand of map must be a collection reference");
   }
 
-  if (!isOperatorOperand(lambda)) {
-    throw new UnsupportedQueryPlanError("Lambda expression must have operands");
+  if (!isOperatorOperand(lambda) || lambda.operator !== "lambda") {
+    throw new UnsupportedQueryPlanError("Second operand of map must be a lambda expression");
   }
 
   assertSingleVariableLambda("map", lambda);

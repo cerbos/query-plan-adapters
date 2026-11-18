@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
-import type { Value } from "@cerbos/core";
+import type { PlanResourcesResponse, Value } from "@cerbos/core";
 import {
   ChromaClient,
   ChromaNotFoundError,
@@ -21,6 +21,9 @@ import {
   FUZZ_DIR,
   fuzzThrown,
   fuzzVerdict,
+  readsClock,
+  rendered,
+  unrefusedMutants,
   writeFuzzResults,
 } from "./corpus";
 import type { FuzzVerdict, Golden } from "./corpus";
@@ -277,12 +280,21 @@ let collection: Collection | undefined;
  * The default-off behaviour is a caller-supplied argument the corpus cannot vary, so it is pinned
  * in `translator.test.ts` instead.
  */
+const translatePlan = (queryPlan: PlanResourcesResponse) =>
+  queryPlanToChromaDB({ queryPlan, fieldNameMapper: FIELD_NAME_MAPPER, allowPostFilter: true });
+
 async function translate(golden: Golden) {
-  return queryPlanToChromaDB({
-    queryPlan: await planOf(golden),
-    fieldNameMapper: FIELD_NAME_MAPPER,
-    allowPostFilter: true,
-  });
+  return translatePlan(await planOf(golden));
+}
+
+// Two properties "refuse, never best-effort" rests on, checked without running a query
+// (conformance/README.md, "The harness contract").
+function assertFitness(queryPlan: PlanResourcesResponse): void {
+  if (!readsClock(queryPlan)) {
+    expect(rendered(() => translatePlan(queryPlan))).toEqual(rendered(() => translatePlan(queryPlan)));
+  }
+
+  expect(unrefusedMutants(queryPlan, translatePlan, UnsupportedOperatorError)).toEqual([]);
 }
 
 async function selectAllowed(golden: Golden): Promise<string[]> {
@@ -448,6 +460,8 @@ describe("conformance (chromadb)", () => {
         }
 
         const entry = ledgerEntry(golden, tag);
+
+        assertFitness(await planOf(golden));
 
         if (entry?.status === "unsupported") {
           await expect(translate(golden)).rejects.toThrow(

@@ -189,9 +189,32 @@ public class ElasticsearchQueryPlanAdapter {
     }
 
     private static Result translateCondition(Operand condition, Options options) {
+        assertPlannerOperators(condition, options.operatorOverrides());
         Operand normalized = selectStringIndexes(condition);
         assertNoExplicitNullAttributeComparisons(normalized, options);
         return new Result.Conditional(new PlanWalker(options).translate(normalized));
+    }
+
+    /** Every operator a Cerbos plan holds. Some shapes are decided without reading a subtree. */
+    private static final Set<String> PLANNER_OPERATORS = Set.of(
+            "add", "all", "ancestorOf", "and", "contains", "descendentOf", "div", "double",
+            "duration", "dyn", "endsWith", "eq", "except", "exists", "exists_one", "filter", "ge",
+            "get-field", "gt", "has", "hasIntersection", "has_intersection", "hierarchy", "if",
+            "in", "index", "int", "intersect", "isSubset", "lambda", "le", "list", "lt", "map",
+            "matches", "mod", "mult", "ne", "not", "or", "overlaps", "set-field", "size",
+            "startsWith", "string", "struct", "sub", "timeSince", "timestamp", "upperAscii");
+
+    /** Refuses an operator that is neither a Cerbos operator nor overridden, before translating. */
+    private static void assertPlannerOperators(Operand operand, Map<String, OperatorFunction> overrides) {
+        if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
+            return;
+        }
+        String operator = operand.getExpression().getOperator();
+        if (!PLANNER_OPERATORS.contains(operator) && !overrides.containsKey(operator)) {
+            throw Refusals.unsupported("Unknown operator: " + operator);
+        }
+        operand.getExpression().getOperandsList()
+                .forEach(child -> assertPlannerOperators(child, overrides));
     }
 
     /**
