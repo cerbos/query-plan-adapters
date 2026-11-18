@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.JsonNode
 import dev.cerbos.queryplan.exposed.Corpus.LedgerEntry
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.Op
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.update
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -63,6 +65,8 @@ class AdversarialConformanceTest {
         val tags: List<Tag>,
         val subCategoryNames: List<String>,
         val parentSeedId: String?,
+        val peerSeedId: String? = null,
+        val stepParentSeedId: String? = null,
     )
 
     /** One seed's `derived-fields.json` entry. */
@@ -172,6 +176,17 @@ class AdversarialConformanceTest {
                     it[createdAt] = d.createdAt?.let(Instant::parse)
                     it[updatedAt] = d.updatedAt?.let(Instant::parse)
                 }
+                s.stepParentSeedId?.let { step ->
+                    val stepSeed = byId[step] ?: error("seeds.json: \"${s.id}\" names step parent \"$step\", not a seed id")
+                    Parents.insert {
+                        it[id] = "${s.id}-step"
+                        it[aBool] = stepSeed.aBool
+                        it[aString] = stepSeed.aString
+                        it[aNumber] = stepSeed.aNumber
+                        it[aOptionalString] = stepSeed.aOptionalString
+                        it[stepResourceId] = s.id
+                    }
+                }
                 s.tags.forEachIndexed { index, tag ->
                     Tags.insert {
                         it[tagId] = tag.id
@@ -247,6 +262,12 @@ class AdversarialConformanceTest {
                     it[aOptionalString] = innerSeed.aOptionalString
                     it[parentId] = parent
                 }
+            }
+            // The peer is the named seed's own row, so its key is set once every row exists.
+            for (s in seeds) {
+                val peer = s.peerSeedId ?: continue
+                require(peer in byId) { "seeds.json: \"${s.id}\" names peer \"$peer\", not a seed id" }
+                Resources.update({ Resources.id eq s.id }) { it[peerId] = peer }
             }
         }
 
