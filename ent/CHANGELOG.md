@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fixed an over-grant on PostgreSQL and MySQL: a timestamp literal with digits past the microsecond
+  was rounded to the stored microsecond grid when bound, so `>=` and `<` could admit the row on
+  the boundary. The comparison is now solved on the grid (`x >= c` as `x > floor(c)`, and `==`
+  never holds).
+
 ## v0.2.0
 
 - **Breaking:** `SchemaType.Table` is removed; nothing read it. Regenerate `cerbos_schema.go`.
