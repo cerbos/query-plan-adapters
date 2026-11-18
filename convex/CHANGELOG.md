@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The package no longer ships the test suites or the conformance harness (`src/*.test.ts`,
+  `src/corpus.ts`).
+
 - `postFilter` compares two `bytes` values by their contents. It used to read each as an empty
   map, so any two were equal.
 
