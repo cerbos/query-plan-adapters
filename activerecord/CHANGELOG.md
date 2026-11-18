@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- `int(...) % 0` no longer fails the whole query on PostgreSQL with a division by zero; it is UNKNOWN, as CEL's error denies the row under either polarity.
+
 ### Changed
 
 - **Breaking:** a PostgreSQL array column mapped as a field raises `Cerbos::ActiveRecord::UnmappedAttributeError`, as an enum or serialized column does: CEL reads a list there, where the filter would compare one value per row.
