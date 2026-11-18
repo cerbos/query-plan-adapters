@@ -11,7 +11,7 @@ public sealed class Fintech : Domain<Payment>
 
     public override AttributeMap<Payment> Map { get; } = new AttributeMap<Payment>()
         .Field("request.resource.id", p => p.Id)
-        .Field("request.resource.attr.amount", p => (double)p.Amount)
+        .Field("request.resource.attr.amount", p => p.Amount)
         .Field("request.resource.attr.currency", p => p.Currency)
         .Field("request.resource.attr.status", p => p.Status)
         .Field("request.resource.attr.riskScore", p => p.RiskScore)
@@ -26,7 +26,7 @@ public sealed class Fintech : Domain<Payment>
             .Field("decision", x => x.Decision))
         .Field("request.resource.attr.account.currency", p => p.Account.Currency)
         .Field("request.resource.attr.account.status", p => p.Account.Status)
-        .Field("request.resource.attr.account.overdraftLimit", p => (double?)p.Account.OverdraftLimit)
+        .Field("request.resource.attr.account.overdraftLimit", p => p.Account.OverdraftLimit)
         .Field("request.resource.attr.account.customer.id", p => p.Account.Customer.Id)
         .Field("request.resource.attr.account.customer.kycLevel", p => p.Account.Customer.KycLevel)
         .Field("request.resource.attr.account.customer.pep", p => p.Account.Customer.Pep)

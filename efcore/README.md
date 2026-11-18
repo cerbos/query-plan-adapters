@@ -199,7 +199,7 @@ passed:
 | --- | --- |
 | core | 32 / 32 |
 | extended | 105 / 110 |
-| adversarial | 489 / 550 |
+| adversarial | 493 / 554 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json). All 21 are `unsupported`: the adapter throws
@@ -216,7 +216,8 @@ at query time ("could not be translated") is a bug in this adapter: report it.
 ### Attribute numbers are doubles
 
 Cerbos sends every attribute number as a double, so map numeric columns as `double` where you can.
-An `int`, `long` or `decimal` column is converted to `double` in SQL, which is exact up to 2^53.
+An `int`, `long` or `decimal` column is converted to `double` in SQL: exact for integers up to 2^53,
+and a fractional `decimal` becomes the nearest `double`, as it does when the application sends it.
 
 ### SQL Server stores no NaN or infinity
 

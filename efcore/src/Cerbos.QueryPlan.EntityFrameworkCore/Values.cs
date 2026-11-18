@@ -31,7 +31,7 @@ internal static class ScalarKinds
         var t = Nullable.GetUnderlyingType(type) ?? type;
         if (t == typeof(string)) return ScalarKind.String;
         if (t == typeof(bool)) return ScalarKind.Bool;
-        if (t == typeof(double) || t == typeof(float) || t == typeof(int) || t == typeof(long) || t == typeof(short)) return ScalarKind.Double;
+        if (t == typeof(double) || t == typeof(float) || t == typeof(int) || t == typeof(long) || t == typeof(short) || t == typeof(decimal)) return ScalarKind.Double;
         if (t == typeof(DateTime) || t == typeof(DateTimeOffset)) return ScalarKind.TimestampString;
         return null;
     }

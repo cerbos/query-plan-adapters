@@ -24,6 +24,10 @@ public class Resource
     public string? MainCategoryId { get; set; }
     public Category? MainCategory { get; set; }
     public Parent? Parent { get; set; }
+    public string? StepParentId { get; set; }
+    public Parent? StepParent { get; set; }
+    public string? PeerId { get; set; }
+    public Resource? Peer { get; set; }
 }
 
 public class Tag
@@ -74,14 +78,15 @@ public class Label
     public string SubCategoryId { get; set; } = "";
 }
 
-/// <summary>The resource's own copy of its parent seed's scalars, one row per resource.</summary>
+/// <summary>A resource's own copy of its parent or step-parent seed's scalars, one row per resource and relation.</summary>
 public class Parent
 {
     public required string Id { get; set; }
-    public string ResourceId { get; set; } = "";
+    public string? ResourceId { get; set; }
     public bool? ABool { get; set; }
     public string? AString { get; set; }
-    public double? ANumber { get; set; }
+    // decimal, so the corpus reads a decimal column as well as double ones.
+    public decimal? ANumber { get; set; }
     public string? AOptionalString { get; set; }
     public Inner? Inner { get; set; }
 }
@@ -123,6 +128,8 @@ public class CorpusContext(DbContextOptions<CorpusContext> options, string? coll
             r.HasMany(x => x.Categories).WithOne().HasForeignKey(c => c.ResourceId);
             r.HasOne(x => x.MainCategory).WithMany().HasForeignKey(x => x.MainCategoryId).OnDelete(DeleteBehavior.NoAction);
             r.HasOne(x => x.Parent).WithOne().HasForeignKey<Parent>(p => p.ResourceId);
+            r.HasOne(x => x.StepParent).WithMany().HasForeignKey(x => x.StepParentId).OnDelete(DeleteBehavior.NoAction);
+            r.HasOne(x => x.Peer).WithMany().HasForeignKey(x => x.PeerId).OnDelete(DeleteBehavior.NoAction);
         });
         modelBuilder.Entity<Category>().HasMany(c => c.SubCategories).WithOne().HasForeignKey(s => s.CategoryId);
         modelBuilder.Entity<SubCategory>().HasMany(s => s.Labels).WithOne().HasForeignKey(l => l.SubCategoryId);

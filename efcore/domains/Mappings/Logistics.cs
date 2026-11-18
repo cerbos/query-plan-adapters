@@ -18,7 +18,7 @@ public sealed class Logistics : Domain<Shipment>
         .Field("request.resource.attr.customsHold", s => s.CustomsHold)
         .Field("request.resource.attr.shipper", s => s.ShipperAccount)
         .Field("request.resource.attr.eta", s => s.Eta)
-        .Field("request.resource.attr.declaredValue", s => (double)s.DeclaredValue)
+        .Field("request.resource.attr.declaredValue", s => s.DeclaredValue)
         .Field("request.resource.attr.origin.code", s => s.OriginHub.Code)
         .Field("request.resource.attr.origin.country", s => s.OriginHub.Country)
         .Field("request.resource.attr.origin.region", s => s.OriginHub.Region)

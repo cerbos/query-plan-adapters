@@ -20,7 +20,7 @@ public sealed class Government : Domain<BenefitCase>
         .Field("request.resource.attr.closedOn", c => c.ClosedOn)
         .Field("request.resource.attr.pii", c => c.Pii)
         .Field("request.resource.attr.assignedTo", c => c.AssignedTo)
-        .Field("request.resource.attr.monthlyAmount", c => (double?)c.MonthlyAmount)
+        .Field("request.resource.attr.monthlyAmount", c => c.MonthlyAmount)
         .List("request.resource.attr.flags", c => c.Flags, f => f.Flag)
         .Field("request.resource.attr.agency.code", c => c.Agency.Code)
         .Field("request.resource.attr.agency.state", c => c.Agency.State)
