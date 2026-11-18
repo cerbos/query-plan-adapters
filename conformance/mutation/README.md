@@ -11,6 +11,8 @@ go -C conformance/mutation run . -adapter ent -workers 3 -out /tmp/mut-ent      
 go -C conformance/mutation run . -adapter drizzle -files comparison,values -ops logical,negation
 go -C conformance/mutation run . -adapter sqlalchemy -list                       # print, do not run
 go -C conformance/mutation run . -adapter ent -out /tmp/mut-ent -report          # rewrite report.md
+QPA_FUZZ_DIR=/tmp/fuzz go -C conformance/mutation run . -adapter ent \
+  -survivors-of /tmp/mut-ent/results.jsonl -out /tmp/mut-ent-fuzz                # survivors against a fuzz round
 ```
 
 A run is never committed and never gates a pull request. What it finds becomes a case, as a fuzz
