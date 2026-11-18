@@ -28,6 +28,9 @@ type fuzzManifest struct {
 	Tags    []string          `json:"tags"`
 	Kept    int               `json:"kept"`
 	Dropped map[string]string `json:"dropped"`
+	Rows    int               `json:"rows,omitempty"`
+	Kind    string            `json:"kind,omitempty"`
+	From    string            `json:"from,omitempty"`
 }
 
 // fuzzCaseFile is <out>/cases.json: every kept case's condition trees, for fuzz-shrink.
@@ -43,6 +46,8 @@ func runSubcommand(name string, args []string) error {
 		return runFuzzReport(args)
 	case "fuzz-shrink":
 		return runFuzzShrink(ctx, args)
+	case "fuzz-compose":
+		return runFuzzCompose(args)
 	}
 	return fmt.Errorf("unknown subcommand %q", name)
 }
@@ -51,6 +56,7 @@ func runFuzz(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("fuzz", flag.ExitOnError)
 	seed := fs.Uint64("seed", 1, "the generator seed; the same seed and PDP pins give the same cases and goldens")
 	count := fs.Int("count", 500, "how many cases to generate before dropping the ones no adapter can be judged on")
+	rows := fs.Int("rows", 0, "how many generated rows to add to the dataset the run is recorded against")
 	out := fs.String("out", "", "the directory to write into; must be empty or missing, and outside conformance/")
 	confFlag := fs.String("conformance", "", "the conformance directory (default: located from the working directory)")
 	if err := fs.Parse(args); err != nil {
@@ -73,6 +79,14 @@ func runFuzz(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if *rows > 0 {
+		if in.dataset, err = generateRows(conf, *seed, *rows); err != nil {
+			return err
+		}
+		if in.ds, err = loadDatasetFiles(in.dataset); err != nil {
+			return err
+		}
+	}
 
 	if missing := unreadGrammarPaths(in.corpus); len(missing) > 0 {
 		return fmt.Errorf("fuzz: no hand-written case reads %s, so no harness need map it; drop it from the grammar (fuzzgen.go)", strings.Join(missing, ", "))
@@ -86,7 +100,7 @@ func runFuzz(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	m := fuzzManifest{Seed: *seed, Count: *count, Tags: in.tags(), Dropped: dropped}
+	m := fuzzManifest{Seed: *seed, Count: *count, Rows: *rows, Tags: in.tags(), Dropped: dropped}
 	if err := writeFuzzDir(*out, m, recorded); err != nil {
 		return err
 	}
@@ -100,6 +114,7 @@ type fuzzInputs struct {
 	corpus   *Corpus
 	ds       *Dataset
 	versions []pdpVersion // previous, then current
+	dataset  map[string][]byte
 }
 
 func (in *fuzzInputs) tags() []string {
@@ -164,6 +179,7 @@ type fuzzRecording struct {
 	cases   []*fuzzCase
 	goldens map[string][]*Golden // tag -> goldens, in cases order
 	policy  []byte
+	dataset map[string][]byte
 }
 
 // recordFuzz compiles the cases into one policy, drops any the PDP will not load, and records the
@@ -178,7 +194,7 @@ func recordFuzz(ctx context.Context, in *fuzzInputs, cases []*fuzzCase, seed uin
 		return nil, nil, err
 	}
 	if len(cases) == 0 {
-		return &fuzzRecording{goldens: map[string][]*Golden{}}, dropped, nil
+		return &fuzzRecording{goldens: map[string][]*Golden{}, dataset: in.dataset}, dropped, nil
 	}
 	corpus := fuzzCorpus(in.corpus, cases, seed)
 	policy, err := buildPolicy(corpus)
@@ -201,7 +217,7 @@ func recordFuzz(ctx context.Context, in *fuzzInputs, cases []*fuzzCase, seed uin
 		byTag[v.Tag] = goldens
 	}
 
-	rec := &fuzzRecording{goldens: map[string][]*Golden{}, policy: policy}
+	rec := &fuzzRecording{goldens: map[string][]*Golden{}, policy: policy, dataset: in.dataset}
 	for i, fc := range cases {
 		reason := ""
 		for _, v := range in.versions {
@@ -375,6 +391,11 @@ func writeFuzzDir(out string, m fuzzManifest, rec *fuzzRecording) error {
 			return err
 		}
 		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			return err
+		}
+	}
+	for name, raw := range rec.dataset {
+		if err := os.WriteFile(filepath.Join(out, name), raw, 0o644); err != nil {
 			return err
 		}
 	}

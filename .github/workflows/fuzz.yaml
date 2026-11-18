@@ -14,6 +14,10 @@ on:
         description: "Cases to generate"
         required: false
         default: "500"
+      rows:
+        description: "Generated rows to add to the dataset; 0 records against the corpus seeds alone"
+        required: false
+        default: "0"
       adapters:
         description: "Space-separated adapters to replay (run-harness.sh --list); empty replays every store leg of every adapter"
         required: false
@@ -46,7 +50,8 @@ jobs:
         env:
           SEED: ${{ inputs.seed || github.run_number }}
           COUNT: ${{ inputs.count }}
-        run: go -C conformance/generator run . fuzz -seed "${SEED}" -count "${COUNT}" -out "${RUNNER_TEMP}/fuzz"
+          ROWS: ${{ inputs.rows }}
+        run: go -C conformance/generator run . fuzz -seed "${SEED}" -count "${COUNT}" -rows "${ROWS}" -out "${RUNNER_TEMP}/fuzz"
 
       # One matrix leg per adapter and store, from the same roster run-harness.sh runs locally.
       - name: List the store legs

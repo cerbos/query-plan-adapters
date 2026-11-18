@@ -57,6 +57,15 @@ final class Corpus {
         return Path.of(System.getProperty("user.dir"), "..", "conformance").normalize();
     }
 
+    /** A fuzz run recorded with generated rows carries its own dataset, which replaces the corpus's. */
+    static Path datasetDir() {
+        String fuzzDir = System.getenv().getOrDefault("QPA_FUZZ_DIR", "");
+        if (!fuzzDir.isEmpty() && Files.exists(Path.of(fuzzDir, "seeds.json"))) {
+            return Path.of(fuzzDir);
+        }
+        return conformanceDir();
+    }
+
     static JsonNode readJson(Path file) {
         try {
             return JSON.readTree(file.toFile());

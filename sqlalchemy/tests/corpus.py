@@ -51,8 +51,20 @@ CONFORMANCE_DIR = os.path.realpath(
 )
 
 
+_DATASET_FILES = {"seeds.json", "derived-fields.json", "resources.json"}
+
+
 def read_corpus_json(name: str) -> Any:
-    with open(os.path.join(CONFORMANCE_DIR, name), encoding="utf-8") as f:
+    """A fuzz run recorded with generated rows carries its own dataset, which replaces the corpus's."""
+    fuzz_dir = os.environ.get("QPA_FUZZ_DIR")
+    base = CONFORMANCE_DIR
+    if (
+        fuzz_dir
+        and name in _DATASET_FILES
+        and os.path.exists(os.path.join(fuzz_dir, name))
+    ):
+        base = fuzz_dir
+    with open(os.path.join(base, name), encoding="utf-8") as f:
         return json.load(f)
 
 

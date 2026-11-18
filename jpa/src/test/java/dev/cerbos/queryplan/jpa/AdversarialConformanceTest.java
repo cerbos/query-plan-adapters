@@ -296,7 +296,7 @@ class AdversarialConformanceTest {
     private record DerivedFile(Map<String, Derived> derived) {}
 
     private static List<Seed> allSeeds() {
-        return Corpus.readJson(Corpus.conformanceDir().resolve("seeds.json"), SeedsFile.class).seeds();
+        return Corpus.readJson(Corpus.datasetDir().resolve("seeds.json"), SeedsFile.class).seeds();
     }
 
     private static Set<String> unheldSeeds() {
@@ -310,7 +310,7 @@ class AdversarialConformanceTest {
     private static void seed() {
         List<Seed> seeds = allSeeds().stream().filter(s -> !UNHELD.contains(s.id())).toList();
         Map<String, Derived> derived = Corpus.readJson(
-                Corpus.conformanceDir().resolve("derived-fields.json"), DerivedFile.class).derived();
+                Corpus.datasetDir().resolve("derived-fields.json"), DerivedFile.class).derived();
         Map<String, Seed> byId = seeds.stream().collect(Collectors.toMap(Seed::id, Function.identity()));
         Function<Seed, Seed> parentOf = s -> s == null || s.parentSeedId() == null
                 ? null : byId.get(s.parentSeedId());
