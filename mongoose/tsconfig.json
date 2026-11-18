@@ -1,13 +1,18 @@
 {
-  "extends": ["@tsconfig/node24", "@tsconfig/strictest"],
-  "include": ["src"],
-  "//exclude": "Test-only sources. `corpus.ts` is not a test file but is read by both suites and by neither consumer, so it is excluded for the same reason: nothing here may reach lib/.",
-  "exclude": ["src/**/*.test.ts", "src/corpus.ts"],
+  "extends": [
+    "@tsconfig/node24",
+    "@tsconfig/strictest"
+  ],
+  "include": [
+    "src"
+  ],
   "compilerOptions": {
     "checkJs": true,
     "composite": true,
     "exactOptionalPropertyTypes": false,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "outDir": "lib",
     "rootDir": "src",
     "declarationMap": true,

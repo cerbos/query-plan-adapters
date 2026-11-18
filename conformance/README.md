@@ -36,6 +36,7 @@ conformance/scripts/run-harness.sh <adapter>   # one adapter's harness, its stor
 | `golden/<tag>/<case id>.json` | For each PDP: the plan, the allowed ids, and the case's intent and trap. | generator |
 | `golden/CHANGES.md` | What changed between the previous and current PDP. | generator |
 | `generator/` | The Go program that writes everything marked "generator". | hand |
+| `harnesses/<adapter>/` | Each adapter's conformance harness, its ledger (`conformance-ledger.json`), store setup and fuzz mode. It imports the adapter from the adapter's own folder and runs on that folder's install ([harnesses/README.md](harnesses/README.md)). | hand |
 | `domains/` | The domain stress kit: ten domain models with their own policies and goldens, and each adapter's harness for them, run by hand and outside CI ([domains/README.md](domains/README.md)). | hand, `domains/kit` |
 
 A file marked "generator" changes only by editing the cases or the dataset and re-running the
@@ -147,11 +148,11 @@ That is the whole contract. The harness asserts no counts and pins no messages. 
 projection is recorded, so a field the harness forgets to store shows up as a wrong result rather than
 a vacuous pass.
 
-Every service image a harness starts is pinned in one constant file that adapter's suites share,
-`<adapter>/<SERVICE>_IMAGE`, as `repo:tag`, never under `conformance/`, since a change there re-runs
-every adapter's workflow. Renovate bumps those files and the quoted pins in the adversarial suites.
+Every service image a harness starts is pinned in one constant file that adapter's harness and
+example share, `<adapter>/<SERVICE>_IMAGE`, as `repo:tag`, never in the shared corpus, since a change
+there re-runs every adapter's workflow. Renovate bumps those files and the quoted pins in the adversarial suites.
 
-### The ledger — `<adapter>/conformance-ledger.json`
+### The ledger — `conformance/harnesses/<adapter>/conformance-ledger.json`
 
 ```json
 {
@@ -191,7 +192,8 @@ No harness starts a PDP: each replays the goldens. `scripts/run-harness.sh <adap
 runs one adapter's harness the way its workflow does, starting the store it needs and tearing it
 down; `--list` names each adapter's store legs, and `--all` runs every adapter. Run one leg at a
 time: several harnesses at once overload a laptop into timeouts that read as failures. The commands
-behind each leg, and the adapter's other suites, are in its README's "Development" section.
+behind each leg, and the adapter's other suites, are in its README's "Development" section; each
+harness lives in `harnesses/<adapter>/` ([harnesses/README.md](harnesses/README.md)).
 
 ## Fuzzing
 

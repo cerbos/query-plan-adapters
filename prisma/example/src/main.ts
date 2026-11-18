@@ -1,9 +1,9 @@
 /**
  * Example application for `@cerbos/orm-prisma`, run against the shared demo domain.
  *
- * This is NOT a test of what the adapter translates — `../src/adversarial.test.ts` proves that
- * against a hostile corpus and a live PDP oracle. This proves the two things that harness
- * structurally cannot:
+ * This is NOT a test of what the adapter translates —
+ * `../../conformance/harnesses/prisma/adversarial.test.ts` proves that against a hostile corpus and
+ * a live PDP oracle. This proves the two things that harness structurally cannot:
  *
  *   1. Packaging. The import below resolves through the PUBLISHED package — `exports`, `types`,
  *      the `files` allowlist, the peer range — because run.sh installs `npm pack`'s tarball

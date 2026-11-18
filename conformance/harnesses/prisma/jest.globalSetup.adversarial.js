@@ -1,0 +1,221 @@
+const { execFileSync } = require("node:child_process");
+
+/**
+ * Bring up the store the adversarial suite replays the corpus against.
+ *
+ * SQLite needs nothing here: `npm run test:v*` pushes `prisma/dev-adversarial.db`
+ * before jest starts, exactly as it always did. A container-backed leg cannot work that way — the
+ * connection string only exists once the container is running — so the container is started here,
+ * `DATABASE_URL` is exported for the test workers jest forks next, and `prisma db push` creates
+ * the schema against it. PostgreSQL was the first (cerbos/query-plan-adapters#320), MySQL the
+ * second (#340).
+ *
+ * `prisma db push` rather than raw DDL on purpose: the columns are the point of these legs (a real
+ * `integer`, a real `timestamp(3)`/`datetime(3)`), and only Prisma's own migration engine renders
+ * the model the client will then query through.
+ *
+ * It is also why the MySQL leg's collation is applied AFTER the push rather than configured on the
+ * server: see `MYSQL_COLLATION` below.
+ */
+
+// Both images mirror the ent and spring-data harnesses' targets so every adapter proves the same
+// servers.
+const POSTGRES_IMAGE = "postgres:17-alpine";
+
+const MYSQL_IMAGE = "mysql:8.4";
+
+/**
+ * How the PostgreSQL leg's database is initialised: `--lc-collate=C`, a byte-order collation.
+ *
+ * CEL orders strings by code point, and `<`, `<=`, `>` and `>=` on a text column follow the
+ * column's collation. PostgreSQL collations are deterministic, so `=` is byte-exact under any of
+ * them, but a linguistic one orders case, accents and punctuation below the letter: under glibc's
+ * `en_US.utf8` `'One' > 'a'` is TRUE, which over-grants
+ * `comparison/greater-than/string-code-point-order` (cerbos/query-plan-adapters#489). `"C"` orders
+ * by byte, which for UTF-8 is code point order. Prisma's migration engine emits no `COLLATE` on
+ * PostgreSQL, so every column inherits the database's.
+ *
+ * Stated rather than inherited: the Alpine image reports `en_US.utf8` without it, and orders by
+ * byte only because musl's `strcoll` does. The same database on a glibc image, or on a managed
+ * service, orders linguistically.
+ *
+ * Overridable so the over-grant can be reproduced rather than taken on trust:
+ * `ADAPTER_TEST_POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en-US"
+ * npm run test:postgres:v7` gives the pinned image ICU's linguistic order, which musl
+ * cannot, and fails both `string-code-point-order` cases. A measurement escape hatch, not a CI leg.
+ */
+const POSTGRES_INITDB_ARGS =
+  process.env.ADAPTER_TEST_POSTGRES_INITDB_ARGS ?? "--lc-collate=C";
+
+/**
+ * The collation the MySQL leg runs the whole corpus under.
+ *
+ * CEL string equality is byte-exact. MySQL's own default `utf8mb4_0900_ai_ci` is case- AND
+ * accent-insensitive and its `LIKE` follows the column's collation — but the server's default is
+ * not even what a Prisma-managed database gets. **Prisma's MySQL migration engine hardcodes
+ * `DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` into every `CREATE TABLE` and ignores
+ * the server's default entirely**, and `utf8mb4_unicode_ci` is case- and accent-insensitive too.
+ * Measured against MySQL 8.4 with `prisma db push`, not inferred — which is why this leg
+ * converts the tables afterwards instead of passing `--collation-server=…` to the container, a
+ * flag that would read as doing something and do nothing.
+ *
+ * Under either insensitive collation `'One' = 'one'` is TRUE, and `string/equals/case-sensitive`,
+ * `string/equals/non-ascii-literal` and every `hierarchy/*` prefix probe return rows the PDP denies. That is a store misconfiguration rather than a
+ * limitation of this adapter — no Prisma `where` clause could restore byte-exact equality — so the
+ * leg pins a byte-exact collation and states the requirement, as every other MySQL leg does.
+ * `README.md` says the same thing to consumers, who inherit the same default.
+ *
+ * `utf8mb4_0900_bin`, because it is the one MySQL collation that is byte-exact AND NO PAD.
+ * Case-sensitive is not enough: `utf8mb4_0900_as_cs` weighs a default-ignorable code point such as
+ * SOFT HYPHEN (U+00AD) as nothing, so seed h6's `"o\u00ADne"` equals `"one"` under it
+ * (cerbos/query-plan-adapters#474). The older `utf8mb4_bin` is byte-exact but PAD SPACE, so
+ * `'a' = 'a '` is TRUE under it.
+ *
+ * Overridable so the over-grant can be reproduced rather than taken on trust:
+ * `ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_ai_ci npm run test:mysql` fails on the
+ * case and accent probes, and `…=utf8mb4_0900_as_cs` on the h6 soft-hyphen probes. Same escape
+ * hatch as spring-data's `-Dadapter.test.mysql.collation`.
+ */
+const MYSQL_COLLATION =
+  process.env.ADAPTER_TEST_MYSQL_COLLATION ?? "utf8mb4_0900_bin";
+
+/**
+ * Give every table Prisma just created the collation above.
+ *
+ * On its own connection, and with foreign-key checks off for the duration: a converted table
+ * momentarily disagrees with the tables still pointing at it, and MySQL rejects that outright
+ * (`ERROR 3780`). `foreign_key_checks` is a SESSION variable, so this cannot run through Prisma's
+ * pool, where the next statement may land on another connection.
+ *
+ * Read from `information_schema` rather than from a list of model names, so a model added to the
+ * schema is converted too instead of being silently left case-insensitive.
+ */
+async function applyMysqlCollation(url) {
+  const mariadb = require("mariadb");
+  // Spelled out rather than handed the URL: the connector's own parser accepts only a
+  // `mariadb://` scheme, and testcontainers hands back a `mysql://` one.
+  const { hostname, port, username, password, pathname } = new URL(url);
+
+  const connection = await mariadb.createConnection({
+    host: hostname,
+    port: Number(port),
+    user: decodeURIComponent(username),
+    password: decodeURIComponent(password),
+    database: decodeURIComponent(pathname.replace(/^\//, "")),
+  });
+
+  try {
+    const tables = await connection.query(
+      "select TABLE_NAME as name from information_schema.TABLES where TABLE_SCHEMA = database()"
+    );
+
+    // An empty list would leave every conversion unexecuted and the whole leg running on Prisma's
+    // case-insensitive default while reporting nothing.
+    if (tables.length === 0) {
+      throw new Error(
+        "prisma db push created no tables: the MySQL collation conversion would guard nothing"
+      );
+    }
+
+    await connection.query("SET FOREIGN_KEY_CHECKS = 0");
+
+    for (const { name } of tables) {
+      await connection.query(
+        `ALTER TABLE \`${name}\` CONVERT TO CHARACTER SET utf8mb4 COLLATE ${MYSQL_COLLATION}`
+      );
+    }
+
+    await connection.query("SET FOREIGN_KEY_CHECKS = 1");
+  } finally {
+    await connection.end();
+  }
+}
+
+/**
+ * One entry per container-backed store: how to start it, which schema each Prisma major pushes
+ * into it, and anything the store needs doing to it once the schema is there.
+ */
+const CONTAINER_STORES = {
+  postgres: {
+    async start() {
+      const { PostgreSqlContainer } = require("@testcontainers/postgresql");
+
+      return new PostgreSqlContainer(POSTGRES_IMAGE)
+        .withEnvironment({ POSTGRES_INITDB_ARGS })
+        .start();
+    },
+    schemas: {
+      6: "prisma/schema.adversarial.pg.v6.prisma",
+      7: "prisma/schema.adversarial.pg.prisma",
+    },
+  },
+  mysql: {
+    async start() {
+      const { MySqlContainer } = require("@testcontainers/mysql");
+
+      // Stock server settings: see MYSQL_COLLATION above for why configuring the server here
+      // would prove nothing.
+      return new MySqlContainer(MYSQL_IMAGE).start();
+    },
+    schemas: {
+      6: "prisma/schema.adversarial.mysql.v6.prisma",
+      7: "prisma/schema.adversarial.mysql.prisma",
+    },
+    afterPush: applyMysqlCollation,
+  },
+};
+
+// The two majors differ in every part of the `db push` invocation, so they are described once
+// rather than branched on per store. Prisma 6's `db push` has no `--url` and reads the schema's
+// `env("DATABASE_URL")` (set below); Prisma 7 dropped `--skip-generate` and takes the url on the
+// command line, its adversarial schemas carrying none.
+const MAJORS = {
+  6: {
+    cli: "node_modules/prisma-v6/build/index.js",
+    extraArgs: () => ["--skip-generate"],
+  },
+  7: {
+    cli: "node_modules/prisma/build/index.js",
+    extraArgs: () => [`--url=${process.env.DATABASE_URL}`],
+  },
+};
+
+module.exports = async function globalSetup() {
+  const storeName = process.env.ADAPTER_TEST_DB ?? "sqlite";
+  const store = CONTAINER_STORES[storeName];
+
+  if (!store) {
+    return;
+  }
+
+  const container = await store.start();
+  process.env.DATABASE_URL = container.getConnectionUri();
+  // globalTeardown runs in its own module registry, so the handle travels through globalThis.
+  globalThis.__ADVERSARIAL_STORE_CONTAINER__ = container;
+
+  const prismaVersion = process.env.PRISMA_VERSION || "7";
+  const major = MAJORS[prismaVersion];
+
+  if (!major) {
+    throw new Error(
+      `Unknown PRISMA_VERSION "${prismaVersion}": expected one of ${Object.keys(MAJORS).join(", ")}`
+    );
+  }
+
+  // No `--force-reset`, here or on the SQLite legs in package.json (which delete their file
+  // first): this database was created by the container a few seconds ago and is empty, so a reset
+  // would be a no-op, and it is a destructive flag Prisma Migrate refuses to run under an AI agent.
+  execFileSync(
+    process.execPath,
+    [
+      major.cli,
+      "db",
+      "push",
+      `--schema=${store.schemas[prismaVersion]}`,
+      ...major.extraArgs(),
+    ],
+    { stdio: "inherit", env: process.env }
+  );
+
+  await store.afterPush?.(process.env.DATABASE_URL);
+};

@@ -220,19 +220,20 @@ case in that tier:
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, the
 `null/has/*` cases but `guard-on-same-attribute` and `explicit-null-attribute`, both
-`relation/has/*` cases and `collection/exists/has-in-lambda` are skipped too: that
-planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0
-keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner
-drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
-and denies every row; write `1.0`. `type-mismatch/in/number-field-in-scalar-principal` and
+`relation/has/*` cases and `collection/exists/has-in-lambda` are skipped too: that planner folds
+`has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps `has()`
+in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`:
+the planner drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int
+overload and denies every row; write `1.0`. `type-mismatch/in/number-field-in-scalar-principal` and
 `type-mismatch/in/string-field-in-dyn-string`: the planner rewrites `in` over a scalar container to
 `==`, where `check()` has no such overload and denies
-([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). Three `composition/*` cases whose DENY condition reads
-`aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while `checkResource` treats the
-erroring deny rule as not matching and allows the document
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with a `Cerbos::MongoDB::Error`;
-none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
-with its reason.
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). Three `composition/*` cases
+whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while
+`checkResource` treats the erroring deny rule as not matching and allows the document
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not
+pass is refused with a `Cerbos::MongoDB::Error`; none returns wrong documents.
+[`conformance-ledger.json`](../conformance/harnesses/mongodb-ruby/conformance-ledger.json) lists
+each one with its reason.
 
 The refused set is macros and `in` over a to-one relation, `has()` over a to-many relation, and a two-variable macro over a map (CEL
 iterates a map's keys), `string()`

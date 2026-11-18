@@ -1,15 +1,21 @@
 {
-  "//": "Type-checks the full source tree, including the test suites that tsconfig.json excludes from the emitting `tsc --build`. src/generated stays excluded (checkJs would report thousands of errors in Prisma's generated runtime). Never emits, so nothing here can reach lib/.",
+  "//": "Type-checks the sources and the unit suite in test/. Never emits, so nothing here can reach lib/.",
   "extends": "./tsconfig.json",
-  "include": ["src"],
-  "exclude": ["src/generated"],
+  "include": [
+    "src",
+    "test"
+  ],
+  "exclude": [],
   "compilerOptions": {
     "noEmit": true,
+    "rootDir": ".",
     "composite": false,
-    "types": ["node", "jest"],
+    "types": [
+      "node",
+      "jest"
+    ],
     "declaration": false,
     "declarationMap": false,
-    "sourceMap": false,
-    "moduleSuffixes": [".v7", ""]
+    "sourceMap": false
   }
 }

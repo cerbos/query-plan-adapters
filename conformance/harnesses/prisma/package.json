@@ -1,0 +1,20 @@
+{
+  "name": "conformance-harness-prisma",
+  "private": true,
+  "//": "Runs with the adapter's toolchain and dependencies (node_modules links to the adapter's): npm ci in ../../../prisma first.",
+  "scripts": {
+    "typecheck": "../../../prisma/node_modules/.bin/tsc -p tsconfig.json && ../../../prisma/node_modules/.bin/tsc -p tsconfig.v6.json",
+    "generate": "bash generate-clients.sh all",
+    "generate:v6": "bash generate-clients.sh 6",
+    "generate:v7": "bash generate-clients.sh 7",
+    "test": "npm run test:v7",
+    "test:v6": "npm run generate:v6 && node -e \"for (const f of ['prisma/dev-adversarial.db', 'prisma/dev-adversarial.db-journal']) require('fs').rmSync(f, { force: true })\" && node node_modules/prisma-v6/build/index.js db push --skip-generate --schema=prisma/schema.adversarial.v6.prisma && PRISMA_VERSION=6 ../../../prisma/node_modules/.bin/jest -c jest.config.js",
+    "test:v7": "npm run generate:v7 && node -e \"for (const f of ['prisma/dev-adversarial.db', 'prisma/dev-adversarial.db-journal']) require('fs').rmSync(f, { force: true })\" && node node_modules/prisma/build/index.js db push --schema=prisma/schema.adversarial.prisma --url=file:./prisma/dev-adversarial.db && PRISMA_VERSION=7 ../../../prisma/node_modules/.bin/jest -c jest.config.js",
+    "test:postgres": "npm run test:postgres:v7",
+    "test:postgres:v6": "npm run generate:v6 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=6 ../../../prisma/node_modules/.bin/jest -c jest.config.js",
+    "test:postgres:v7": "npm run generate:v7 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=7 ../../../prisma/node_modules/.bin/jest -c jest.config.js",
+    "test:mysql": "npm run test:mysql:v7",
+    "test:mysql:v6": "npm run generate:v6 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=6 ../../../prisma/node_modules/.bin/jest -c jest.config.js",
+    "test:mysql:v7": "npm run generate:v7 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=7 ../../../prisma/node_modules/.bin/jest -c jest.config.js"
+  }
+}

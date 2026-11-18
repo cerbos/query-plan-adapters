@@ -1,7 +1,7 @@
 /**
  * The demo domain's single resource kind, as a Convex consumer would model it: one table of flat
  * scalar fields and no relations. The richer schema the adapter is PROVED against lives in
- * ../../convex/schema.ts.
+ * ../../../conformance/harnesses/convex/backend/schema.ts.
  *
  * `id` is the demo domain's own identifier and is not Convex's `_id`. Every example reports the
  * ids in demo/seeds.json, and a Convex document id is minted by the backend on insert — so the

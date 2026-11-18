@@ -9,7 +9,7 @@ require "time"
 # Duplicated across adapters on purpose (ADR 0007). Do not extract or share it.
 module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
-  LEDGER_FILE = File.expand_path("../../conformance-ledger.json", __dir__)
+  LEDGER_FILE = File.expand_path("../../../conformance/harnesses/mongodb-ruby/conformance-ledger.json", __dir__)
 
   def self.read_json(path) = JSON.parse(File.read(path, encoding: "UTF-8"))
 

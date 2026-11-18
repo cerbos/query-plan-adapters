@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "cd ../.. && oxlint -c tools/oxlint/oxlint.config.ts --deny-warnings convex drizzle langchain-chromadb mongoose prisma",
-    "lint:fix": "cd ../.. && oxlint -c tools/oxlint/oxlint.config.ts --fix convex drizzle langchain-chromadb mongoose prisma"
+    "lint": "cd ../.. && oxlint -c tools/oxlint/oxlint.config.ts --deny-warnings convex drizzle langchain-chromadb mongoose prisma conformance/harnesses/convex conformance/harnesses/drizzle conformance/harnesses/langchain-chromadb conformance/harnesses/mongoose conformance/harnesses/prisma",
+    "lint:fix": "cd ../.. && oxlint -c tools/oxlint/oxlint.config.ts --fix convex drizzle langchain-chromadb mongoose prisma conformance/harnesses/convex conformance/harnesses/drizzle conformance/harnesses/langchain-chromadb conformance/harnesses/mongoose conformance/harnesses/prisma"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.93.0",

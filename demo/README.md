@@ -83,7 +83,7 @@ workflow.
   opt out with, and adding one is what
   [ADR 0001](../docs/adr/0001-demo-domain-has-no-per-adapter-exceptions.md) rules out.
 - **Adding an adapter**: add its example in the same change that adds its
-  `conformance-ledger.json`; check 4 reads the roster from those files, so the two land together or
+  `conformance/harnesses/<adapter>/conformance-ledger.json`; check 4 reads the roster from those files, so the two land together or
   CI stays red. The harness it needs: [conformance/README.md](../conformance/README.md#the-harness-contract).
 - **A shape that needs a carve-out for one adapter is wrong for this directory.** Argue it in
   `conformance/`, where each adapter keeps a ledger.
@@ -142,8 +142,8 @@ authorization bug. Here the id lists are frozen on purpose: for plumbing (did th
 did the ORM accept the filter, did rows come back) a frozen list is the better tripwire and doubles
 as documentation.
 
-`validate-demo.sh` first reads the adapter roster (every directory holding a
-`conformance-ledger.json`) once, requiring it to be non-empty, and reuses it for every adapter
+`validate-demo.sh` first reads the adapter roster (every `conformance/harnesses/<adapter>/`
+holding a `conformance-ledger.json`) once, requiring it to be non-empty, and reuses it for every adapter
 check, so a missing roster cannot skip validation. It then checks:
 
 1. **Structural.** `expected.json` declares exactly the five shapes and every entry is well-formed

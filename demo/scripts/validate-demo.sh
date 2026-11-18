@@ -19,7 +19,7 @@
 #      not fussiness: 3592/3593 are Cerbos's default ports, which any other local PDP may be
 #      holding, so a hardcoded default does not fail, it silently plans against the wrong policy
 #      suite.
-#   4. Every adapter has a runnable example/run.sh. The roster is every directory holding a
+#   4. Every adapter has a runnable example/run.sh. The roster is every conformance/harnesses/<adapter>/ holding a
 #      conformance-ledger.json — the one already there, never a second list — so registering an
 #      adapter is what demands an example of it, and adding one without an example fails here.
 #   5. Principal provenance: an example reads its principal out of seeds.json rather than
@@ -49,10 +49,10 @@ done
 # The roster is every adapter directory that carries a conformance ledger (conformance/README.md,
 # "The ledger"). Capture it before populating the array: a failed substitution in a for-loop would
 # silently skip every roster-based check.
-adapter_roster="$(find "${REPO_ROOT}" -mindepth 2 -maxdepth 2 -name conformance-ledger.json \
+adapter_roster="$(find "${REPO_ROOT}/conformance/harnesses" -mindepth 2 -maxdepth 2 -name conformance-ledger.json \
   -exec dirname {} \; | xargs -n1 basename | sort)"
 if [[ -z "${adapter_roster}" ]]; then
-  echo "no <adapter>/conformance-ledger.json found: the adapter roster is empty" >&2
+  echo "no conformance/harnesses/<adapter>/conformance-ledger.json found: the adapter roster is empty" >&2
   exit 1
 fi
 ADAPTERS=()
@@ -381,7 +381,7 @@ done
 # ---------------------------------------------------------------------------------------------
 echo "==> [4/5] example coverage: every adapter has a runnable example/run.sh"
 
-# The roster is the set of directories holding a conformance-ledger.json — the same one checks 3
+# The roster is the set of conformance/harnesses/<adapter>/ holding a conformance-ledger.json — the same one checks 3
 # and 5 iterate, and the same rule that keeps the PDP pin in one place. A second list here would be
 # a list that can disagree with the corpus, and the adapter left off it is exactly the one nothing
 # would demand an example of. The roster is asserted non-empty above, so this cannot pass by

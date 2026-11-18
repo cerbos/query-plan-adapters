@@ -5,10 +5,10 @@ import * as path from "path";
 import { afterAll, describe, expect, test } from "@jest/globals";
 import type { JsonObject } from "@bufbuild/protobuf";
 
-import { PlanKind, queryPlanToPrisma, UnsupportedQueryPlanError } from "@cerbos/orm-prisma";
-import type { PrismaDatamodel } from "@cerbos/orm-prisma";
-import { planOf } from "@cerbos/orm-prisma/corpus";
-import type { Golden } from "@cerbos/orm-prisma/corpus";
+import { PlanKind, queryPlanToPrisma, UnsupportedQueryPlanError } from "../../../../prisma/src";
+import type { PrismaDatamodel } from "../../../../prisma/src";
+import { planOf } from "../../../../prisma/test/golden-plans";
+import type { Golden } from "../../../../prisma/test/golden-plans";
 import type { DomainMapping } from "./types";
 
 const STORE = process.env["DOMAIN_STORE"] ?? "sqlite";

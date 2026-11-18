@@ -516,12 +516,19 @@ the current PDP (0.57.0), where the total is every golden case in the tier:
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in
 [Unsupported shapes](#unsupported-shapes), and
-[`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
-cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps `has()` in the plan. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
+[`conformance-ledger.json`](../conformance/harnesses/elasticsearch-java/conformance-ledger.json)
+lists each one with the reason. Planner-divergence cases are skipped, not compared, because the
+recorded plan and `check()` disagree and no adapter can pass them. On 0.57.0 that is three extended
+cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and
+`null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted
+attribute to true, while `check()` denies the document; 0.57.0 keeps `has()` in the plan. In
+`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner
+drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while
+`check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
 cases a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it excludes j2,
 while `check()` receives `aNumber` as absent and treats the erroring DENY as not matching
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). In `type-mismatch/in/number-field-in-scalar-principal` and
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). In
+`type-mismatch/in/number-field-in-scalar-principal` and
 `type-mismatch/in/string-field-in-dyn-string` the planner rewrites an `in` over a scalar container
 to `eq`, while `check()` has no `in` overload for it and errors on that disjunct
 ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
@@ -589,7 +596,7 @@ applies to every field, and quietly returns more rows.
   as Cerbos does; `exists_one` over a literal list with a `t == field` body, `size()` of a
   `filter()` over a literal list, and a `list()` holding map literals fold; and a collection macro
   inside a nested lambda lowers to a `nested` query inside the enclosing one.
-  [`conformance-ledger.json`](conformance-ledger.json) lists each remaining refusal.
+  [`conformance-ledger.json`](../conformance/harnesses/elasticsearch-java/conformance-ledger.json) lists each remaining refusal.
 - **Breaking ([#597](https://github.com/cerbos/query-plan-adapters/issues/597)).** `matches()`
   refuses a repetition count with a leading zero (`^one{01}$`), which RE2 reads as literal text and
   Lucene as `{1}`, and nested counts whose copies multiply past 1000 (`^(a{2}){600}$`), which RE2

@@ -36,8 +36,8 @@ log="$(mktemp)"
 if grep -q '^conformance/' <<<"$changed"; then
   conformance/scripts/validate-corpus.sh >>"$log" 2>&1 || failed="validate-corpus"
 fi
-for dir in $(cut -d/ -f1 <<<"$changed" | sort -u); do
-  [ -f "$dir/conformance-ledger.json" ] || continue
+for dir in $(sed -E 's#^conformance/harnesses/([^/]+)/.*#\1#; s#/.*##' <<<"$changed" | sort -u); do
+  [ -f "conformance/harnesses/$dir/conformance-ledger.json" ] || continue
   leg="$(conformance/scripts/run-harness.sh --list | awk -v a="$dir" '$1 == a {print $2}')"
   conformance/scripts/run-harness.sh "$dir" "$leg" >>"$log" 2>&1 || failed="$failed $dir($leg)"
 done

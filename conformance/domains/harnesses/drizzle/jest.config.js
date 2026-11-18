@@ -15,8 +15,6 @@ module.exports = {
   transformIgnorePatterns: ["node_modules/(?!(uuid|@cerbos)/)"],
   modulePaths: [path.join(ADAPTER, "node_modules")],
   moduleNameMapper: {
-    "^@cerbos/orm-drizzle$": path.join(ADAPTER, "src"),
-    "^@cerbos/orm-drizzle/(.*)$": path.join(ADAPTER, "src", "$1"),
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
   testMatch: ["<rootDir>/domains.test.ts"],

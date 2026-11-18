@@ -68,10 +68,12 @@ gets exactly the rows the PDP allows. The switch above only skips a query that c
 row. Every value from the plan is a bound parameter
 with an explicit cast (`$1::text`), and every identifier is double-quoted.
 
-Every shape the adapter refuses returns an error wrapping `cerbospgx.ErrUnsupported` — never a broader
-filter. Use `errors.Is(err, cerbospgx.ErrUnsupported)` to tell "the policy asks for something PostgreSQL
-cannot express" from a mapping or configuration error. The corpus cases it refuses are listed in
-[`conformance-ledger.json`](conformance-ledger.json) (see [Conformance contract](#conformance-contract)).
+Every shape the adapter refuses returns an error wrapping `cerbospgx.ErrUnsupported` — never a
+broader filter. Use `errors.Is(err, cerbospgx.ErrUnsupported)` to tell "the policy asks for
+something PostgreSQL cannot express" from a mapping or configuration error. The corpus cases it
+refuses are listed in
+[`conformance-ledger.json`](../conformance/harnesses/pgx/conformance-ledger.json) (see [Conformance
+contract](#conformance-contract)).
 
 ## Composing the fragment with your own predicates
 
@@ -274,12 +276,16 @@ The total is every golden case in the tier for PDP 0.57.0. A case whose golden r
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
-[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. Two of the skipped cases, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
-planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
-while `check()` has no double + int overload and denies every row, so write `1.0`.
-Two more, `type-mismatch/in/number-field-in-scalar-principal` and
-`type-mismatch/in/string-field-in-dyn-string`, are the planner rewriting `in` over a scalar container
-to `eq`, which `check()` has no overload for
+[`conformance-ledger.json`](../conformance/harnesses/pgx/conformance-ledger.json) lists each one
+with its reason. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are
+skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the
+row; 0.57.0 keeps `has()` in the plan. Two of the skipped cases,
+`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the planner
+dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's, while
+`check()` has no double + int overload and denies every row, so write `1.0`. Two more,
+`type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string`, are the planner rewriting `in` over a scalar
+container to `eq`, which `check()` has no overload for
 ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 
 ### Known gaps
@@ -486,7 +492,7 @@ golangci-lint fmt ./...
 - The conformance suite (`TestAdversarialConformance`) starts no PDP: it replays the recorded
   goldens in `conformance/golden/` against a PostgreSQL container from
   [`POSTGRES_IMAGE`](POSTGRES_IMAGE), the same file `example/run.sh` reads. A case it cannot pass
-  goes in [`conformance-ledger.json`](conformance-ledger.json): `unsupported` (translation must
+  goes in [`conformance-ledger.json`](../conformance/harnesses/pgx/conformance-ledger.json): `unsupported` (translation must
   return `ErrUnsupported`) or `divergent` (the result must differ, with an issue).
 - The unit suite needs nothing running. It covers what the corpus cannot: malformed and hostile
   plans no planner emits. CI runs it as a separate step before the Docker-backed one.

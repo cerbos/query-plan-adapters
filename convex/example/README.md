@@ -122,9 +122,9 @@ The second row is why the deploy is needed: only something that executes the pac
 ## Ports
 
 The Convex backend runs on **13210/13211** and the PDP on **13592/13593**, not the defaults
-(3210/3211 are what `npm run convex:up` binds; 3592/3593 are Cerbos's). Sharing them would not fail
-— it would deploy over a conformance run's functions or plan against another policy suite. Both are
-passed through `$CONVEX_URL` and `$CERBOS_HOST` with no fallback. The backend is started from the
+(3210/3211 are what the conformance harness's `npm run up` binds; 3592/3593 are Cerbos's). Sharing
+them would not fail — it would deploy over a conformance run's functions or plan against another
+policy suite. Both are passed through `$CONVEX_URL` and `$CERBOS_HOST` with no fallback. The backend is started from the
 adapter's own [`../docker-compose.yml`](../docker-compose.yml) with the ports overridden, so the
 image pin lives in one place.
 

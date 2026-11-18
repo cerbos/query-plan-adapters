@@ -4,7 +4,7 @@
 # everything it writes — the policy, resources.json, the goldens and their degeneracy rules — so
 # this checks only what sits outside it:
 #
-#   1. each <adapter>/conformance-ledger.json against conformance/README.md, "The ledger", its lacks
+#   1. each conformance/harnesses/<adapter>/conformance-ledger.json against conformance/README.md, "The ledger", its lacks
 #      mapping only store capabilities some seed in seeds.json requires to a reason and its stores;
 #   2. the PDP pin: pdp-versions.json is well-formed, and every restatement of it agrees;
 #   3. the ent and pgx vendored translator trees are byte-identical;
@@ -49,11 +49,11 @@ while IFS= read -r ledger; do
   adapter="$(basename "$(dirname "${ledger}")")"
   roster+=("${adapter}")
   if ! jq -e . "${ledger}" >/dev/null 2>&1; then
-    fail "${adapter}/conformance-ledger.json is not valid JSON"
+    fail "conformance/harnesses/${adapter}/conformance-ledger.json is not valid JSON"
     continue
   fi
   while IFS= read -r problem; do
-    fail "${adapter}/conformance-ledger.json: ${problem}"
+    fail "conformance/harnesses/${adapter}/conformance-ledger.json: ${problem}"
   done < <(jq -r --arg adapter "${adapter}" --argjson tags "${pdp_tags}" --argjson capabilities "${capabilities}" \
     --argjson stores "${stores}" '
     def text: type == "string" and length > 0;
@@ -85,10 +85,10 @@ while IFS= read -r ledger; do
   ' "${ledger}")
   jq -r '.cases | keys[]' "${ledger}" 2>/dev/null | sort >"${TMP}/ledger-ids" || true
   while IFS= read -r stale; do
-    fail "${adapter}/conformance-ledger.json names ${stale}, which has no golden under golden/${current_tag}/"
+    fail "conformance/harnesses/${adapter}/conformance-ledger.json names ${stale}, which has no golden under golden/${current_tag}/"
   done < <(comm -23 "${TMP}/ledger-ids" "${TMP}/case-ids")
-done < <(find "${REPO_ROOT}" -mindepth 2 -maxdepth 2 -name conformance-ledger.json | sort)
-[[ "${#roster[@]}" -gt 0 ]] || fail "no <adapter>/conformance-ledger.json found: the roster is empty"
+done < <(find "${REPO_ROOT}/conformance/harnesses" -mindepth 2 -maxdepth 2 -name conformance-ledger.json | sort)
+[[ "${#roster[@]}" -gt 0 ]] || fail "no conformance/harnesses/<adapter>/conformance-ledger.json found: the roster is empty"
 
 # ---- 2 (cont.). Restatements of the current pin. ---------------------------------------------
 # Files that cannot read pdp-versions.json (Compose files, go.mod) restate it. Tag and digest are
@@ -186,7 +186,7 @@ for adapter in "${roster[@]}"; do
     (.cases | with_entries(select(.value.pdp == null or (.value.pdp | index($tag) != null))) | keys) as $ledgered
     | $tiers[0] | group_by(.tier)[]
     | "\(.[0].tier)\t\(map(select((.skipped | not) and (.id as $id | $ledgered | index($id) == null))) | length) / \(length)"
-  ' "${REPO_ROOT}/${adapter}/conformance-ledger.json")
+  ' "${REPO_ROOT}/conformance/harnesses/${adapter}/conformance-ledger.json")
 done
 
 if [[ "${failures}" -gt 0 ]]; then

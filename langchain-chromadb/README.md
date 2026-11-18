@@ -387,15 +387,22 @@ caller must. Passed cases on the current PDP, 0.57.0, out of every golden case i
 | adversarial | 486 / 554 |
 
 Without `allowPostFilter`, the 384 cases the post-filter answers throw `UnsupportedOperatorError`
-instead, as they did before the option existed (`src/translator.test.ts` pins that), leaving 78
+instead, as they did before the option existed (`test/translator.test.ts` pins that), leaving 78
 passing: 22, 12 and 44 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
-records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
-Planner-divergence cases are skipped, and count in the total but never as passed. On 0.57.0 that is
-three extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the record; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*`
-cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2,
-while `checkResource` receives `aNumber` as absent and treats the erroring deny rule as not matching
+records.
+[`conformance-ledger.json`](../conformance/harnesses/langchain-chromadb/conformance-ledger.json)
+lists each one with its reason. Planner-divergence cases are skipped, and count in the total but
+never as passed. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0,
+`null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner
+folds `has()` on an omitted attribute to true, while `check()` denies the record; 0.57.0 keeps
+`has()` in the plan. `arithmetic/add/int-literal-plus-constant` and
+`arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x +
+1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies
+every row; write `1.0`. Three `composition/*` cases whose DENY condition reads `aNumber`, which j2
+lacks: the plan's `not(...)` of it denies j2, while `checkResource` receives `aNumber` as absent and
+treats the erroring deny rule as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Two `type-mismatch/in/*` cases
 whose container is a scalar: the planner rewrites `in` over it to `eq`, while `check()` has no `in`
 overload for that container and errors
@@ -407,7 +414,7 @@ corpus reads through a filter is missing on some seed. It declares the boolean k
 spelled without `$ne` and proved by the corpus (`logic/not/bare-boolean-attribute`,
 `type-mismatch/not-equals/number-field-against-string-literal`). An inequality over a string key has
 no `Where` form, so the post-filter answers it. The corpus therefore proves no `$ne`/`$nin` filter;
-`src/translator.test.ts` pins that `required` gates them, and that the type declarations are what
+`test/translator.test.ts` pins that `required` gates them, and that the type declarations are what
 spell the others.
 
 The harness stores every scalar the dataset has, `createdBy` and `scope` included, and maps each.
@@ -517,13 +524,20 @@ demo/scripts/run-example.sh langchain-chromadb
 
 ## Development
 
-Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
-gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
-`*.test.ts`.
+Edit `src/`; the unit suite and its fixtures live in `test/`. `npm run build` (`tsc --build`) emits
+`src/` alone to `lib/`, which is gitignored. The conformance harness lives outside this folder, in
+[`../conformance/harnesses/langchain-chromadb/`](../conformance/harnesses/langchain-chromadb/), and
+runs on this folder's install, so `npm ci` here first.
 
 | Command | What it does | Needs |
 | --- | --- | --- |
 | `npm test` | Offline unit suite: the refusal type, the rules every emitted filter obeys (each field is a mapped key, no `$not`/`$nor`, `$ne`/`$nin` only on `required` fields and never on a boolean or integer key, fractional thresholds only on `numericType: "float"` fields), the mapper contract no policy can reach (function mappers, `required`, `numericType`, `valueType`, the unmapped fallback), what `allowPostFilter` changes and what it leaves alone, and malformed input | Node only |
-| `npm run typecheck` | Type-checks `src/` and the tests | Node only |
-| `npm run chroma` | Starts the pinned ChromaDB ([`CHROMA_IMAGE`](CHROMA_IMAGE)) on port 8234 | Docker |
-| `npm run test:adversarial` | Replays the recorded conformance goldens (`../conformance/golden/`) against the ChromaDB on `CHROMA_URL` (default `http://127.0.0.1:8234`); no PDP | A running ChromaDB |
+| `npm run typecheck` | Type-checks `src/` and `test/` | Node only |
+
+In `../conformance/harnesses/langchain-chromadb/`:
+
+| Command | What it does | Needs |
+| --- | --- | --- |
+| `npm run store` | Starts the pinned ChromaDB ([`CHROMA_IMAGE`](CHROMA_IMAGE)) on port 8234 | Docker |
+| `npm test` | Replays the recorded conformance goldens (`../conformance/golden/`) against the ChromaDB on `CHROMA_URL` (default `http://127.0.0.1:8234`); no PDP | A running ChromaDB |
+| `npm run typecheck` | Type-checks the harness | Node only |

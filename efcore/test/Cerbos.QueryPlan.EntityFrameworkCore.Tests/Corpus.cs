@@ -111,7 +111,7 @@ public static class Corpus
 
     public static Ledger ReadLedger()
     {
-        var file = Path.Combine(AdapterDir, "conformance-ledger.json");
+        var file = Path.Combine(AdapterDir, "..", "conformance", "harnesses", "efcore", "conformance-ledger.json");
         var ledger = JsonSerializer.Deserialize<Ledger>(File.ReadAllText(file), LedgerOptions)!;
         if (ledger.Adapter != "efcore" || ledger.Cases is null) throw new InvalidOperationException(file + " is not the efcore ledger");
         return ledger;

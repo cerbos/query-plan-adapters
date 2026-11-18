@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/efcore.yaml"
       - ".github/workflows/efcore-publish.yaml"
+      # Another adapter's harness and ledger cannot change this result.
+      - "!conformance/harnesses/**"
+      - "conformance/harnesses/efcore/**"
       # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
       - "!conformance/domains/**"
       # No script, harness or build reads Markdown, except the package README, which only

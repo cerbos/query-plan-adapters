@@ -43,7 +43,7 @@ TEMURIN_IMAGE="eclipse-temurin:21-jdk"
 mkdir -p "${CACHE_DIR}"
 
 roster() {
-  find "${REPO_ROOT}" -mindepth 2 -maxdepth 2 -name conformance-ledger.json \
+  find "${REPO_ROOT}/conformance/harnesses" -mindepth 2 -maxdepth 2 -name conformance-ledger.json \
     | xargs -n1 dirname | xargs -n1 basename | sort
 }
 
@@ -88,6 +88,9 @@ wait_for() { # <description> <command...>: up to 60 tries, a second apart
 
 npm_ready() { [[ -d node_modules ]] || npm ci --no-audit --no-fund; }
 
+# Runs a command in the adapter's harness directory, conformance/harnesses/<adapter>/.
+in_harness() { (cd "${REPO_ROOT}/conformance/harnesses/${adapter}" && "$@"); }
+
 gradle() { # <adapter> <gradle args...>, with the environment passed through
   local adapter="$1"; shift
   if command -v java >/dev/null 2>&1; then
@@ -117,11 +120,11 @@ run_leg() { # <adapter> <store>
   # The leg's name, for a harness whose fuzz results file cannot tell its store from the inside.
   export QPA_HARNESS_STORE="${store}"
   case "${adapter}:${store}" in
-    drizzle:sqlite) npm_ready && npm run test:adversarial ;;
-    drizzle:postgres | drizzle:mysql) npm_ready && npm run "test:adversarial:${store}" ;;
+    drizzle:sqlite) npm_ready && in_harness npm test ;;
+    drizzle:postgres | drizzle:mysql) npm_ready && in_harness npm run "test:${store}" ;;
 
-    prisma:sqlite-v*) npm_ready && npm run "test:adversarial:${store#sqlite-}" ;;
-    prisma:postgres-v* | prisma:mysql-v*) npm_ready && npm run "test:adversarial:${store%-v*}:${store##*-}" ;;
+    prisma:sqlite-v*) npm_ready && in_harness npm run "test:${store#sqlite-}" ;;
+    prisma:postgres-v* | prisma:mysql-v*) npm_ready && in_harness npm run "test:${store%-v*}:${store##*-}" ;;
 
     mongoose:mongo | mongoose:mongo-next)
       local file=MONGO_IMAGE
@@ -130,7 +133,7 @@ run_leg() { # <adapter> <store>
       CONTAINERS+=(qpa-harness-mongo)
       docker run -d --rm --name qpa-harness-mongo -p 27017:27017 "$(cat "${file}")" >/dev/null || return 1
       wait_for MongoDB docker exec qpa-harness-mongo mongosh --quiet --eval 'db.runCommand({ping: 1}).ok' \
-        && npm run test:adversarial
+        && in_harness npm test
       ;;
 
     langchain-chromadb:chroma)
@@ -138,7 +141,7 @@ run_leg() { # <adapter> <store>
       CONTAINERS+=(qpa-harness-chroma)
       docker run -d --rm --name qpa-harness-chroma -p 8234:8000 "$(cat CHROMA_IMAGE)" >/dev/null || return 1
       wait_for Chroma curl -sf http://127.0.0.1:8234/api/v2/heartbeat \
-        && CHROMA_URL=http://127.0.0.1:8234 npm run test:adversarial
+        && CHROMA_URL=http://127.0.0.1:8234 in_harness npm test
       ;;
 
     convex:convex)
@@ -149,9 +152,9 @@ run_leg() { # <adapter> <store>
       if wait_for "the Convex backend" curl -sf http://127.0.0.1:3210/version; then
         local key
         key="$(docker compose exec -T backend ./generate_admin_key.sh 2>/dev/null | tail -n 1)"
-        CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 CONVEX_SELF_HOSTED_ADMIN_KEY="${key}" npx convex deploy -y \
-          && CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 CONVEX_SELF_HOSTED_ADMIN_KEY="${key}" npx convex codegen \
-          && CONVEX_URL=http://127.0.0.1:3210 npm run test:adversarial || status=$?
+        export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210 CONVEX_SELF_HOSTED_ADMIN_KEY="${key}"
+        in_harness npm run deploy && in_harness npm run codegen \
+          && CONVEX_URL=http://127.0.0.1:3210 in_harness npm test || status=$?
       else
         status=1
       fi

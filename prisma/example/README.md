@@ -40,15 +40,16 @@ fails. `archived` and `region` are absent on purpose: policy never references th
 
 ## Packaging and verification
 
-Translation is proved elsewhere ([`../src/adversarial.test.ts`](../src/adversarial.test.ts), against
-the hostile corpus). This example proves what that harness cannot: that the import resolves through
-the **published surface** — the `exports` map, `types`, the `files` allowlist, and the peer range
-against this example's own `@prisma/client`. See
-[ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md).
+Translation is proved elsewhere
+([`../../conformance/harnesses/prisma/adversarial.test.ts`](../../conformance/harnesses/prisma/adversarial.test.ts),
+against the hostile corpus). This example proves what that harness cannot: that the import resolves
+through the **published surface** — the `exports` map, `types`, the `files` allowlist, and the peer
+range against this example's own `@prisma/client`. See [ADR
+0002](../../docs/adr/0002-examples-install-the-packed-artifact.md).
 
 Both checks were verified by breaking them:
 
-| Break | Example | `npm test` | `npm run test:adversarial` |
+| Break | Example | `npm test` | the conformance harness |
 | --- | --- | --- | --- |
 | `exports["."]` points at a missing file | fails (TS2307) | passes | passes |
 | `lib/**/*.js` dropped from `files` | fails (MODULE_NOT_FOUND) | passes | passes |

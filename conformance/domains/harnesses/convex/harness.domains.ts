@@ -2,8 +2,8 @@ import { afterAll, describe, expect, test } from "@jest/globals";
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
 
-import { queryPlanToConvex, UnsupportedQueryPlanError } from "@cerbos/orm-convex";
-import { planOf } from "@cerbos/orm-convex/corpus";
+import { queryPlanToConvex, UnsupportedQueryPlanError } from "../../../../convex/src";
+import { planOf } from "../../../../convex/test/golden-plans";
 import {
   asCorpusGolden,
   DOMAINS,

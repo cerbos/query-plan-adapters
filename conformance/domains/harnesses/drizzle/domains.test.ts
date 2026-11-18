@@ -11,9 +11,9 @@ import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
 import mysql from "mysql2/promise";
 import { Client, Pool } from "pg";
 
-import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from "@cerbos/orm-drizzle";
-import { planOf } from "@cerbos/orm-drizzle/corpus";
-import type { Golden } from "@cerbos/orm-drizzle/corpus";
+import { PlanKind, queryPlanToDrizzle, UnsupportedQueryPlanError } from "../../../../drizzle/src";
+import { planOf } from "../../../../drizzle/test/golden-plans";
+import type { Golden } from "../../../../drizzle/test/golden-plans";
 import { kit } from "./kit";
 import type { Dialect, DomainMapping, Kit } from "./kit";
 

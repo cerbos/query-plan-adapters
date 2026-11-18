@@ -28,7 +28,7 @@ import (
 
 const (
 	conformanceDirName = "conformance"
-	ledgerFile         = "conformance-ledger.json"
+	ledgerFile         = "../conformance/harnesses/pgx/conformance-ledger.json"
 	// nowMinus24h is the placeholder a golden records for the instant `now() - duration("24h")`
 	// folds to. It is substituted before the plan is decoded.
 	nowMinus24h = "__NOW_MINUS_24H__"

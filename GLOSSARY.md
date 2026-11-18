@@ -48,12 +48,11 @@ bug. Declared once, as `plannerDivergence` on the case, optionally scoped to PDP
 skips it for those tags.
 _Avoid_: known divergence, adapter divergence
 
-**Ledger**:
-`<adapter>/conformance-ledger.json`: the cases one adapter cannot pass, each `unsupported` (the
-adapter throws its refusal type) or `divergent` (a known wrong result, with an issue). Lists
-exceptions only, and is an output of running the harness, not an input. The set of directories
-holding one is the adapter roster.
-_Avoid_: classification, actions.json, skip list
+**Ledger**: `conformance/harnesses/<adapter>/conformance-ledger.json`: the cases one adapter cannot
+pass, each `unsupported` (the adapter throws its refusal type) or `divergent` (a known wrong result,
+with an issue). Lists exceptions only, and is an output of running the harness, not an input. The
+set of directories holding one is the adapter roster. _Avoid_: classification, actions.json, skip
+list
 
 **Store capability**:
 Something a seed needs of a store beyond holding its attributes, such as `null-list` (a list sent as

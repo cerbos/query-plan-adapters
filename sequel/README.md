@@ -60,20 +60,20 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | adversarial | 466 / 554 |
 
 Every other case is refused with a `Cerbos::Sequel::Error`, which the harness asserts.
-[`conformance-ledger.json`](conformance-ledger.json) gives the reason for each. None is a known
-wrong result. A case whose golden file records a `plannerDivergence` for the PDP is skipped,
-because the plan and `check()` disagree and no adapter can pass it: on 0.57.0 those are three
-extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and
-`null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted
-attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the plan
-drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
-and denies every row: write `1.0`. In `type-mismatch/in/number-field-in-scalar-principal` and
-`type-mismatch/in/string-field-in-dyn-string` the planner rewrites `in` over a scalar container
+[`conformance-ledger.json`](../conformance/harnesses/sequel/conformance-ledger.json) gives the
+reason for each. None is a known wrong result. A case whose golden file records a
+`plannerDivergence` for the PDP is skipped, because the plan and `check()` disagree and no adapter
+can pass it: on 0.57.0 those are three extended cases and four adversarial cases. On 0.56.0,
+`null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner
+folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()`
+in the plan. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`
+the plan drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int
+overload and denies every row: write `1.0`. In `type-mismatch/in/number-field-in-scalar-principal`
+and `type-mismatch/in/string-field-in-dyn-string` the planner rewrites `in` over a scalar container
 to `==`, which `check()` refuses as a type error
 ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). In the three `composition/*`
-cases a DENY condition reads an
-attribute one row lacks, which the plan and `check()` treat differently
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
+cases a DENY condition reads an attribute one row lacks, which the plan and `check()` treat
+differently ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 Some shapes that are CEL errors on every row are translated rather than refused, as SQL
 UNKNOWN, which denies under both polarities exactly as the error does:

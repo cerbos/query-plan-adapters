@@ -17,12 +17,5 @@ module.exports = {
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
-  // The offline suite. The conformance harness needs a Convex backend, and it imports
-  // `convex/_generated`, which `npx convex codegen` produces against a live deployment and
-  // .gitignore excludes. It has its own config (jest.adversarial.config.js) and is skipped here,
-  // so `npm test` stays runnable with nothing installed but node.
-  testPathIgnorePatterns: [
-    "/node_modules/",
-    "<rootDir>/src/adversarial.test.ts",
-  ],
+  testPathIgnorePatterns: ["/node_modules/"],
 };

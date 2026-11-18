@@ -98,7 +98,7 @@ There is no schema file: the demo's four flat attributes become four metadata ke
 
 - `run.sh` reads the image from [`../CHROMA_IMAGE`](../CHROMA_IMAGE), the constant the adapter's
   suites and workflow already share, so there is one pin to bump.
-- ChromaDB is published on host port **18234**, not the 8234 that `npm run chroma` and the
+- ChromaDB is published on host port **18234**, not the 8234 that the conformance harness's `npm run store` and the
   adapter's CI bind, so the example cannot create or delete collections in a server a conformance
   run is using (the same reason the demo PDP uses 13592/13593).
 

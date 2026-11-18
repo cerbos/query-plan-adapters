@@ -17,7 +17,8 @@ check.
 
 - A refusal throws the adapter's refusal type with a message naming the real mechanism, in the
   store's own terms. A ledger entry's `reason` names the same mechanism.
-- A change to what an adapter can translate updates its `conformance-ledger.json` and its README's
+- A change to what an adapter can translate updates its ledger
+  (`conformance/harnesses/<adapter>/conformance-ledger.json`) and its README's
   `Conformance contract` table in the same commit.
 
 ## What a translator unit test may pin
@@ -55,7 +56,7 @@ Three kinds of material live only there, and they are not equal:
   case, over the whole dataset. An adapter that infers its mapping from the ORM replays every case
   twice, through the inferred mapping and through a fully declared one, and each must match the
   ledger. Drizzle also replays list-reading cases under `indexMappers`.
-- **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/src/corpus.ts`,
+- **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/test/golden-plans.ts`,
   `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`,
   `sequel/spec/support/conformance_corpus.rb`, `mongodb-ruby/spec/support/conformance_corpus.rb`,
   the Java `Corpus.java` files, `exposed/src/test/kotlin/dev/cerbos/queryplan/exposed/Corpus.kt`,
@@ -74,8 +75,8 @@ Three kinds of material live only there, and they are not equal:
 ## Prose
 
 - Write "every adapter" / "every harness" / "every example" wherever prose spans the roster, in docs,
-  test-file comments and JSON `description`s alike. The roster is the set of directories holding a
-  `conformance-ledger.json`, so the phrasing stays true when it changes. Genuine counts of something
+  test-file comments and JSON `description`s alike. The roster is the set of `conformance/harnesses/<adapter>/`
+  holding a `conformance-ledger.json`, so the phrasing stays true when it changes. Genuine counts of something
   else (cases, seed rows) go in digits.
 
 ## Commits

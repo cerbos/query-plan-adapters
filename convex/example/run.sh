@@ -21,7 +21,7 @@ set -euo pipefail
 EXAMPLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR="$(cd "${EXAMPLE_DIR}/.." && pwd)"
 
-# 13210/13211, not Convex's default 3210/3211: those are the ports `npm run convex:up` and the
+# 13210/13211, not Convex's default 3210/3211: those are the ports the conformance harness's `npm run up` and the
 # adapter's own CI bind, and a demo backend holding them would let this example deploy over the
 # functions a conformance run is using — and read its data. demo/docker-compose.yml publishes the
 # PDP on 13592/13593 for exactly the same reason. src/main.ts reaches this through $CONVEX_URL, so

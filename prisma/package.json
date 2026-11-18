@@ -29,8 +29,6 @@
     "lib/**/*.js.map",
     "src/**/*.ts",
     "!src/**/*.test.ts",
-    "!src/corpus.ts",
-    "!src/test-setup.*.ts",
     "!src/generated/**",
     "README.md",
     "LICENSE"
@@ -39,30 +37,17 @@
     "access": "public",
     "provenance": true
   },
-  "//test": "`test` is the translator unit test: offline, so no Cerbos sidecar, no `db push`, and no generated client. It is also engine-agnostic — it produces where-inputs and never hands one to a Prisma client — which is why it has no v6/v7 split. Only `test:adversarial*` needs a store; it replays the recorded goldens and starts no PDP.",
+  "//test": "`test` is the translator unit test: offline, so no Cerbos sidecar, no `db push`, and no generated client. It is also engine-agnostic — it produces where-inputs and never hands one to a Prisma client — which is why it has no v6/v7 split. The conformance harness lives in ../conformance/harnesses/prisma/.",
   "scripts": {
     "build": "tsc --build",
-    "typecheck": "npm run typecheck:v7 && npm run typecheck:v6",
-    "typecheck:v6": "tsc -p tsconfig.typecheck.v6.json",
-    "typecheck:v7": "tsc -p tsconfig.typecheck.json",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "prepare": "npm run build",
-    "prisma:generate": "bash scripts/generate-clients.sh all",
-    "prisma:generate:v6": "bash scripts/generate-clients.sh 6",
-    "prisma:generate:v7": "bash scripts/generate-clients.sh 7",
-    "test": "jest",
-    "test:adversarial": "npm run test:adversarial:v7",
-    "test:adversarial:v6": "npm run prisma:generate:v6 && node -e \"for (const f of ['prisma/dev-adversarial.db', 'prisma/dev-adversarial.db-journal']) require('fs').rmSync(f, { force: true })\" && node node_modules/prisma-v6/build/index.js db push --skip-generate --schema=prisma/schema.adversarial.v6.prisma && PRISMA_VERSION=6 jest --config jest.adversarial.config.js",
-    "test:adversarial:v7": "npm run prisma:generate:v7 && node -e \"for (const f of ['prisma/dev-adversarial.db', 'prisma/dev-adversarial.db-journal']) require('fs').rmSync(f, { force: true })\" && node node_modules/prisma/build/index.js db push --schema=prisma/schema.adversarial.prisma --url=file:./prisma/dev-adversarial.db && PRISMA_VERSION=7 jest --config jest.adversarial.config.js",
-    "test:adversarial:postgres": "npm run test:adversarial:postgres:v7",
-    "test:adversarial:postgres:v6": "npm run prisma:generate:v6 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=6 jest --config jest.adversarial.config.js",
-    "test:adversarial:postgres:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=postgres PRISMA_VERSION=7 jest --config jest.adversarial.config.js",
-    "test:adversarial:mysql": "npm run test:adversarial:mysql:v7",
-    "test:adversarial:mysql:v6": "npm run prisma:generate:v6 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=6 jest --config jest.adversarial.config.js",
-    "test:adversarial:mysql:v7": "npm run prisma:generate:v7 && ADAPTER_TEST_DB=mysql PRISMA_VERSION=7 jest --config jest.adversarial.config.js"
+    "test": "jest"
   },
   "engines": {
     "node": ">=22.0.0"
   },
+  "//devDependencies": "Also the install ../conformance/harnesses/prisma/ runs on (its node_modules links here): the store drivers and testcontainers are its, not the unit suite's.",
   "devDependencies": {
     "@bufbuild/protobuf": "^2.15.0",
     "@cerbos/api": "^0.11.2",

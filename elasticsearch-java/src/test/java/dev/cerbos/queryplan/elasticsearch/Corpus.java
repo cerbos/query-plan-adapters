@@ -140,7 +140,7 @@ final class Corpus {
     record LedgerEntry(String status, String reason, String issue, List<String> pdp) {}
 
     static final Map<String, LedgerEntry> LEDGER = JSON.convertValue(
-            read(Path.of(System.getProperty("user.dir"), "conformance-ledger.json")).get("cases"),
+            read(conformanceDir().resolve("harnesses/elasticsearch-java/conformance-ledger.json")).get("cases"),
             new TypeReference<LinkedHashMap<String, LedgerEntry>>() {});
 
     /** The ledger entry for a case under one PDP tag, or null. */

@@ -109,13 +109,13 @@ const UNSUPPORTED_CONVERSIONS = {
  * CONNECTION's collation rather than any column's or the server's. mysql2's default is
  * `utf8mb4_unicode_ci`, under which `'true' = 'TRUE'` and `'true' = 'true '` are both TRUE even on
  * a server started case-sensitive — measured against the MySQL 8.4 image the adversarial leg pins
- * (`MYSQL_IMAGE` in `adversarial.test.ts`) through that leg's own client, not inferred.
- * `utf8mb4_0900_bin` is the collation that is byte-exact AND NO PAD: `utf8mb4_bin` is PAD SPACE,
- * and `utf8mb4_0900_as_cs` ignores a soft hyphen, so `'tr­ue' = 'true'` is TRUE under it.
- * The `_utf8mb4` introducer fixes the literals' character set, so the COLLATE is valid whatever
- * the connection's is. It needs MySQL 8.0.17, the floor
- * `CAST(… AS FLOAT(53))` already sets. SQLite compares the literals BINARY and PostgreSQL in its
- * deterministic database collation, so neither needs one.
+ * (`MYSQL_IMAGE` in `conformance/harnesses/drizzle/adversarial.test.ts`) through that leg's own
+ * client, not inferred. `utf8mb4_0900_bin` is the collation that is byte-exact AND NO PAD:
+ * `utf8mb4_bin` is PAD SPACE, and `utf8mb4_0900_as_cs` ignores a soft hyphen, so `'tr­ue' = 'true'`
+ * is TRUE under it. The `_utf8mb4` introducer fixes the literals' character set, so the COLLATE is
+ * valid whatever the connection's is. It needs MySQL 8.0.17, the floor `CAST(… AS FLOAT(53))`
+ * already sets. SQLite compares the literals BINARY and PostgreSQL in its deterministic database
+ * collation, so neither needs one.
  *
  * The dialect is read off the column's own Drizzle class, as `indexed.ts` does; the caller still
  * declares none.

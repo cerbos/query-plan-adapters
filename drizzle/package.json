@@ -28,7 +28,6 @@
     "lib/**/*.js.map",
     "src/**/*.ts",
     "!src/**/*.test.ts",
-    "!src/corpus.ts",
     "README.md",
     "LICENSE"
   ],
@@ -36,20 +35,18 @@
     "access": "public",
     "provenance": true
   },
-  "//test": "`test` is the offline unit suite: caller-supplied options, the refusal type and malformed plans. It needs no Cerbos, no database and no Docker. `test:adversarial*` replays the recorded conformance goldens (../conformance/golden/) against a real store and needs no PDP; the PostgreSQL and MySQL legs need Docker.",
+  "//test": "`test` is the offline unit suite: caller-supplied options, the refusal type and malformed plans. It needs no Cerbos, no database and no Docker. The conformance harness lives in ../conformance/harnesses/drizzle/.",
   "scripts": {
     "build": "tsc --build",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
-    "test": "jest",
-    "test:adversarial": "jest --config jest.adversarial.config.js",
-    "test:adversarial:postgres": "ADAPTER_TEST_DB=postgres npm run test:adversarial",
-    "test:adversarial:mysql": "ADAPTER_TEST_DB=mysql npm run test:adversarial"
+    "test": "jest"
   },
   "engines": {
     "node": ">=22.0.0"
   },
+  "//devDependencies": "Also the install ../conformance/harnesses/drizzle/ runs on (its node_modules links here): the store drivers and testcontainers are its, not the unit suite's.",
   "devDependencies": {
     "@bufbuild/protobuf": "^2.15.0",
     "@cerbos/api": "^0.11.2",

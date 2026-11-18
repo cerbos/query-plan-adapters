@@ -1,10 +1,14 @@
 {
-  "//": "Type-checks the full source tree, including every test suite. Never emits, so nothing here can reach lib/.",
+  "//": "Type-checks the sources and the unit suite in test/. Never emits, so nothing here can reach lib/.",
   "extends": "./tsconfig.json",
-  "include": ["src"],
+  "include": [
+    "src",
+    "test"
+  ],
   "exclude": [],
   "compilerOptions": {
     "noEmit": true,
+    "rootDir": ".",
     "composite": false,
     "declaration": false,
     "declarationMap": false,

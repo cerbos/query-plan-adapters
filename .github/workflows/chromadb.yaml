@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/chromadb.yaml"
       - ".github/workflows/chromadb-publish.yaml"
+      # Another adapter's harness and ledger cannot change this result.
+      - "!conformance/harnesses/**"
+      - "conformance/harnesses/langchain-chromadb/**"
       # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
       - "!conformance/domains/**"
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this
@@ -51,9 +54,9 @@ jobs:
       # below runs on.
       #
       # The image is read from langchain-chromadb/CHROMA_IMAGE rather than restated here: the
-      # `npm run chroma` helper developers use locally reads the same file, and a matrix entry
-      # that drifted from it would prove the adapter against a different server than anyone
-      # reproducing a failure locally.
+      # conformance harness's `npm run store` helper developers use locally reads the same file, and
+      # a matrix entry that drifted from it would prove the adapter against a different server than
+      # anyone reproducing a failure locally.
       - name: Start ChromaDB
         if: matrix.node-version == '22'
         run: |
@@ -80,13 +83,17 @@ jobs:
 
       - run: npm install
       - run: npm run typecheck
+      - name: Type-check the conformance harness
+        working-directory: conformance/harnesses/langchain-chromadb
+        run: npm run typecheck
       - run: npm test
 
       # The conformance corpus discriminates the translator and the store, not the Node runtime, so
       # it runs on the baseline Node leg only.
       - name: Run conformance harness
         if: matrix.node-version == '22'
-        run: npm run test:adversarial
+        working-directory: conformance/harnesses/langchain-chromadb
+        run: npm test
         env:
           CHROMA_URL: http://127.0.0.1:8000
 

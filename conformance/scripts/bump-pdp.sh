@@ -107,7 +107,7 @@ done
 # The old `previous` stops being tested, so ledger entries scoped to it go: an entry scoped to it
 # alone is deleted, and the tag is dropped from a list that names others (conformance/README.md,
 # "Bumping the PDP"). validate-corpus.sh rejects a `pdp` tag pdp-versions.json no longer records.
-for ledger in "${REPO_ROOT}"/*/conformance-ledger.json; do
+for ledger in "${REPO_ROOT}"/conformance/harnesses/*/conformance-ledger.json; do
   jq -e --arg tag "${dropped_tag}" '[.cases[] | .pdp? // [] | index($tag)] | any' "${ledger}" \
     >/dev/null || continue
   jq --arg tag "${dropped_tag}" '

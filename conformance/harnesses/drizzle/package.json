@@ -1,0 +1,11 @@
+{
+  "name": "conformance-harness-drizzle",
+  "private": true,
+  "//": "Runs with the adapter's toolchain and dependencies (node_modules links to the adapter's): npm ci in ../../../drizzle first.",
+  "scripts": {
+    "typecheck": "../../../drizzle/node_modules/.bin/tsc -p tsconfig.json",
+    "test": "../../../drizzle/node_modules/.bin/jest -c jest.config.js",
+    "test:postgres": "ADAPTER_TEST_DB=postgres ../../../drizzle/node_modules/.bin/jest -c jest.config.js",
+    "test:mysql": "ADAPTER_TEST_DB=mysql ../../../drizzle/node_modules/.bin/jest -c jest.config.js"
+  }
+}

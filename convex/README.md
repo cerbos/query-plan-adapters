@@ -299,7 +299,8 @@ the planner rewrites an `in` over a scalar container to `eq`, which `check()` ha
 ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 
 Every other case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong
-documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
+documents. [`conformance-ledger.json`](../conformance/harnesses/convex/conformance-ledger.json)
+lists each one with its reason.
 
 The corpus's two NULL conventions need no option here, only the mapping and the document shape: an
 attribute the caller omits for a NULL value is absent from the document and declared
@@ -436,20 +437,29 @@ demo/scripts/run-example.sh convex
 
 ## Development
 
-Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
-gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
-`*.test.ts`.
+Edit `src/`; the unit suite and its fixtures live in `test/`. `npm run build` (`tsc --build`)
+emits `src/` alone to `lib/`, which is gitignored. The conformance harness lives outside this folder,
+in [`../conformance/harnesses/convex/`](../conformance/harnesses/convex/), and runs on this folder's
+install, so `npm ci` here first.
 
 | Command | What it does | Needs |
 | --- | --- | --- |
 | `npm test` | Caller-supplied options the corpus cannot vary (function mappers, the unmapped-reference refusal, the `allowPostFilter` gate, the `nullAttributeRepresentation` boundary), the refusal type, the rules every filter handed to Convex obeys, and malformed input | Node only |
-| `npm run typecheck` | Type-checks `src/`, the tests and the backend functions | A deployed backend with `convex/_generated` for the harness |
-| `npm run convex:up` | Starts the Convex backend pinned in `docker-compose.yml` on port 3210 | Docker |
-| `npm run test:adversarial` | The documents each recorded golden plan returns in a real Convex backend equal the recorded `check()` decisions, for both pinned PDPs | `npm run convex:up`, then `npx convex deploy` and `npx convex codegen`; `CONVEX_URL` if not on 3210 |
+| `npm run typecheck` | Type-checks `src/` and `test/` | Node only |
+
+In `../conformance/harnesses/convex/`, a Convex project whose functions are in `backend/`:
+
+| Command | What it does | Needs |
+| --- | --- | --- |
+| `npm run up` | Starts the Convex backend pinned in [`docker-compose.yml`](docker-compose.yml) on port 3210 | Docker |
+| `npm run deploy`, `npm run codegen` | Deploys `backend/` and generates `backend/_generated` | `CONVEX_SELF_HOSTED_URL` and `CONVEX_SELF_HOSTED_ADMIN_KEY` |
+| `npm test` | The documents each recorded golden plan returns in a real Convex backend equal the recorded `check()` decisions, for both pinned PDPs | A deployed backend; `CONVEX_URL` if not on 3210 |
+| `npm run typecheck` | Type-checks the harness and the backend functions | `npm run codegen` |
 
 No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` and applies
-[`conformance-ledger.json`](conformance-ledger.json): a case with no entry must return exactly the
-recorded allowed ids, and an `unsupported` case must throw `UnsupportedQueryPlanError`. See
-"The harness contract" in [conformance/README.md](../conformance/README.md), and the
-`integration-test` job in [`.github/workflows/convex.yaml`](../.github/workflows/convex.yaml) for the
-full backend bring-up sequence.
+[`conformance-ledger.json`](../conformance/harnesses/convex/conformance-ledger.json): a case with no
+entry must return exactly the recorded allowed ids, and an `unsupported` case must throw
+`UnsupportedQueryPlanError`. See "The harness contract" in
+[conformance/README.md](../conformance/README.md), and the `integration-test` job in
+[`.github/workflows/convex.yaml`](../.github/workflows/convex.yaml) for the full backend bring-up
+sequence.

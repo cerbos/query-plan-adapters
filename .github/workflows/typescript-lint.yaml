@@ -8,6 +8,11 @@ on:
       - "langchain-chromadb/**"
       - "mongoose/**"
       - "prisma/**"
+      - "conformance/harnesses/convex/**"
+      - "conformance/harnesses/drizzle/**"
+      - "conformance/harnesses/langchain-chromadb/**"
+      - "conformance/harnesses/mongoose/**"
+      - "conformance/harnesses/prisma/**"
       - "tools/oxlint/**"
       - ".github/workflows/typescript-lint.yaml"
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this

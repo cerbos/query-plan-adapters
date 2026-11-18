@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/drizzle.yaml"
       - ".github/workflows/drizzle-publish.yaml"
+      # Another adapter's harness and ledger cannot change this result.
+      - "!conformance/harnesses/**"
+      - "conformance/harnesses/drizzle/**"
       # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
       - "!conformance/domains/**"
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this
@@ -58,6 +61,9 @@ jobs:
 
       - run: npm install
       - run: npm run typecheck
+      - name: Type-check the conformance harness
+        working-directory: conformance/harnesses/drizzle
+        run: npm run typecheck
       - run: npm run test
 
       # The conformance harness replays the recorded goldens (no PDP) against a real store. The
@@ -65,7 +71,8 @@ jobs:
       # baseline leg only.
       - name: Run conformance harness (SQLite)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial
+        working-directory: conformance/harnesses/drizzle
+        run: npm test
 
       # The store IS a translator property, unlike the Node runtime: `float(53)` casts, boolean
       # CASE arms, timestamp binding and division by zero all evaluate differently on PostgreSQL
@@ -73,7 +80,8 @@ jobs:
       # service block on ubuntu-latest.
       - name: Run conformance harness (PostgreSQL)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:postgres
+        working-directory: conformance/harnesses/drizzle
+        run: npm run test:postgres
 
       # The third store, and the one that disagrees with the other two on the most
       # (cerbos/query-plan-adapters#340): its default collation makes `=` case- AND
@@ -82,7 +90,8 @@ jobs:
       # MySQL 8.0.17.
       - name: Run conformance harness (MySQL)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:mysql
+        working-directory: conformance/harnesses/drizzle
+        run: npm run test:mysql
 
   # The peer range also admits drizzle 1.0, whose column types, PostgreSQL arrays and relations
   # differ from 0.45 at runtime. The unit suite and the corpus run again against it, the corpus on
@@ -104,17 +113,24 @@ jobs:
       - run: npm install
       - run: npm install --no-save drizzle-orm@1.0.0-rc.5
       - run: npm run typecheck
+      - name: Type-check the conformance harness
+        working-directory: conformance/harnesses/drizzle
+        run: npm run typecheck
       - run: npm run test
       - name: Run conformance harness (SQLite)
-        run: npm run test:adversarial
+        working-directory: conformance/harnesses/drizzle
+        run: npm test
       - name: Run conformance harness (SQLite, legacy relations)
-        run: npm run test:adversarial
+        working-directory: conformance/harnesses/drizzle
+        run: npm test
         env:
           QPA_DRIZZLE_RELATIONS: legacy
       - name: Run conformance harness (PostgreSQL)
-        run: npm run test:adversarial:postgres
+        working-directory: conformance/harnesses/drizzle
+        run: npm run test:postgres
       - name: Run conformance harness (MySQL)
-        run: npm run test:adversarial:mysql
+        working-directory: conformance/harnesses/drizzle
+        run: npm run test:mysql
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the

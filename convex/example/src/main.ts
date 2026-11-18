@@ -1,9 +1,10 @@
 /**
  * Example application for `@cerbos/orm-convex`, run against the shared demo domain.
  *
- * This is NOT a test of what the adapter translates — `../src/adversarial.test.ts` proves that
- * against a hostile corpus with a live PDP as the oracle, inside a real Convex backend. This
- * proves the two things that harness structurally cannot:
+ * This is NOT a test of what the adapter translates —
+ * `../../conformance/harnesses/convex/adversarial.test.ts` proves that against a hostile corpus
+ * with a live PDP as the oracle, inside a real Convex backend. This proves the two things that
+ * harness structurally cannot:
  *
  *   1. Packaging. The adapter is resolved through its PUBLISHED package — the `exports` map,
  *      `types`, the `files` allowlist, and the `@cerbos/core` peer range against the copy this
@@ -82,7 +83,7 @@ if (!cerbosHost) {
 
 /**
  * The Convex backend run.sh started, on the same terms and for the same reason: 3210 is the port
- * `npm run convex:up` and the adapter's own CI bind, so a default of it would let this example
+ * the conformance harness's `npm run up` and the adapter's own CI bind, so a default of it would let this example
  * deploy over — and read from — the backend a conformance run is using.
  *
  * demo/scripts/run-example.sh's contract — "reads no environment except CERBOS_HOST" — is between

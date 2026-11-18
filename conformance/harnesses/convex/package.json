@@ -1,0 +1,17 @@
+{
+  "name": "conformance-harness-convex",
+  "private": true,
+  "//": "Runs with the adapter's toolchain and dependencies (node_modules links to the adapter's): npm ci in ../../../convex first.",
+  "scripts": {
+    "typecheck": "../../../convex/node_modules/.bin/tsc -p tsconfig.json",
+    "test": "../../../convex/node_modules/.bin/jest -c jest.config.js --runInBand",
+    "up": "docker compose -f ../../../convex/docker-compose.yml up -d --wait",
+    "down": "docker compose -f ../../../convex/docker-compose.yml down -v",
+    "deploy": "convex deploy -y",
+    "codegen": "convex codegen"
+  },
+  "//dependencies": "Declared only because the Convex CLI refuses to deploy without it; it resolves from the adapter's node_modules, so it is never installed here.",
+  "dependencies": {
+    "convex": "^1.21.0"
+  }
+}

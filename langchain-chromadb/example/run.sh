@@ -11,7 +11,8 @@
 # laptop.
 #
 # The image is READ from ../CHROMA_IMAGE rather than restated here — the same constant this
-# adapter's suites, its `npm run chroma` helper and its workflow already share, so it cannot drift.
+# adapter's suites, the conformance harness's `npm run store` helper and the workflow already share,
+# so it cannot drift.
 #
 # Everything this script prints for a human goes to stderr. stdout carries exactly one JSON
 # document, which the shared runner diffs against demo/expected.json.
@@ -21,10 +22,11 @@ set -euo pipefail
 EXAMPLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADAPTER_DIR="$(cd "${EXAMPLE_DIR}/.." && pwd)"
 
-# 18234, not the 8234 `npm run chroma` and this adapter's CI bind: a demo ChromaDB holding that
-# port would let this example create and delete collections inside the server a conformance run is
-# using. demo/docker-compose.yml publishes the PDP on 13592/13593 for exactly the same reason.
-# src/main.ts reaches this through $CHROMA_URL, so the number is not written down twice.
+# 18234, not the 8234 the conformance harness's `npm run store` and this adapter's CI bind: a demo
+# ChromaDB holding that port would let this example create and delete collections inside the server
+# a conformance run is using. demo/docker-compose.yml publishes the PDP on 13592/13593 for exactly
+# the same reason. src/main.ts reaches this through $CHROMA_URL, so the number is not written down
+# twice.
 CHROMA_PORT=18234
 CHROMA_URL="http://127.0.0.1:${CHROMA_PORT}"
 # Named rather than anonymous so the trap below can dump its logs and remove it. The name is

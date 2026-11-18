@@ -7,6 +7,9 @@ on:
       - "conformance/**"
       - "demo/**"
       - ".github/workflows/jpa.yaml"
+      # Another adapter's harness and ledger cannot change this result.
+      - "!conformance/harnesses/**"
+      - "conformance/harnesses/jpa/**"
       # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
       - "!conformance/domains/**"
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this

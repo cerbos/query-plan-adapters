@@ -9,7 +9,7 @@ require "time"
 # Duplicated across adapters on purpose (ADR 0007). Do not extract or share it.
 module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
-  LEDGER_FILE = File.expand_path("../../conformance-ledger.json", __dir__)
+  LEDGER_FILE = File.expand_path("../../../conformance/harnesses/sequel/conformance-ledger.json", __dir__)
 
   # A seed requiring a store capability the ledger lacks on this store is a resource it cannot
   # hold: it is not loaded, and its id is struck from every golden's allowed set.

@@ -1,0 +1,15 @@
+{
+  "//": "Type-checks the harness and the adapter sources it imports. node_modules is a link to the adapter's. Never emits.",
+  "extends": "../../../langchain-chromadb/tsconfig.json",
+  "include": [
+    "*.ts"
+  ],
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "../../.."
+  }
+}

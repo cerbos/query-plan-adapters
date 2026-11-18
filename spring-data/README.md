@@ -180,9 +180,9 @@ divergence is skipped, and counts toward the total but not as passed:
 | adversarial | 483 / 554 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json), which holds the jpa adapter's entries: the
-translation is the same. [jpa's contract](../jpa/README.md#conformance-contract) says what the
-planner divergences are.
+[`conformance-ledger.json`](../conformance/harnesses/spring-data/conformance-ledger.json), which
+holds the jpa adapter's entries: the translation is the same. [jpa's
+contract](../jpa/README.md#conformance-contract) says what the planner divergences are.
 
 ## Gotchas
 
@@ -270,6 +270,6 @@ that overload there; the guard still fires on any `CriteriaDelete`.
 |---|---|
 | `SpringDataQueryPlanAdapterTest` | What the wrapper adds: `unrestricted()` for an always-allowed plan, refusals raised by `toSpecification`, the `delete(Specification)` guard |
 | `RepositorySurfaceTest` | Spring Data glue: `findAll` / `count` / paging, de-duplication, composition |
-| `AdversarialConformanceTest` | Conformance through `toSpecification` on H2; exceptions in [`conformance-ledger.json`](conformance-ledger.json) |
+| `AdversarialConformanceTest` | Conformance through `toSpecification` on H2; exceptions in [`conformance-ledger.json`](../conformance/harnesses/spring-data/conformance-ledger.json) |
 
 The translator's own suites, and the PostgreSQL and MySQL legs, are in [jpa](../jpa/README.md#testing).

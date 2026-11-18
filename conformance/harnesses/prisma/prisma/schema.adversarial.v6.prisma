@@ -1,0 +1,118 @@
+// Prisma 6 client for the shared adversarial differential harness. Keep the data model in
+// lockstep with schema.adversarial.prisma; only the generator and datasource configuration
+// differ so each matrix leg executes through a genuinely version-matched client.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma-adversarial-v6"
+}
+
+datasource db {
+  provider = "sqlite"
+  // One connection: the harness sets `PRAGMA case_sensitive_like = ON`, which is per-connection,
+  // and the v6 query engine pools connections — a query on another pooled connection would run
+  // a case-insensitive LIKE and over-grant the `string/*/case-sensitive` rows.
+  url      = "file:./dev-adversarial.db?connection_limit=1"
+}
+
+model AdversarialResource {
+  id              String                         @id
+  aBool           Boolean?
+  aString         String?
+  aNumber         Int?
+  aDouble         Float?
+  aOptionalString String?
+  createdBy       String
+  scope           String?
+  createdAt       DateTime?
+  updatedAt       DateTime?
+  tags            AdversarialTag[]
+  categories      AdversarialCategory[]
+  parent          AdversarialParent?             @relation("Parent")
+  numberList      AdversarialNumberListElement[]
+  boolList        AdversarialBoolListElement[]
+  // Two more to-one relations (conformance/seeds.json `peerSeedId`, `stepParentSeedId`): `peer` is
+  // another resource row, and `stepParent` a second row in the parent table.
+  peer            AdversarialResource?           @relation("Peer", fields: [peerId], references: [id])
+  peerId          String?
+  peerOf          AdversarialResource[]          @relation("Peer")
+  stepParent      AdversarialParent?             @relation("StepParent", fields: [stepParentId], references: [id])
+  stepParentId    String?                        @unique
+}
+
+model AdversarialTag {
+  id         String              @id @default(cuid())
+  tagId      String
+  name       String?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
+}
+
+model AdversarialCategory {
+  id            String                   @id @default(cuid())
+  name          String
+  resource      AdversarialResource      @relation(fields: [resourceId], references: [id])
+  resourceId    String
+  subCategories AdversarialSubCategory[]
+}
+
+model AdversarialSubCategory {
+  id         String              @id @default(cuid())
+  name       String
+  category   AdversarialCategory @relation(fields: [categoryId], references: [id])
+  categoryId String
+  labels     AdversarialLabel[]
+}
+
+model AdversarialLabel {
+  id            String                 @id @default(cuid())
+  name          String?
+  subCategory   AdversarialSubCategory @relation(fields: [subCategoryId], references: [id])
+  subCategoryId String
+}
+
+// The corpus's one REAL to-one relation (conformance/seeds.json `parentSeedId`). `parent` and
+// `parent.inner` are separate rows reached through a join, unlike `obj.inner`, which is a flat
+// column wearing a dotted name. A resource owns its own parent chain — no two resources share a
+// parent row — so a filter that returned the parent instead of the child could not agree with the
+// oracle by accident.
+model AdversarialParent {
+  id              String              @id @default(cuid())
+  aBool           Boolean?
+  aString         String?
+  aNumber         Int?
+  aOptionalString String?
+  resource        AdversarialResource? @relation("Parent", fields: [resourceId], references: [id])
+  resourceId      String?              @unique
+  stepChild       AdversarialResource? @relation("StepParent")
+  inner           AdversarialInner?
+}
+
+model AdversarialInner {
+  id              String            @id @default(cuid())
+  aBool           Boolean?
+  aString         String?
+  aNumber         Int?
+  aOptionalString String?
+  parent          AdversarialParent @relation(fields: [parentId], references: [id])
+  parentId        String            @unique
+}
+
+// The corpus's two homogeneous scalar lists (conformance/seeds.json `aNumberList`, `aBoolList`),
+// one owned row per element, the same shape `tagNames` projects out of AdversarialTag. A child
+// model rather than a scalar list because SQLite and MySQL have no array columns, and because a
+// PostgreSQL scalar list cannot hold a NULL element, which a6 and a4 carry. Only membership is
+// asked of these rows (the in-*-list and hasint-*-list actions); the element's position is not
+// stored, since every positional read (index-*-list) is refused before the list is resolved.
+model AdversarialNumberListElement {
+  id         String              @id @default(cuid())
+  value      Float?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
+}
+
+model AdversarialBoolListElement {
+  id         String              @id @default(cuid())
+  value      Boolean?
+  resource   AdversarialResource @relation(fields: [resourceId], references: [id])
+  resourceId String
+}

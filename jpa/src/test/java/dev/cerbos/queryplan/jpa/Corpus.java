@@ -153,7 +153,7 @@ final class Corpus {
     private record Ledger(String adapter, Map<String, Lack> lacks, Map<String, LedgerEntry> cases) {}
 
     private static Ledger readLedger() {
-        Path file = Path.of(System.getProperty("user.dir"), "conformance-ledger.json");
+        Path file = conformanceDir().resolve("harnesses/jpa/conformance-ledger.json");
         Ledger ledger = readJson(file, Ledger.class);
         if (!"jpa".equals(ledger.adapter()) || ledger.cases() == null) {
             throw new IllegalStateException(file + " is not the jpa ledger");

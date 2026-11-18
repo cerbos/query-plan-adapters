@@ -50,7 +50,7 @@ SEEDS: list[dict[str, Any]] = read_corpus_json("seeds.json")["seeds"]
 DERIVED: dict[str, dict[str, Any]] = read_corpus_json("derived-fields.json")["derived"]
 
 with open(
-    os.path.join(os.path.dirname(__file__), "..", "conformance-ledger.json"),
+    os.path.join(os.path.dirname(__file__), "..", "..", "conformance", "harnesses", "sqlalchemy", "conformance-ledger.json"),
     encoding="utf-8",
 ) as _f:
     _LEDGER_FILE = json.load(_f)

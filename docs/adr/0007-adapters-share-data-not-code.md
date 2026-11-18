@@ -102,6 +102,10 @@ oracle establishes that the filter returns the rows the policy allows.
 
 ## Consequences
 
+_Amended by [ADR 0016](0016-conformance-harnesses-live-outside-the-adapters.md): each harness and
+ledger now lives in `conformance/harnesses/<adapter>/`, and each workflow's path filter keeps
+another adapter's from re-running it._
+
 **Per-adapter expectations must not live under `conformance/`.** Every adapter workflow triggers on
 `conformance/**`, and so does `conformance.yaml`, so one adapter re-pinning one filter would
 re-run every other adapter for nothing. This is the same argument `conformance/README.md` ("The

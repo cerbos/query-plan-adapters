@@ -1,0 +1,10 @@
+{
+  "name": "conformance-harness-mongoose",
+  "private": true,
+  "//": "Runs with the adapter's toolchain and dependencies (node_modules links to the adapter's): npm ci in ../../../mongoose first.",
+  "scripts": {
+    "typecheck": "../../../mongoose/node_modules/.bin/tsc -p tsconfig.json",
+    "test": "../../../mongoose/node_modules/.bin/jest -c jest.config.js",
+    "store": "docker run --rm -p 27017:27017 --name test-mongo \"$(cat ../../../mongoose/MONGO_IMAGE)\""
+  }
+}

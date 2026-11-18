@@ -44,7 +44,7 @@ once. What it cost to run had grown faster than what it proved:
   tag: the plan exactly as returned, and the seed ids `check()` allowed. It also writes
   `golden/CHANGES.md`, the previous → current diff. It fails on an empty or total oracle the case
   does not declare `degenerate`. CI runs it with `-check`, so a stale golden fails.
-- **A per-adapter ledger** (`<adapter>/conformance-ledger.json`) lists only the cases that adapter
+- **A per-adapter ledger** (`conformance/harnesses/<adapter>/conformance-ledger.json`) lists only the cases that adapter
   cannot pass: `unsupported` (translating throws the adapter's refusal type) or `divergent` (a
   known wrong result, with an issue), optionally scoped to one PDP tag. Every other case must return
   exactly the recorded ids.

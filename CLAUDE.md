@@ -1,8 +1,12 @@
 # CLAUDE.md
 
 Adapters that translate a Cerbos query plan into a database-native filter, each an independent
-package in a directory holding a `conformance-ledger.json`, except spring-data, which wraps jpa
-([ADR 0013](docs/adr/0013-spring-data-wraps-the-jpa-core.md)).
+package in a top-level directory, except spring-data, which wraps jpa
+([ADR 0013](docs/adr/0013-spring-data-wraps-the-jpa-core.md)). The roster is the set of
+`conformance/harnesses/<adapter>/` holding a `conformance-ledger.json`. An adapter folder holds the
+adapter and its own unit tests only; its conformance harness, ledger and store setup live in
+`conformance/harnesses/<adapter>/` and import it
+([ADR 0016](docs/adr/0016-conformance-harnesses-live-outside-the-adapters.md)).
 
 **The invariant: a shape an adapter cannot express throws the adapter's refusal type.** Every filter
 an adapter emits returns exactly the rows the PDP allows. A best-effort filter can *over-grant*,

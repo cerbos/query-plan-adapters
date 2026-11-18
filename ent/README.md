@@ -84,10 +84,11 @@ ordinary `*sql.Predicate`, so it composes with ent's own predicates, `Limit` and
 predicate is rendered through ent's `sql.Builder`, so quoting and placeholders follow the dialect,
 and every value from the plan is a bound parameter.
 
-Every shape the adapter refuses returns an error wrapping `cerbosent.ErrUnsupported` — never a broader
-predicate. Use `errors.Is(err, cerbosent.ErrUnsupported)` to tell "the policy asks for something SQL
-cannot express" from a mapping or configuration error. The corpus cases it refuses are listed in
-[`conformance-ledger.json`](conformance-ledger.json) (see [Conformance contract](#conformance-contract)).
+Every shape the adapter refuses returns an error wrapping `cerbosent.ErrUnsupported` — never a
+broader predicate. Use `errors.Is(err, cerbosent.ErrUnsupported)` to tell "the policy asks for
+something SQL cannot express" from a mapping or configuration error. The corpus cases it refuses are
+listed in [`conformance-ledger.json`](../conformance/harnesses/ent/conformance-ledger.json) (see
+[Conformance contract](#conformance-contract)).
 
 ## Mapping attributes
 
@@ -365,13 +366,16 @@ adversarial cases.
 | adversarial | 462 / 554 |
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
-[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
-holds for every dialect. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. Two of the skipped cases, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
-planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
-while `check()` has no double + int overload and denies every row, so write `1.0`.
-Two more, `type-mismatch/in/number-field-in-scalar-principal` and
-`type-mismatch/in/string-field-in-dyn-string`, are the planner rewriting `in` over a scalar container
-to `eq`, which `check()` has no overload for
+[`conformance-ledger.json`](../conformance/harnesses/ent/conformance-ledger.json) lists each one
+with its reason, and one ledger holds for every dialect. On 0.56.0, `null/has/missing-attribute` and
+`null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted
+attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. Two of the
+skipped cases, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`,
+are the planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double
+spelling's, while `check()` has no double + int overload and denies every row, so write `1.0`. Two
+more, `type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string`, are the planner rewriting `in` over a scalar
+container to `eq`, which `check()` has no overload for
 ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 
 ### Known gaps
@@ -556,7 +560,7 @@ golangci-lint fmt ./...
 
 - The conformance suite (`TestAdversarialConformance`) starts no PDP: it replays the recorded
   goldens in `conformance/golden/` against in-memory SQLite, then PostgreSQL and MySQL
-  testcontainers. A case it cannot pass goes in [`conformance-ledger.json`](conformance-ledger.json):
+  testcontainers. A case it cannot pass goes in [`conformance-ledger.json`](../conformance/harnesses/ent/conformance-ledger.json):
   `unsupported` (translation must return `ErrUnsupported`) or `divergent` (the result must differ,
   with an issue).
 - The unit suite needs nothing running. It covers what the corpus cannot: malformed and hostile

@@ -15,8 +15,6 @@ module.exports = {
   transformIgnorePatterns: ["node_modules/(?!(uuid|@cerbos)/)"],
   modulePaths: [path.join(ADAPTER, "node_modules")],
   moduleNameMapper: {
-    "^@cerbos/orm-prisma$": path.join(ADAPTER, "src"),
-    "^@cerbos/orm-prisma/(.*)$": path.join(ADAPTER, "src", "$1"),
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
   testMatch: ["<rootDir>/domains.test.ts"],

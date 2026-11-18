@@ -1,10 +1,11 @@
 /**
  * Example application for `@cerbos/langchain-chromadb`, run against the shared demo domain.
  *
- * This is NOT a test of what the adapter translates — `../src/adversarial.test.ts` proves that
- * against a hostile corpus with a live PDP oracle and a real ChromaDB server, and
- * `../src/translator.test.ts` pins the `Where` document each shape emits. This proves the two
- * things neither of those structurally can:
+ * This is NOT a test of what the adapter translates —
+ * `../../conformance/harnesses/langchain-chromadb/adversarial.test.ts` proves that against a
+ * hostile corpus with a live PDP oracle and a real ChromaDB server, and `../src/translator.test.ts`
+ * pins the `Where` document each shape emits. This proves the two things neither of those
+ * structurally can:
  *
  *   1. Packaging. The import below resolves through the PUBLISHED package — `exports`, `types`,
  *      the `files` allowlist, the `@cerbos/core` peer range against the copy this example
@@ -112,8 +113,9 @@ const cerbosHost = requiredEnv("CERBOS_HOST");
 /**
  * Set by this example's own run.sh, which owns the ChromaDB container the way the shared runner
  * owns the PDP. No fallback here either, for a weaker but real version of the same reason: 8234 is
- * the port `npm run chroma` and this adapter's CI bind, and a default pointing at it would let a
- * demo run create and delete collections inside a conformance run's server.
+ * the port the conformance harness's `npm run store` and this adapter's CI bind, and a default
+ * pointing at it would let a demo run create and delete collections inside a conformance run's
+ * server.
  */
 const chromaEndpoint = new URL(requiredEnv("CHROMA_URL"));
 

@@ -420,7 +420,8 @@ Three shapes need a word on how they stay exact:
   instant off the grid is false on every row that holds a value, and a missing one stays the
   error.
 
-What raises (the full list, with reasons, is [`conformance-ledger.json`](conformance-ledger.json)):
+What raises (the full list, with reasons, is
+[`conformance-ledger.json`](../conformance/harnesses/activerecord/conformance-ledger.json)):
 
 | Case | Why the adapter raises |
 | --- | --- |
@@ -451,15 +452,22 @@ cases that return exactly the allowed rows, out of every golden case in the tier
 | extended | 107 / 110 |
 | adversarial | 499 / 554 |
 
-Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness
-asserts, or listed as a known wrong result. [`conformance-ledger.json`](conformance-ledger.json)
-gives the reason for each. A case whose golden file records a `plannerDivergence` for the PDP is
-skipped, because the plan and `check()` disagree and no adapter can pass it. On 0.57.0 those are
-three extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the
-planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In `type-mismatch/in/number-field-in-scalar-principal` and
+Every other case is either refused with a `Cerbos::ActiveRecord::Error`, which the harness asserts,
+or listed as a known wrong result.
+[`conformance-ledger.json`](../conformance/harnesses/activerecord/conformance-ledger.json) gives the
+reason for each. A case whose golden file records a `plannerDivergence` for the PDP is skipped,
+because the plan and `check()` disagree and no adapter can pass it. On 0.57.0 those are three
+extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and
+`null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted
+attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. In
+`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner
+drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while
+`check()` has no double + int overload and denies every row; write `1.0`. In
+`type-mismatch/in/number-field-in-scalar-principal` and
 `type-mismatch/in/string-field-in-dyn-string` the planner rewrites `in` over a scalar container to
 `==`, which `check()` refuses as a type error
-([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). In the other three, all `composition/*`, a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). In the other three, all
+`composition/*`, a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it
 denies j2, while `check()` receives `aNumber` as absent, treats the erroring DENY as not matching
 and lets the ALLOW stand ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 

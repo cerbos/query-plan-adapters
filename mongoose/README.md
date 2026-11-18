@@ -355,7 +355,7 @@ reads that attribute as a map and ranges over its keys, which no filter can iter
   two-variable macro over a map (both iterate the keys the application sent, which no stored
   document carries), `string()` of an untyped integral constant of 1e6 or more, and a bare
   comparison of two `dateTime` fields
-  ([`conformance-ledger.json`](conformance-ledger.json) lists every refused corpus case with its
+  ([`conformance-ledger.json`](../conformance/harnesses/mongoose/conformance-ledger.json) lists every refused corpus case with its
   reason).
 
 A condition the filter path refuses at the top level is evaluated instead as one `$expr` in CEL's
@@ -378,15 +378,22 @@ queries over the corpus's 44 seed documents on MongoDB 7 and 9. Passed cases on 
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.57.0 that is three extended cases and four adversarial cases.
-`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`:
-the planner rewrites an `in` over a scalar container to `eq`, while `check()` has no such overload
-and denies ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
-On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*` cases whose DENY condition reads `aNumber`, which j2
+`type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string`: the planner rewrites an `in` over a scalar container
+to `eq`, while `check()` has no such overload and denies
+([#596](https://github.com/cerbos/query-plan-adapters/issues/596)). On 0.56.0,
+`null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner
+folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps
+`has()` in the plan. `arithmetic/add/int-literal-plus-constant` and
+`arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x +
+1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies
+every row; write `1.0`. Three `composition/*` cases whose DENY condition reads `aNumber`, which j2
 lacks: the plan's `not(...)` of it denies j2, while `checkResource` receives `aNumber` as absent,
 treats the erroring deny rule as not matching and allows the document
-([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with `UnsupportedQueryPlanError`;
-none returns wrong documents. [`conformance-ledger.json`](conformance-ledger.json) lists each one
-with its reason.
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not
+pass is refused with `UnsupportedQueryPlanError`; none returns wrong documents.
+[`conformance-ledger.json`](../conformance/harnesses/mongoose/conformance-ledger.json) lists each
+one with its reason.
 
 Three behaviours the corpus relies on that a caller's mapping has to provide:
 
@@ -430,7 +437,7 @@ reads must be the documents the application put into the resource attributes.** 
 catalogues six ways that can break.
 
 This adapter **builds no subquery**: a relation is a path inside the same document, and it never
-emits `$lookup`/`$graphLookup` or calls `populate()`/`aggregate()`. `src/translator.test.ts`
+emits `$lookup`/`$graphLookup` or calls `populate()`/`aggregate()`. `test/translator.test.ts`
 asserts that, since five of the rows below depend on it.
 
 | Hazard | Position | Mechanism to check |
@@ -573,19 +580,27 @@ demo/scripts/run-example.sh mongoose
 
 ## Development
 
-Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
-gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
-`*.test.ts`.
+Edit `src/`; the unit suite and its fixtures live in `test/`. `npm run build` (`tsc --build`) emits
+`src/` alone to `lib/`, which is gitignored. The conformance harness lives outside this folder, in
+[`../conformance/harnesses/mongoose/`](../conformance/harnesses/mongoose/), and runs on this
+folder's install, so `npm ci` here first.
 
 | Command | What it does | Needs |
 | --- | --- | --- |
 | `npm test` | Caller-supplied options the corpus cannot vary (`valueParser` incl. `ObjectId` coercion, function mappers, the `nullAttributeRepresentation` boundary), the refusal type, the timestamp literal contract, the no-`$lookup` source scan and malformed input | Node only |
-| `npm run typecheck` | Type-checks `src/` and the tests | Node only |
-| `npm run mongo` | Starts the pinned MongoDB ([`MONGO_IMAGE`](MONGO_IMAGE)) on port 27017 | Docker |
-| `npm run test:adversarial` | The documents each recorded golden plan returns on real MongoDB equal the recorded `check()` decisions, for both pinned PDPs | `npm run mongo` in another shell |
+| `npm run typecheck` | Type-checks `src/` and `test/` | Node only |
+
+In `../conformance/harnesses/mongoose/`:
+
+| Command | What it does | Needs |
+| --- | --- | --- |
+| `npm run store` | Starts the pinned MongoDB ([`MONGO_IMAGE`](MONGO_IMAGE)) on port 27017 | Docker |
+| `npm test` | The documents each recorded golden plan returns on real MongoDB equal the recorded `check()` decisions, for both pinned PDPs | `npm run store` in another shell |
+| `npm run typecheck` | Type-checks the harness | Node only |
 
 No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` and applies
-[`conformance-ledger.json`](conformance-ledger.json): a case with no entry must return exactly the
-recorded allowed ids, and an `unsupported` case must throw `UnsupportedQueryPlanError`. See
-"The harness contract" in [conformance/README.md](../conformance/README.md). CI also runs the
-harness against [`MONGO_NEXT_IMAGE`](MONGO_NEXT_IMAGE).
+[`conformance-ledger.json`](../conformance/harnesses/mongoose/conformance-ledger.json): a case with
+no entry must return exactly the recorded allowed ids, and an `unsupported` case must throw
+`UnsupportedQueryPlanError`. See "The harness contract" in
+[conformance/README.md](../conformance/README.md). CI also runs the harness against
+[`MONGO_NEXT_IMAGE`](MONGO_NEXT_IMAGE).

@@ -118,7 +118,7 @@ internal object Corpus {
     )
 
     private fun readLedger(): Ledger {
-        val file = Path.of(System.getProperty("user.dir"), "conformance-ledger.json")
+        val file = conformanceDir().resolve("harnesses/exposed/conformance-ledger.json")
         val ledger = JSON.readValue(file.toFile(), Ledger::class.java)
         check(ledger.adapter == ADAPTER) { "$file is not the $ADAPTER ledger" }
         return ledger

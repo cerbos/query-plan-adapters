@@ -1,6 +1,6 @@
 import type { Metadata } from "chromadb";
 
-import type { FieldMapper, FieldNameMapperConfig } from "@cerbos/langchain-chromadb";
+import type { FieldMapper, FieldNameMapperConfig } from "../../../../langchain-chromadb/src";
 import type { Resource } from "./common";
 
 export interface DomainMapping {

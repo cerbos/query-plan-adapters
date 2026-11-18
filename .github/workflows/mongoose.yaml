@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/mongoose.yaml"
       - ".github/workflows/mongoose-publish.yaml"
+      # Another adapter's harness and ledger cannot change this result.
+      - "!conformance/harnesses/**"
+      - "conformance/harnesses/mongoose/**"
       # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
       - "!conformance/domains/**"
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this
@@ -38,10 +41,11 @@ jobs:
       fail-fast: false
       matrix:
         # The references live in mongoose/MONGO_IMAGE and mongoose/MONGO_NEXT_IMAGE, so this
-        # dimension is a list of FILENAMES and no image is restated here: `npm run mongo` and
-        # mongoose/example/run.sh read MONGO_IMAGE too. MONGO_IMAGE is the baseline, the only one
-        # the example runs; MONGO_NEXT_IMAGE is the forward-compatibility leg, a different major.
-        # Both names end in `_IMAGE` because that is the file pattern renovate.json bumps.
+        # dimension is a list of FILENAMES and no image is restated here: the conformance harness's
+        # `npm run store` and mongoose/example/run.sh read MONGO_IMAGE too. MONGO_IMAGE is the
+        # baseline, the only one the example runs; MONGO_NEXT_IMAGE is the forward-compatibility
+        # leg, a different major. Both names end in `_IMAGE` because that is the file pattern
+        # renovate.json bumps.
         mongodb-image-file:
           - MONGO_IMAGE
           - MONGO_NEXT_IMAGE
@@ -91,13 +95,17 @@ jobs:
 
       - run: npm install
       - run: npm run typecheck
+      - name: Type-check the conformance harness
+        working-directory: conformance/harnesses/mongoose
+        run: npm run typecheck
       - run: npm run test
 
       # The conformance corpus discriminates MongoDB server behaviour, not the Node runtime, so it
       # runs once per server version on the baseline Node leg.
       - name: Run conformance harness
         if: matrix.node-version == '22'
-        run: npm run test:adversarial
+        working-directory: conformance/harnesses/mongoose
+        run: npm test
 
       - name: Stop MongoDB
         if: always() && matrix.node-version == '22'

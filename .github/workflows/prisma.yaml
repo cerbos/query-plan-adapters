@@ -8,6 +8,9 @@ on:
       - "demo/**"
       - ".github/workflows/prisma.yaml"
       - ".github/workflows/prisma-publish.yaml"
+      # Another adapter's harness and ledger cannot change this result.
+      - "!conformance/harnesses/**"
+      - "conformance/harnesses/prisma/**"
       # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
       - "!conformance/domains/**"
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this
@@ -60,15 +63,21 @@ jobs:
 
       - run: npm install
 
-      - name: Generate Prisma clients
-        run: npm run prisma:generate
+      - name: Type-check sources and the unit suite
+        run: npm run typecheck
 
-      - name: Type-check sources and test suites
+      # The harness's own clients, one per store and Prisma major; its type-check needs both.
+      - name: Generate the harness's Prisma clients
+        working-directory: conformance/harnesses/prisma
+        run: npm run generate
+
+      - name: Type-check the conformance harness
+        working-directory: conformance/harnesses/prisma
         run: npm run typecheck
 
       # The translator unit test: offline, and engine-agnostic because it never hands a filter to
       # a Prisma client. The prisma-version dimension therefore no longer discriminates it — it
-      # is still the dimension the conformance legs below and `npm run typecheck` above are
+      # is still the dimension the conformance legs below are
       # matrixed on, which is why it stays.
       - name: Run tests
         run: npm test
@@ -78,7 +87,8 @@ jobs:
       # Prisma major on the baseline Node leg only.
       - name: Run conformance harness (SQLite)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:v${{ matrix.prisma-version }}
+        working-directory: conformance/harnesses/prisma
+        run: npm run test:v${{ matrix.prisma-version }}
 
       # The provider IS a translator property, unlike the Node runtime — and unlike the Prisma
       # major above it, which is an ENGINE matrix. A fractional threshold against an `Int` column,
@@ -88,7 +98,8 @@ jobs:
       # suite's own jest globalSetup, so it needs no service block on ubuntu-latest.
       - name: Run conformance harness (PostgreSQL)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:postgres:v${{ matrix.prisma-version }}
+        working-directory: conformance/harnesses/prisma
+        run: npm run test:postgres:v${{ matrix.prisma-version }}
 
       # The third provider (cerbos/query-plan-adapters#340), and the one whose STORE CONFIGURATION
       # is part of the contract: Prisma's MySQL migration engine writes
@@ -99,7 +110,8 @@ jobs:
       # leg like the other two, giving 2 majors x 3 stores = 6 runs, all on Node 22.
       - name: Run conformance harness (MySQL)
         if: matrix.node-version == '22'
-        run: npm run test:adversarial:mysql:v${{ matrix.prisma-version }}
+        working-directory: conformance/harnesses/prisma
+        run: npm run test:mysql:v${{ matrix.prisma-version }}
 
   # The example application: the published package, installed from `npm pack`'s tarball and used
   # the way a consumer uses it, against the shared demo domain. It covers the two things the

@@ -516,16 +516,21 @@ current PDP, 0.57.0, identical on all six combinations, out of every golden case
 | adversarial | 383 / 554 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
-on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
-Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
-never as passed. On 0.57.0 that is three extended cases and four adversarial cases.
-On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. The three `composition/*` cases with a conditional `DENY` rule: the deny
+on 0.56.0. [`conformance-ledger.json`](../conformance/harnesses/prisma/conformance-ledger.json)
+lists each one with its reason. Cases the corpus marks as a planner divergence are skipped, not
+failed, and count in the total but never as passed. On 0.57.0 that is three extended cases and four
+adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison`
+are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies
+the row; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and
+`arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x +
+1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies
+every row; write `1.0`. The three `composition/*` cases with a conditional `DENY` rule: the deny
 condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while
 `checkResource` receives `aNumber` as absent and treats the erroring deny as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). And
-`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`:
-CEL has no `in` overload for a scalar container, so `check()` errors on that disjunct, while the
-planner rewrites the `in` to an equality.
+`type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string`: CEL has no `in` overload for a scalar container, so
+`check()` errors on that disjunct, while the planner rewrites the `in` to an equality.
 
 **Providers.** `ADAPTER_TEST_MYSQL_COLLATION` replays the MySQL legs under another collation, which
 is how the figures in the collation section were measured, and `ADAPTER_TEST_POSTGRES_INITDB_ARGS`
@@ -759,25 +764,33 @@ A fuller app: [cerbos/express-prisma-cerbos](https://github.com/cerbos/express-p
 
 ## Development
 
-Edit `src/`. `npm run build` (`tsc --build`) emits the published surface to `lib/`, which is
-gitignored and leaves the tests out; `npm run typecheck` is the check that covers `src/` and every
-`*.test.ts`.
+Edit `src/`; the unit suite and its fixtures live in `test/`. `npm run build` (`tsc --build`)
+emits `src/` alone to `lib/`, which is gitignored. The conformance harness lives outside this folder,
+in [`../conformance/harnesses/prisma/`](../conformance/harnesses/prisma/), and runs on this folder's
+install, so `npm ci` here first.
 
 | Command | What it runs | Needs |
 | --- | --- | --- |
 | `npm test` | Offline unit tests: caller-supplied options the corpus cannot vary (mapper forms, `subqueryFilter`, element nullability, `nullAttributeRepresentation`), the refusal type, the timestamp literal contract and malformed input | Nothing |
-| `npm run typecheck` | `tsc` against Prisma 7 and 6 | Nothing |
-| `npm run test:adversarial:v7` / `:v6` | Conformance harness on SQLite, Prisma 7 / 6 | Nothing |
-| `npm run test:adversarial:postgres:v7` / `:v6` | Conformance harness on PostgreSQL | Docker |
-| `npm run test:adversarial:mysql:v7` / `:v6` | Conformance harness on MySQL | Docker |
+| `npm run typecheck` | Type-checks `src/` and `test/` | Nothing |
 
-`npm run test:adversarial`, `…:postgres` and `…:mysql` alias the v7 leg. CI runs all six
+In `../conformance/harnesses/prisma/`, which holds the test schemas and generates their clients:
+
+| Command | What it runs | Needs |
+| --- | --- | --- |
+| `npm run test:v7` / `:v6` | Conformance harness on SQLite, Prisma 7 / 6 | Nothing |
+| `npm run test:postgres:v7` / `:v6` | Conformance harness on PostgreSQL | Docker |
+| `npm run test:mysql:v7` / `:v6` | Conformance harness on MySQL | Docker |
+| `npm run typecheck` | `tsc` over the harness against Prisma 7 and 6 | `npm run generate` |
+
+`npm test`, `npm run test:postgres` and `npm run test:mysql` alias the v7 leg. CI runs all six
 store/Prisma combinations. The SQLite legs delete `prisma/dev-adversarial.db` and push the schema
 into a fresh file, so they need no `--force-reset` (which Prisma refuses to run under an AI agent).
 
 No suite starts a PDP. The harness reads the golden files under `../conformance/golden/` for both
-pinned PDPs and applies [`conformance-ledger.json`](conformance-ledger.json): a case with no entry
-must return exactly the recorded allowed ids, and an `unsupported` case must throw
+pinned PDPs and applies
+[`conformance-ledger.json`](../conformance/harnesses/prisma/conformance-ledger.json): a case with no
+entry must return exactly the recorded allowed ids, and an `unsupported` case must throw
 `UnsupportedQueryPlanError`. See "The harness contract" in
 [conformance/README.md](../conformance/README.md). `npm test` reads its plans from the same golden
 files but pins no corpus case's filter; it needs no database or generated client, and has no v6/v7

@@ -455,20 +455,22 @@ total but not as passed:
 | adversarial | 483 / 554 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json): 21 are `unsupported`, where the adapter
-throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the plan reads an attribute the mapping does not declare) rather than emit a filter. On 0.57.0,
-three extended cases and four adversarial cases are planner divergences the corpus skips:
-`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
-planner drops the int type of the literal in `R.attr.x + 1` while `check()` has no double + int
-overload and denies every row (write `1.0`),
-`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`,
-whose `in` over a scalar the plan and `check()` answer differently, and
-three `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's
-`not(...)` of it denies j2, while `check()` receives `aNumber` as absent and treats the erroring
-DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too:
-that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0
-keeps `has()` in the plan.
+[`conformance-ledger.json`](../conformance/harnesses/jpa/conformance-ledger.json): 21 are
+`unsupported`, where the adapter throws one of its refusal types (`UnsupportedPlanShapeException`,
+or `UnmappedAttributeException` when the plan reads an attribute the mapping does not declare)
+rather than emit a filter. On 0.57.0, three extended cases and four adversarial cases are planner
+divergences the corpus skips: `arithmetic/add/int-literal-plus-constant` and
+`arithmetic/add/int-literal-negated`, where the planner drops the int type of the literal in
+`R.attr.x + 1` while `check()` has no double + int overload and denies every row (write `1.0`),
+`type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string`, whose `in` over a scalar the plan and `check()`
+answer differently, and three `composition/*` cases whose DENY condition reads `aNumber`, which j2
+lacks: the plan's `not(...)` of it denies j2, while `check()` receives `aNumber` as absent and
+treats the erroring DENY as not matching
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). On 0.56.0,
+`null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner
+folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()`
+in the plan.
 
 Other guarantees:
 
@@ -861,7 +863,7 @@ change here runs its suites too.
 |---|---|---|
 | `JpaQueryPlanAdapterTest` | Call contract: malformed operands, overrides, mapping validation, macro depth, bulk-delete guard, plus corpus-gap shapes | H2 in-process |
 | `RefusalTypesTest` | Which refusal type each refused corpus case and each malformed plan throws | nothing — no database |
-| `AdversarialConformanceTest` | Conformance: every recorded golden plan of both PDPs replayed, rows compared with the recorded `check()` decisions; exceptions in [`conformance-ledger.json`](conformance-ledger.json) | H2 in-process, or Docker for PostgreSQL/MySQL |
+| `AdversarialConformanceTest` | Conformance: every recorded golden plan of both PDPs replayed, rows compared with the recorded `check()` decisions; exceptions in [`conformance-ledger.json`](../conformance/harnesses/jpa/conformance-ledger.json) | H2 in-process, or Docker for PostgreSQL/MySQL |
 
 ```bash
 ./gradlew test                            # every suite

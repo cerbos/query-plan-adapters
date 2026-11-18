@@ -520,9 +520,9 @@ adapter bug can reach raises `IllegalStateException` instead, deliberately, so i
 for a classified refusal.
 
 Every corpus case this adapter refuses is listed in
-[`conformance-ledger.json`](conformance-ledger.json) with the mechanism that makes it
-inexpressible, and the conformance harness asserts each one raises `UnsupportedPlanShapeException`
-or `UnmappedAttributeException` rather than return a filter.
+[`conformance-ledger.json`](../conformance/harnesses/exposed/conformance-ledger.json) with the
+mechanism that makes it inexpressible, and the conformance harness asserts each one raises
+`UnsupportedPlanShapeException` or `UnmappedAttributeException` rather than return a filter.
 
 ## Aliased root tables
 
@@ -604,8 +604,9 @@ total but not as passed:
 | adversarial | 497 / 554 |
 
 The same cases pass on all four stores, and under both MySQL prepared-statement modes. Every case
-that does not pass is listed with its reason in [`conformance-ledger.json`](conformance-ledger.json):
-47 are `unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
+that does not pass is listed with its reason in
+[`conformance-ledger.json`](../conformance/harnesses/exposed/conformance-ledger.json): 47 are
+`unsupported`, where the adapter throws `UnsupportedPlanShapeException`, or
 `UnmappedAttributeException` when the fix is a mapping change, rather than emit a filter. None is
 `divergent`. They fall into these families:
 
@@ -918,7 +919,7 @@ An unknown value fails rather than falling back to the default.
 
 | Suite | Role | Needs |
 |---|---|---|
-| `AdversarialConformanceTest` | Conformance: every recorded golden plan of both PDPs replayed, rows compared with the recorded `check()` decisions; exceptions in [`conformance-ledger.json`](conformance-ledger.json). Each case is translated through the inferred mapping and the hand-declared one, which must give the same rows or the same refusal; a fuzz replay (`QPA_FUZZ_DIR`) judges both the same way | H2 or SQLite in-process, or Docker for PostgreSQL/MySQL |
+| `AdversarialConformanceTest` | Conformance: every recorded golden plan of both PDPs replayed, rows compared with the recorded `check()` decisions; exceptions in [`conformance-ledger.json`](../conformance/harnesses/exposed/conformance-ledger.json). Each case is translated through the inferred mapping and the hand-declared one, which must give the same rows or the same refusal; a fuzz replay (`QPA_FUZZ_DIR`) judges both the same way | H2 or SQLite in-process, or Docker for PostgreSQL/MySQL |
 | `ContractTest` | Call contract: the null-convention options, a resolver mapping, `maxMacroDepth`, and plans the planner cannot produce | nothing — no database |
 | `ExposedSurfaceTest`, `ContractSmokeTest`, `MappingDslTest` | The public surface: `QueryPlanFilter`, the mapping DSL, composition with `where`, `andWhere` and DAO `find` | H2 in-process |
 | The translator and review suites | Branches no policy reaches, caller-supplied options, and dialect rendering | H2 and SQLite in-process |

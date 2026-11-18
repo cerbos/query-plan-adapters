@@ -179,7 +179,8 @@ adapter reads once per `ToFilter`: `DateTimeOffset.UtcNow`, or `QueryPlanOptions
 | `list[i]`, `map[k]` | A mapped list with a `position` column by a constant or a numeric column; a map literal by a column |
 | `? :` as a value | A conditional value is carried as its cases, and the operator over it is applied to each |
 
-Refused, each with the reason in [`conformance-ledger.json`](conformance-ledger.json): `int()`,
+Refused, each with the reason in
+[`conformance-ledger.json`](../conformance/harnesses/efcore/conformance-ledger.json): `int()`,
 `double()` and `timestamp()` over a string column (the store cannot say whether the text parses),
 division by a column other than the dividend, the sign of a zero, `string()` of a number literal
 (the plan does not say whether CEL typed it as an int or a double), ordered equality of a list
@@ -202,9 +203,9 @@ passed:
 | adversarial | 493 / 554 |
 
 Every case that does not pass is listed with its reason in
-[`conformance-ledger.json`](conformance-ledger.json). All 21 are `unsupported`: the adapter throws
-`QueryPlanRefusedException` rather than emit a predicate, identically on all three stores. None is
-`divergent`, and none is a wrong answer.
+[`conformance-ledger.json`](../conformance/harnesses/efcore/conformance-ledger.json). All 21 are
+`unsupported`: the adapter throws `QueryPlanRefusedException` rather than emit a predicate,
+identically on all three stores. None is `divergent`, and none is a wrong answer.
 
 ## Gotchas
 

@@ -1,0 +1,10 @@
+{
+  "name": "conformance-harness-langchain-chromadb",
+  "private": true,
+  "//": "Runs with the adapter's toolchain and dependencies (node_modules links to the adapter's): npm ci in ../../../langchain-chromadb first.",
+  "scripts": {
+    "typecheck": "../../../langchain-chromadb/node_modules/.bin/tsc -p tsconfig.json",
+    "test": "../../../langchain-chromadb/node_modules/.bin/jest -c jest.config.js",
+    "store": "docker run --rm -p 8234:8000 \"$(cat ../../../langchain-chromadb/CHROMA_IMAGE)\""
+  }
+}

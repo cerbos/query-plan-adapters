@@ -1,9 +1,10 @@
 /**
  * Example application for `@cerbos/orm-mongoose`, run against the shared demo domain.
  *
- * This is NOT a test of what the adapter translates — `../src/adversarial.test.ts` proves that
- * against a hostile corpus with a live PDP as the oracle, on two MongoDB server versions. This
- * proves the two things that harness structurally cannot:
+ * This is NOT a test of what the adapter translates —
+ * `../../conformance/harnesses/mongoose/adversarial.test.ts` proves that against a hostile corpus
+ * with a live PDP as the oracle, on two MongoDB server versions. This proves the two things that
+ * harness structurally cannot:
  *
  *   1. Packaging. The import below resolves through the PUBLISHED package — the `exports` map,
  *      `types`, the `files` allowlist — because run.sh installs `npm pack`'s tarball rather than
@@ -38,9 +39,9 @@ const RESOURCE_KIND = "document";
 
 /**
  * The store this example owns. `run.sh` starts the server on 27117 rather than MongoDB's default
- * 27017 for the reason demo/docker-compose.yml publishes the PDP on 13592/13593: 27017 is the
- * port `npm run mongo` and the adapter's own CI both bind, and a demo server already holding it
- * would make one of the two silently talk to the other's data.
+ * 27017 for the reason demo/docker-compose.yml publishes the PDP on 13592/13593: 27017 is the port
+ * the conformance harness's `npm run store` and the adapter's own CI both bind, and a demo server
+ * already holding it would make one of the two silently talk to the other's data.
  *
  * The collection is scratch state, emptied and reseeded on every run.
  */

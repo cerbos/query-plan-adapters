@@ -1,0 +1,23 @@
+{
+  "//": "Type-checks the harness and the adapter sources it imports against the Prisma v7 fixtures (tsconfig.v6.json: v6). node_modules is a link to the adapter's. Requires `npm run generate` first. Never emits.",
+  "extends": "../../../prisma/tsconfig.json",
+  "include": [
+    "*.ts"
+  ],
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "../../..",
+    "types": [
+      "node",
+      "jest"
+    ],
+    "moduleSuffixes": [
+      ".v7",
+      ""
+    ]
+  }
+}

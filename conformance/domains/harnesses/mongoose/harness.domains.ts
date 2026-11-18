@@ -3,8 +3,8 @@ import * as os from "node:os";
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import mongoose from "mongoose";
 
-import { PlanKind, queryPlanToMongoose, UnsupportedQueryPlanError } from "@cerbos/orm-mongoose";
-import { planOf } from "@cerbos/orm-mongoose/corpus";
+import { PlanKind, queryPlanToMongoose, UnsupportedQueryPlanError } from "../../../../mongoose/src";
+import { planOf } from "../../../../mongoose/test/golden-plans";
 import {
   asCorpusGolden,
   DOMAINS,

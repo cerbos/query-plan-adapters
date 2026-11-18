@@ -54,15 +54,15 @@ purpose: they belong to the application filter in shape 5, not to policy.
 
 ## Packaging proof
 
-[`../src/adversarial.test.ts`](../src/adversarial.test.ts) proves what the adapter translates. It
-imports from `"."`, so it never touches the published surface. This example does:
-`run.sh` installs the `npm pack` tarball, so the import resolves through the `exports` map, `types`,
-the `files` allowlist, and the peer range against this example's own `drizzle-orm`
-([ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md)).
+[`../../conformance/harnesses/drizzle/adversarial.test.ts`](../../conformance/harnesses/drizzle/adversarial.test.ts)
+proves what the adapter translates. It imports from `"."`, so it never touches the published
+surface. This example does: `run.sh` installs the `npm pack` tarball, so the import resolves through
+the `exports` map, `types`, the `files` allowlist, and the peer range against this example's own
+`drizzle-orm` ([ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md)).
 
 Both breaks were checked by hand:
 
-| Break                                   | Example                  | `npm test`  | `npm run test:adversarial` |
+| Break                                   | Example                  | `npm test`  | the conformance harness |
 | --------------------------------------- | ------------------------ | ----------- | -------------------------- |
 | `exports["."]` points at a missing file  | fails (TS2307)           | passes | passes                |
 | `lib/**/*.js` dropped from `files`       | fails (MODULE_NOT_FOUND) | passes | passes                |

@@ -1,0 +1,10 @@
+{
+  "//": "Same as tsconfig.json, but resolves the `./test-setup*` imports to the Prisma v6 fixtures so the harness is type-checked against both supported client majors.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "moduleSuffixes": [
+      ".v6",
+      ""
+    ]
+  }
+}

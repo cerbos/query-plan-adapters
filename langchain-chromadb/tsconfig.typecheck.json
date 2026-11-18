@@ -1,12 +1,18 @@
 {
-  "//": "Type-checks the full source tree, including the test suites that tsconfig.json excludes from the emitting `tsc --build`. Never emits, so nothing here can reach lib/.",
+  "//": "Type-checks the sources and the unit suite in test/. Never emits, so nothing here can reach lib/.",
   "extends": "./tsconfig.json",
-  "include": ["src"],
+  "include": [
+    "src",
+    "test"
+  ],
   "exclude": [],
   "compilerOptions": {
     "noEmit": true,
+    "rootDir": ".",
     "composite": false,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false

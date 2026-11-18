@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import { ChromaClient, ChromaNotFoundError, type Collection } from "chromadb";
 
-import { PlanKind, queryPlanToChromaDB, UnsupportedOperatorError } from "@cerbos/langchain-chromadb";
-import { planOf } from "@cerbos/langchain-chromadb/corpus";
+import { PlanKind, queryPlanToChromaDB, UnsupportedOperatorError } from "../../../../langchain-chromadb/src";
+import { planOf } from "../../../../langchain-chromadb/test/golden-plans";
 import {
   asCorpusGolden,
   DOMAINS,

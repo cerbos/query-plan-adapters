@@ -13,8 +13,6 @@ module.exports = {
   transformIgnorePatterns: ["node_modules/(?!(uuid|@cerbos)/)"],
   modulePaths: [path.join(ADAPTER, "node_modules")],
   moduleNameMapper: {
-    "^@cerbos/langchain-chromadb$": path.join(ADAPTER, "src"),
-    "^@cerbos/langchain-chromadb/(.*)$": path.join(ADAPTER, "src", "$1"),
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
   testMatch: ["<rootDir>/harness.domains.ts"],

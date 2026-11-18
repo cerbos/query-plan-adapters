@@ -575,23 +575,24 @@ recorded in that tier:
 | extended | 91 / 110 |
 | adversarial | 417 / 554 |
 
-Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
-skipped because its golden file records a planner divergence, which no adapter can pass and the
-harness does not compare. Under 0.57.0 those are three extended cases and four adversarial cases:
-`arithmetic/add/int-literal-plus-constant` and
-`arithmetic/add/int-literal-negated` (the planner drops the int type of the literal in
-`R.attr.x + 1`, while `check()` has no double + int overload and denies every row, so write `1.0`),
-three
-`composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of
-it denies j2, while `check()` receives `aNumber` as absent and treats the erroring DENY as not
-matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)), and
-`type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`
-(the planner rewrites `in` over a scalar container to `==`, which `check()` has no overload for;
-[#596](https://github.com/cerbos/query-plan-adapters/issues/596)). On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too:
-that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0
-keeps `has()` in the plan.
-[`conformance-ledger.json`](conformance-ledger.json) lists each refused case with the mechanism that
-rules it out.
+Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is skipped
+because its golden file records a planner divergence, which no adapter can pass and the harness does
+not compare. Under 0.57.0 those are three extended cases and four adversarial cases:
+`arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` (the planner
+drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
+and denies every row, so write `1.0`), three `composition/*` cases whose DENY condition reads
+`aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while `check()` receives `aNumber`
+as absent and treats the erroring DENY as not matching
+([#530](https://github.com/cerbos/query-plan-adapters/issues/530)), and
+`type-mismatch/in/number-field-in-scalar-principal` and
+`type-mismatch/in/string-field-in-dyn-string` (the planner rewrites `in` over a scalar container to
+`==`, which `check()` has no overload for;
+[#596](https://github.com/cerbos/query-plan-adapters/issues/596)). On 0.56.0,
+`null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner
+folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()`
+in the plan.
+[`conformance-ledger.json`](../conformance/harnesses/sqlalchemy/conformance-ledger.json) lists each
+refused case with the mechanism that rules it out.
 
 ### Refusals
 

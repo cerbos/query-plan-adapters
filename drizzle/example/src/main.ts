@@ -1,9 +1,10 @@
 /**
  * Example application for `@cerbos/orm-drizzle`, run against the shared demo domain.
  *
- * This is NOT a test of what the adapter translates — `../src/adversarial.test.ts` proves that
- * against a hostile corpus and a live PDP oracle, on SQLite and on PostgreSQL. This proves the
- * two things that harness structurally cannot:
+ * This is NOT a test of what the adapter translates —
+ * `../../conformance/harnesses/drizzle/adversarial.test.ts` proves that against a hostile corpus
+ * and a live PDP oracle, on SQLite and on PostgreSQL. This proves the two things that harness
+ * structurally cannot:
  *
  *   1. Packaging. The import below resolves through the PUBLISHED package — `exports`, `types`,
  *      the `files` allowlist, the peer range against this example's own `drizzle-orm` — because

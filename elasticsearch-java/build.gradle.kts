@@ -54,7 +54,7 @@ tasks.test {
     inputs.dir(project.file("../conformance"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("conformanceCorpus")
-    inputs.file(project.file("conformance-ledger.json"))
+    inputs.file(project.file("../conformance/harnesses/elasticsearch-java/conformance-ledger.json"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("conformanceLedger")
     // The file naming the Elasticsearch image the container-backed suites start. CI sets

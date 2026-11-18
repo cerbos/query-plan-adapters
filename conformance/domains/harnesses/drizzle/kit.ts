@@ -1,8 +1,8 @@
 import * as my from "drizzle-orm/mysql-core";
 import * as pg from "drizzle-orm/pg-core";
 import * as lite from "drizzle-orm/sqlite-core";
-import type { Mapper, NullAttributeRepresentation } from "@cerbos/orm-drizzle";
-import type { RelationsSchema } from "@cerbos/orm-drizzle/types";
+import type { Mapper, NullAttributeRepresentation } from "../../../../drizzle/src";
+import type { RelationsSchema } from "../../../../drizzle/src/types";
 
 export type Dialect = "sqlite" | "postgres" | "mysql";
 

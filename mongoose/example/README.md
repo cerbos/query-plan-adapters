@@ -55,7 +55,7 @@ import in [`src/main.ts`](src/main.ts) resolves through the published `exports` 
 `files` allowlist ([ADR 0002](../../docs/adr/0002-examples-install-the-packed-artifact.md)). Both
 breaks below were checked by hand:
 
-| Break                                   | Example                  | `npm test`  | `npm run test:adversarial` |
+| Break                                   | Example                  | `npm test`  | the conformance harness |
 | --------------------------------------- | ------------------------ | ----------- | -------------------------- |
 | `exports["."]` points at a missing file  | fails (TS2307)           | passes | passes                |
 | `lib/**/*.js` dropped from `files`       | fails (MODULE_NOT_FOUND) | passes | passes                |
@@ -86,11 +86,12 @@ breaks below were checked by hand:
 
 ## The store
 
-- `run.sh` reads the image from [`../MONGO_IMAGE`](../MONGO_IMAGE), the same file `npm run mongo`
-  and the baseline CI leg read, so there is one pin to bump. It runs only that baseline server;
-  [`../MONGO_NEXT_IMAGE`](../MONGO_NEXT_IMAGE) is covered by the adapter's own suites.
-- MongoDB is published on host port **27117**, not 27017, so it cannot collide with `npm run mongo`
-  or the adapter's CI (the same reason the demo PDP uses 13592/13593).
+- `run.sh` reads the image from [`../MONGO_IMAGE`](../MONGO_IMAGE), the same file the conformance
+  harness's `npm run store` and the baseline CI leg read, so there is one pin to bump. It runs only
+  that baseline server; [`../MONGO_NEXT_IMAGE`](../MONGO_NEXT_IMAGE) is covered by the conformance
+  harness.
+- MongoDB is published on host port **27117**, not 27017, so it cannot collide with the conformance
+  harness's `npm run store` or the adapter's CI (the same reason the demo PDP uses 13592/13593).
 
 This is a JSON-printing CLI, not an onboarding artifact; that is
 [`spring-data/example/`](../../spring-data/example/)

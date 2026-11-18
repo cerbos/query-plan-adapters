@@ -1,6 +1,6 @@
 import type { Model, Schema } from "mongoose";
 
-import type { Mapper } from "@cerbos/orm-mongoose";
+import type { Mapper } from "../../../../mongoose/src";
 import type { Resource } from "./common";
 
 export interface DomainMapping {

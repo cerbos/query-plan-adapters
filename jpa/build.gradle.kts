@@ -93,7 +93,7 @@ tasks.test {
     inputs.dir(project.file("../conformance"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("conformanceCorpus")
-    inputs.file(project.file("conformance-ledger.json"))
+    inputs.file(project.file("../conformance/harnesses/jpa/conformance-ledger.json"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("conformanceLedger")
     inputs.file(project.file("POSTGRES_IMAGE"))
