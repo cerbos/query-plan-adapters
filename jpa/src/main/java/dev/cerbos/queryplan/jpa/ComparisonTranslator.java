@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.Temporal;
 import java.util.ArrayList;
 import java.util.List;
@@ -704,8 +705,24 @@ final class ComparisonTranslator {
 
     private Predicate timestampLeaf(String op, String variable, Instant instant, Scope scope) {
         Path<?> path = scope.path(variable);
-        return leaf.withOverride(op, path, instant,
-                () -> leaf.defaultLeaf(op, path, temporalBound(variable, path, op, instant)));
+        return leaf.withOverride(op, path, instant, () -> microsecondLeaf(op, variable, path, instant));
+    }
+
+    /**
+     * A constant finer than a microsecond, against a column that holds whole microseconds (every
+     * store this adapter supports): binding it would round it, so {@code x >= c} is solved as
+     * {@code x > floor(c)}, and no stored value equals it.
+     */
+    private Predicate microsecondLeaf(String op, String variable, Path<?> path, Instant instant) {
+        if (instant.getNano() % 1_000 == 0) {
+            return leaf.defaultLeaf(op, path, temporalBound(variable, path, op, instant));
+        }
+        Instant floor = instant.truncatedTo(ChronoUnit.MICROS);
+        return switch (op) {
+            case "eq", "ne" -> matchesNothing(op, path);
+            case "gt", "ge" -> leaf.defaultLeaf("gt", path, temporalBound(variable, path, "gt", floor));
+            default -> leaf.defaultLeaf("le", path, temporalBound(variable, path, "le", floor));
+        };
     }
 
     /** {@code instant} as the column's Java type; see {@link #timestampLeaf}. */
