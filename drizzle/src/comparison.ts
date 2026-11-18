@@ -908,19 +908,28 @@ export const buildComparisonFilter = (
   const context: ComparisonContext = { operator, mapper, options, negated };
 
   // An attribute is a JSON value — a string, number, boolean, null, list or map — never a CEL
-  // timestamp, and CEL has no ordering between a timestamp and any of those: the comparison is a
-  // no-overload error, denied under both polarities, whatever the column stores. Only a
-  // `timestamp(attribute)` conversion compares as an instant.
-  if (operator !== "eq" && operator !== "ne") {
-    const isAttribute = (operand: PlanExpressionOperand) =>
-      isNameOperand(operand) && operand.name.startsWith("request.");
+  // timestamp, whatever the column stores. Against a timestamp, an ordering is a no-overload error,
+  // denied under both polarities, and heterogeneous equality makes `==` false and `!=` true. Only
+  // a `timestamp(attribute)` conversion compares as an instant.
+  const isAttribute = (operand: PlanExpressionOperand) =>
+    isNameOperand(operand) && operand.name.startsWith("request.");
 
-    if (
-      (isAttribute(left) && isOperatorCall(right, "timestamp")) ||
-      (isAttribute(right) && isOperatorCall(left, "timestamp"))
-    ) {
-      return UNKNOWN_CONDITION;
+  const bareAgainstTimestamp =
+    (isAttribute(left) && isOperatorCall(right, "timestamp")) ||
+    (isAttribute(right) && isOperatorCall(left, "timestamp"));
+
+  if (bareAgainstTimestamp && operator !== "eq" && operator !== "ne") {
+    return UNKNOWN_CONDITION;
+  }
+
+  if (bareAgainstTimestamp) {
+    if (timestampLiteral(isAttribute(left) ? right : left) === undefined) {
+      throw new UnsupportedQueryPlanError(
+        "A bare attribute compared with timestamp() over a non-literal: CEL answers by type, false for == and true for !=, only where the converted value is present",
+      );
     }
+
+    return buildMixedTypeComparison(context, left, right);
   }
 
   const indexed = [left, right].find((operand) =>
