@@ -1,0 +1,76 @@
+{
+  "action": "decommission",
+  "allowed": [
+    "dv02",
+    "dv03"
+  ],
+  "domain": "iot",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.site.org.id"
+                },
+                {
+                  "value": "org-acme"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.online"
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "tier"
+                      },
+                      {
+                        "variable": "request.resource.attr.labels"
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "orgId": "org-acme",
+      "regions": []
+    },
+    "id": "ad1",
+    "roles": [
+      "org_admin"
+    ]
+  },
+  "principalName": "admin_acme",
+  "resourceKind": "device"
+}

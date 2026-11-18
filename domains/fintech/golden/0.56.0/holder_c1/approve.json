@@ -1,0 +1,24 @@
+{
+  "action": "approve",
+  "allowed": [],
+  "domain": "fintech",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 0,
+      "branches": [],
+      "customerId": "c1"
+    },
+    "id": "u-c1",
+    "roles": [
+      "customer"
+    ]
+  },
+  "principalName": "holder_c1",
+  "resourceKind": "payment"
+}

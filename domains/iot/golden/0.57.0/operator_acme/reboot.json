@@ -1,0 +1,110 @@
+{
+  "action": "reboot",
+  "allowed": [
+    "dv01",
+    "dv04",
+    "dv08"
+  ],
+  "domain": "iot",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.site.org.id"
+                },
+                {
+                  "value": "org-acme"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.alerts"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "a.severity"
+                                  },
+                                  {
+                                    "value": 3
+                                  }
+                                ],
+                                "operator": "ge"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "a.acknowledged"
+                                  }
+                                ],
+                                "operator": "not"
+                              }
+                            }
+                          ],
+                          "operator": "and"
+                        }
+                      },
+                      {
+                        "variable": "a"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.batteryPct"
+                },
+                {
+                  "value": 20
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "orgId": "org-acme",
+      "regions": []
+    },
+    "id": "op1",
+    "roles": [
+      "operator"
+    ]
+  },
+  "principalName": "operator_acme",
+  "resourceKind": "device"
+}

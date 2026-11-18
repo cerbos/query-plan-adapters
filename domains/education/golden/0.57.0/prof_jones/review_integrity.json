@@ -1,0 +1,25 @@
+{
+  "action": "review_integrity",
+  "allowed": [],
+  "domain": "education",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [
+        "cs"
+      ],
+      "term": ""
+    },
+    "id": "f-jones",
+    "roles": [
+      "faculty"
+    ]
+  },
+  "principalName": "prof_jones",
+  "resourceKind": "submission"
+}

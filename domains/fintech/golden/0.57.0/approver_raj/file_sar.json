@@ -1,0 +1,23 @@
+{
+  "action": "file_sar",
+  "allowed": [],
+  "domain": "fintech",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 100000,
+      "branches": []
+    },
+    "id": "u-raj",
+    "roles": [
+      "approver"
+    ]
+  },
+  "principalName": "approver_raj",
+  "resourceKind": "payment"
+}

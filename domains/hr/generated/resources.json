@@ -1,0 +1,250 @@
+{
+  "kind": "employee_record",
+  "nulls": "omitted",
+  "resources": [
+    {
+      "id": "e01",
+      "attr": {
+        "department": {
+          "costCenter": "CC-100",
+          "id": "eng"
+        },
+        "email": "ceo@example.com",
+        "employmentType": "full_time",
+        "hiredOn": "2010-01-04T09:00:00Z",
+        "level": 9,
+        "location": {
+          "city": "London",
+          "country": "GB"
+        },
+        "salaryBand": "X",
+        "skills": []
+      }
+    },
+    {
+      "id": "e02",
+      "attr": {
+        "department": {
+          "costCenter": "CC-100",
+          "id": "eng"
+        },
+        "email": "e02@example.com",
+        "employmentType": "full_time",
+        "hiredOn": "2015-03-01T09:00:00Z",
+        "level": 6,
+        "location": {
+          "city": "London",
+          "country": "GB"
+        },
+        "manager": {
+          "id": "e01"
+        },
+        "salaryBand": "E",
+        "skills": []
+      }
+    },
+    {
+      "id": "e03",
+      "attr": {
+        "department": {
+          "costCenter": "CC-300",
+          "id": "fin"
+        },
+        "email": "e03@example.com",
+        "employmentType": "full_time",
+        "hiredOn": "2016-03-01T09:00:00Z",
+        "level": 7,
+        "location": {
+          "city": "New York",
+          "country": "US"
+        },
+        "manager": {
+          "id": "e01"
+        },
+        "salaryBand": "F",
+        "skills": []
+      }
+    },
+    {
+      "id": "e04",
+      "attr": {
+        "department": {
+          "costCenter": "CC-100",
+          "id": "eng"
+        },
+        "email": "e04@example.com",
+        "employmentType": "full_time",
+        "hiredOn": "2019-01-01T09:00:00Z",
+        "level": 4,
+        "location": {
+          "city": "London",
+          "country": "GB"
+        },
+        "manager": {
+          "id": "e02",
+          "manager": {
+            "id": "e01"
+          }
+        },
+        "salaryBand": "C",
+        "skills": [
+          "go",
+          "kubernetes"
+        ]
+      }
+    },
+    {
+      "id": "e05",
+      "attr": {
+        "department": {
+          "costCenter": "CC-100",
+          "id": "eng"
+        },
+        "email": "e05@example.com",
+        "employmentType": "full_time",
+        "hiredOn": "2020-01-01T09:00:00Z",
+        "level": 3,
+        "location": {
+          "city": "Edinburgh",
+          "country": "GB"
+        },
+        "manager": {
+          "id": "e02",
+          "manager": {
+            "id": "e01"
+          }
+        },
+        "skills": []
+      }
+    },
+    {
+      "id": "e06",
+      "attr": {
+        "department": {
+          "costCenter": "CC-200",
+          "id": "ops"
+        },
+        "email": "e06@contractors.example.com",
+        "employmentType": "contractor",
+        "hiredOn": "2021-01-01T09:00:00Z",
+        "level": 6,
+        "location": {
+          "city": "New York",
+          "country": "US"
+        },
+        "manager": {
+          "id": "e02",
+          "manager": {
+            "id": "e01"
+          }
+        },
+        "skills": [
+          "payroll"
+        ],
+        "terminatedOn": "2023-01-01T09:00:00Z"
+      }
+    },
+    {
+      "id": "e07",
+      "attr": {
+        "department": {
+          "costCenter": "CC-300",
+          "id": "fin"
+        },
+        "email": "e07@example.com",
+        "employmentType": "full_time",
+        "hiredOn": "2018-01-01T09:00:00Z",
+        "level": 5,
+        "location": {
+          "city": "London",
+          "country": "GB"
+        },
+        "manager": {
+          "id": "e03",
+          "manager": {
+            "id": "e01"
+          }
+        },
+        "salaryBand": "D",
+        "skills": []
+      }
+    },
+    {
+      "id": "e08",
+      "attr": {
+        "department": {
+          "costCenter": "CC-200",
+          "id": "ops"
+        },
+        "email": "e08@contractors.example.com",
+        "employmentType": "contractor",
+        "hiredOn": "2022-01-01T09:00:00Z",
+        "level": 2,
+        "location": {
+          "city": "London",
+          "country": "GB"
+        },
+        "manager": {
+          "id": "e04",
+          "manager": {
+            "id": "e02"
+          }
+        },
+        "skills": [
+          "Go"
+        ]
+      }
+    },
+    {
+      "id": "e09",
+      "attr": {
+        "department": {
+          "costCenter": "CC-100",
+          "id": "eng"
+        },
+        "email": "e09@example.com",
+        "employmentType": "intern",
+        "hiredOn": "2024-06-01T09:00:00Z",
+        "level": 2,
+        "location": {
+          "city": "New York",
+          "country": "US"
+        },
+        "manager": {
+          "id": "e04",
+          "manager": {
+            "id": "e02"
+          }
+        },
+        "skills": [],
+        "terminatedOn": "2024-09-01T09:00:00Z"
+      }
+    },
+    {
+      "id": "e10",
+      "attr": {
+        "department": {
+          "costCenter": "CC-200",
+          "id": "ops"
+        },
+        "email": "e10@contractors.example.com.evil.io",
+        "employmentType": "contractor",
+        "hiredOn": "2024-01-01T09:00:00Z",
+        "level": 1,
+        "location": {
+          "city": "Edinburgh",
+          "country": "GB"
+        },
+        "manager": {
+          "id": "e05",
+          "manager": {
+            "id": "e02"
+          }
+        },
+        "skills": [
+          "go"
+        ]
+      }
+    }
+  ]
+}

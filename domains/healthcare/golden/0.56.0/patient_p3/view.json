@@ -1,0 +1,136 @@
+{
+  "action": "view",
+  "allowed": [
+    "n05"
+  ],
+  "domain": "healthcare",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.codes"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "c.system"
+                                        },
+                                        {
+                                          "value": "ICD-10"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  },
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "c.code"
+                                        },
+                                        {
+                                          "value": "F"
+                                        }
+                                      ],
+                                      "operator": "startsWith"
+                                    }
+                                  }
+                                ],
+                                "operator": "and"
+                              }
+                            },
+                            {
+                              "variable": "c"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.patient.mrn"
+                      },
+                      {
+                        "value": "MRN-0003"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.noteType"
+                      },
+                      {
+                        "value": "psychotherapy"
+                      }
+                    ],
+                    "operator": "ne"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.deleted"
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "mrn": "MRN-0003",
+      "specialties": [],
+      "wards": []
+    },
+    "id": "u-p3",
+    "roles": [
+      "patient"
+    ]
+  },
+  "principalName": "patient_p3",
+  "resourceKind": "clinical_note"
+}

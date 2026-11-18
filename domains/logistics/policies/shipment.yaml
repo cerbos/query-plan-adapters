@@ -1,0 +1,57 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: shipment
+  version: default
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [hub_operator]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.origin.code in P.attr.hubs
+              - expr: R.attr.destination.code in P.attr.hubs
+              - expr: R.attr.checkpoints.exists(c, c.hub.code in P.attr.hubs)
+    - actions: [view, update_status]
+      effect: EFFECT_ALLOW
+      roles: [carrier]
+      condition:
+        match:
+          expr: has(R.attr.carrier) && R.attr.carrier.scac == P.attr.scac
+    - actions: [update_status]
+      effect: EFFECT_DENY
+      roles: [carrier]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.status == "delivered"
+              - expr: R.attr.hazmat && !("hazmat" in P.attr.certifications)
+              - expr: '"cold-chain" in R.attr.handling && !("cold-chain" in P.attr.certifications)'
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [customer]
+      condition:
+        match:
+          expr: R.attr.shipper == P.attr.account
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [customs_officer]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.destination.country == P.attr.country
+              - expr: R.attr.origin.country != R.attr.destination.country
+    - actions: [release_customs]
+      effect: EFFECT_ALLOW
+      roles: [customs_officer]
+      condition:
+        match:
+          all:
+            of:
+              - expr: has(R.attr.customsHold) && R.attr.customsHold
+              - expr: R.attr.destination.country == P.attr.country
+              - expr: R.attr.declaredValue > 1000 || R.attr.hazmat
+              - expr: size(R.attr.checkpoints) > 0 || R.attr.weightKg < 50.0

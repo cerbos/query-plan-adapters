@@ -1,0 +1,122 @@
+{
+  "action": "read",
+  "allowed": [
+    "ar01"
+  ],
+  "domain": "media",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": "published"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.embargoUntil"
+                            }
+                          ],
+                          "operator": "has"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.embargoUntil"
+                            }
+                          ],
+                          "operator": "timestamp"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "2026-11-18T12:21:33.723544043Z"
+                            }
+                          ],
+                          "operator": "timestamp"
+                        }
+                      }
+                    ],
+                    "operator": "lt"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.paywalled"
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.language"
+                },
+                {
+                  "value": "en"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [],
+      "languages": [
+        "en"
+      ],
+      "subscriber": false
+    },
+    "id": "rd1",
+    "roles": [
+      "reader"
+    ]
+  },
+  "principalName": "reader_free",
+  "resourceKind": "article"
+}

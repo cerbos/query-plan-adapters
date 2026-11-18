@@ -1,0 +1,24 @@
+{
+  "action": "sign",
+  "allowed": [],
+  "domain": "healthcare",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "mrn": "MRN-0003",
+      "specialties": [],
+      "wards": []
+    },
+    "id": "u-p3",
+    "roles": [
+      "patient"
+    ]
+  },
+  "principalName": "patient_p3",
+  "resourceKind": "clinical_note"
+}

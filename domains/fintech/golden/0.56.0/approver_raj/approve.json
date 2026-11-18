@@ -1,0 +1,191 @@
+{
+  "action": "approve",
+  "allowed": [
+    "pay01",
+    "pay03",
+    "pay07",
+    "pay08"
+  ],
+  "domain": "fintech",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.counterparty.country"
+                            },
+                            {
+                              "value": [
+                                "IR",
+                                "KP",
+                                "SY"
+                              ]
+                            }
+                          ],
+                          "operator": "in"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "sanctions"
+                            },
+                            {
+                              "variable": "request.resource.attr.flags"
+                            }
+                          ],
+                          "operator": "in"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.status"
+                      },
+                      {
+                        "value": "pending"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.amount"
+                      },
+                      {
+                        "value": 100000
+                      }
+                    ],
+                    "operator": "le"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.initiatedBy"
+                      },
+                      {
+                        "value": "u-raj"
+                      }
+                    ],
+                    "operator": "ne"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.approvals"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "a.approverId"
+                                        },
+                                        {
+                                          "value": "u-raj"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  },
+                                  {
+                                    "variable": "a"
+                                  }
+                                ],
+                                "operator": "lambda"
+                              }
+                            }
+                          ],
+                          "operator": "exists"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.currency"
+                      },
+                      {
+                        "variable": "request.resource.attr.account.currency"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.account.status"
+                      },
+                      {
+                        "value": "frozen"
+                      }
+                    ],
+                    "operator": "ne"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 100000,
+      "branches": []
+    },
+    "id": "u-raj",
+    "roles": [
+      "approver"
+    ]
+  },
+  "principalName": "approver_raj",
+  "resourceKind": "payment"
+}

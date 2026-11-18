@@ -1,0 +1,48 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: benefit_case
+  version: default
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [caseworker, supervisor]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.agency.code == P.attr.agency
+              - expr: R.attr.clearanceLevel <= P.attr.clearance
+              - expr: R.attr.assignedTo == P.id || R.attr.assignedTo == null
+    - actions: [view, approve]
+      effect: EFFECT_ALLOW
+      roles: [supervisor]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.applicant.countyFips in P.attr.counties
+              - expr: R.attr.status == "pending_review"
+              - expr: R.attr.monthlyAmount != null && R.attr.monthlyAmount <= 2500.0
+              - expr: R.attr.assignedTo != P.id
+    - actions: [audit]
+      effect: EFFECT_ALLOW
+      roles: [auditor]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.status == "closed"
+              - expr: R.attr.agency.state == P.attr.state
+              - expr: R.attr.closedOn != null && timestamp(R.attr.closedOn) > timestamp(R.attr.openedOn)
+    - actions: [foia_release]
+      effect: EFFECT_ALLOW
+      roles: [foia_officer]
+      condition:
+        match:
+          all:
+            of:
+              - expr: "!R.attr.pii"
+              - expr: R.attr.status == "closed"
+              - expr: '!("sealed" in R.attr.flags)'
+              - expr: R.attr.caseNumber.matches("^[A-Z]{2}-[0-9]{4}-[0-9]+$")
+              - expr: R.attr.applicant.citizenship != null

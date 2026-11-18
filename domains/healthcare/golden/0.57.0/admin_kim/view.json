@@ -1,0 +1,23 @@
+{
+  "action": "view",
+  "allowed": [],
+  "domain": "healthcare",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "specialties": [],
+      "wards": []
+    },
+    "id": "u-kim",
+    "roles": [
+      "admin"
+    ]
+  },
+  "principalName": "admin_kim",
+  "resourceKind": "clinical_note"
+}

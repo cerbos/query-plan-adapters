@@ -1,0 +1,43 @@
+actions: [view, grade, review_integrity, flag_late]
+principals:
+  student_sam: {id: st-sam, roles: [student], attr: {departments: [], term: ""}}
+  prof_jones: {id: f-jones, roles: [faculty], attr: {departments: [cs], term: ""}}
+  ta_lee: {id: ta-lee, roles: [ta], attr: {departments: [], term: ""}}
+  integrity_kay: {id: io-kay, roles: [integrity_officer], attr: {departments: [cs, math], term: ""}}
+  registrar_ro: {id: r-ro, roles: [registrar], attr: {departments: [], term: 2024-FA}}
+tables:
+  departments:
+    - {id: cs, name: Computer Science}
+    - {id: math, name: Mathematics}
+    - {id: hist, name: History}
+  courses:
+    - {id: co1, code: CS101, term: 2024-FA, department_id: cs}
+    - {id: co2, code: MA201, term: 2024-FA, department_id: math}
+    - {id: co3, code: HI110, term: 2025-SP, department_id: hist}
+  course_staff:
+    - {id: cs1, course_id: co1, user_id: f-jones, role: instructor}
+    - {id: cs2, course_id: co1, user_id: ta-lee, role: ta}
+    - {id: cs3, course_id: co2, user_id: ta-lee, role: instructor}
+    - {id: cs4, course_id: co2, user_id: f-jones, role: ta}
+    - {id: cs5, course_id: co3, user_id: f-jones, role: Instructor}
+  assignments:
+    - {id: as1, course_id: co1, title: Lab 1, due_at: 2024-10-01T23:59:59Z, max_points: 20, group_work: false}
+    - {id: as2, course_id: co1, title: Project, due_at: 2024-12-01T23:59:59Z, max_points: 100, group_work: true}
+    - {id: as3, course_id: co2, title: Proofs, due_at: 2024-10-15T12:00:00.500Z, max_points: 50, group_work: false}
+    - {id: as4, course_id: co3, title: Essay, due_at: 2025-03-01T00:00:00Z, max_points: 40, group_work: false}
+  submissions:
+    - {id: sb01, assignment_id: as1, student_id: st-sam, submitted_at: 2024-10-01T22:00:00Z, score: 18.5, late: false, plagiarism_score: 0.05, status: graded, locked: true}
+    - {id: sb02, assignment_id: as1, student_id: st-ann, submitted_at: 2024-10-02T01:00:00Z, late: true, plagiarism_score: 0.41, status: submitted, locked: false}
+    - {id: sb03, assignment_id: as2, student_id: st-ann, submitted_at: 2024-12-01T23:59:59Z, late: false, status: submitted, locked: false}
+    - {id: sb04, assignment_id: as2, student_id: st-bo, submitted_at: 2024-12-02T00:00:00Z, late: false, plagiarism_score: 0.4, status: submitted, locked: false}
+    - {id: sb05, assignment_id: as3, student_id: st-sam, submitted_at: 2024-10-15T12:00:00Z, late: false, plagiarism_score: 0.9, status: submitted, locked: false}
+    - {id: sb06, assignment_id: as3, student_id: st-cy, submitted_at: 2024-10-15T12:00:00.750Z, late: false, status: submitted, locked: false}
+    - {id: sb07, assignment_id: as4, student_id: st-cy, late: false, status: draft, locked: false}
+    - {id: sb08, assignment_id: as4, student_id: st-sam, submitted_at: 2025-03-02T00:00:00Z, score: 30, late: false, plagiarism_score: 0.6, status: graded, locked: false}
+    - {id: sb09, assignment_id: as1, student_id: ST-SAM, submitted_at: 2024-09-30T10:00:00Z, late: false, status: submitted, locked: false}
+    - {id: sb10, assignment_id: as3, student_id: st-dee, late: false, plagiarism_score: 0.99, status: draft, locked: true}
+  submission_members:
+    - {submission_id: sb03, student_id: st-ann}
+    - {submission_id: sb03, student_id: st-sam}
+    - {submission_id: sb04, student_id: st-bo}
+    - {submission_id: sb04, student_id: st-cy}

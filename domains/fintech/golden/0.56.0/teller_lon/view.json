@@ -1,0 +1,70 @@
+{
+  "action": "view",
+  "allowed": [
+    "pay01",
+    "pay02",
+    "pay03",
+    "pay04",
+    "pay06",
+    "pay11",
+    "pay12"
+  ],
+  "domain": "fintech",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.account.customer.branch.code"
+                },
+                {
+                  "value": [
+                    "LON01",
+                    "LON02"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.amount"
+                },
+                {
+                  "value": 10000
+                }
+              ],
+              "operator": "lt"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 0,
+      "branches": [
+        "LON01",
+        "LON02"
+      ]
+    },
+    "id": "u-teller",
+    "roles": [
+      "teller"
+    ]
+  },
+  "principalName": "teller_lon",
+  "resourceKind": "payment"
+}

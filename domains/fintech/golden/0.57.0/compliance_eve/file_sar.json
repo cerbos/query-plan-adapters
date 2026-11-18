@@ -1,0 +1,137 @@
+{
+  "action": "file_sar",
+  "allowed": [
+    "pay04",
+    "pay07",
+    "pay10"
+  ],
+  "domain": "fintech",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "sanctions"
+                },
+                {
+                  "variable": "request.resource.attr.flags"
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.counterparty.country"
+                      },
+                      {
+                        "value": [
+                          "IR",
+                          "KP",
+                          "SY"
+                        ]
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.amount"
+                      },
+                      {
+                        "value": 0.01
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.flags"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "f"
+                                  },
+                                  {
+                                    "value": "structuring"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            },
+                            {
+                              "variable": "f"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.account.customer.kycLevel"
+                      },
+                      {
+                        "value": 3
+                      }
+                    ],
+                    "operator": "lt"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 0,
+      "branches": []
+    },
+    "id": "u-eve",
+    "roles": [
+      "compliance"
+    ]
+  },
+  "principalName": "compliance_eve",
+  "resourceKind": "payment"
+}

@@ -1,0 +1,23 @@
+{
+  "action": "edit",
+  "allowed": [],
+  "domain": "legal",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clientId": "",
+      "practiceAreas": []
+    },
+    "id": "rm-eli",
+    "roles": [
+      "records_manager"
+    ]
+  },
+  "principalName": "records_eli",
+  "resourceKind": "legal_document"
+}

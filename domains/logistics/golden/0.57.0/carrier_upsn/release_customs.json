@@ -1,0 +1,25 @@
+{
+  "action": "release_customs",
+  "allowed": [],
+  "domain": "logistics",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "certifications": [
+        "cold-chain"
+      ],
+      "scac": "UPSN"
+    },
+    "id": "u-car2",
+    "roles": [
+      "carrier"
+    ]
+  },
+  "principalName": "carrier_upsn",
+  "resourceKind": "shipment"
+}

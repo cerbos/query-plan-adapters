@@ -1,0 +1,276 @@
+{
+  "kind": "article",
+  "nulls": "omitted",
+  "resources": [
+    {
+      "id": "ar01",
+      "attr": {
+        "author": {
+          "id": "au3",
+          "staff": true
+        },
+        "contributors": [],
+        "keywords": [
+          "election",
+          "politics"
+        ],
+        "language": "en",
+        "paywalled": false,
+        "publishedAt": "2024-11-06T06:00:00Z",
+        "section": {
+          "desk": "News",
+          "slug": "politics"
+        },
+        "slug": "election-results",
+        "status": "published",
+        "wordCount": 900
+      }
+    },
+    {
+      "id": "ar02",
+      "attr": {
+        "author": {
+          "id": "au1",
+          "staff": true
+        },
+        "contributors": [],
+        "keywords": [
+          "semiconductors"
+        ],
+        "language": "en",
+        "paywalled": true,
+        "publishedAt": "2024-01-01T00:00:00Z",
+        "section": {
+          "desk": "features",
+          "slug": "tech"
+        },
+        "slug": "chip-war",
+        "status": "published",
+        "wordCount": 1500
+      }
+    },
+    {
+      "id": "ar03",
+      "attr": {
+        "author": {
+          "id": "au2",
+          "staff": false
+        },
+        "contributors": [
+          {
+            "id": "au1",
+            "staff": true
+          }
+        ],
+        "embargoUntil": "2099-01-01T00:00:00Z",
+        "keywords": [],
+        "language": "en",
+        "paywalled": false,
+        "section": {
+          "desk": "news",
+          "slug": "world"
+        },
+        "slug": "future-scoop",
+        "status": "published",
+        "wordCount": 400
+      }
+    },
+    {
+      "id": "ar04",
+      "attr": {
+        "author": {
+          "id": "au3",
+          "staff": true
+        },
+        "contributors": [],
+        "embargoUntil": "2020-01-01T00:00:00Z",
+        "keywords": [
+          "legal"
+        ],
+        "language": "fr",
+        "paywalled": false,
+        "publishedAt": "2020-01-01T00:00:00Z",
+        "section": {
+          "desk": "news",
+          "slug": "world"
+        },
+        "slug": "old-embargo",
+        "status": "published",
+        "wordCount": 350
+      }
+    },
+    {
+      "id": "ar05",
+      "attr": {
+        "author": {
+          "id": "au2",
+          "staff": false
+        },
+        "contributors": [
+          {
+            "id": "au1",
+            "staff": true
+          },
+          {
+            "id": "au3",
+            "staff": true
+          }
+        ],
+        "keywords": [
+          "lawsuit-pending"
+        ],
+        "language": "en",
+        "paywalled": false,
+        "section": {
+          "desk": "news",
+          "slug": "world"
+        },
+        "slug": "draft-piece",
+        "status": "draft",
+        "wordCount": 120
+      }
+    },
+    {
+      "id": "ar06",
+      "attr": {
+        "author": {
+          "id": "au3",
+          "staff": true
+        },
+        "contributors": [],
+        "keywords": [
+          "Legal"
+        ],
+        "language": "en",
+        "paywalled": false,
+        "section": {
+          "desk": "news",
+          "slug": "world"
+        },
+        "slug": "Bad_Slug",
+        "status": "review",
+        "wordCount": 800
+      }
+    },
+    {
+      "id": "ar07",
+      "attr": {
+        "author": {
+          "id": "au2",
+          "staff": false
+        },
+        "contributors": [
+          {
+            "id": "au3",
+            "staff": true
+          }
+        ],
+        "keywords": [
+          "lawsuits"
+        ],
+        "language": "en",
+        "paywalled": true,
+        "section": {
+          "desk": "news",
+          "slug": "world"
+        },
+        "slug": "ready-to-go",
+        "status": "review",
+        "wordCount": 300
+      }
+    },
+    {
+      "id": "ar08",
+      "attr": {
+        "author": {
+          "id": "au3",
+          "staff": true
+        },
+        "contributors": [],
+        "keywords": [],
+        "language": "en",
+        "paywalled": false,
+        "section": {
+          "desk": "news",
+          "slug": "world"
+        },
+        "slug": "short-one",
+        "status": "review",
+        "wordCount": 299
+      }
+    },
+    {
+      "id": "ar09",
+      "attr": {
+        "author": {
+          "id": "au1",
+          "staff": true
+        },
+        "contributors": [],
+        "keywords": [
+          "legal",
+          "retraction"
+        ],
+        "language": "en",
+        "paywalled": false,
+        "publishedAt": "2023-01-01T00:00:00Z",
+        "section": {
+          "desk": "features",
+          "slug": "tech"
+        },
+        "slug": "retracted-story",
+        "status": "retracted",
+        "wordCount": 1000
+      }
+    },
+    {
+      "id": "ar10",
+      "attr": {
+        "author": {
+          "id": "au3",
+          "staff": true
+        },
+        "contributors": [],
+        "keywords": [
+          "legal-ish"
+        ],
+        "language": "en",
+        "paywalled": false,
+        "section": {
+          "desk": "News",
+          "slug": "politics"
+        },
+        "slug": "double--dash",
+        "status": "review",
+        "wordCount": 500
+      }
+    },
+    {
+      "id": "ar11",
+      "attr": {
+        "author": {
+          "id": "au3",
+          "staff": true
+        },
+        "contributors": [
+          {
+            "id": "au1",
+            "staff": true
+          }
+        ],
+        "keywords": [
+          "budget"
+        ],
+        "language": "en",
+        "paywalled": false,
+        "section": {
+          "desk": "news",
+          "slug": "world"
+        },
+        "slug": "budget-2025",
+        "status": "review",
+        "wordCount": 600
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "action": "view_compensation",
+  "allowed": [],
+  "domain": "hr",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 5
+    },
+    "id": "e07",
+    "roles": [
+      "employee",
+      "hr_admin"
+    ]
+  },
+  "principalName": "hr_admin",
+  "resourceKind": "employee_record"
+}

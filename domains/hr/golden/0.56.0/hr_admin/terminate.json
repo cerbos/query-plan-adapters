@@ -1,0 +1,32 @@
+{
+  "action": "terminate",
+  "allowed": [
+    "e01",
+    "e02",
+    "e03",
+    "e04",
+    "e05",
+    "e08"
+  ],
+  "domain": "hr",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 5
+    },
+    "id": "e07",
+    "roles": [
+      "employee",
+      "hr_admin"
+    ]
+  },
+  "principalName": "hr_admin",
+  "resourceKind": "employee_record"
+}

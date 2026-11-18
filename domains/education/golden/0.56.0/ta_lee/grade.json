@@ -1,0 +1,98 @@
+{
+  "action": "grade",
+  "allowed": [
+    "sb02",
+    "sb05",
+    "sb06",
+    "sb09"
+  ],
+  "domain": "education",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.locked"
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.assignment.course.staff"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "s.userId"
+                                  },
+                                  {
+                                    "value": "ta-lee"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "s.role"
+                                  },
+                                  {
+                                    "value": "instructor"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            }
+                          ],
+                          "operator": "and"
+                        }
+                      },
+                      {
+                        "variable": "s"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [],
+      "term": ""
+    },
+    "id": "ta-lee",
+    "roles": [
+      "ta"
+    ]
+  },
+  "principalName": "ta_lee",
+  "resourceKind": "submission"
+}

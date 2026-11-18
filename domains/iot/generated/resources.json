@@ -1,0 +1,221 @@
+{
+  "kind": "device",
+  "nulls": "omitted",
+  "resources": [
+    {
+      "id": "dv01",
+      "attr": {
+        "alerts": [
+          {
+            "acknowledged": false,
+            "code": "OVERHEAT",
+            "severity": 3
+          }
+        ],
+        "batteryPct": 80,
+        "decommissioned": false,
+        "firmware": "2.1.0",
+        "labels": {
+          "env": "prod",
+          "tier": "gold"
+        },
+        "lastSeenAt": "2024-01-01T00:00:00Z",
+        "model": "T100",
+        "online": true,
+        "serial": "SN-001",
+        "site": {
+          "org": {
+            "id": "org-acme",
+            "plan": "enterprise"
+          },
+          "region": "eu-west"
+        }
+      }
+    },
+    {
+      "id": "dv02",
+      "attr": {
+        "alerts": [
+          {
+            "acknowledged": true,
+            "code": "OFFLINE",
+            "severity": 5
+          }
+        ],
+        "batteryPct": 15,
+        "decommissioned": false,
+        "firmware": "2.0.9",
+        "labels": {
+          "env": "staging"
+        },
+        "model": "T100",
+        "online": false,
+        "serial": "SN-002",
+        "site": {
+          "org": {
+            "id": "org-acme",
+            "plan": "enterprise"
+          },
+          "region": "eu-west"
+        }
+      }
+    },
+    {
+      "id": "dv03",
+      "attr": {
+        "alerts": [],
+        "decommissioned": false,
+        "firmware": "1.9.4",
+        "labels": {},
+        "model": "T200",
+        "online": false,
+        "serial": "SN-003",
+        "site": {
+          "org": {
+            "id": "org-acme",
+            "plan": "enterprise"
+          },
+          "region": "eu-west"
+        }
+      }
+    },
+    {
+      "id": "dv04",
+      "attr": {
+        "alerts": [
+          {
+            "acknowledged": false,
+            "code": "TAMPER",
+            "severity": 4
+          }
+        ],
+        "batteryPct": 21,
+        "decommissioned": false,
+        "firmware": "2.2.0-rc1",
+        "labels": {
+          "env": "dev",
+          "restricted": "yes"
+        },
+        "lastSeenAt": "2023-06-01T00:00:00Z",
+        "model": "T200",
+        "online": true,
+        "serial": "SN-004",
+        "site": {
+          "org": {
+            "id": "org-acme",
+            "plan": "enterprise"
+          },
+          "region": "us-east"
+        }
+      }
+    },
+    {
+      "id": "dv05",
+      "attr": {
+        "alerts": [
+          {
+            "acknowledged": false,
+            "code": "DRIFT",
+            "severity": 2
+          }
+        ],
+        "batteryPct": 100,
+        "decommissioned": false,
+        "firmware": "20.1",
+        "labels": {
+          "env": "Prod"
+        },
+        "model": "T100",
+        "online": true,
+        "serial": "SN-005",
+        "site": {
+          "org": {
+            "id": "org-acme",
+            "plan": "enterprise"
+          },
+          "region": "eu-west"
+        }
+      }
+    },
+    {
+      "id": "dv06",
+      "attr": {
+        "alerts": [
+          {
+            "acknowledged": false,
+            "code": "TAMPER",
+            "severity": 5
+          }
+        ],
+        "batteryPct": 50,
+        "decommissioned": false,
+        "firmware": "2.3.1",
+        "labels": {
+          "env": "dev",
+          "tier": "silver"
+        },
+        "model": "T300",
+        "online": false,
+        "serial": "SN-006",
+        "site": {
+          "org": {
+            "id": "org-beta",
+            "plan": "free"
+          },
+          "region": "eu-west"
+        }
+      }
+    },
+    {
+      "id": "dv07",
+      "attr": {
+        "alerts": [],
+        "batteryPct": 5,
+        "decommissioned": true,
+        "firmware": "2.3.1",
+        "labels": {
+          "tier": ""
+        },
+        "model": "T300",
+        "online": false,
+        "serial": "SN-007",
+        "site": {
+          "org": {
+            "id": "org-acme",
+            "plan": "enterprise"
+          },
+          "region": "eu-west"
+        }
+      }
+    },
+    {
+      "id": "dv08",
+      "attr": {
+        "alerts": [
+          {
+            "acknowledged": false,
+            "code": "OVERHEAT",
+            "severity": 3
+          }
+        ],
+        "batteryPct": 60,
+        "decommissioned": false,
+        "firmware": "2.0.0",
+        "labels": {
+          "env": "test",
+          "restricted": "no"
+        },
+        "model": "T100",
+        "online": true,
+        "serial": "SN-008",
+        "site": {
+          "org": {
+            "id": "org-acme",
+            "plan": "enterprise"
+          },
+          "region": "us-east"
+        }
+      }
+    }
+  ]
+}

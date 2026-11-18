@@ -1,0 +1,411 @@
+{
+  "kind": "payment",
+  "nulls": "omitted",
+  "resources": [
+    {
+      "id": "pay01",
+      "attr": {
+        "account": {
+          "currency": "GBP",
+          "customer": {
+            "branch": {
+              "code": "LON01",
+              "country": "GB"
+            },
+            "id": "c1",
+            "kycLevel": 3,
+            "pep": false
+          },
+          "overdraftLimit": 500,
+          "status": "active"
+        },
+        "amount": 120.5,
+        "approvals": [],
+        "counterparty": {
+          "country": "GB",
+          "iban": "GB00ACME",
+          "name": "Acme"
+        },
+        "createdAt": "2023-01-10T09:00:00Z",
+        "currency": "GBP",
+        "flags": [],
+        "initiatedBy": "u-c1",
+        "riskScore": 0.1,
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay02",
+      "attr": {
+        "account": {
+          "currency": "GBP",
+          "customer": {
+            "branch": {
+              "code": "LON01",
+              "country": "GB"
+            },
+            "id": "c1",
+            "kycLevel": 3,
+            "pep": false
+          },
+          "overdraftLimit": 500,
+          "status": "active"
+        },
+        "amount": 5000.5,
+        "approvals": [
+          {
+            "approverId": "u-raj",
+            "decision": "approved"
+          }
+        ],
+        "counterparty": {
+          "country": "DE",
+          "iban": "DE00BETA",
+          "name": "Beta"
+        },
+        "createdAt": "2023-01-11T09:00:00Z",
+        "currency": "GBP",
+        "flags": [
+          "velocity"
+        ],
+        "initiatedBy": "u-c1",
+        "riskScore": 0.79999,
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay03",
+      "attr": {
+        "account": {
+          "currency": "GBP",
+          "customer": {
+            "branch": {
+              "code": "LON01",
+              "country": "GB"
+            },
+            "id": "c1",
+            "kycLevel": 3,
+            "pep": false
+          },
+          "overdraftLimit": 500,
+          "status": "active"
+        },
+        "amount": 5000.51,
+        "approvals": [],
+        "counterparty": {
+          "country": "GB",
+          "iban": "GB00GAMA",
+          "name": "Gamma"
+        },
+        "createdAt": "2023-01-12T09:00:00Z",
+        "currency": "GBP",
+        "flags": [],
+        "initiatedBy": "u-mia",
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay04",
+      "attr": {
+        "account": {
+          "currency": "EUR",
+          "customer": {
+            "branch": {
+              "code": "LON01",
+              "country": "GB"
+            },
+            "id": "c1",
+            "kycLevel": 3,
+            "pep": false
+          },
+          "status": "active"
+        },
+        "amount": 9999.99,
+        "approvals": [],
+        "counterparty": {
+          "country": "IR",
+          "iban": "IR00DELT",
+          "name": "Delta"
+        },
+        "createdAt": "2023-02-01T09:00:00Z",
+        "currency": "GBP",
+        "flags": [
+          "sanctions",
+          "velocity"
+        ],
+        "initiatedBy": "u-c1",
+        "riskScore": 0.8,
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay05",
+      "attr": {
+        "account": {
+          "currency": "GBP",
+          "customer": {
+            "branch": {
+              "code": "LON02",
+              "country": "GB"
+            },
+            "id": "c2",
+            "kycLevel": 1
+          },
+          "overdraftLimit": 0,
+          "status": "frozen"
+        },
+        "amount": 10000,
+        "approvals": [],
+        "counterparty": {
+          "country": "GB",
+          "iban": "GB00ECHO",
+          "name": "Echo"
+        },
+        "createdAt": "2023-02-02T09:00:00Z",
+        "currency": "GBP",
+        "flags": [],
+        "initiatedBy": "u-teller",
+        "riskScore": 0.2,
+        "status": "completed"
+      }
+    },
+    {
+      "id": "pay06",
+      "attr": {
+        "account": {
+          "currency": "GBP",
+          "customer": {
+            "branch": {
+              "code": "LON02",
+              "country": "GB"
+            },
+            "id": "c2",
+            "kycLevel": 1
+          },
+          "overdraftLimit": 0,
+          "status": "frozen"
+        },
+        "amount": 0.01,
+        "approvals": [],
+        "counterparty": {
+          "country": "KP",
+          "iban": "KP00FOXX",
+          "name": "Fox"
+        },
+        "createdAt": "2023-02-03T09:00:00Z",
+        "currency": "GBP",
+        "flags": [],
+        "initiatedBy": "u-c2",
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay07",
+      "attr": {
+        "account": {
+          "currency": "EUR",
+          "customer": {
+            "branch": {
+              "code": "FRA01",
+              "country": "DE"
+            },
+            "id": "c3",
+            "kycLevel": 2,
+            "pep": true
+          },
+          "overdraftLimit": 2500.75,
+          "status": "active"
+        },
+        "amount": 4999.99,
+        "approvals": [
+          {
+            "approverId": "u-mia",
+            "decision": "approved"
+          }
+        ],
+        "counterparty": {
+          "country": "FR",
+          "iban": "FR00GOLF",
+          "name": "Golf"
+        },
+        "createdAt": "2023-03-01T09:00:00Z",
+        "currency": "EUR",
+        "flags": [
+          "structuring"
+        ],
+        "initiatedBy": "u-c3",
+        "riskScore": 0.95,
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay08",
+      "attr": {
+        "account": {
+          "currency": "EUR",
+          "customer": {
+            "branch": {
+              "code": "FRA01",
+              "country": "DE"
+            },
+            "id": "c3",
+            "kycLevel": 2,
+            "pep": true
+          },
+          "overdraftLimit": 2500.75,
+          "status": "active"
+        },
+        "amount": 75000,
+        "approvals": [
+          {
+            "approverId": "u-mia",
+            "decision": "rejected"
+          }
+        ],
+        "counterparty": {
+          "country": "ir",
+          "iban": "ir00HOTL",
+          "name": "Hotel"
+        },
+        "createdAt": "2023-03-02T09:00:00Z",
+        "currency": "EUR",
+        "flags": [],
+        "initiatedBy": "u-c3",
+        "riskScore": 0.3,
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay09",
+      "attr": {
+        "account": {
+          "currency": "USD",
+          "customer": {
+            "branch": {
+              "code": "FRA01",
+              "country": "DE"
+            },
+            "id": "c4",
+            "kycLevel": 2
+          },
+          "status": "active"
+        },
+        "amount": 250,
+        "approvals": [],
+        "counterparty": {
+          "country": "US",
+          "iban": "US00INDI",
+          "name": "India"
+        },
+        "createdAt": "2023-03-03T09:00:00Z",
+        "currency": "USD",
+        "flags": [],
+        "initiatedBy": "u-c4",
+        "riskScore": 0,
+        "status": "rejected"
+      }
+    },
+    {
+      "id": "pay10",
+      "attr": {
+        "account": {
+          "currency": "USD",
+          "customer": {
+            "branch": {
+              "code": "FRA01",
+              "country": "DE"
+            },
+            "id": "c4",
+            "kycLevel": 2
+          },
+          "status": "active"
+        },
+        "amount": 3000,
+        "approvals": [],
+        "counterparty": {
+          "country": "SY",
+          "iban": "SY00JULI",
+          "name": "Juliet"
+        },
+        "createdAt": "2023-03-04T09:00:00Z",
+        "currency": "USD",
+        "flags": [
+          "Sanctions"
+        ],
+        "initiatedBy": "u-c4",
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay11",
+      "attr": {
+        "account": {
+          "currency": "GBP",
+          "customer": {
+            "branch": {
+              "code": "LON01",
+              "country": "GB"
+            },
+            "id": "c1",
+            "kycLevel": 3,
+            "pep": false
+          },
+          "overdraftLimit": 500,
+          "status": "active"
+        },
+        "amount": 4000,
+        "approvals": [
+          {
+            "approverId": "u-raj",
+            "decision": "approved"
+          },
+          {
+            "approverId": "u-mia",
+            "decision": "approved"
+          }
+        ],
+        "counterparty": {
+          "country": "GB",
+          "iban": "GB00KILO",
+          "name": "Kilo"
+        },
+        "createdAt": "2023-03-05T09:00:00Z",
+        "currency": "GBP",
+        "flags": [],
+        "initiatedBy": "u-c1",
+        "riskScore": 0.5,
+        "status": "pending"
+      }
+    },
+    {
+      "id": "pay12",
+      "attr": {
+        "account": {
+          "currency": "EUR",
+          "customer": {
+            "branch": {
+              "code": "LON01",
+              "country": "GB"
+            },
+            "id": "c1",
+            "kycLevel": 3,
+            "pep": false
+          },
+          "status": "active"
+        },
+        "amount": 100,
+        "approvals": [],
+        "counterparty": {
+          "country": "GB",
+          "iban": "GB00LIMA",
+          "name": "Lima"
+        },
+        "createdAt": "2023-03-06T09:00:00Z",
+        "currency": "EUR",
+        "flags": [],
+        "initiatedBy": "u-c1",
+        "status": "Pending"
+      }
+    }
+  ]
+}

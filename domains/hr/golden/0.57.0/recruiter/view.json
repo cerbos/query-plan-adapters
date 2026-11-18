@@ -1,0 +1,76 @@
+{
+  "action": "view",
+  "allowed": [
+    "e08"
+  ],
+  "domain": "hr",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.employmentType"
+                },
+                {
+                  "value": "contractor"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.email"
+                },
+                {
+                  "value": "@contractors.example.com"
+                }
+              ],
+              "operator": "endsWith"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.terminatedOn"
+                      }
+                    ],
+                    "operator": "has"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 0
+    },
+    "id": "rc1",
+    "roles": [
+      "recruiter"
+    ]
+  },
+  "principalName": "recruiter",
+  "resourceKind": "employee_record"
+}

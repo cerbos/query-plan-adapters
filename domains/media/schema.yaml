@@ -1,0 +1,61 @@
+kind: article
+note: >
+  Newsroom CMS. `keywords` is a native text[] column on PostgreSQL (a JSON array elsewhere).
+  Sections are keyed by a natural `slug`. Contributors are a many-to-many through a join table to
+  the authors table, flattened so the policy sees a list of authors. Embargoes compare against
+  now(); seed timestamps are far in the past or future.
+tables:
+  authors:
+    pk: id
+    columns:
+      id: string
+      display_name: string
+      staff: bool
+  sections:
+    pk: slug
+    columns:
+      slug: string
+      name: string
+      desk: string
+  articles:
+    pk: id
+    columns:
+      id: string
+      slug: string
+      section_slug: string -> sections
+      author_id: string -> authors
+      status: string
+      language: string
+      embargo_until: timestamp?
+      published_at: timestamp?
+      paywalled: bool
+      word_count: int
+      keywords: string[]
+  article_contributors:
+    pk: [article_id, author_id]
+    columns:
+      article_id: string -> articles
+      author_id: string -> authors
+resource:
+  table: articles
+  attributes:
+    slug: slug
+    status: status
+    language: language
+    embargoUntil: embargo_until
+    publishedAt: published_at
+    paywalled: paywalled
+    wordCount: word_count
+    keywords: keywords
+    section:
+      one: section_slug
+      attributes: {slug: slug, desk: desk}
+    author:
+      one: author_id
+      attributes: {id: id, staff: staff}
+    contributors:
+      many: article_contributors
+      fk: article_id
+      via: author_id
+      orderBy: author_id
+      attributes: {id: id, staff: staff}

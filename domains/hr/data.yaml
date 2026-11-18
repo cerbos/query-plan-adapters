@@ -1,0 +1,34 @@
+actions: [view, view_compensation, edit, terminate]
+principals:
+  emp_e05: {id: e05, roles: [employee], attr: {level: 3, departments: [], country: ""}}
+  mgr_e02: {id: e02, roles: [employee, manager], attr: {level: 6, departments: [], country: ""}}
+  ceo_e01: {id: e01, roles: [employee, manager], attr: {level: 9, departments: [], country: ""}}
+  hrbp_uk: {id: hr1, roles: [hrbp], attr: {level: 0, departments: [eng, ops], country: GB}}
+  recruiter: {id: rc1, roles: [recruiter], attr: {level: 0, departments: [], country: ""}}
+  hr_admin: {id: e07, roles: [employee, hr_admin], attr: {level: 5, departments: [], country: ""}}
+tables:
+  departments:
+    - {id: eng, name: Engineering, cost_center: CC-100}
+    - {id: ops, name: Operations, cost_center: CC-200}
+    - {id: fin, name: Finance, cost_center: CC-300}
+  locations:
+    - {code: LDN, country: GB, city: London}
+    - {code: NYC, country: US, city: New York}
+    - {code: EDI, country: GB, city: Edinburgh}
+  employees:
+    - {id: e01, department_id: eng, location_code: LDN, level: 9, employment_type: full_time, salary_band: X, hired_on: 2010-01-04T09:00:00Z, work_email: ceo@example.com}
+    - {id: e02, manager_id: e01, department_id: eng, location_code: LDN, level: 6, employment_type: full_time, salary_band: E, hired_on: 2015-03-01T09:00:00Z, work_email: e02@example.com}
+    - {id: e03, manager_id: e01, department_id: fin, location_code: NYC, level: 7, employment_type: full_time, salary_band: F, hired_on: 2016-03-01T09:00:00Z, work_email: e03@example.com}
+    - {id: e04, manager_id: e02, department_id: eng, location_code: LDN, level: 4, employment_type: full_time, salary_band: C, hired_on: 2019-01-01T09:00:00Z, work_email: e04@example.com}
+    - {id: e05, manager_id: e02, department_id: eng, location_code: EDI, level: 3, employment_type: full_time, hired_on: 2020-01-01T09:00:00Z, work_email: e05@example.com}
+    - {id: e06, manager_id: e02, department_id: ops, location_code: NYC, level: 6, employment_type: contractor, hired_on: 2021-01-01T09:00:00Z, terminated_on: 2023-01-01T09:00:00Z, work_email: e06@contractors.example.com}
+    - {id: e07, manager_id: e03, department_id: fin, location_code: LDN, level: 5, employment_type: full_time, salary_band: D, hired_on: 2018-01-01T09:00:00Z, work_email: e07@example.com}
+    - {id: e08, manager_id: e04, department_id: ops, location_code: LDN, level: 2, employment_type: contractor, hired_on: 2022-01-01T09:00:00Z, work_email: e08@contractors.example.com}
+    - {id: e09, manager_id: e04, department_id: eng, location_code: NYC, level: 2, employment_type: intern, hired_on: 2024-06-01T09:00:00Z, terminated_on: 2024-09-01T09:00:00Z, work_email: e09@example.com}
+    - {id: e10, manager_id: e05, department_id: ops, location_code: EDI, level: 1, employment_type: contractor, hired_on: 2024-01-01T09:00:00Z, work_email: e10@contractors.example.com.evil.io}
+  employee_skills:
+    - {employee_id: e04, skill: go}
+    - {employee_id: e04, skill: kubernetes}
+    - {employee_id: e06, skill: payroll}
+    - {employee_id: e08, skill: Go}
+    - {employee_id: e10, skill: go}

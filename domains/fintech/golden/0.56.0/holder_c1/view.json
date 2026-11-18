@@ -1,0 +1,44 @@
+{
+  "action": "view",
+  "allowed": [
+    "pay01",
+    "pay02",
+    "pay03",
+    "pay04",
+    "pay11",
+    "pay12"
+  ],
+  "domain": "fintech",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.account.customer.id"
+          },
+          {
+            "value": "c1"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 0,
+      "branches": [],
+      "customerId": "c1"
+    },
+    "id": "u-c1",
+    "roles": [
+      "customer"
+    ]
+  },
+  "principalName": "holder_c1",
+  "resourceKind": "payment"
+}

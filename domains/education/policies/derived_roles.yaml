@@ -1,0 +1,19 @@
+apiVersion: api.cerbos.dev/v1
+derivedRoles:
+  name: course_roles
+  definitions:
+    - name: course_instructor
+      parentRoles: [faculty, ta]
+      condition:
+        match:
+          expr: R.attr.assignment.course.staff.exists(s, s.userId == P.id && s.role == "instructor")
+    - name: course_ta
+      parentRoles: [faculty, ta]
+      condition:
+        match:
+          expr: R.attr.assignment.course.staff.exists(s, s.userId == P.id && s.role == "ta")
+    - name: submitter
+      parentRoles: [student]
+      condition:
+        match:
+          expr: R.attr.studentId == P.id || P.id in R.attr.members

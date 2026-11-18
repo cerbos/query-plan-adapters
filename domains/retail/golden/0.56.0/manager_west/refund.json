@@ -1,0 +1,97 @@
+{
+  "action": "refund",
+  "allowed": [
+    "o01",
+    "o04"
+  ],
+  "domain": "retail",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.status"
+                                  },
+                                  {
+                                    "value": [
+                                      "delivered",
+                                      "returned",
+                                      "shipped"
+                                    ]
+                                  }
+                                ],
+                                "operator": "in"
+                              }
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.totalCents"
+                            },
+                            {
+                              "value": 20000
+                            }
+                          ],
+                          "operator": "gt"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.store.region"
+                },
+                {
+                  "value": "west"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "refundLimitCents": 20000,
+      "region": "west"
+    },
+    "id": "sm-w",
+    "roles": [
+      "store_manager"
+    ]
+  },
+  "principalName": "manager_west",
+  "resourceKind": "order"
+}

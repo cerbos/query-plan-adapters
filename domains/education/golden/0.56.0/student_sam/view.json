@@ -1,0 +1,61 @@
+{
+  "action": "view",
+  "allowed": [
+    "sb01",
+    "sb03",
+    "sb05",
+    "sb08"
+  ],
+  "domain": "education",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.studentId"
+                },
+                {
+                  "value": "st-sam"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "st-sam"
+                },
+                {
+                  "variable": "request.resource.attr.members"
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [],
+      "term": ""
+    },
+    "id": "st-sam",
+    "roles": [
+      "student"
+    ]
+  },
+  "principalName": "student_sam",
+  "resourceKind": "submission"
+}

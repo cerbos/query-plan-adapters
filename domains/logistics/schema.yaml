@@ -1,0 +1,78 @@
+kind: shipment
+note: >
+  Freight forwarding. A shipment has two to-one relations to the same hubs table (origin and
+  destination), an optional carrier, a list of handling codes, and a list of checkpoint scans
+  that each join to a hub of their own.
+tables:
+  hubs:
+    pk: id
+    columns:
+      id: string
+      code: string
+      country: string
+      region: string
+  carriers:
+    pk: id
+    columns:
+      id: string
+      name: string
+      scac: string
+  shipments:
+    pk: id
+    columns:
+      id: string
+      tracking_no: string
+      status: string
+      origin_hub_id: string -> hubs
+      destination_hub_id: string -> hubs
+      carrier_id: string? -> carriers
+      weight_kg: float
+      hazmat: bool
+      customs_hold: bool?
+      shipper_account: string
+      eta: timestamp?
+      declared_value: decimal
+  shipment_handling:
+    pk: [shipment_id, code]
+    columns:
+      shipment_id: string -> shipments
+      code: string
+  checkpoints:
+    pk: id
+    columns:
+      id: string
+      shipment_id: string -> shipments
+      hub_id: string -> hubs
+      event: string
+      scanned_at: timestamp
+resource:
+  table: shipments
+  attributes:
+    trackingNumber: tracking_no
+    status: status
+    weightKg: weight_kg
+    hazmat: hazmat
+    customsHold: customs_hold
+    shipper: shipper_account
+    eta: eta
+    declaredValue: declared_value
+    origin:
+      one: origin_hub_id
+      attributes: {code: code, country: country, region: region}
+    destination:
+      one: destination_hub_id
+      attributes: {code: code, country: country, region: region}
+    carrier:
+      one: carrier_id
+      attributes: {scac: scac}
+    handling: {many: shipment_handling, fk: shipment_id, value: code, orderBy: code}
+    checkpoints:
+      many: checkpoints
+      fk: shipment_id
+      orderBy: scanned_at
+      attributes:
+        event: event
+        scannedAt: scanned_at
+        hub:
+          one: hub_id
+          attributes: {code: code}

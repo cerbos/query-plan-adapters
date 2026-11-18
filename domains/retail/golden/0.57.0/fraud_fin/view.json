@@ -1,0 +1,148 @@
+{
+  "action": "view",
+  "allowed": [
+    "o02",
+    "o03",
+    "o07",
+    "o09"
+  ],
+  "domain": "retail",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.lines"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "l.category"
+                                  },
+                                  {
+                                    "value": "gift_card"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "l.quantity"
+                                        },
+                                        {
+                                          "variable": "l.unitPriceCents"
+                                        }
+                                      ],
+                                      "operator": "mult"
+                                    }
+                                  },
+                                  {
+                                    "value": 50000
+                                  }
+                                ],
+                                "operator": "gt"
+                              }
+                            }
+                          ],
+                          "operator": "and"
+                        }
+                      },
+                      {
+                        "variable": "l"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.couponCode"
+                      },
+                      {
+                        "value": "STAFF"
+                      }
+                    ],
+                    "operator": "startsWith"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.customer.tier"
+                      },
+                      {
+                        "value": "staff"
+                      }
+                    ],
+                    "operator": "ne"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.lines"
+                      }
+                    ],
+                    "operator": "size"
+                  }
+                },
+                {
+                  "value": 3
+                }
+              ],
+              "operator": "gt"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {},
+    "id": "fr-fin",
+    "roles": [
+      "fraud_analyst"
+    ]
+  },
+  "principalName": "fraud_fin",
+  "resourceKind": "order"
+}

@@ -1,0 +1,78 @@
+{
+  "action": "update_status",
+  "allowed": [
+    "s05",
+    "s07"
+  ],
+  "domain": "logistics",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.status"
+                            },
+                            {
+                              "value": "delivered"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "variable": "request.resource.attr.hazmat"
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.carrier.scac"
+                },
+                {
+                  "value": "UPSN"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "certifications": [
+        "cold-chain"
+      ],
+      "scac": "UPSN"
+    },
+    "id": "u-car2",
+    "roles": [
+      "carrier"
+    ]
+  },
+  "principalName": "carrier_upsn",
+  "resourceKind": "shipment"
+}

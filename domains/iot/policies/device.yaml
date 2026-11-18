@@ -1,0 +1,52 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: device
+  version: default
+  variables:
+    local:
+      same_org: R.attr.site.org.id == P.attr.orgId
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [org_member, technician, operator, org_admin]
+      condition:
+        match:
+          expr: V.same_org
+    - actions: [view]
+      effect: EFFECT_DENY
+      roles: [org_member]
+      condition:
+        match:
+          expr: has(R.attr.labels.restricted) && R.attr.labels.restricted == "yes"
+    - actions: [update_firmware]
+      effect: EFFECT_ALLOW
+      roles: [technician]
+      condition:
+        match:
+          all:
+            of:
+              - expr: V.same_org
+              - expr: R.attr.site.region in P.attr.regions
+              - expr: R.attr.firmware.startsWith("2.")
+              - expr: "!R.attr.decommissioned"
+              - expr: '!has(R.attr.labels.env) || R.attr.labels.env != "prod"'
+    - actions: [reboot]
+      effect: EFFECT_ALLOW
+      roles: [operator]
+      condition:
+        match:
+          all:
+            of:
+              - expr: V.same_org
+              - expr: R.attr.alerts.exists(a, a.severity >= 3 && !a.acknowledged)
+              - expr: has(R.attr.batteryPct) && R.attr.batteryPct > 20
+    - actions: [decommission]
+      effect: EFFECT_ALLOW
+      roles: [org_admin]
+      condition:
+        match:
+          all:
+            of:
+              - expr: V.same_org
+              - expr: "!R.attr.online"
+              - expr: '!("tier" in R.attr.labels)'

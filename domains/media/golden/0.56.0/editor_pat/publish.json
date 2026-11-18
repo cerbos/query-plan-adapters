@@ -1,0 +1,121 @@
+{
+  "action": "publish",
+  "allowed": [
+    "ar11"
+  ],
+  "domain": "media",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.section.desk"
+                },
+                {
+                  "value": "news"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": "review"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.wordCount"
+                },
+                {
+                  "value": 300
+                }
+              ],
+              "operator": "ge"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.slug"
+                },
+                {
+                  "value": "^[a-z0-9]+(-[a-z0-9]+)*$"
+                }
+              ],
+              "operator": "matches"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.contributors"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "c.staff"
+                            },
+                            {
+                              "variable": "c"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "all"
+                  }
+                },
+                {
+                  "variable": "request.resource.attr.author.staff"
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [
+        "news"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    "id": "ed1",
+    "roles": [
+      "editor"
+    ]
+  },
+  "principalName": "editor_pat",
+  "resourceKind": "article"
+}

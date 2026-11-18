@@ -1,0 +1,30 @@
+actions: [view, update_firmware, reboot, decommission]
+principals:
+  member_acme: {id: m1, roles: [org_member], attr: {orgId: org-acme, regions: []}}
+  tech_eu: {id: t1, roles: [technician], attr: {orgId: org-acme, regions: [eu-west, eu-central]}}
+  operator_acme: {id: op1, roles: [operator], attr: {orgId: org-acme, regions: []}}
+  admin_acme: {id: ad1, roles: [org_admin], attr: {orgId: org-acme, regions: []}}
+tables:
+  orgs:
+    - {id: org-acme, name: Acme, plan: enterprise}
+    - {id: org-beta, name: Beta, plan: free}
+  sites:
+    - {id: si1, org_id: org-acme, region: eu-west, name: Dublin}
+    - {id: si2, org_id: org-acme, region: us-east, name: Virginia}
+    - {id: si3, org_id: org-beta, region: eu-west, name: Paris}
+  devices:
+    - {id: dv01, serial: SN-001, model: T100, firmware: 2.1.0, site_id: si1, last_seen_at: 2024-01-01T00:00:00Z, online: true, battery_pct: 80, labels: {env: prod, tier: gold}, decommissioned: false}
+    - {id: dv02, serial: SN-002, model: T100, firmware: 2.0.9, site_id: si1, online: false, battery_pct: 15, labels: {env: staging}, decommissioned: false}
+    - {id: dv03, serial: SN-003, model: T200, firmware: 1.9.4, site_id: si1, online: false, labels: {}, decommissioned: false}
+    - {id: dv04, serial: SN-004, model: T200, firmware: 2.2.0-rc1, site_id: si2, last_seen_at: 2023-06-01T00:00:00Z, online: true, battery_pct: 21, labels: {env: dev, restricted: "yes"}, decommissioned: false}
+    - {id: dv05, serial: SN-005, model: T100, firmware: "20.1", site_id: si1, online: true, battery_pct: 100, labels: {env: Prod}, decommissioned: false}
+    - {id: dv06, serial: SN-006, model: T300, firmware: 2.3.1, site_id: si3, online: false, battery_pct: 50, labels: {env: dev, tier: silver}, decommissioned: false}
+    - {id: dv07, serial: SN-007, model: T300, firmware: 2.3.1, site_id: si1, online: false, battery_pct: 5, labels: {tier: ""}, decommissioned: true}
+    - {id: dv08, serial: SN-008, model: T100, firmware: 2.0.0, site_id: si2, online: true, battery_pct: 60, labels: {env: test, restricted: "no"}, decommissioned: false}
+  device_alerts:
+    - {id: al1, device_id: dv01, severity: 3, acknowledged: false, code: OVERHEAT}
+    - {id: al2, device_id: dv02, severity: 5, acknowledged: true, code: OFFLINE}
+    - {id: al3, device_id: dv04, severity: 4, acknowledged: false, code: TAMPER}
+    - {id: al4, device_id: dv05, severity: 2, acknowledged: false, code: DRIFT}
+    - {id: al5, device_id: dv08, severity: 3, acknowledged: false, code: OVERHEAT}
+    - {id: al6, device_id: dv06, severity: 5, acknowledged: false, code: TAMPER}

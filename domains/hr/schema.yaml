@@ -1,0 +1,59 @@
+kind: employee_record
+note: >
+  HR system. Employees reference their manager in the same table, and policies follow that
+  self-relation two hops for skip-level access. The location table's key is a natural `code`.
+  Policies also compare `request.resource.id` with the principal.
+tables:
+  departments:
+    pk: id
+    columns:
+      id: string
+      name: string
+      cost_center: string
+  locations:
+    pk: code
+    columns:
+      code: string
+      country: string
+      city: string
+  employees:
+    pk: id
+    columns:
+      id: string
+      manager_id: string? -> employees
+      department_id: string -> departments
+      location_code: string -> locations
+      level: int
+      employment_type: string
+      salary_band: string?
+      hired_on: timestamp
+      terminated_on: timestamp?
+      work_email: string
+  employee_skills:
+    pk: [employee_id, skill]
+    columns:
+      employee_id: string -> employees
+      skill: string
+resource:
+  table: employees
+  attributes:
+    level: level
+    employmentType: employment_type
+    salaryBand: salary_band
+    hiredOn: hired_on
+    terminatedOn: terminated_on
+    email: work_email
+    skills: {many: employee_skills, fk: employee_id, value: skill, orderBy: skill}
+    department:
+      one: department_id
+      attributes: {id: id, costCenter: cost_center}
+    location:
+      one: location_code
+      attributes: {country: country, city: city}
+    manager:
+      one: manager_id
+      attributes:
+        id: id
+        manager:
+          one: manager_id
+          attributes: {id: id}

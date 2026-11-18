@@ -1,0 +1,426 @@
+{
+  "kind": "shipment",
+  "nulls": "omitted",
+  "rootTable": "shipments",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "code",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "country",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "region",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "hubs",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "code": "LHR",
+          "country": "GB",
+          "id": "hb1",
+          "region": "EMEA"
+        },
+        {
+          "code": "JFK",
+          "country": "US",
+          "id": "hb2",
+          "region": "AMER"
+        },
+        {
+          "code": "FRA",
+          "country": "DE",
+          "id": "hb3",
+          "region": "EMEA"
+        },
+        {
+          "code": "lhr",
+          "country": "GB",
+          "id": "hb4",
+          "region": "EMEA"
+        },
+        {
+          "code": "ORD",
+          "country": "US",
+          "id": "hb5",
+          "region": "AMER"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "scac",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "carriers",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "id": "cr1",
+          "name": "Express",
+          "scac": "DHLX"
+        },
+        {
+          "id": "cr2",
+          "name": "Parcel",
+          "scac": "UPSN"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "tracking_no",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "origin_hub_id",
+          "nullable": false,
+          "references": "hubs",
+          "type": "string"
+        },
+        {
+          "name": "destination_hub_id",
+          "nullable": false,
+          "references": "hubs",
+          "type": "string"
+        },
+        {
+          "name": "carrier_id",
+          "nullable": true,
+          "references": "carriers",
+          "type": "string"
+        },
+        {
+          "name": "weight_kg",
+          "nullable": false,
+          "type": "float"
+        },
+        {
+          "name": "hazmat",
+          "nullable": false,
+          "type": "bool"
+        },
+        {
+          "name": "customs_hold",
+          "nullable": true,
+          "type": "bool"
+        },
+        {
+          "name": "shipper_account",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "eta",
+          "nullable": true,
+          "type": "timestamp"
+        },
+        {
+          "name": "declared_value",
+          "nullable": false,
+          "type": "decimal"
+        }
+      ],
+      "name": "shipments",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "carrier_id": "cr1",
+          "customs_hold": true,
+          "declared_value": 1500,
+          "destination_hub_id": "hb2",
+          "eta": "2030-01-01T00:00:00Z",
+          "hazmat": false,
+          "id": "s01",
+          "origin_hub_id": "hb1",
+          "shipper_account": "ACME-001",
+          "status": "in_transit",
+          "tracking_no": "TRK-001",
+          "weight_kg": 12.5
+        },
+        {
+          "carrier_id": "cr1",
+          "customs_hold": null,
+          "declared_value": 99.99,
+          "destination_hub_id": "hb1",
+          "eta": null,
+          "hazmat": true,
+          "id": "s02",
+          "origin_hub_id": "hb3",
+          "shipper_account": "ACME-001",
+          "status": "delivered",
+          "tracking_no": "TRK-002",
+          "weight_kg": 3
+        },
+        {
+          "carrier_id": null,
+          "customs_hold": true,
+          "declared_value": 25000,
+          "destination_hub_id": "hb5",
+          "eta": null,
+          "hazmat": false,
+          "id": "s03",
+          "origin_hub_id": "hb2",
+          "shipper_account": "GLOBEX",
+          "status": "booked",
+          "tracking_no": "TRK-003",
+          "weight_kg": 800
+        },
+        {
+          "carrier_id": "cr2",
+          "customs_hold": true,
+          "declared_value": 1000,
+          "destination_hub_id": "hb2",
+          "eta": "2030-02-01T00:00:00Z",
+          "hazmat": true,
+          "id": "s04",
+          "origin_hub_id": "hb3",
+          "shipper_account": "acme-001",
+          "status": "in_transit",
+          "tracking_no": "TRK-004",
+          "weight_kg": 40.25
+        },
+        {
+          "carrier_id": "cr2",
+          "customs_hold": false,
+          "declared_value": 1000.01,
+          "destination_hub_id": "hb5",
+          "eta": null,
+          "hazmat": false,
+          "id": "s05",
+          "origin_hub_id": "hb4",
+          "shipper_account": "INITECH",
+          "status": "in_transit",
+          "tracking_no": "TRK-005",
+          "weight_kg": 1
+        },
+        {
+          "carrier_id": "cr1",
+          "customs_hold": null,
+          "declared_value": 5000,
+          "destination_hub_id": "hb3",
+          "eta": null,
+          "hazmat": false,
+          "id": "s06",
+          "origin_hub_id": "hb3",
+          "shipper_account": "GLOBEX",
+          "status": "exception",
+          "tracking_no": "TRK-006",
+          "weight_kg": 5
+        },
+        {
+          "carrier_id": "cr2",
+          "customs_hold": null,
+          "declared_value": 10,
+          "destination_hub_id": "hb3",
+          "eta": null,
+          "hazmat": false,
+          "id": "s07",
+          "origin_hub_id": "hb2",
+          "shipper_account": "ACME-001",
+          "status": "in_transit",
+          "tracking_no": "TRK-007",
+          "weight_kg": 2
+        },
+        {
+          "carrier_id": "cr1",
+          "customs_hold": true,
+          "declared_value": 1200.5,
+          "destination_hub_id": "hb2",
+          "eta": null,
+          "hazmat": true,
+          "id": "s08",
+          "origin_hub_id": "hb3",
+          "shipper_account": "GLOBEX",
+          "status": "in_transit",
+          "tracking_no": "TRK-008",
+          "weight_kg": 60
+        },
+        {
+          "carrier_id": "cr1",
+          "customs_hold": true,
+          "declared_value": 999.99,
+          "destination_hub_id": "hb2",
+          "eta": null,
+          "hazmat": false,
+          "id": "s09",
+          "origin_hub_id": "hb4",
+          "shipper_account": "INITECH",
+          "status": "in_transit",
+          "tracking_no": "TRK-009",
+          "weight_kg": 7
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "shipment_id",
+          "nullable": false,
+          "references": "shipments",
+          "type": "string"
+        },
+        {
+          "name": "code",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "shipment_handling",
+      "primaryKey": [
+        "shipment_id",
+        "code"
+      ],
+      "rows": [
+        {
+          "code": "fragile",
+          "shipment_id": "s01"
+        },
+        {
+          "code": "cold-chain",
+          "shipment_id": "s03"
+        },
+        {
+          "code": "cold-chain",
+          "shipment_id": "s04"
+        },
+        {
+          "code": "fragile",
+          "shipment_id": "s04"
+        },
+        {
+          "code": "Cold-Chain",
+          "shipment_id": "s07"
+        },
+        {
+          "code": "oversized",
+          "shipment_id": "s08"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "shipment_id",
+          "nullable": false,
+          "references": "shipments",
+          "type": "string"
+        },
+        {
+          "name": "hub_id",
+          "nullable": false,
+          "references": "hubs",
+          "type": "string"
+        },
+        {
+          "name": "event",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "scanned_at",
+          "nullable": false,
+          "type": "timestamp"
+        }
+      ],
+      "name": "checkpoints",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "event": "picked_up",
+          "hub_id": "hb1",
+          "id": "k01",
+          "scanned_at": "2024-01-01T08:00:00Z",
+          "shipment_id": "s01"
+        },
+        {
+          "event": "picked_up",
+          "hub_id": "hb3",
+          "id": "k02",
+          "scanned_at": "2024-01-02T08:00:00Z",
+          "shipment_id": "s04"
+        },
+        {
+          "event": "transit",
+          "hub_id": "hb1",
+          "id": "k03",
+          "scanned_at": "2024-01-03T08:00:00Z",
+          "shipment_id": "s04"
+        },
+        {
+          "event": "exception",
+          "hub_id": "hb3",
+          "id": "k04",
+          "scanned_at": "2024-01-04T08:00:00Z",
+          "shipment_id": "s06"
+        },
+        {
+          "event": "transit",
+          "hub_id": "hb4",
+          "id": "k05",
+          "scanned_at": "2024-01-05T08:00:00Z",
+          "shipment_id": "s07"
+        },
+        {
+          "event": "picked_up",
+          "hub_id": "hb3",
+          "id": "k06",
+          "scanned_at": "2024-01-06T08:00:00Z",
+          "shipment_id": "s08"
+        }
+      ]
+    }
+  ]
+}

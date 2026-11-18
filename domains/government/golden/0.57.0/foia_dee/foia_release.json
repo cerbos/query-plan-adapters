@@ -1,0 +1,102 @@
+{
+  "action": "foia_release",
+  "allowed": [
+    "k03",
+    "k06"
+  ],
+  "domain": "government",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.pii"
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": "closed"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "sealed"
+                      },
+                      {
+                        "variable": "request.resource.attr.flags"
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.caseNumber"
+                },
+                {
+                  "value": "^[A-Z]{2}-[0-9]{4}-[0-9]+$"
+                }
+              ],
+              "operator": "matches"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.applicant.citizenship"
+                },
+                {
+                  "value": null
+                }
+              ],
+              "operator": "ne"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "counties": [],
+      "state": ""
+    },
+    "id": "fo-dee",
+    "roles": [
+      "foia_officer"
+    ]
+  },
+  "principalName": "foia_dee",
+  "resourceKind": "benefit_case"
+}

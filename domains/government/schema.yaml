@@ -1,0 +1,59 @@
+kind: benefit_case
+nulls: explicit
+note: >
+  State benefits casework. NULL columns arrive as explicit nulls. County FIPS codes are strings
+  with leading zeros that must never be compared as numbers. Monthly amounts are DECIMAL and may
+  be null. Case numbers are validated with a regex.
+tables:
+  agencies:
+    pk: code
+    columns:
+      code: string
+      name: string
+      state: string
+  applicants:
+    pk: id
+    columns:
+      id: string
+      county_fips: string
+      household_size: int
+      citizenship: string?
+  cases:
+    pk: id
+    columns:
+      id: string
+      case_number: string
+      agency_code: string -> agencies
+      applicant_id: string -> applicants
+      status: string
+      clearance_level: int
+      program: string
+      opened_on: timestamp
+      closed_on: timestamp?
+      pii: bool
+      assigned_to: string?
+      monthly_amount: decimal?
+  case_flags:
+    pk: [case_id, flag]
+    columns:
+      case_id: string -> cases
+      flag: string
+resource:
+  table: cases
+  attributes:
+    caseNumber: case_number
+    status: status
+    clearanceLevel: clearance_level
+    program: program
+    openedOn: opened_on
+    closedOn: closed_on
+    pii: pii
+    assignedTo: assigned_to
+    monthlyAmount: monthly_amount
+    flags: {many: case_flags, fk: case_id, value: flag, orderBy: flag}
+    agency:
+      one: agency_code
+      attributes: {code: code, state: state}
+    applicant:
+      one: applicant_id
+      attributes: {countyFips: county_fips, householdSize: household_size, citizenship: citizenship}

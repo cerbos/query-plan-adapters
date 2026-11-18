@@ -1,0 +1,22 @@
+{
+  "action": "update_status",
+  "allowed": [],
+  "domain": "logistics",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "US"
+    },
+    "id": "u-cbp",
+    "roles": [
+      "customs_officer"
+    ]
+  },
+  "principalName": "customs_us",
+  "resourceKind": "shipment"
+}

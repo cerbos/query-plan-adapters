@@ -1,0 +1,64 @@
+{
+  "action": "view",
+  "allowed": [
+    "sb01",
+    "sb02",
+    "sb03",
+    "sb04",
+    "sb05",
+    "sb06",
+    "sb09"
+  ],
+  "domain": "education",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.assignment.course.term"
+                },
+                {
+                  "value": "2024-FA"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": "draft"
+                }
+              ],
+              "operator": "ne"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [],
+      "term": "2024-FA"
+    },
+    "id": "r-ro",
+    "roles": [
+      "registrar"
+    ]
+  },
+  "principalName": "registrar_ro",
+  "resourceKind": "submission"
+}

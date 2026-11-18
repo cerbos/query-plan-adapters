@@ -1,0 +1,108 @@
+{
+  "action": "view",
+  "allowed": [
+    "e02",
+    "e04",
+    "e05",
+    "e08",
+    "e10"
+  ],
+  "domain": "hr",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.id"
+                },
+                {
+                  "value": "e02"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.manager.id"
+                            },
+                            {
+                              "value": "e02"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.manager.manager.id"
+                            },
+                            {
+                              "value": "e02"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.terminatedOn"
+                            }
+                          ],
+                          "operator": "has"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 6
+    },
+    "id": "e02",
+    "roles": [
+      "employee",
+      "manager"
+    ]
+  },
+  "principalName": "mgr_e02",
+  "resourceKind": "employee_record"
+}

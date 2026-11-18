@@ -1,0 +1,24 @@
+{
+  "action": "destroy",
+  "allowed": [],
+  "domain": "legal",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clearance": 2,
+      "clientId": "",
+      "practiceAreas": []
+    },
+    "id": "l-ali",
+    "roles": [
+      "lawyer"
+    ]
+  },
+  "principalName": "lawyer_ali",
+  "resourceKind": "legal_document"
+}

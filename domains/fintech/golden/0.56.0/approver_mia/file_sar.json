@@ -1,0 +1,25 @@
+{
+  "action": "file_sar",
+  "allowed": [],
+  "domain": "fintech",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 5000.5,
+      "branches": [
+        "LON01"
+      ]
+    },
+    "id": "u-mia",
+    "roles": [
+      "approver"
+    ]
+  },
+  "principalName": "approver_mia",
+  "resourceKind": "payment"
+}

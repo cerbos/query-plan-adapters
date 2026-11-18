@@ -1,0 +1,228 @@
+{
+  "kind": "benefit_case",
+  "nulls": "explicit",
+  "resources": [
+    {
+      "id": "k01",
+      "attr": {
+        "agency": {
+          "code": "DSS",
+          "state": "CA"
+        },
+        "applicant": {
+          "citizenship": "US",
+          "countyFips": "06037",
+          "householdSize": 4
+        },
+        "assignedTo": null,
+        "caseNumber": "CA-2023-1001",
+        "clearanceLevel": 1,
+        "closedOn": null,
+        "flags": [],
+        "monthlyAmount": 2500,
+        "openedOn": "2023-01-01T00:00:00Z",
+        "pii": true,
+        "program": "snap",
+        "status": "pending_review"
+      }
+    },
+    {
+      "id": "k02",
+      "attr": {
+        "agency": {
+          "code": "DSS",
+          "state": "CA"
+        },
+        "applicant": {
+          "citizenship": null,
+          "countyFips": "6037",
+          "householdSize": 1
+        },
+        "assignedTo": "cw-ann",
+        "caseNumber": "CA-2023-1002",
+        "clearanceLevel": 2,
+        "closedOn": null,
+        "flags": [],
+        "monthlyAmount": 300,
+        "openedOn": "2023-02-01T00:00:00Z",
+        "pii": true,
+        "program": "snap",
+        "status": "pending_review"
+      }
+    },
+    {
+      "id": "k03",
+      "attr": {
+        "agency": {
+          "code": "HHS",
+          "state": "TX"
+        },
+        "applicant": {
+          "citizenship": "",
+          "countyFips": "48201",
+          "householdSize": 2
+        },
+        "assignedTo": "sv-bo",
+        "caseNumber": "TX-2022-77",
+        "clearanceLevel": 3,
+        "closedOn": "2023-01-01T00:00:00Z",
+        "flags": [
+          "appeal"
+        ],
+        "monthlyAmount": 2500.01,
+        "openedOn": "2022-01-01T00:00:00Z",
+        "pii": false,
+        "program": "medicaid",
+        "status": "closed"
+      }
+    },
+    {
+      "id": "k04",
+      "attr": {
+        "agency": {
+          "code": "DSS",
+          "state": "CA"
+        },
+        "applicant": {
+          "citizenship": "MX",
+          "countyFips": "06001",
+          "householdSize": 6
+        },
+        "assignedTo": null,
+        "caseNumber": "ca-2021-5",
+        "clearanceLevel": 1,
+        "closedOn": "2021-12-31T00:00:00Z",
+        "flags": [],
+        "monthlyAmount": null,
+        "openedOn": "2021-01-01T00:00:00Z",
+        "pii": false,
+        "program": "tanf",
+        "status": "closed"
+      }
+    },
+    {
+      "id": "k05",
+      "attr": {
+        "agency": {
+          "code": "DSS",
+          "state": "CA"
+        },
+        "applicant": {
+          "citizenship": "US",
+          "countyFips": "06037",
+          "householdSize": 4
+        },
+        "assignedTo": "cw-zed",
+        "caseNumber": "CA-2020-12",
+        "clearanceLevel": 4,
+        "closedOn": "2020-06-01T00:00:00Z",
+        "flags": [
+          "sealed"
+        ],
+        "monthlyAmount": null,
+        "openedOn": "2020-01-01T00:00:00Z",
+        "pii": false,
+        "program": "tanf",
+        "status": "closed"
+      }
+    },
+    {
+      "id": "k06",
+      "attr": {
+        "agency": {
+          "code": "dss",
+          "state": "CA"
+        },
+        "applicant": {
+          "citizenship": "US",
+          "countyFips": "06037",
+          "householdSize": 4
+        },
+        "assignedTo": null,
+        "caseNumber": "CA-2019-3",
+        "clearanceLevel": 0,
+        "closedOn": "2019-02-01T00:00:00Z",
+        "flags": [
+          "Sealed"
+        ],
+        "monthlyAmount": null,
+        "openedOn": "2019-01-01T00:00:00Z",
+        "pii": false,
+        "program": "snap",
+        "status": "closed"
+      }
+    },
+    {
+      "id": "k07",
+      "attr": {
+        "agency": {
+          "code": "DSS",
+          "state": "CA"
+        },
+        "applicant": {
+          "citizenship": "",
+          "countyFips": "48201",
+          "householdSize": 2
+        },
+        "assignedTo": "sv-bo",
+        "caseNumber": "CA-2024-9",
+        "clearanceLevel": 2,
+        "closedOn": null,
+        "flags": [],
+        "monthlyAmount": 100,
+        "openedOn": "2024-01-01T00:00:00Z",
+        "pii": true,
+        "program": "snap",
+        "status": "pending_review"
+      }
+    },
+    {
+      "id": "k08",
+      "attr": {
+        "agency": {
+          "code": "DSS",
+          "state": "CA"
+        },
+        "applicant": {
+          "citizenship": "MX",
+          "countyFips": "06001",
+          "householdSize": 6
+        },
+        "assignedTo": null,
+        "caseNumber": "CA-2024-10",
+        "clearanceLevel": 2,
+        "closedOn": null,
+        "flags": [],
+        "monthlyAmount": 50,
+        "openedOn": "2024-02-01T00:00:00Z",
+        "pii": false,
+        "program": "snap",
+        "status": "pending_review"
+      }
+    },
+    {
+      "id": "k09",
+      "attr": {
+        "agency": {
+          "code": "HHS",
+          "state": "TX"
+        },
+        "applicant": {
+          "citizenship": "",
+          "countyFips": "48201",
+          "householdSize": 2
+        },
+        "assignedTo": null,
+        "caseNumber": "TX-2024-1",
+        "clearanceLevel": 1,
+        "closedOn": null,
+        "flags": [],
+        "monthlyAmount": null,
+        "openedOn": "2024-03-01T00:00:00Z",
+        "pii": false,
+        "program": "medicaid",
+        "status": "pending_review"
+      }
+    }
+  ]
+}

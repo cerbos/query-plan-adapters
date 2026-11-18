@@ -1,0 +1,81 @@
+{
+  "action": "read",
+  "allowed": [
+    "ar04",
+    "ar05",
+    "ar07",
+    "ar09"
+  ],
+  "domain": "media",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "value": "legal"
+                },
+                {
+                  "variable": "request.resource.attr.keywords"
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.keywords"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "k"
+                            },
+                            {
+                              "value": "lawsuit"
+                            }
+                          ],
+                          "operator": "startsWith"
+                        }
+                      },
+                      {
+                        "variable": "k"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [],
+      "languages": []
+    },
+    "id": "lg1",
+    "roles": [
+      "legal"
+    ]
+  },
+  "principalName": "lawyer_quinn",
+  "resourceKind": "article"
+}

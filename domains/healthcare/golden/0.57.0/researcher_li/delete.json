@@ -1,0 +1,24 @@
+{
+  "action": "delete",
+  "allowed": [],
+  "domain": "healthcare",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "north",
+      "specialties": [],
+      "wards": []
+    },
+    "id": "u-li",
+    "roles": [
+      "researcher"
+    ]
+  },
+  "principalName": "researcher_li",
+  "resourceKind": "clinical_note"
+}

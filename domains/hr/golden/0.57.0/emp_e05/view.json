@@ -1,0 +1,39 @@
+{
+  "action": "view",
+  "allowed": [
+    "e05"
+  ],
+  "domain": "hr",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.id"
+          },
+          {
+            "value": "e05"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 3
+    },
+    "id": "e05",
+    "roles": [
+      "employee"
+    ]
+  },
+  "principalName": "emp_e05",
+  "resourceKind": "employee_record"
+}

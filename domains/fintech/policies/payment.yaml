@@ -1,0 +1,63 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: payment
+  version: default
+  variables:
+    local:
+      sanctioned: R.attr.counterparty.country in ["IR", "KP", "SY"]
+      high_risk: (has(R.attr.riskScore) && R.attr.riskScore >= 0.8) || size(R.attr.flags) > 0
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [customer]
+      condition:
+        match:
+          expr: R.attr.account.customer.id == P.attr.customerId
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [teller]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.account.customer.branch.code in P.attr.branches
+              - expr: R.attr.amount < 10000
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [compliance]
+      condition:
+        match:
+          any:
+            of:
+              - expr: V.high_risk
+              - expr: V.sanctioned
+              - expr: has(R.attr.account.customer.pep) && R.attr.account.customer.pep
+    - actions: [approve, view]
+      effect: EFFECT_ALLOW
+      roles: [approver]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.status == "pending"
+              - expr: R.attr.amount <= P.attr.approvalLimit
+              - expr: R.attr.initiatedBy != P.id
+              - expr: "!R.attr.approvals.exists(a, a.approverId == P.id)"
+              - expr: R.attr.currency == R.attr.account.currency
+              - expr: R.attr.account.status != "frozen"
+    - actions: [approve]
+      effect: EFFECT_DENY
+      roles: [approver]
+      condition:
+        match:
+          expr: V.sanctioned || "sanctions" in R.attr.flags
+    - actions: [file_sar]
+      effect: EFFECT_ALLOW
+      roles: [compliance]
+      condition:
+        match:
+          any:
+            of:
+              - expr: '"sanctions" in R.attr.flags'
+              - expr: V.sanctioned && R.attr.amount > 0.01
+              - expr: R.attr.flags.exists(f, f == "structuring") && R.attr.account.customer.kycLevel < 3

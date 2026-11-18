@@ -1,0 +1,90 @@
+{
+  "action": "update_status",
+  "allowed": [
+    "s01",
+    "s06",
+    "s08",
+    "s09"
+  ],
+  "domain": "logistics",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.status"
+                            },
+                            {
+                              "value": "delivered"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "cold-chain"
+                            },
+                            {
+                              "variable": "request.resource.attr.handling"
+                            }
+                          ],
+                          "operator": "in"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.carrier.scac"
+                },
+                {
+                  "value": "DHLX"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "certifications": [
+        "hazmat"
+      ],
+      "scac": "DHLX"
+    },
+    "id": "u-car1",
+    "roles": [
+      "carrier"
+    ]
+  },
+  "principalName": "carrier_dhlx",
+  "resourceKind": "shipment"
+}

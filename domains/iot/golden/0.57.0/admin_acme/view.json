@@ -1,0 +1,44 @@
+{
+  "action": "view",
+  "allowed": [
+    "dv01",
+    "dv02",
+    "dv03",
+    "dv04",
+    "dv05",
+    "dv07",
+    "dv08"
+  ],
+  "domain": "iot",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.site.org.id"
+          },
+          {
+            "value": "org-acme"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "orgId": "org-acme",
+      "regions": []
+    },
+    "id": "ad1",
+    "roles": [
+      "org_admin"
+    ]
+  },
+  "principalName": "admin_acme",
+  "resourceKind": "device"
+}

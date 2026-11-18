@@ -1,0 +1,26 @@
+{
+  "action": "flag_late",
+  "allowed": [],
+  "domain": "education",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [
+        "cs",
+        "math"
+      ],
+      "term": ""
+    },
+    "id": "io-kay",
+    "roles": [
+      "integrity_officer"
+    ]
+  },
+  "principalName": "integrity_kay",
+  "resourceKind": "submission"
+}

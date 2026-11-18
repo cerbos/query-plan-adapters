@@ -1,0 +1,44 @@
+{
+  "action": "view",
+  "allowed": [
+    "s01",
+    "s02",
+    "s06",
+    "s08",
+    "s09"
+  ],
+  "domain": "logistics",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.carrier.scac"
+          },
+          {
+            "value": "DHLX"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "certifications": [
+        "hazmat"
+      ],
+      "scac": "DHLX"
+    },
+    "id": "u-car1",
+    "roles": [
+      "carrier"
+    ]
+  },
+  "principalName": "carrier_dhlx",
+  "resourceKind": "shipment"
+}

@@ -1,0 +1,100 @@
+{
+  "action": "update_firmware",
+  "allowed": [
+    "dv02"
+  ],
+  "domain": "iot",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.site.org.id"
+                },
+                {
+                  "value": "org-acme"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.site.region"
+                },
+                {
+                  "value": [
+                    "eu-west",
+                    "eu-central"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.firmware"
+                },
+                {
+                  "value": "2."
+                }
+              ],
+              "operator": "startsWith"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.decommissioned"
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.labels.env"
+                },
+                {
+                  "value": "prod"
+                }
+              ],
+              "operator": "ne"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "orgId": "org-acme",
+      "regions": [
+        "eu-west",
+        "eu-central"
+      ]
+    },
+    "id": "t1",
+    "roles": [
+      "technician"
+    ]
+  },
+  "principalName": "tech_eu",
+  "resourceKind": "device"
+}

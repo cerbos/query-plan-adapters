@@ -1,0 +1,61 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: order
+  version: default
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [customer]
+      condition:
+        match:
+          expr: R.attr.customer.id == P.id
+    - actions: [cancel]
+      effect: EFFECT_ALLOW
+      roles: [customer]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.customer.id == P.id
+              - expr: R.attr.status in ["placed", "paid"]
+              - expr: P.attr.tier == "gold" && R.attr.lines.all(l, l.quantity <= 2)
+    - actions: [view, refund]
+      effect: EFFECT_ALLOW
+      roles: [store_manager]
+      condition:
+        match:
+          expr: has(R.attr.store) && R.attr.store.region == P.attr.region
+    - actions: [refund]
+      effect: EFFECT_DENY
+      roles: [store_manager]
+      condition:
+        match:
+          any:
+            of:
+              - expr: '!(R.attr.status in ["delivered", "returned", "shipped"])'
+              - expr: R.attr.totalCents > P.attr.refundLimitCents
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [support_agent]
+      condition:
+        match:
+          expr: R.attr.channel == "online"
+    - actions: [cancel]
+      effect: EFFECT_ALLOW
+      roles: [support_agent]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.status in ["placed", "paid"]
+              - expr: '!R.attr.lines.exists(l, l.category == "gift_card")'
+    - actions: [view, flag_fraud]
+      effect: EFFECT_ALLOW
+      roles: [fraud_analyst]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.lines.exists(l, l.category == "gift_card" && l.quantity * l.unitPriceCents > 50000)
+              - expr: has(R.attr.couponCode) && R.attr.couponCode.startsWith("STAFF") && R.attr.customer.tier != "staff"
+              - expr: size(R.attr.lines) > 3

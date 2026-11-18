@@ -1,0 +1,75 @@
+kind: legal_document
+nulls: explicit
+note: >
+  Law firm document management. The application sends NULL columns as explicit nulls, so
+  policies test `== null` rather than has(). Ethical walls are a list of screened users on the
+  matter; negating membership in it must not leak documents.
+tables:
+  clients:
+    pk: id
+    columns:
+      id: string
+      name: string
+      industry: string?
+  matters:
+    pk: id
+    columns:
+      id: string
+      client_id: string -> clients
+      practice_area: string
+      status: string
+      opened_at: timestamp
+      lead_partner_id: string?
+  matter_team:
+    pk: [matter_id, user_id]
+    columns:
+      matter_id: string -> matters
+      user_id: string
+  matter_screens:
+    pk: [matter_id, user_id]
+    columns:
+      matter_id: string -> matters
+      user_id: string
+  documents:
+    pk: id
+    columns:
+      id: string
+      matter_id: string -> matters
+      title: string
+      privilege: string?
+      classification: int
+      legal_hold: bool
+      created_by: string
+      retention_until: timestamp?
+  document_shares:
+    pk: id
+    columns:
+      id: string
+      document_id: string -> documents
+      party_type: string
+      party_id: string
+resource:
+  table: documents
+  attributes:
+    title: title
+    privilege: privilege
+    classification: classification
+    legalHold: legal_hold
+    createdBy: created_by
+    retentionUntil: retention_until
+    shares:
+      many: document_shares
+      fk: document_id
+      orderBy: id
+      attributes: {partyType: party_type, partyId: party_id}
+    matter:
+      one: matter_id
+      attributes:
+        status: status
+        practiceArea: practice_area
+        leadPartnerId: lead_partner_id
+        team: {many: matter_team, fk: matter_id, value: user_id, orderBy: user_id}
+        screened: {many: matter_screens, fk: matter_id, value: user_id, orderBy: user_id}
+        client:
+          one: client_id
+          attributes: {id: id, industry: industry}

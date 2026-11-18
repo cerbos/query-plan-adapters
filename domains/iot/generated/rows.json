@@ -1,0 +1,344 @@
+{
+  "kind": "device",
+  "nulls": "omitted",
+  "rootTable": "devices",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "plan",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "orgs",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "id": "org-acme",
+          "name": "Acme",
+          "plan": "enterprise"
+        },
+        {
+          "id": "org-beta",
+          "name": "Beta",
+          "plan": "free"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "org_id",
+          "nullable": false,
+          "references": "orgs",
+          "type": "string"
+        },
+        {
+          "name": "region",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "sites",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "id": "si1",
+          "name": "Dublin",
+          "org_id": "org-acme",
+          "region": "eu-west"
+        },
+        {
+          "id": "si2",
+          "name": "Virginia",
+          "org_id": "org-acme",
+          "region": "us-east"
+        },
+        {
+          "id": "si3",
+          "name": "Paris",
+          "org_id": "org-beta",
+          "region": "eu-west"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "serial",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "model",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "firmware",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "site_id",
+          "nullable": false,
+          "references": "sites",
+          "type": "string"
+        },
+        {
+          "name": "last_seen_at",
+          "nullable": true,
+          "type": "timestamp"
+        },
+        {
+          "name": "online",
+          "nullable": false,
+          "type": "bool"
+        },
+        {
+          "name": "battery_pct",
+          "nullable": true,
+          "type": "int"
+        },
+        {
+          "name": "labels",
+          "nullable": false,
+          "type": "json"
+        },
+        {
+          "name": "decommissioned",
+          "nullable": false,
+          "type": "bool"
+        }
+      ],
+      "name": "devices",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "battery_pct": 80,
+          "decommissioned": false,
+          "firmware": "2.1.0",
+          "id": "dv01",
+          "labels": {
+            "env": "prod",
+            "tier": "gold"
+          },
+          "last_seen_at": "2024-01-01T00:00:00Z",
+          "model": "T100",
+          "online": true,
+          "serial": "SN-001",
+          "site_id": "si1"
+        },
+        {
+          "battery_pct": 15,
+          "decommissioned": false,
+          "firmware": "2.0.9",
+          "id": "dv02",
+          "labels": {
+            "env": "staging"
+          },
+          "last_seen_at": null,
+          "model": "T100",
+          "online": false,
+          "serial": "SN-002",
+          "site_id": "si1"
+        },
+        {
+          "battery_pct": null,
+          "decommissioned": false,
+          "firmware": "1.9.4",
+          "id": "dv03",
+          "labels": {},
+          "last_seen_at": null,
+          "model": "T200",
+          "online": false,
+          "serial": "SN-003",
+          "site_id": "si1"
+        },
+        {
+          "battery_pct": 21,
+          "decommissioned": false,
+          "firmware": "2.2.0-rc1",
+          "id": "dv04",
+          "labels": {
+            "env": "dev",
+            "restricted": "yes"
+          },
+          "last_seen_at": "2023-06-01T00:00:00Z",
+          "model": "T200",
+          "online": true,
+          "serial": "SN-004",
+          "site_id": "si2"
+        },
+        {
+          "battery_pct": 100,
+          "decommissioned": false,
+          "firmware": "20.1",
+          "id": "dv05",
+          "labels": {
+            "env": "Prod"
+          },
+          "last_seen_at": null,
+          "model": "T100",
+          "online": true,
+          "serial": "SN-005",
+          "site_id": "si1"
+        },
+        {
+          "battery_pct": 50,
+          "decommissioned": false,
+          "firmware": "2.3.1",
+          "id": "dv06",
+          "labels": {
+            "env": "dev",
+            "tier": "silver"
+          },
+          "last_seen_at": null,
+          "model": "T300",
+          "online": false,
+          "serial": "SN-006",
+          "site_id": "si3"
+        },
+        {
+          "battery_pct": 5,
+          "decommissioned": true,
+          "firmware": "2.3.1",
+          "id": "dv07",
+          "labels": {
+            "tier": ""
+          },
+          "last_seen_at": null,
+          "model": "T300",
+          "online": false,
+          "serial": "SN-007",
+          "site_id": "si1"
+        },
+        {
+          "battery_pct": 60,
+          "decommissioned": false,
+          "firmware": "2.0.0",
+          "id": "dv08",
+          "labels": {
+            "env": "test",
+            "restricted": "no"
+          },
+          "last_seen_at": null,
+          "model": "T100",
+          "online": true,
+          "serial": "SN-008",
+          "site_id": "si2"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "device_id",
+          "nullable": false,
+          "references": "devices",
+          "type": "string"
+        },
+        {
+          "name": "severity",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "acknowledged",
+          "nullable": false,
+          "type": "bool"
+        },
+        {
+          "name": "code",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "device_alerts",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "acknowledged": false,
+          "code": "OVERHEAT",
+          "device_id": "dv01",
+          "id": "al1",
+          "severity": 3
+        },
+        {
+          "acknowledged": true,
+          "code": "OFFLINE",
+          "device_id": "dv02",
+          "id": "al2",
+          "severity": 5
+        },
+        {
+          "acknowledged": false,
+          "code": "TAMPER",
+          "device_id": "dv04",
+          "id": "al3",
+          "severity": 4
+        },
+        {
+          "acknowledged": false,
+          "code": "DRIFT",
+          "device_id": "dv05",
+          "id": "al4",
+          "severity": 2
+        },
+        {
+          "acknowledged": false,
+          "code": "OVERHEAT",
+          "device_id": "dv08",
+          "id": "al5",
+          "severity": 3
+        },
+        {
+          "acknowledged": false,
+          "code": "TAMPER",
+          "device_id": "dv06",
+          "id": "al6",
+          "severity": 5
+        }
+      ]
+    }
+  ]
+}

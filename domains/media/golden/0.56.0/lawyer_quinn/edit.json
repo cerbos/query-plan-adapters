@@ -1,0 +1,23 @@
+{
+  "action": "edit",
+  "allowed": [],
+  "domain": "media",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [],
+      "languages": []
+    },
+    "id": "lg1",
+    "roles": [
+      "legal"
+    ]
+  },
+  "principalName": "lawyer_quinn",
+  "resourceKind": "article"
+}

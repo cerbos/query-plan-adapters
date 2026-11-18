@@ -1,0 +1,24 @@
+{
+  "action": "terminate",
+  "allowed": [],
+  "domain": "hr",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 0
+    },
+    "id": "rc1",
+    "roles": [
+      "recruiter"
+    ]
+  },
+  "principalName": "recruiter",
+  "resourceKind": "employee_record"
+}

@@ -1,0 +1,28 @@
+{
+  "action": "delete",
+  "allowed": [],
+  "domain": "healthcare",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "south",
+      "specialties": [
+        "mental_health"
+      ],
+      "wards": [
+        "w3"
+      ]
+    },
+    "id": "u-ng",
+    "roles": [
+      "physician"
+    ]
+  },
+  "principalName": "dr_ng",
+  "resourceKind": "clinical_note"
+}

@@ -1,0 +1,23 @@
+{
+  "action": "review_integrity",
+  "allowed": [],
+  "domain": "education",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [],
+      "term": "2024-FA"
+    },
+    "id": "r-ro",
+    "roles": [
+      "registrar"
+    ]
+  },
+  "principalName": "registrar_ro",
+  "resourceKind": "submission"
+}

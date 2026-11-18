@@ -1,0 +1,26 @@
+{
+  "action": "destroy",
+  "allowed": [],
+  "domain": "legal",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clearance": 5,
+      "clientId": "",
+      "practiceAreas": [
+        "litigation"
+      ]
+    },
+    "id": "p-cho",
+    "roles": [
+      "partner"
+    ]
+  },
+  "principalName": "partner_cho",
+  "resourceKind": "legal_document"
+}

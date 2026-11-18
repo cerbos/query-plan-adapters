@@ -1,0 +1,70 @@
+{
+  "action": "view_compensation",
+  "allowed": [
+    "e01",
+    "e02",
+    "e04",
+    "e05",
+    "e08",
+    "e10"
+  ],
+  "domain": "hr",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.department.id"
+                },
+                {
+                  "value": [
+                    "eng",
+                    "ops"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.location.country"
+                },
+                {
+                  "value": "GB"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "GB",
+      "departments": [
+        "eng",
+        "ops"
+      ],
+      "level": 0
+    },
+    "id": "hr1",
+    "roles": [
+      "hrbp"
+    ]
+  },
+  "principalName": "hrbp_uk",
+  "resourceKind": "employee_record"
+}

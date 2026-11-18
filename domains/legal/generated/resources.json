@@ -1,0 +1,300 @@
+{
+  "kind": "legal_document",
+  "nulls": "explicit",
+  "resources": [
+    {
+      "id": "d01",
+      "attr": {
+        "classification": 2,
+        "createdBy": "l-ali",
+        "legalHold": true,
+        "matter": {
+          "client": {
+            "id": "cl1",
+            "industry": "software"
+          },
+          "leadPartnerId": "p-cho",
+          "practiceArea": "litigation",
+          "screened": [],
+          "status": "open",
+          "team": [
+            "l-ali",
+            "l-bea",
+            "pl-dan"
+          ]
+        },
+        "privilege": "work-product",
+        "retentionUntil": null,
+        "shares": [],
+        "title": "Complaint"
+      }
+    },
+    {
+      "id": "d02",
+      "attr": {
+        "classification": 1,
+        "createdBy": "pl-dan",
+        "legalHold": false,
+        "matter": {
+          "client": {
+            "id": "cl1",
+            "industry": "software"
+          },
+          "leadPartnerId": "p-cho",
+          "practiceArea": "litigation",
+          "screened": [],
+          "status": "open",
+          "team": [
+            "l-ali",
+            "l-bea",
+            "pl-dan"
+          ]
+        },
+        "privilege": null,
+        "retentionUntil": null,
+        "shares": [],
+        "title": "Exhibit A"
+      }
+    },
+    {
+      "id": "d03",
+      "attr": {
+        "classification": 3,
+        "createdBy": "l-bea",
+        "legalHold": false,
+        "matter": {
+          "client": {
+            "id": "cl1",
+            "industry": "software"
+          },
+          "leadPartnerId": "p-cho",
+          "practiceArea": "litigation",
+          "screened": [],
+          "status": "open",
+          "team": [
+            "l-ali",
+            "l-bea",
+            "pl-dan"
+          ]
+        },
+        "privilege": "attorney-client",
+        "retentionUntil": null,
+        "shares": [],
+        "title": "Strategy memo"
+      }
+    },
+    {
+      "id": "d04",
+      "attr": {
+        "classification": 2,
+        "createdBy": "l-ali",
+        "legalHold": false,
+        "matter": {
+          "client": {
+            "id": "cl2",
+            "industry": null
+          },
+          "leadPartnerId": null,
+          "practiceArea": "m\u0026a",
+          "screened": [
+            "l-ali"
+          ],
+          "status": "open",
+          "team": [
+            "l-ali",
+            "pl-dan"
+          ]
+        },
+        "privilege": "attorney-client",
+        "retentionUntil": null,
+        "shares": [
+          {
+            "partyId": "cl2",
+            "partyType": "opposing_counsel"
+          }
+        ],
+        "title": "SPA draft"
+      }
+    },
+    {
+      "id": "d05",
+      "attr": {
+        "classification": 1,
+        "createdBy": "pl-dan",
+        "legalHold": false,
+        "matter": {
+          "client": {
+            "id": "cl2",
+            "industry": null
+          },
+          "leadPartnerId": null,
+          "practiceArea": "m\u0026a",
+          "screened": [
+            "l-ali"
+          ],
+          "status": "open",
+          "team": [
+            "l-ali",
+            "pl-dan"
+          ]
+        },
+        "privilege": null,
+        "retentionUntil": null,
+        "shares": [
+          {
+            "partyId": "cl2",
+            "partyType": "client"
+          }
+        ],
+        "title": "Data room index"
+      }
+    },
+    {
+      "id": "d06",
+      "attr": {
+        "classification": 4,
+        "createdBy": "l-bea",
+        "legalHold": false,
+        "matter": {
+          "client": {
+            "id": "cl2",
+            "industry": null
+          },
+          "leadPartnerId": "p-zed",
+          "practiceArea": "Litigation",
+          "screened": [
+            "p-cho"
+          ],
+          "status": "closed",
+          "team": [
+            "l-bea"
+          ]
+        },
+        "privilege": "",
+        "retentionUntil": "2020-01-01T00:00:00Z",
+        "shares": [
+          {
+            "partyId": "cl2",
+            "partyType": "client"
+          }
+        ],
+        "title": "Settlement"
+      }
+    },
+    {
+      "id": "d07",
+      "attr": {
+        "classification": 1,
+        "createdBy": "l-bea",
+        "legalHold": true,
+        "matter": {
+          "client": {
+            "id": "cl2",
+            "industry": null
+          },
+          "leadPartnerId": "p-zed",
+          "practiceArea": "Litigation",
+          "screened": [
+            "p-cho"
+          ],
+          "status": "closed",
+          "team": [
+            "l-bea"
+          ]
+        },
+        "privilege": null,
+        "retentionUntil": "2019-06-30T00:00:00Z",
+        "shares": [
+          {
+            "partyId": "cl2",
+            "partyType": "court"
+          }
+        ],
+        "title": "Court order"
+      }
+    },
+    {
+      "id": "d08",
+      "attr": {
+        "classification": 2,
+        "createdBy": "p-cho",
+        "legalHold": false,
+        "matter": {
+          "client": {
+            "id": "cl1",
+            "industry": "software"
+          },
+          "leadPartnerId": "p-cho",
+          "practiceArea": "employment",
+          "screened": [],
+          "status": "closed",
+          "team": [
+            "L-ALI"
+          ]
+        },
+        "privilege": null,
+        "retentionUntil": "2099-01-01T00:00:00Z",
+        "shares": [],
+        "title": "Severance"
+      }
+    },
+    {
+      "id": "d09",
+      "attr": {
+        "classification": 2,
+        "createdBy": "p-cho",
+        "legalHold": false,
+        "matter": {
+          "client": {
+            "id": "cl1",
+            "industry": "software"
+          },
+          "leadPartnerId": "p-cho",
+          "practiceArea": "employment",
+          "screened": [],
+          "status": "closed",
+          "team": [
+            "L-ALI"
+          ]
+        },
+        "privilege": "work-product",
+        "retentionUntil": "2018-01-01T00:00:00Z",
+        "shares": [],
+        "title": "HR notes"
+      }
+    },
+    {
+      "id": "d10",
+      "attr": {
+        "classification": 2,
+        "createdBy": "l-ali",
+        "legalHold": false,
+        "matter": {
+          "client": {
+            "id": "cl2",
+            "industry": null
+          },
+          "leadPartnerId": null,
+          "practiceArea": "m\u0026a",
+          "screened": [
+            "l-ali"
+          ],
+          "status": "open",
+          "team": [
+            "l-ali",
+            "pl-dan"
+          ]
+        },
+        "privilege": null,
+        "retentionUntil": null,
+        "shares": [
+          {
+            "partyId": "cl2",
+            "partyType": "Client"
+          }
+        ],
+        "title": "Board minutes"
+      }
+    }
+  ]
+}

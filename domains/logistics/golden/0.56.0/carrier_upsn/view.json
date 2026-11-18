@@ -1,0 +1,42 @@
+{
+  "action": "view",
+  "allowed": [
+    "s04",
+    "s05",
+    "s07"
+  ],
+  "domain": "logistics",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.carrier.scac"
+          },
+          {
+            "value": "UPSN"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "certifications": [
+        "cold-chain"
+      ],
+      "scac": "UPSN"
+    },
+    "id": "u-car2",
+    "roles": [
+      "carrier"
+    ]
+  },
+  "principalName": "carrier_upsn",
+  "resourceKind": "shipment"
+}

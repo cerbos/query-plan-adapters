@@ -1,0 +1,66 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: legal_document
+  version: default
+  variables:
+    local:
+      on_team: P.id in R.attr.matter.team
+      screened: P.id in R.attr.matter.screened
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [lawyer]
+      condition:
+        match:
+          expr: V.on_team && !V.screened
+    - actions: [edit]
+      effect: EFFECT_ALLOW
+      roles: [lawyer]
+      condition:
+        match:
+          all:
+            of:
+              - expr: V.on_team && !V.screened
+              - expr: R.attr.matter.status == "open"
+              - expr: R.attr.classification <= P.attr.clearance
+    - actions: [view, edit]
+      effect: EFFECT_ALLOW
+      roles: [partner]
+      condition:
+        match:
+          any:
+            of:
+              - expr: R.attr.matter.leadPartnerId == P.id
+              - expr: R.attr.matter.practiceArea in P.attr.practiceAreas
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [paralegal]
+      condition:
+        match:
+          expr: V.on_team && R.attr.privilege == null
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [client_user]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.matter.client.id == P.attr.clientId
+              - expr: R.attr.shares.exists(s, s.partyType == "client" && s.partyId == P.attr.clientId)
+              - expr: R.attr.privilege == null || R.attr.privilege == ""
+    - actions: ["*"]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          expr: V.screened
+    - actions: [destroy]
+      effect: EFFECT_ALLOW
+      roles: [records_manager]
+      condition:
+        match:
+          all:
+            of:
+              - expr: "!R.attr.legalHold"
+              - expr: R.attr.retentionUntil != null && timestamp(R.attr.retentionUntil) < now()
+              - expr: R.attr.matter.status == "closed"

@@ -1,0 +1,30 @@
+actions: [view, approve, audit, foia_release]
+principals:
+  worker_ann: {id: cw-ann, roles: [caseworker], attr: {agency: DSS, clearance: 2, counties: [], state: ""}}
+  supervisor_bo: {id: sv-bo, roles: [supervisor], attr: {agency: DSS, clearance: 3, counties: ["06037", "48201"], state: ""}}
+  auditor_cy: {id: au-cy, roles: [auditor], attr: {state: CA, counties: []}}
+  foia_dee: {id: fo-dee, roles: [foia_officer], attr: {counties: [], state: ""}}
+tables:
+  agencies:
+    - {code: DSS, name: Social Services, state: CA}
+    - {code: HHS, name: Health and Human Services, state: TX}
+    - {code: dss, name: Lowercase Office, state: CA}
+  applicants:
+    - {id: ap1, county_fips: "06037", household_size: 4, citizenship: US}
+    - {id: ap2, county_fips: "6037", household_size: 1}
+    - {id: ap3, county_fips: "48201", household_size: 2, citizenship: ""}
+    - {id: ap4, county_fips: "06001", household_size: 6, citizenship: MX}
+  cases:
+    - {id: k01, case_number: CA-2023-1001, agency_code: DSS, applicant_id: ap1, status: pending_review, clearance_level: 1, program: snap, opened_on: 2023-01-01T00:00:00Z, pii: true, monthly_amount: 2500.00}
+    - {id: k02, case_number: CA-2023-1002, agency_code: DSS, applicant_id: ap2, status: pending_review, clearance_level: 2, program: snap, opened_on: 2023-02-01T00:00:00Z, pii: true, assigned_to: cw-ann, monthly_amount: 300.00}
+    - {id: k03, case_number: TX-2022-77, agency_code: HHS, applicant_id: ap3, status: closed, clearance_level: 3, program: medicaid, opened_on: 2022-01-01T00:00:00Z, closed_on: 2023-01-01T00:00:00Z, pii: false, assigned_to: sv-bo, monthly_amount: 2500.01}
+    - {id: k04, case_number: ca-2021-5, agency_code: DSS, applicant_id: ap4, status: closed, clearance_level: 1, program: tanf, opened_on: 2021-01-01T00:00:00Z, closed_on: 2021-12-31T00:00:00Z, pii: false}
+    - {id: k05, case_number: CA-2020-12, agency_code: DSS, applicant_id: ap1, status: closed, clearance_level: 4, program: tanf, opened_on: 2020-01-01T00:00:00Z, closed_on: 2020-06-01T00:00:00Z, pii: false, assigned_to: cw-zed}
+    - {id: k06, case_number: CA-2019-3, agency_code: dss, applicant_id: ap1, status: closed, clearance_level: 0, program: snap, opened_on: 2019-01-01T00:00:00Z, closed_on: 2019-02-01T00:00:00Z, pii: false}
+    - {id: k07, case_number: CA-2024-9, agency_code: DSS, applicant_id: ap3, status: pending_review, clearance_level: 2, program: snap, opened_on: 2024-01-01T00:00:00Z, pii: true, assigned_to: sv-bo, monthly_amount: 100.00}
+    - {id: k08, case_number: CA-2024-10, agency_code: DSS, applicant_id: ap4, status: pending_review, clearance_level: 2, program: snap, opened_on: 2024-02-01T00:00:00Z, pii: false, monthly_amount: 50.00}
+    - {id: k09, case_number: TX-2024-1, agency_code: HHS, applicant_id: ap3, status: pending_review, clearance_level: 1, program: medicaid, opened_on: 2024-03-01T00:00:00Z, pii: false}
+  case_flags:
+    - {case_id: k03, flag: appeal}
+    - {case_id: k05, flag: sealed}
+    - {case_id: k06, flag: Sealed}

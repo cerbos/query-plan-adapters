@@ -1,0 +1,37 @@
+actions: [view, refund, cancel, flag_fraud]
+principals:
+  shopper_c1: {id: cu1, roles: [customer], attr: {tier: gold}}
+  manager_west: {id: sm-w, roles: [store_manager], attr: {region: west, refundLimitCents: 20000}}
+  agent_sue: {id: ag-sue, roles: [support_agent], attr: {}}
+  fraud_fin: {id: fr-fin, roles: [fraud_analyst], attr: {}}
+tables:
+  stores:
+    - {id: st1, region: west, country: US}
+    - {id: st2, region: east, country: US}
+    - {id: st3, region: West, country: CA}
+  customers:
+    - {id: cu1, email: a@example.com, tier: gold, loyalty_points: 1200}
+    - {id: cu2, email: b@example.com, tier: staff, loyalty_points: 0}
+    - {id: cu3, email: c@example.com, tier: bronze, loyalty_points: 15}
+  order:
+    - {id: o01, customer_id: cu1, store_id: st1, status: delivered, channel: in_store, total_cents: 19999, currency: USD, placed_at: 2023-05-01T10:00:00Z, gift: false}
+    - {id: o02, customer_id: cu1, status: placed, channel: online, total_cents: 5000, currency: USD, coupon_code: STAFF10, placed_at: 2023-05-02T10:00:00Z, gift: true}
+    - {id: o03, customer_id: cu2, status: paid, channel: online, total_cents: 120000, currency: USD, coupon_code: STAFF20, placed_at: 2023-05-03T10:00:00Z, gift: false}
+    - {id: o04, customer_id: cu3, store_id: st1, status: returned, channel: in_store, total_cents: 20000, currency: USD, placed_at: 2023-05-04T10:00:00Z, gift: false}
+    - {id: o05, customer_id: cu3, store_id: st2, status: delivered, channel: in_store, total_cents: 300, currency: USD, coupon_code: staff5, placed_at: 2023-05-05T10:00:00Z, gift: false}
+    - {id: o06, customer_id: cu3, store_id: st3, status: delivered, channel: in_store, total_cents: 100, currency: CAD, placed_at: 2023-05-06T10:00:00Z, gift: false}
+    - {id: o07, customer_id: cu1, status: paid, channel: online, total_cents: 9000000000, currency: USD, placed_at: 2023-05-07T10:00:00Z, gift: false}
+    - {id: o08, customer_id: cu3, status: placed, channel: Online, total_cents: 0, currency: USD, coupon_code: "", placed_at: 2023-05-08T10:00:00Z, gift: false}
+    - {id: o09, customer_id: cu1, store_id: st1, status: shipped, channel: in_store, total_cents: 20001, currency: USD, placed_at: 2023-05-09T10:00:00Z, gift: false}
+  order_line:
+    - {id: l01, order_id: o01, line_no: 1, sku: SHOE-1, category: apparel, quantity: 1, unit_price_cents: 19999}
+    - {id: l02, order_id: o02, line_no: 1, sku: GC-50, category: gift_card, quantity: 1, unit_price_cents: 5000}
+    - {id: l03, order_id: o03, line_no: 1, sku: GC-100, category: gift_card, quantity: 6, unit_price_cents: 10000}
+    - {id: l04, order_id: o03, line_no: 2, sku: TV-1, category: electronics, quantity: 1, unit_price_cents: 60000}
+    - {id: l05, order_id: o04, line_no: 1, sku: HAT-1, category: apparel, quantity: 2, unit_price_cents: 10000}
+    - {id: l06, order_id: o05, line_no: 1, sku: GUM, category: grocery, quantity: 3, unit_price_cents: 100}
+    - {id: l07, order_id: o07, line_no: 1, sku: GC-BULK, category: gift_card, quantity: 90000, unit_price_cents: 100000}
+    - {id: l08, order_id: o09, line_no: 1, sku: SOCK, category: apparel, quantity: 1, unit_price_cents: 1}
+    - {id: l09, order_id: o09, line_no: 2, sku: SOCK, category: apparel, quantity: 1, unit_price_cents: 20000}
+    - {id: l10, order_id: o09, line_no: 3, sku: BELT, category: apparel, quantity: 1, unit_price_cents: 0}
+    - {id: l11, order_id: o09, line_no: 4, sku: TIE, category: apparel, quantity: 1, unit_price_cents: 0}

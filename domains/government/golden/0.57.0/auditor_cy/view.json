@@ -1,0 +1,23 @@
+{
+  "action": "view",
+  "allowed": [],
+  "domain": "government",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "counties": [],
+      "state": "CA"
+    },
+    "id": "au-cy",
+    "roles": [
+      "auditor"
+    ]
+  },
+  "principalName": "auditor_cy",
+  "resourceKind": "benefit_case"
+}

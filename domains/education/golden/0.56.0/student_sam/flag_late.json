@@ -1,0 +1,23 @@
+{
+  "action": "flag_late",
+  "allowed": [],
+  "domain": "education",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [],
+      "term": ""
+    },
+    "id": "st-sam",
+    "roles": [
+      "student"
+    ]
+  },
+  "principalName": "student_sam",
+  "resourceKind": "submission"
+}

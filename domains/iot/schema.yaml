@@ -1,0 +1,63 @@
+kind: device
+note: >
+  IoT fleet management. `labels` is a JSON object column (JSONB on PostgreSQL) holding free-form
+  string tags that policies index as a map (`R.attr.labels.env`, `"tier" in R.attr.labels`).
+  Alerts are a child table. Firmware versions are strings compared by prefix.
+tables:
+  orgs:
+    pk: id
+    columns:
+      id: string
+      name: string
+      plan: string
+  sites:
+    pk: id
+    columns:
+      id: string
+      org_id: string -> orgs
+      region: string
+      name: string
+  devices:
+    pk: id
+    columns:
+      id: string
+      serial: string
+      model: string
+      firmware: string
+      site_id: string -> sites
+      last_seen_at: timestamp?
+      online: bool
+      battery_pct: int?
+      labels: json
+      decommissioned: bool
+  device_alerts:
+    pk: id
+    columns:
+      id: string
+      device_id: string -> devices
+      severity: int
+      acknowledged: bool
+      code: string
+resource:
+  table: devices
+  attributes:
+    serial: serial
+    model: model
+    firmware: firmware
+    lastSeenAt: last_seen_at
+    online: online
+    batteryPct: battery_pct
+    labels: labels
+    decommissioned: decommissioned
+    site:
+      one: site_id
+      attributes:
+        region: region
+        org:
+          one: org_id
+          attributes: {id: id, plan: plan}
+    alerts:
+      many: device_alerts
+      fk: device_id
+      orderBy: id
+      attributes: {severity: severity, acknowledged: acknowledged, code: code}

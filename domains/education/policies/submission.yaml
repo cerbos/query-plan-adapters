@@ -1,0 +1,50 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: submission
+  version: default
+  importDerivedRoles: [course_roles]
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      derivedRoles: [submitter, course_instructor, course_ta]
+    - actions: [grade]
+      effect: EFFECT_ALLOW
+      derivedRoles: [course_instructor]
+      condition:
+        match:
+          expr: has(R.attr.submittedAt) && !R.attr.locked
+    - actions: [grade]
+      effect: EFFECT_ALLOW
+      derivedRoles: [course_ta]
+      condition:
+        match:
+          all:
+            of:
+              - expr: has(R.attr.submittedAt) && !R.attr.locked
+              - expr: R.attr.assignment.maxPoints <= 50
+              - expr: "!has(R.attr.score)"
+    - actions: [review_integrity]
+      effect: EFFECT_ALLOW
+      roles: [integrity_officer]
+      condition:
+        match:
+          all:
+            of:
+              - expr: has(R.attr.plagiarismScore) && R.attr.plagiarismScore > 0.4
+              - expr: R.attr.assignment.course.department.id in P.attr.departments
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [registrar]
+      condition:
+        match:
+          expr: R.attr.assignment.course.term == P.attr.term && R.attr.status != "draft"
+    - actions: [flag_late]
+      effect: EFFECT_ALLOW
+      derivedRoles: [course_instructor, course_ta]
+      condition:
+        match:
+          all:
+            of:
+              - expr: has(R.attr.submittedAt)
+              - expr: timestamp(R.attr.submittedAt) > timestamp(R.attr.assignment.dueAt)
+              - expr: "!R.attr.late"
