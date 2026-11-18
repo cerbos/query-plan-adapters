@@ -81,6 +81,10 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  /** The seed whose own resource row is this row's `peer`. */
+  peerSeedId?: string | null;
+  /** The seed whose scalars this row's `stepParent`, a second relation into the parent table, carries. */
+  stepParentSeedId?: string | null;
   aNumberList: (number | null)[];
   aBoolList: (boolean | null)[];
   /** The store capabilities the row needs (conformance/README.md, "The harness contract"). */
@@ -159,8 +163,8 @@ function derivedFor(seed: Seed): DerivedEntry {
 // parent (and inner) row carrying the named seed's scalars, so no two resources share one.
 const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
 
-function parentSeedOf(seed: Seed | undefined): Seed | undefined {
-  const id = seed?.parentSeedId;
+function parentSeedOf(seed: Seed | undefined, field: "parentSeedId" | "peerSeedId" | "stepParentSeedId" = "parentSeedId"): Seed | undefined {
+  const id = seed?.[field];
 
   if (id === undefined || id === null) {
     return undefined;
@@ -169,7 +173,7 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const parent = SEEDS_BY_ID.get(id);
 
   if (parent === undefined) {
-    throw new Error(`seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`);
+    throw new Error(`seeds.json: "${seed?.id}" names ${field} "${id}", which is not a seed id`);
   }
 
   return parent;
@@ -225,7 +229,15 @@ interface ParentRow {
   aString: string | null;
   aNumber: number | null;
   aOptionalString: string | null;
-  resourceId: string;
+  /** NULL on a `stepParent` row, which the resource references through `step_parent_id`. */
+  resourceId: string | null;
+}
+
+/** The resource table's own foreign keys, set once every row they reference exists. */
+interface ResourceLinkRow {
+  id: string;
+  peerId: string | null;
+  stepParentId: string | null;
 }
 
 interface InnerRow {
@@ -241,6 +253,7 @@ interface SeedRows {
   resources: ResourceRow[];
   parents: ParentRow[];
   inners: InnerRow[];
+  links: ResourceLinkRow[];
   tags: TagRow[];
   categories: CategoryRow[];
   subCategories: SubCategoryRow[];
@@ -253,6 +266,7 @@ function seedRows(): SeedRows {
     resources: [],
     parents: [],
     inners: [],
+    links: [],
     tags: [],
     categories: [],
     subCategories: [],
@@ -299,6 +313,29 @@ function seedRows(): SeedRows {
           parentId,
         });
       }
+    }
+
+    const stepParentSeed = parentSeedOf(seed, "stepParentSeedId");
+
+    if (stepParentSeed !== undefined) {
+      rows.parents.push({
+        id: `${seed.id}-step`,
+        aBool: stepParentSeed.aBool,
+        aString: stepParentSeed.aString,
+        aNumber: stepParentSeed.aNumber,
+        aOptionalString: stepParentSeed.aOptionalString,
+        resourceId: null,
+      });
+    }
+
+    const peerSeed = parentSeedOf(seed, "peerSeedId");
+
+    if (peerSeed !== undefined || stepParentSeed !== undefined) {
+      rows.links.push({
+        id: seed.id,
+        peerId: peerSeed?.id ?? null,
+        stepParentId: stepParentSeed === undefined ? null : `${seed.id}-step`,
+      });
     }
 
     seed.tags.forEach((tag, position) => {
@@ -415,7 +452,9 @@ function sqliteStore(): AdversarialStore {
           updated_at TEXT,
           tag_names_json TEXT,
           a_number_list_json TEXT,
-          a_bool_list_json TEXT
+          a_bool_list_json TEXT,
+          peer_id TEXT REFERENCES adversarial_resources(id),
+          step_parent_id TEXT UNIQUE REFERENCES adversarial_parents(id)
         );
         CREATE TABLE adversarial_parents (
           id TEXT PRIMARY KEY,
@@ -423,7 +462,7 @@ function sqliteStore(): AdversarialStore {
           a_string TEXT,
           a_number INTEGER,
           a_optional_string TEXT,
-          resource_id TEXT NOT NULL UNIQUE
+          resource_id TEXT UNIQUE
         );
         CREATE TABLE adversarial_inners (
           id TEXT PRIMARY KEY,
@@ -460,6 +499,9 @@ function sqliteStore(): AdversarialStore {
       db.insert(resources).values(rows.resources).run();
       db.insert(parents).values(rows.parents).run();
       db.insert(inners).values(rows.inners).run();
+      for (const { id, ...link } of rows.links) {
+        db.update(resources).set(link).where(drizzleOrm.eq(resources.id, id)).run();
+      }
       db.insert(tags).values(rows.tags).run();
       db.insert(categories).values(rows.categories).run();
       db.insert(subCategories).values(rows.subCategories).run();
@@ -587,7 +629,8 @@ function postgresStore(): AdversarialStore {
           a_number_list_array integer[],
           a_bool_list_json   jsonb,
           a_bool_list_plain_json json,
-          a_bool_list_array  boolean[]
+          a_bool_list_array  boolean[],
+          peer_id            text REFERENCES adversarial_resources(id)
         );
         CREATE TABLE adversarial_parents (
           id                 text PRIMARY KEY,
@@ -595,8 +638,10 @@ function postgresStore(): AdversarialStore {
           a_string           text,
           a_number           integer,
           a_optional_string  text,
-          resource_id        text NOT NULL UNIQUE REFERENCES adversarial_resources(id)
+          resource_id        text UNIQUE REFERENCES adversarial_resources(id)
         );
+        ALTER TABLE adversarial_resources
+          ADD COLUMN step_parent_id text UNIQUE REFERENCES adversarial_parents(id);
         CREATE TABLE adversarial_inners (
           id                 text PRIMARY KEY,
           a_bool             boolean,
@@ -653,6 +698,9 @@ function postgresStore(): AdversarialStore {
           when a_bool_list_json is not null then array[]::boolean[] end`);
       await db.insert(parents).values(rows.parents);
       await db.insert(inners).values(rows.inners);
+      for (const { id, ...link } of rows.links) {
+        await db.update(resources).set(link).where(drizzleOrm.eq(resources.id, id));
+      }
       await db.insert(tags).values(rows.tags);
       await db.insert(categories).values(rows.categories);
       await db.insert(subCategories).values(rows.subCategories);
@@ -764,7 +812,8 @@ function mysqlStore(): AdversarialStore {
        updated_at         datetime(6),
        tag_names_json     json,
        a_number_list_json json,
-       a_bool_list_json   json
+       a_bool_list_json   json,
+       peer_id            varchar(64) REFERENCES adversarial_resources(id)
      )`,
     `CREATE TABLE adversarial_parents (
        id                 varchar(64) PRIMARY KEY,
@@ -772,8 +821,10 @@ function mysqlStore(): AdversarialStore {
        a_string           varchar(255),
        a_number           int,
        a_optional_string  varchar(255),
-       resource_id        varchar(64) NOT NULL UNIQUE REFERENCES adversarial_resources(id)
+       resource_id        varchar(64) UNIQUE REFERENCES adversarial_resources(id)
      )`,
+    `ALTER TABLE adversarial_resources
+       ADD COLUMN step_parent_id varchar(64) UNIQUE REFERENCES adversarial_parents(id)`,
     `CREATE TABLE adversarial_inners (
        id                 varchar(64) PRIMARY KEY,
        a_bool             boolean,
@@ -838,6 +889,9 @@ function mysqlStore(): AdversarialStore {
       await db.insert(resources).values(rows.resources.map(toMysqlResourceRow));
       await db.insert(parents).values(rows.parents);
       await db.insert(inners).values(rows.inners);
+      for (const { id, ...link } of rows.links) {
+        await db.update(resources).set(link).where(drizzleOrm.eq(resources.id, id));
+      }
       await db.insert(tags).values(rows.tags);
       await db.insert(categories).values(rows.categories);
       await db.insert(subCategories).values(rows.subCategories);

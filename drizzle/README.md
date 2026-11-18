@@ -489,7 +489,7 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | --- | --- |
 | core | 32 / 32 |
 | extended | 106 / 110 |
-| adversarial | 454 / 550 |
+| adversarial | 458 / 554 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
@@ -560,6 +560,13 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 ## Behaviour changes
 
 - Supports drizzle 1.0 (from `1.0.0-rc.5`) as well as 0.44 and 0.45.
+- Fixed over-grants: every relation subquery now ranges under its own alias, named by its path
+  (`cerbos_<relation>`). Two relations into one table (`origin.country == destination.country`)
+  used to compare the inner row with itself, and a relation from a table to itself
+  (`manager.id == "e02"`) was not correlated with the outer row, so both returned rows the PDP
+  denies. A `subqueryFilter` or `transform` is rebound to the alias through its drizzle columns; one
+  that names the table in raw SQL no longer reaches the related row. A drizzle `alias()` table
+  declared as a relation's `table` now works.
 - `table` and `schema` options: with them, an attribute the mapper leaves out reads the resource
   table's column or relation of the same name and `request.resource.id` its primary key, and a
   relation entry may give only a `name` (from `relations()` or `defineRelations()`) or a `table`
@@ -697,7 +704,7 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
   misconfiguration stays a plain `Error`.
 - [#509](https://github.com/cerbos/query-plan-adapters/issues/509): a collection macro nested over
   the relation an enclosing macro iterates — `tags.exists(t, tags.exists(u, u.name != t.name))` —
-  now gives the inner subquery its own alias (`cerbos_<table>_<n>`), so the lambda compares its
+  now gives the inner subquery its own alias, so the lambda compares its
   element with the enclosing one. Both subqueries used to range over the bare table name, SQL
   resolved `t.name` to the inner row, and the body compared each element with itself: an
   under-grant, and an over-grant under negation. An inner element read that cannot be rebound to

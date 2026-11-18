@@ -28,7 +28,7 @@ import { bindConstant, characterLength } from "./predicates";
 import {
   chainCorrelation,
   requireLeadingHops,
-  resolveTableName,
+  relationSource,
 } from "./relations";
 import { normalizeRfc3339Milliseconds, timestampColumnForm } from "./timestamp";
 import type { BuildFilterOptions, ResolvedMapper, RelationMapping } from "./types";
@@ -736,7 +736,7 @@ const buildSizeExpression = (
   if (resolved.relations.length > 0) {
     const primary = resolved.relations[resolved.relations.length - 1]!;
     const leading = resolved.relations.slice(0, -1);
-    const tableName = resolveTableName(primary.table, operand.name);
+    const source = relationSource(primary, operand.name);
     const chainWhere = chainCorrelation(primary, leading, operand.name, options);
 
     // A chain ending in a to-ONE hop names a scalar of that hop's row, and size() of it is a
@@ -753,7 +753,7 @@ const buildSizeExpression = (
 
       return requireLeadingHops(
         leading,
-        sql`(select ${length} from ${sql.identifier(tableName)} where ${chainWhere})`,
+        sql`(select ${length} from ${source} where ${chainWhere})`,
         operand.name,
         options,
       );
@@ -764,7 +764,7 @@ const buildSizeExpression = (
     // parentless row (#309).
     return requireLeadingHops(
       leading,
-      sql`(select count(*) from ${sql.identifier(tableName)} where ${chainWhere})`,
+      sql`(select count(*) from ${source} where ${chainWhere})`,
       operand.name,
       options,
     );
