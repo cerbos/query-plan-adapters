@@ -120,4 +120,38 @@ export const MAPPER: ConformanceMapper = {
     field: "parent.inner.aOptionalString",
     nullable: true,
   },
+  "request.resource.attr.peer": { field: "peer", nullable: true },
+  "request.resource.attr.peer.aBool": {
+    field: "peer.aBool",
+    nullable: true,
+  },
+  "request.resource.attr.peer.aString": {
+    field: "peer.aString",
+    nullable: true,
+  },
+  "request.resource.attr.peer.aNumber": {
+    field: "peer.aNumber",
+    nullable: true,
+  },
+  "request.resource.attr.peer.aOptionalString": {
+    field: "peer.aOptionalString",
+    nullable: true,
+  },
+  "request.resource.attr.stepParent": { field: "stepParent", nullable: true },
+  "request.resource.attr.stepParent.aBool": {
+    field: "stepParent.aBool",
+    nullable: true,
+  },
+  "request.resource.attr.stepParent.aString": {
+    field: "stepParent.aString",
+    nullable: true,
+  },
+  "request.resource.attr.stepParent.aNumber": {
+    field: "stepParent.aNumber",
+    nullable: true,
+  },
+  "request.resource.attr.stepParent.aOptionalString": {
+    field: "stepParent.aOptionalString",
+    nullable: true,
+  },
 };

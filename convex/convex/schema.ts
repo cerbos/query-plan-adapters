@@ -1,6 +1,13 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v, type Infer } from "convex/values";
 
+const relationLevel = v.object({
+  aBool: v.optional(v.boolean()),
+  aString: v.optional(v.string()),
+  aNumber: v.optional(v.number()),
+  aOptionalString: v.optional(v.string()),
+});
+
 export const adversarialDocument = {
   id: v.string(),
   aBool: v.optional(v.boolean()),
@@ -64,6 +71,8 @@ export const adversarialDocument = {
       ),
     }),
   ),
+  peer: v.optional(relationLevel),
+  stepParent: v.optional(relationLevel),
 };
 
 const adversarialDocumentValidator = v.object(adversarialDocument);

@@ -18,6 +18,7 @@ var CerbosSchema = &cerbosent.Schema{Types: []cerbosent.SchemaType{
 	{Name: "Parent", ID: "id", Columns: map[string]string{"a_bool": "bool", "a_number": "int", "a_optional_string": "string", "a_string": "string", "id": "string"}, Fields: map[string]string{"a_bool": "a_bool", "a_number": "a_number", "a_optional_string": "a_optional_string", "a_string": "a_string", "id": "id"}, Edges: []cerbosent.SchemaEdge{
 		{Name: "resource", Type: "Resource", Unique: true, Join: []cerbosent.SchemaJoin{{Table: "adversarial_resource", FromColumn: "resource_id", ToColumn: "id"}}},
 		{Name: "inner", Type: "Inner", Unique: true, Join: []cerbosent.SchemaJoin{{Table: "adversarial_inner", FromColumn: "id", ToColumn: "parent_id"}}},
+		{Name: "step_children", Type: "Resource", Unique: false, Join: []cerbosent.SchemaJoin{{Table: "adversarial_resource", FromColumn: "id", ToColumn: "step_parent_id"}}},
 	}},
 	{Name: "Resource", ID: "id", Columns: map[string]string{"a_bool": "bool", "a_double": "float64", "a_number": "int", "a_optional_string": "string", "a_string": "string", "created_at": "time.Time", "created_by": "string", "id": "string", "scope": "string", "updated_at": "time.Time"}, Fields: map[string]string{"a_bool": "a_bool", "a_double": "a_double", "a_number": "a_number", "a_optional_string": "a_optional_string", "a_string": "a_string", "created_at": "created_at", "created_by": "created_by", "id": "id", "scope": "scope", "updated_at": "updated_at"}, Edges: []cerbosent.SchemaEdge{
 		{Name: "tags", Type: "Tag", Unique: false, Join: []cerbosent.SchemaJoin{{Table: "adversarial_tag", FromColumn: "id", ToColumn: "resource_id"}}},
@@ -25,6 +26,9 @@ var CerbosSchema = &cerbosent.Schema{Types: []cerbosent.SchemaType{
 		{Name: "parent", Type: "Parent", Unique: true, Join: []cerbosent.SchemaJoin{{Table: "adversarial_parent", FromColumn: "id", ToColumn: "resource_id"}}},
 		{Name: "number_elems", Type: "NumberElem", Unique: false, Join: []cerbosent.SchemaJoin{{Table: "adversarial_number_elem", FromColumn: "id", ToColumn: "resource_id"}}},
 		{Name: "bool_elems", Type: "BoolElem", Unique: false, Join: []cerbosent.SchemaJoin{{Table: "adversarial_bool_elem", FromColumn: "id", ToColumn: "resource_id"}}},
+		{Name: "peered_by", Type: "Resource", Unique: false, Join: []cerbosent.SchemaJoin{{Table: "adversarial_resource", FromColumn: "id", ToColumn: "peer_id"}}},
+		{Name: "peer", Type: "Resource", Unique: true, Join: []cerbosent.SchemaJoin{{Table: "adversarial_resource", FromColumn: "peer_id", ToColumn: "id"}}},
+		{Name: "step_parent", Type: "Parent", Unique: true, Join: []cerbosent.SchemaJoin{{Table: "adversarial_parent", FromColumn: "step_parent_id", ToColumn: "id"}}},
 	}},
 	{Name: "SubCategory", ID: "id", Columns: map[string]string{"id": "string", "name": "string"}, Fields: map[string]string{"id": "id", "name": "name"}, Edges: []cerbosent.SchemaEdge{
 		{Name: "labels", Type: "Label", Unique: false, Join: []cerbosent.SchemaJoin{{Table: "adversarial_label", FromColumn: "id", ToColumn: "sub_category_id"}}},

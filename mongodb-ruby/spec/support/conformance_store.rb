@@ -49,6 +49,8 @@ module ConformanceStore
       # (conformance/README.md, "The dataset"), so a category can be partly matched.
       "categories" => categories(seed),
       "parent" => stored_parent(seed),
+      "peer" => seed["peerSeedId"] && relation_level(ConformanceCorpus::SEEDS_BY_ID.fetch(seed["peerSeedId"])),
+      "stepParent" => seed["stepParentSeedId"] && relation_level(ConformanceCorpus::SEEDS_BY_ID.fetch(seed["stepParentSeedId"])),
       # Verbatim, null elements included: a null element is a value CEL compares.
       "aNumberList" => seed.fetch("aNumberList"),
       "aBoolList" => seed.fetch("aBoolList")

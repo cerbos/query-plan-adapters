@@ -52,6 +52,9 @@ module CorpusMapper
     # what makes the adapter require it outside any $nor.
     "request.resource.attr.parent" => {relation: {name: "parent", type: :one, fields: RELATION_LEVEL_FIELDS}},
     "request.resource.attr.parent.inner" => {relation: {name: "parent.inner", type: :one, fields: RELATION_LEVEL_FIELDS}},
+    # `peer` (a self-relation) and `stepParent` are held like `parent`: an embedded copy per document.
+    "request.resource.attr.peer" => {relation: {name: "peer", type: :one, fields: RELATION_LEVEL_FIELDS}},
+    "request.resource.attr.stepParent" => {relation: {name: "stepParent", type: :one, fields: RELATION_LEVEL_FIELDS}},
     "request.resource.attr.tags" => {
       relation: {name: "tags", type: :many, fields: {"id" => {field: "id"}, "name" => {field: "name", nullable: true}}}
     },

@@ -95,7 +95,8 @@ CREATE TABLE adversarial_resource (
 	created_by         text    NOT NULL,
 	scope              text,
 	created_at         text,
-	updated_at         text
+	updated_at         text,
+	peer_id            text REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_tag (
 	pk           integer PRIMARY KEY AUTOINCREMENT,
@@ -125,8 +126,9 @@ CREATE TABLE adversarial_parent (
 	a_string           text,
 	a_number           integer,
 	a_optional_string  text,
-	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+	resource_id        text    UNIQUE REFERENCES adversarial_resource(id)
 );
+ALTER TABLE adversarial_resource ADD COLUMN step_parent_id text REFERENCES adversarial_parent(id);
 CREATE TABLE adversarial_inner (
 	id                 text PRIMARY KEY,
 	a_bool             integer,
@@ -163,7 +165,8 @@ CREATE TABLE adversarial_resource (
 	created_by         text             NOT NULL,
 	scope              text,
 	created_at         timestamptz,
-	updated_at         timestamptz
+	updated_at         timestamptz,
+	peer_id            text REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_tag (
 	pk           bigserial PRIMARY KEY,
@@ -193,8 +196,9 @@ CREATE TABLE adversarial_parent (
 	a_string           text,
 	a_number           bigint,
 	a_optional_string  text,
-	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+	resource_id        text    UNIQUE REFERENCES adversarial_resource(id)
 );
+ALTER TABLE adversarial_resource ADD COLUMN step_parent_id text REFERENCES adversarial_parent(id);
 CREATE TABLE adversarial_inner (
 	id                 text   PRIMARY KEY,
 	a_bool             boolean,
@@ -247,7 +251,8 @@ CREATE TABLE adversarial_resource (
 	created_by         varchar(64) NOT NULL,
 	scope              varchar(255),
 	created_at         datetime(6),
-	updated_at         datetime(6)
+	updated_at         datetime(6),
+	peer_id            varchar(64) REFERENCES adversarial_resource(id)
 );
 CREATE TABLE adversarial_tag (
 	pk           bigint AUTO_INCREMENT PRIMARY KEY,
@@ -277,8 +282,9 @@ CREATE TABLE adversarial_parent (
 	a_string           varchar(255),
 	a_number           bigint,
 	a_optional_string  varchar(255),
-	resource_id        varchar(64) NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+	resource_id        varchar(64) UNIQUE REFERENCES adversarial_resource(id)
 );
+ALTER TABLE adversarial_resource ADD COLUMN step_parent_id varchar(64) REFERENCES adversarial_parent(id);
 CREATE TABLE adversarial_inner (
 	id                 varchar(64) PRIMARY KEY,
 	a_bool             boolean,
@@ -486,6 +492,17 @@ func declaredMapper() cerbosent.Mapper {
 		Via:          []cerbosent.Hop{{Table: parentTable, ChildColumn: "parent_id", JoinColumn: "id"}},
 		SourceColumn: "id", TargetColumn: "resource_id",
 	}
+	// peer is a foreign key from the resource table to itself; stepParent a second relation into
+	// the parent table, held on the resource row. Their string hops are declared, so a comparison
+	// between two of them is byte-exact under any collation.
+	peerRel := &cerbosent.Relation{
+		Table:        resourceTable,
+		SourceColumn: "peer_id", TargetColumn: "id",
+	}
+	stepParentRel := &cerbosent.Relation{
+		Table:        parentTable,
+		SourceColumn: "step_parent_id", TargetColumn: "id",
+	}
 
 	return cerbosent.MapperMap{
 		// The primary key, reached as `request.resource.id` rather than through `attr` (the
@@ -559,6 +576,17 @@ func declaredMapper() cerbosent.Mapper {
 		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
+
+		"request.resource.attr.peer":                       {ScalarRelation: peerRel},
+		"request.resource.attr.peer.aBool":                 {ScalarRelation: peerRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.peer.aString":               {ScalarRelation: peerRel, Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.peer.aNumber":               {ScalarRelation: peerRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.peer.aOptionalString":       {ScalarRelation: peerRel, Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.stepParent":                 {ScalarRelation: stepParentRel},
+		"request.resource.attr.stepParent.aBool":           {ScalarRelation: stepParentRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.stepParent.aString":         {ScalarRelation: stepParentRel, Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.stepParent.aNumber":         {ScalarRelation: stepParentRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.stepParent.aOptionalString": {ScalarRelation: stepParentRel, Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 	}
 }
 
@@ -657,6 +685,29 @@ func (s *store) seed(t *testing.T, corpus *Corpus) {
 			}
 		}
 	}
+
+	// Every resource row exists now, so a peer can name any of them.
+	for _, seed := range corpus.Seeds {
+		if peer := corpus.seedNamed(seed.PeerSeedID); peer != nil {
+			s.update(t, seed.ID, "peer_id", peer.ID)
+		}
+		if step := corpus.seedNamed(seed.StepParentSeedID); step != nil {
+			s.exec(t, parentTable,
+				[]string{"id", "a_bool", "a_string", "a_number", "a_optional_string"},
+				stepParentID(seed), step.ABool, step.AString, step.ANumber, nullableString(step.AOptionalString))
+			s.update(t, seed.ID, "step_parent_id", stepParentID(seed))
+		}
+	}
+}
+
+// update sets one column of a resource row.
+func (s *store) update(t *testing.T, id, column string, value any) {
+	t.Helper()
+
+	query, args := entsql.Dialect(s.target.dialect).
+		Update(resourceTable).Set(column, value).Where(entsql.EQ("id", id)).Query()
+	_, err := s.db.ExecContext(t.Context(), query, args...)
+	require.NoError(t, err, "seeding %s.%s", resourceTable, column)
 }
 
 // storedTimestamp writes the derived createdAt in whatever form the dialect compares correctly.

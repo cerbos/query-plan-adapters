@@ -108,6 +108,14 @@ public class ResourceEntity {
     @OneToOne(mappedBy = "resource")
     private AdversarialParentEntity parent;
 
+    @ManyToOne
+    @JoinColumn(name = "peer_id")
+    private ResourceEntity peer;
+
+    @OneToOne
+    @JoinColumn(name = "step_parent_id", unique = true)
+    private AdversarialParentEntity stepParent;
+
     public ResourceEntity() {}
 
     public ResourceEntity(String id) {
@@ -152,6 +160,10 @@ public class ResourceEntity {
     public void setNested(NestedEmbeddable nested) { this.nested = nested; }
     public AdversarialParentEntity getParent() { return parent; }
     public void setParent(AdversarialParentEntity parent) { this.parent = parent; }
+    public ResourceEntity getPeer() { return peer; }
+    public void setPeer(ResourceEntity peer) { this.peer = peer; }
+    public AdversarialParentEntity getStepParent() { return stepParent; }
+    public void setStepParent(AdversarialParentEntity stepParent) { this.stepParent = stepParent; }
 
     public List<NumberListElementEntity> getaNumberList() { return aNumberList; }
     public List<BoolListElementEntity> getaBoolList() { return aBoolList; }

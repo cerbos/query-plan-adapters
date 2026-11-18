@@ -62,6 +62,10 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  /** The seed whose own resource row is this row's `peer`. */
+  peerSeedId?: string | null;
+  /** The seed whose scalars this row's `stepParent`, a second relation into the parent table, carries. */
+  stepParentSeedId?: string | null;
   /** The store capabilities the row needs (conformance/README.md, "The harness contract"). */
   requires?: string[];
 }
@@ -142,8 +146,11 @@ function derivedFor(seed: Seed): DerivedEntry {
 // parent (and inner) row carrying the named seed's scalars, so no two resources share one.
 const SEEDS_BY_ID = new Map(SEEDS.map((seed) => [seed.id, seed]));
 
-function parentSeedOf(seed: Seed | undefined): Seed | undefined {
-  const id = seed?.parentSeedId;
+function parentSeedOf(
+  seed: Seed | undefined,
+  field: "parentSeedId" | "peerSeedId" | "stepParentSeedId" = "parentSeedId"
+): Seed | undefined {
+  const id = seed?.[field];
 
   if (id === undefined || id === null) {
     return undefined;
@@ -152,7 +159,7 @@ function parentSeedOf(seed: Seed | undefined): Seed | undefined {
   const parent = SEEDS_BY_ID.get(id);
 
   if (parent === undefined) {
-    throw new Error(`seeds.json: "${seed?.id}" names parent "${id}", which is not a seed id`);
+    throw new Error(`seeds.json: "${seed?.id}" names ${field} "${id}", which is not a seed id`);
   }
 
   return parent;
@@ -184,6 +191,7 @@ async function seedStore(): Promise<void> {
     const derived = derivedFor(seed);
     const parentSeed = parentSeedOf(seed);
     const innerSeed = parentSeedOf(parentSeed);
+    const stepParentSeed = parentSeedOf(seed, "stepParentSeedId");
     await prisma.adversarialResource.create({
       data: {
         id: seed.id,
@@ -212,6 +220,8 @@ async function seedStore(): Promise<void> {
                   inner: innerSeed === undefined ? undefined : { create: relationColumns(innerSeed) },
                 },
               },
+        stepParent:
+          stepParentSeed === undefined ? undefined : { create: relationColumns(stepParentSeed) },
         // One category holding every subcategory name (conformance/README.md, "The dataset").
         categories: {
           create:
@@ -231,6 +241,15 @@ async function seedStore(): Promise<void> {
         },
       },
     });
+  }
+
+  // A resource's peer is another resource row, set once every row exists.
+  for (const seed of SEEDS) {
+    const peerSeed = parentSeedOf(seed, "peerSeedId");
+
+    if (peerSeed !== undefined) {
+      await prisma.adversarialResource.update({ where: { id: seed.id }, data: { peerId: peerSeed.id } });
+    }
   }
 }
 

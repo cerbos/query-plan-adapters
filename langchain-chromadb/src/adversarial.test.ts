@@ -64,6 +64,8 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  peerSeedId?: string;
+  stepParentSeedId?: string;
 }
 
 interface DerivedEntry {
@@ -150,9 +152,15 @@ function metadataFor(seed: Seed): Metadata {
   // level that does not exist writes no key, which is the missing `parent` / `parent.inner` path.
   const parent = parentSeedOf(seed);
 
+  const peer = seed.peerSeedId === undefined ? undefined : SEEDS_BY_ID.get(seed.peerSeedId);
+  const stepParent =
+    seed.stepParentSeedId === undefined ? undefined : SEEDS_BY_ID.get(seed.stepParentSeedId);
+
   const levels: [string, Seed | undefined][] = [
     ["parent", parent],
     ["parent.inner", parentSeedOf(parent)],
+    ["peer", peer],
+    ["stepParent", stepParent],
   ];
 
   for (const [prefix, level] of levels) {
@@ -214,6 +222,10 @@ function metadataFor(seed: Seed): Metadata {
         : { ...relationAttr(parent), inner: relationAttr(inner) },
     ]);
   }
+
+  if (peer !== undefined) json.push(["peer", relationAttr(peer)]);
+
+  if (stepParent !== undefined) json.push(["stepParent", relationAttr(stepParent)]);
 
   for (const [key, value] of json) metadata[key] = JSON.stringify(value);
 

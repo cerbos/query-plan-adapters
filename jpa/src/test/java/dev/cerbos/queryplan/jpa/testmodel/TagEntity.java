@@ -10,12 +10,15 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 @Entity
-@Table(name = "tags")
+// Indexed on (resource_id, name) as a real schema keys a membership lookup: MySQL can drop a
+// binary comparison on `name` that only collates the value inside a subquery that index serves.
+@Table(name = "tags", indexes = @Index(columnList = "resource_id, name"))
 public class TagEntity {
 
     @Id

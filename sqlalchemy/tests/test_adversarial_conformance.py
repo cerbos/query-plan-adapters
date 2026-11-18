@@ -41,7 +41,7 @@ from corpus import (
     read_corpus_json,
     reads_declared_collection,
 )
-from sqlalchemy import create_engine, event, insert, text
+from sqlalchemy import bindparam, create_engine, event, insert, text, update
 from sqlalchemy.engine import make_url
 
 from cerbos_sqlalchemy import UnsupportedPlanError, get_query
@@ -128,6 +128,8 @@ def _seed(engine, ledger_store: str) -> None:
     def parent_of(seed):
         return None if seed["parentSeedId"] is None else by_id[seed["parentSeedId"]]
 
+    links: list[dict[str, Any]] = []
+
     def scalars(seed):
         return {
             "a_bool": seed["aBool"],
@@ -200,6 +202,20 @@ def _seed(engine, ledger_store: str) -> None:
                         "parent_id": parent_id,
                     }
                 )
+        step = seed.get("stepParentSeedId")
+        step_id = f"{seed['id']}-step" if step is not None else None
+        if step is not None:
+            rows[AdvParent].append(
+                {"id": step_id, **scalars(by_id[step]), "resource_id": None}
+            )
+        if step is not None or seed.get("peerSeedId") is not None:
+            links.append(
+                {
+                    "link_id": seed["id"],
+                    "peer_id": seed.get("peerSeedId"),
+                    "step_parent_id": step_id,
+                }
+            )
         for tag in tags:
             rows[AdvTag].append(
                 {"tag_id": tag["id"], "name": tag["name"], "resource_id": seed["id"]}
@@ -228,6 +244,18 @@ def _seed(engine, ledger_store: str) -> None:
         for model, model_rows in rows.items():
             if model_rows:
                 conn.execute(insert(model.__table__), model_rows)
+        # After every row exists, so each foreign key finds its target.
+        if links:
+            table = AdvResource.__table__
+            conn.execute(
+                update(table)
+                .where(table.c.id == bindparam("link_id"))
+                .values(
+                    peer_id=bindparam("peer_id"),
+                    step_parent_id=bindparam("step_parent_id"),
+                ),
+                links,
+            )
 
 
 def _case_sensitive_like(dbapi_conn, _):

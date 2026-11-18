@@ -51,6 +51,8 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  peerSeedId?: string;
+  stepParentSeedId?: string;
   /** Homogeneous scalar lists. A null ELEMENT is a value, not an absent attribute. */
   aNumberList: (number | null)[];
   aBoolList: (boolean | null)[];
@@ -125,6 +127,8 @@ interface AdversarialResourceDocument {
   tags: Tag[];
   categories: AdversarialCategory[];
   parent: AdversarialParent | null;
+  peer: AdversarialRelationLevel | null;
+  stepParent: AdversarialRelationLevel | null;
   aNumberList: (number | null)[];
   aBoolList: (boolean | null)[];
 }
@@ -199,6 +203,8 @@ const resourceSchema = new Schema<AdversarialResourceDocument>(
     tags: { type: [tagSchema], default: [] },
     categories: { type: [categorySchema], default: [] },
     parent: { type: parentSchema, default: null },
+    peer: { type: innerSchema, default: null },
+    stepParent: { type: innerSchema, default: null },
     // Native TYPED arrays, which is what an application would declare, and deliberately so:
     // Mongoose casts the literal of an `$expr` comparison to the schema type of the path on the
     // other side, so `[Boolean]` is what gives it the chance to turn the cross-type probes' `1`
@@ -271,6 +277,13 @@ function storedParent(seed: Seed): AdversarialParent | null {
   };
 }
 
+function storedLevel(id: string | undefined): AdversarialRelationLevel | null {
+  if (id === undefined) return null;
+  const level = SEEDS_BY_ID.get(id);
+  if (level === undefined) throw new Error(`seeds.json: "${id}" is not a seed id`);
+  return relationLevel(level);
+}
+
 function toDocument(seed: Seed): AdversarialResourceDocument {
   const derived = derivedFor(seed);
 
@@ -300,6 +313,8 @@ function toDocument(seed: Seed): AdversarialResourceDocument {
             },
           ],
     parent: storedParent(seed),
+    peer: storedLevel(seed.peerSeedId),
+    stepParent: storedLevel(seed.stepParentSeedId),
     aNumberList: seed.aNumberList,
     aBoolList: seed.aBoolList,
   };
