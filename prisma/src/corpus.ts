@@ -440,6 +440,16 @@ export const INFERRED_MAPPER: ConformanceMapper = {
       fields: { aBool: {}, aString: {}, aNumber: {}, aOptionalString: {}, inner: {} },
     },
   },
+  // Two more to-one relations for joins that reach a table twice: `peer` is another resource row
+  // (a relation from the resource model to itself), `stepParent` a second row in the parent table.
+  "request.resource.attr.peer": {
+    nullAttributeRepresentation: "omitted",
+    relation: { name: "peer", fields: { aBool: {}, aString: {}, aNumber: {}, aOptionalString: {} } },
+  },
+  "request.resource.attr.stepParent": {
+    nullAttributeRepresentation: "omitted",
+    relation: { name: "stepParent", fields: { aBool: {}, aString: {}, aNumber: {}, aOptionalString: {} } },
+  },
   "request.resource.attr.tags": {
     relation: { name: "tags", fields: { id: { field: "tagId" } } },
   },
@@ -511,6 +521,34 @@ export const DECLARED_MAPPER: ConformanceMapper = {
             },
           },
         },
+      },
+    },
+  },
+  "request.resource.attr.peer": {
+    nullAttributeRepresentation: "omitted",
+    relation: {
+      name: "peer",
+      type: "one",
+      model: "AdversarialResource",
+      fields: {
+        aBool: { field: "aBool", valueType: "boolean", nullable: true },
+        aString: { field: "aString", valueType: "string", nullable: true },
+        aNumber: { field: "aNumber", valueType: "number", nullable: true },
+        aOptionalString: { field: "aOptionalString", valueType: "string", nullable: true },
+      },
+    },
+  },
+  "request.resource.attr.stepParent": {
+    nullAttributeRepresentation: "omitted",
+    relation: {
+      name: "stepParent",
+      type: "one",
+      model: "AdversarialParent",
+      fields: {
+        aBool: { field: "aBool", valueType: "boolean", nullable: true },
+        aString: { field: "aString", valueType: "string", nullable: true },
+        aNumber: { field: "aNumber", valueType: "number", nullable: true },
+        aOptionalString: { field: "aOptionalString", valueType: "string", nullable: true },
       },
     },
   },

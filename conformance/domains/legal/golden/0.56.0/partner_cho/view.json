@@ -1,0 +1,92 @@
+{
+  "action": "view",
+  "allowed": [
+    "d01",
+    "d02",
+    "d03",
+    "d08",
+    "d09"
+  ],
+  "domain": "legal",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "p-cho"
+                      },
+                      {
+                        "variable": "request.resource.attr.matter.screened"
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.matter.leadPartnerId"
+                      },
+                      {
+                        "value": "p-cho"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.matter.practiceArea"
+                      },
+                      {
+                        "value": "litigation"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clearance": 5,
+      "clientId": "",
+      "practiceAreas": [
+        "litigation"
+      ]
+    },
+    "id": "p-cho",
+    "roles": [
+      "partner"
+    ]
+  },
+  "principalName": "partner_cho",
+  "resourceKind": "legal_document"
+}

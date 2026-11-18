@@ -66,7 +66,8 @@ CREATE TABLE adversarial_resource (
 	created_by         text             NOT NULL,
 	scope              text,
 	created_at         timestamptz,
-	updated_at         timestamptz
+	updated_at         timestamptz,
+	peer_id            text REFERENCES adversarial_resource(id)
 );
 
 CREATE TABLE adversarial_tag (
@@ -101,8 +102,10 @@ CREATE TABLE adversarial_parent (
 	a_string           text,
 	a_number           bigint,
 	a_optional_string  text,
-	resource_id        text    NOT NULL UNIQUE REFERENCES adversarial_resource(id)
+	resource_id        text    UNIQUE REFERENCES adversarial_resource(id)
 );
+
+ALTER TABLE adversarial_resource ADD COLUMN step_parent_id text REFERENCES adversarial_parent(id);
 
 CREATE TABLE adversarial_inner (
 	id                 text    PRIMARY KEY,
@@ -207,6 +210,17 @@ func buildMapper() cerbospgx.Mapper {
 		Via:          []cerbospgx.Hop{{Table: parentTable, ChildColumn: "parent_id", JoinColumn: "id"}},
 		SourceColumn: "id", TargetColumn: "resource_id",
 	}
+	// peer is a foreign key from the resource table to itself; stepParent a second relation into
+	// the parent table, held on the resource row. Their string hops are declared, so a comparison
+	// between two of them is byte-exact under any collation.
+	peerRel := &cerbospgx.Relation{
+		Table:        resourceTable,
+		SourceColumn: "peer_id", TargetColumn: "id",
+	}
+	stepParentRel := &cerbospgx.Relation{
+		Table:        parentTable,
+		SourceColumn: "step_parent_id", TargetColumn: "id",
+	}
 
 	return cerbospgx.MapperMap{
 		// The primary key, reached as `request.resource.id` rather than through `attr` (the
@@ -280,6 +294,17 @@ func buildMapper() cerbospgx.Mapper {
 		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number", NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", NullConvention: cerbospgx.NullConventionOmitted},
+
+		"request.resource.attr.peer":                       {ScalarRelation: peerRel},
+		"request.resource.attr.peer.aBool":                 {ScalarRelation: peerRel, Column: "a_bool", ValueType: cerbospgx.ValueBool, NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.peer.aString":               {ScalarRelation: peerRel, Column: "a_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.peer.aNumber":               {ScalarRelation: peerRel, Column: "a_number", NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.peer.aOptionalString":       {ScalarRelation: peerRel, Column: "a_optional_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.stepParent":                 {ScalarRelation: stepParentRel},
+		"request.resource.attr.stepParent.aBool":           {ScalarRelation: stepParentRel, Column: "a_bool", ValueType: cerbospgx.ValueBool, NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.stepParent.aString":         {ScalarRelation: stepParentRel, Column: "a_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.stepParent.aNumber":         {ScalarRelation: stepParentRel, Column: "a_number", NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.stepParent.aOptionalString": {ScalarRelation: stepParentRel, Column: "a_optional_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
 	}
 }
 
@@ -428,6 +453,23 @@ func seedDatabase(t *testing.T, ctx context.Context, pool *pgxpool.Pool, corpus 
 					fmt.Sprintf("%s-label%d", subID, j), label, subID)
 				require.NoError(t, err, "seeding label for %s", subID)
 			}
+		}
+	}
+
+	// Every resource row exists now, so a peer can name any of them.
+	for _, seed := range corpus.Seeds {
+		if peer := corpus.seedNamed(seed.PeerSeedID); peer != nil {
+			_, err := pool.Exec(ctx, `UPDATE adversarial_resource SET peer_id = $1 WHERE id = $2`, peer.ID, seed.ID)
+			require.NoError(t, err, "seeding peer for %s", seed.ID)
+		}
+		if step := corpus.seedNamed(seed.StepParentSeedID); step != nil {
+			_, err := pool.Exec(ctx, `
+				INSERT INTO adversarial_parent (id, a_bool, a_string, a_number, a_optional_string)
+				VALUES ($1,$2,$3,$4,$5)`,
+				stepParentID(seed), step.ABool, step.AString, step.ANumber, step.AOptionalString)
+			require.NoError(t, err, "seeding stepParent for %s", seed.ID)
+			_, err = pool.Exec(ctx, `UPDATE adversarial_resource SET step_parent_id = $1 WHERE id = $2`, stepParentID(seed), seed.ID)
+			require.NoError(t, err, "seeding stepParent for %s", seed.ID)
 		}
 	}
 }

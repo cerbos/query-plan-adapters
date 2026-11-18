@@ -1,0 +1,70 @@
+{
+  "action": "view_compensation",
+  "allowed": [
+    "e04"
+  ],
+  "domain": "hr",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.manager.id"
+                },
+                {
+                  "value": "e02"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.level"
+                },
+                {
+                  "value": 6
+                }
+              ],
+              "operator": "lt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.salaryBand"
+                }
+              ],
+              "operator": "has"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 6
+    },
+    "id": "e02",
+    "roles": [
+      "employee",
+      "manager"
+    ]
+  },
+  "principalName": "mgr_e02",
+  "resourceKind": "employee_record"
+}

@@ -1,0 +1,94 @@
+{
+  "action": "read",
+  "allowed": [
+    "ar01",
+    "ar02",
+    "ar04"
+  ],
+  "domain": "media",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": "published"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.embargoUntil"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "2026-11-18T12:21:34.497992474Z"
+                      }
+                    ],
+                    "operator": "timestamp"
+                  }
+                }
+              ],
+              "operator": "lt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.language"
+                },
+                {
+                  "value": [
+                    "en",
+                    "fr"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [],
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "subscriber": true
+    },
+    "id": "rd2",
+    "roles": [
+      "reader"
+    ]
+  },
+  "principalName": "reader_sub",
+  "resourceKind": "article"
+}

@@ -4760,6 +4760,42 @@ resourcePolicy:
       condition:
         match:
           expr: '("finance" in R.attr.mainCategory.subNames) ? R.attr.aBool : !R.attr.aBool'
+    # relation/equals/self-relation-one-hop-string
+    - actions:
+        - relation/equals/self-relation-one-hop-string
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.peer.aString == "One"
+    # relation/equals/self-relation-field-to-field
+    - actions:
+        - relation/equals/self-relation-field-to-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.peer.aNumber == R.attr.aNumber
+    # relation/equals/same-table-field-to-field
+    - actions:
+        - relation/equals/same-table-field-to-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aString == R.attr.stepParent.aString
+    # relation/not-equals/same-table-field-to-field
+    - actions:
+        - relation/not-equals/same-table-field-to-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aString != R.attr.stepParent.aString
     # size/equals/collection-two
     - actions:
         - size/equals/collection-two

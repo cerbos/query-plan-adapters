@@ -1,0 +1,26 @@
+{
+  "action": "sign",
+  "allowed": [
+    "n13"
+  ],
+  "domain": "healthcare",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "north",
+      "specialties": [],
+      "wards": []
+    },
+    "id": "u-li",
+    "roles": [
+      "researcher"
+    ]
+  },
+  "principalName": "researcher_li",
+  "resourceKind": "clinical_note"
+}

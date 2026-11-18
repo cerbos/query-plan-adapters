@@ -1,12 +1,12 @@
 import type { PlanExpressionOperand } from "@cerbos/core";
-import { aliasedTableColumn } from "drizzle-orm";
+import { aliasedTableColumn, getTableName } from "drizzle-orm";
 import type { AnyColumn, SQL } from "drizzle-orm";
 
 import { columnTable, dataTypeOf } from "./compat";
 import { exactString } from "./collation";
 import { UnsupportedQueryPlanError } from "./errors";
 import { isNameOperand } from "./operands";
-import { resolveTableName } from "./relations";
+import { bindRelation, rebindColumn, rebindColumns, relationAlias, resolveTableName } from "./relations";
 import { SCOPED_RELATION } from "./types";
 import type {
   BaseMapperEntry,
@@ -14,6 +14,7 @@ import type {
   DeclaredMappingConfig,
   ResolvedMapper,
   ResolvedMapperEntry,
+  MapperTransform,
   MappingConfig,
   NullAttributeRepresentation,
   RelationMapping,
@@ -116,6 +117,40 @@ const unmappedReference = (reference: string, message: string): Error =>
       )
     : new Error(message);
 
+/** A field of `relation` read from the row its alias names. */
+const relationEntry = (relation: RelationMapping, entry: ResolvedMapperEntry, segment: string): BaseMapperEntry => {
+  const mapping = toBaseMapperEntry(entry);
+  const alias = relationAlias(relation);
+
+  if (alias === undefined || isRelationValue(mapping)) return mapping;
+
+  const transform = (fn: MapperTransform): MapperTransform => (args) =>
+    rebindColumns(fn(args), relation.table, alias);
+
+  if (isFunction(mapping)) return transform(mapping);
+
+  if (isMappingConfig(mapping)) {
+    const config: MappingConfig = { ...mapping };
+
+    if (mapping.column !== undefined) config.column = rebindColumn(mapping.column, relation.table, alias);
+
+    if (mapping.transform !== undefined) config.transform = transform(mapping.transform);
+
+    if (mapping.relation !== undefined) config.relation = bindRelation(mapping.relation, relation, segment);
+
+    return config;
+  }
+
+  return rebindColumn(mapping, relation.table, alias);
+};
+
+const ATTR = "request.resource.attr.";
+
+/** The path segment a top-level mapper entry names, for its relation's alias. */
+const rootSegment = (reference: string): string =>
+  reference.startsWith(ATTR) ? reference.slice(ATTR.length) : reference;
+
+/** `relation` (already bound to its alias) read along `path`. */
 const resolveRelationField = (
   relation: RelationMapping,
   path: string[],
@@ -136,7 +171,7 @@ const resolveRelationField = (
       );
     }
 
-    return { relations, mapping: toBaseMapperEntry(relation.field) };
+    return { relations, mapping: relationEntry(relation, relation.field, "") };
   }
 
   const [segment, ...rest] = path;
@@ -152,7 +187,7 @@ const resolveRelationField = (
   if (fieldEntry !== undefined) {
     if (isMappingConfig(fieldEntry) && fieldEntry.relation) {
       return resolveRelationField(
-        fieldEntry.relation,
+        bindRelation(fieldEntry.relation, relation, segment),
         rest,
         reference,
         relations,
@@ -165,7 +200,7 @@ const resolveRelationField = (
       );
     }
 
-    return { relations, mapping: toBaseMapperEntry(fieldEntry) };
+    return { relations, mapping: relationEntry(relation, fieldEntry, segment) };
   }
 
   // A segment the relation does not declare falls back to the table's own column of that name.
@@ -180,7 +215,7 @@ const resolveRelationField = (
       );
     }
 
-    return { relations, mapping: toBaseMapperEntry(inferredColumn) };
+    return { relations, mapping: relationEntry(relation, inferredColumn, segment) };
   }
 
   throw new Error(
@@ -204,7 +239,13 @@ export const resolveFieldReference = (
     }
 
     if (isMappingConfig(direct) && direct.relation) {
-      return resolveRelationField(direct.relation, [], reference, [], false);
+      return resolveRelationField(
+        bindRelation(direct.relation, undefined, rootSegment(reference)),
+        [],
+        reference,
+        [],
+        false,
+      );
     }
 
     return { relations: [], mapping: direct };
@@ -217,7 +258,12 @@ export const resolveFieldReference = (
       continue;
     }
 
-    return resolveRelationField(entry.relation, suffix, reference, []);
+    return resolveRelationField(
+      bindRelation(entry.relation, undefined, rootSegment(prefix)),
+      suffix,
+      reference,
+      [],
+    );
   }
 
   throw unmappedReference(reference, `No mapping found for reference: ${reference}`);
@@ -236,7 +282,7 @@ const resolveRelationChain = (
     }
 
     if (isMappingConfig(direct) && direct.relation) {
-      return [direct.relation];
+      return [bindRelation(direct.relation, undefined, rootSegment(reference))];
     }
   }
 
@@ -248,13 +294,14 @@ const resolveRelationChain = (
     }
 
     // A prefix inside an enclosing lambda scope carries the relations already joined to reach it.
-    const { relations, mapping } = isScopedRelationEntry(entry)
-      ? entry.resolve()
-      : { relations: [], mapping: entry };
+    // A scoped entry's relation is already bound to the scope it was read in.
+    const scoped = isScopedRelationEntry(entry);
+    const { relations, mapping } = scoped ? entry.resolve() : { relations: [], mapping: entry };
 
     if (isMappingConfig(mapping) && mapping.relation) {
-      return resolveRelationField(mapping.relation, suffix, reference, relations)
-        .relations;
+      const relation = scoped ? mapping.relation : bindRelation(mapping.relation, undefined, rootSegment(prefix));
+
+      return resolveRelationField(relation, suffix, reference, relations).relations;
     }
   }
 
@@ -280,7 +327,7 @@ export const resolveRelationDefaultField = (
 
   return {
     relations: resolved.relations,
-    mapping: toBaseMapperEntry(defaultField),
+    mapping: relationEntry(resolved.mapping.relation, defaultField, ""),
   };
 };
 
@@ -329,7 +376,7 @@ const aliasElementMapping = (
   if (resolved.relations.length !== chainLength) refuse();
 
   const rebind = (column: AnyColumn): AnyColumn =>
-    columnTable(column) === primaryRelation.table
+    getTableName(columnTable(column)) === relationAlias(primaryRelation)
       ? aliasedTableColumn(column, alias)
       : refuse();
 
@@ -354,6 +401,10 @@ const aliasElementMapping = (
   };
 };
 
+/** The name a collection subquery ranges under, as `openTables` records it. */
+export const openSource = (relation: RelationMapping, reference: string): string =>
+  relationAlias(relation) ?? resolveTableName(relation.table, reference);
+
 export const createCollectionScope = (
   collectionReference: string,
   variableName: string,
@@ -372,13 +423,12 @@ export const createCollectionScope = (
 
   const leadingRelations = relationChain.slice(0, -1);
 
-  // An enclosing macro already ranges over this table: take a fresh alias, numbered by how many
-  // enclosing scopes hold the table, so the name is deterministic.
-  const tableName = resolveTableName(primaryRelation.table, collectionReference);
-  const occurrences = openTables.filter((name) => name === tableName).length;
+  // An enclosing macro already ranges over this relation: take a fresh alias, numbered by how many
+  // enclosing scopes hold it, so the name is deterministic.
+  const source = openSource(primaryRelation, collectionReference);
+  const occurrences = openTables.filter((name) => name === source).length;
 
-  const alias =
-    occurrences > 0 ? `cerbos_${tableName}_${occurrences}` : undefined;
+  const alias = occurrences > 0 ? `${source}$${occurrences}` : undefined;
 
   if (alias !== undefined && primaryRelation.subqueryFilter !== undefined) {
     throw new UnsupportedQueryPlanError(

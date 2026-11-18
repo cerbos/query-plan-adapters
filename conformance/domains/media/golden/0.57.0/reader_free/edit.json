@@ -1,0 +1,26 @@
+{
+  "action": "edit",
+  "allowed": [],
+  "domain": "media",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [],
+      "languages": [
+        "en"
+      ],
+      "subscriber": false
+    },
+    "id": "rd1",
+    "roles": [
+      "reader"
+    ]
+  },
+  "principalName": "reader_free",
+  "resourceKind": "article"
+}

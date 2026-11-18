@@ -1,0 +1,499 @@
+{
+  "kind": "payment",
+  "nulls": "omitted",
+  "rootTable": "payments",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "code",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "country",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "branches",
+      "primaryKey": [
+        "code"
+      ],
+      "rows": [
+        {
+          "code": "LON01",
+          "country": "GB"
+        },
+        {
+          "code": "LON02",
+          "country": "GB"
+        },
+        {
+          "code": "FRA01",
+          "country": "DE"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "legal_name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "kyc_level",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "branch_code",
+          "nullable": false,
+          "references": "branches",
+          "type": "string"
+        },
+        {
+          "name": "pep",
+          "nullable": true,
+          "type": "bool"
+        }
+      ],
+      "name": "customers",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "branch_code": "LON01",
+          "id": "c1",
+          "kyc_level": 3,
+          "legal_name": "Ada Ltd",
+          "pep": false
+        },
+        {
+          "branch_code": "LON02",
+          "id": "c2",
+          "kyc_level": 1,
+          "legal_name": "Bob Holdings",
+          "pep": null
+        },
+        {
+          "branch_code": "FRA01",
+          "id": "c3",
+          "kyc_level": 2,
+          "legal_name": "Clara GmbH",
+          "pep": true
+        },
+        {
+          "branch_code": "FRA01",
+          "id": "c4",
+          "kyc_level": 2,
+          "legal_name": "lon01 Traders",
+          "pep": null
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "customer_id",
+          "nullable": false,
+          "references": "customers",
+          "type": "string"
+        },
+        {
+          "name": "currency",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "overdraft_limit",
+          "nullable": true,
+          "type": "decimal"
+        }
+      ],
+      "name": "accounts",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "currency": "GBP",
+          "customer_id": "c1",
+          "id": "a1",
+          "overdraft_limit": 500,
+          "status": "active"
+        },
+        {
+          "currency": "EUR",
+          "customer_id": "c1",
+          "id": "a2",
+          "overdraft_limit": null,
+          "status": "active"
+        },
+        {
+          "currency": "GBP",
+          "customer_id": "c2",
+          "id": "a3",
+          "overdraft_limit": 0,
+          "status": "frozen"
+        },
+        {
+          "currency": "EUR",
+          "customer_id": "c3",
+          "id": "a4",
+          "overdraft_limit": 2500.75,
+          "status": "active"
+        },
+        {
+          "currency": "USD",
+          "customer_id": "c4",
+          "id": "a5",
+          "overdraft_limit": null,
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "account_id",
+          "nullable": false,
+          "references": "accounts",
+          "type": "string"
+        },
+        {
+          "name": "amount",
+          "nullable": false,
+          "type": "decimal"
+        },
+        {
+          "name": "currency",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "risk_score",
+          "nullable": true,
+          "type": "float"
+        },
+        {
+          "name": "created_at",
+          "nullable": false,
+          "type": "timestamp"
+        },
+        {
+          "name": "cp_name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "cp_iban",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "cp_country",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "initiated_by",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "payments",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "account_id": "a1",
+          "amount": 120.5,
+          "cp_country": "GB",
+          "cp_iban": "GB00ACME",
+          "cp_name": "Acme",
+          "created_at": "2023-01-10T09:00:00Z",
+          "currency": "GBP",
+          "id": "pay01",
+          "initiated_by": "u-c1",
+          "risk_score": 0.1,
+          "status": "pending"
+        },
+        {
+          "account_id": "a1",
+          "amount": 5000.5,
+          "cp_country": "DE",
+          "cp_iban": "DE00BETA",
+          "cp_name": "Beta",
+          "created_at": "2023-01-11T09:00:00Z",
+          "currency": "GBP",
+          "id": "pay02",
+          "initiated_by": "u-c1",
+          "risk_score": 0.79999,
+          "status": "pending"
+        },
+        {
+          "account_id": "a1",
+          "amount": 5000.51,
+          "cp_country": "GB",
+          "cp_iban": "GB00GAMA",
+          "cp_name": "Gamma",
+          "created_at": "2023-01-12T09:00:00Z",
+          "currency": "GBP",
+          "id": "pay03",
+          "initiated_by": "u-mia",
+          "risk_score": null,
+          "status": "pending"
+        },
+        {
+          "account_id": "a2",
+          "amount": 9999.99,
+          "cp_country": "IR",
+          "cp_iban": "IR00DELT",
+          "cp_name": "Delta",
+          "created_at": "2023-02-01T09:00:00Z",
+          "currency": "GBP",
+          "id": "pay04",
+          "initiated_by": "u-c1",
+          "risk_score": 0.8,
+          "status": "pending"
+        },
+        {
+          "account_id": "a3",
+          "amount": 10000,
+          "cp_country": "GB",
+          "cp_iban": "GB00ECHO",
+          "cp_name": "Echo",
+          "created_at": "2023-02-02T09:00:00Z",
+          "currency": "GBP",
+          "id": "pay05",
+          "initiated_by": "u-teller",
+          "risk_score": 0.2,
+          "status": "completed"
+        },
+        {
+          "account_id": "a3",
+          "amount": 0.01,
+          "cp_country": "KP",
+          "cp_iban": "KP00FOXX",
+          "cp_name": "Fox",
+          "created_at": "2023-02-03T09:00:00Z",
+          "currency": "GBP",
+          "id": "pay06",
+          "initiated_by": "u-c2",
+          "risk_score": null,
+          "status": "pending"
+        },
+        {
+          "account_id": "a4",
+          "amount": 4999.99,
+          "cp_country": "FR",
+          "cp_iban": "FR00GOLF",
+          "cp_name": "Golf",
+          "created_at": "2023-03-01T09:00:00Z",
+          "currency": "EUR",
+          "id": "pay07",
+          "initiated_by": "u-c3",
+          "risk_score": 0.95,
+          "status": "pending"
+        },
+        {
+          "account_id": "a4",
+          "amount": 75000,
+          "cp_country": "ir",
+          "cp_iban": "ir00HOTL",
+          "cp_name": "Hotel",
+          "created_at": "2023-03-02T09:00:00Z",
+          "currency": "EUR",
+          "id": "pay08",
+          "initiated_by": "u-c3",
+          "risk_score": 0.3,
+          "status": "pending"
+        },
+        {
+          "account_id": "a5",
+          "amount": 250,
+          "cp_country": "US",
+          "cp_iban": "US00INDI",
+          "cp_name": "India",
+          "created_at": "2023-03-03T09:00:00Z",
+          "currency": "USD",
+          "id": "pay09",
+          "initiated_by": "u-c4",
+          "risk_score": 0,
+          "status": "rejected"
+        },
+        {
+          "account_id": "a5",
+          "amount": 3000,
+          "cp_country": "SY",
+          "cp_iban": "SY00JULI",
+          "cp_name": "Juliet",
+          "created_at": "2023-03-04T09:00:00Z",
+          "currency": "USD",
+          "id": "pay10",
+          "initiated_by": "u-c4",
+          "risk_score": null,
+          "status": "pending"
+        },
+        {
+          "account_id": "a1",
+          "amount": 4000,
+          "cp_country": "GB",
+          "cp_iban": "GB00KILO",
+          "cp_name": "Kilo",
+          "created_at": "2023-03-05T09:00:00Z",
+          "currency": "GBP",
+          "id": "pay11",
+          "initiated_by": "u-c1",
+          "risk_score": 0.5,
+          "status": "pending"
+        },
+        {
+          "account_id": "a2",
+          "amount": 100,
+          "cp_country": "GB",
+          "cp_iban": "GB00LIMA",
+          "cp_name": "Lima",
+          "created_at": "2023-03-06T09:00:00Z",
+          "currency": "EUR",
+          "id": "pay12",
+          "initiated_by": "u-c1",
+          "risk_score": null,
+          "status": "Pending"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "payment_id",
+          "nullable": false,
+          "references": "payments",
+          "type": "string"
+        },
+        {
+          "name": "flag",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "payment_flags",
+      "primaryKey": [
+        "payment_id",
+        "flag"
+      ],
+      "rows": [
+        {
+          "flag": "velocity",
+          "payment_id": "pay02"
+        },
+        {
+          "flag": "sanctions",
+          "payment_id": "pay04"
+        },
+        {
+          "flag": "velocity",
+          "payment_id": "pay04"
+        },
+        {
+          "flag": "structuring",
+          "payment_id": "pay07"
+        },
+        {
+          "flag": "Sanctions",
+          "payment_id": "pay10"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "payment_id",
+          "nullable": false,
+          "references": "payments",
+          "type": "string"
+        },
+        {
+          "name": "approver_id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "decision",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "payment_approvals",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "approver_id": "u-raj",
+          "decision": "approved",
+          "id": "ap1",
+          "payment_id": "pay02"
+        },
+        {
+          "approver_id": "u-mia",
+          "decision": "approved",
+          "id": "ap2",
+          "payment_id": "pay07"
+        },
+        {
+          "approver_id": "u-mia",
+          "decision": "rejected",
+          "id": "ap3",
+          "payment_id": "pay08"
+        },
+        {
+          "approver_id": "u-raj",
+          "decision": "approved",
+          "id": "ap4",
+          "payment_id": "pay11"
+        },
+        {
+          "approver_id": "u-mia",
+          "decision": "approved",
+          "id": "ap5",
+          "payment_id": "pay11"
+        }
+      ]
+    }
+  ]
+}

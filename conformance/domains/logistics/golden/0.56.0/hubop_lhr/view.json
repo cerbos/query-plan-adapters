@@ -1,0 +1,95 @@
+{
+  "action": "view",
+  "allowed": [
+    "s01",
+    "s02",
+    "s04"
+  ],
+  "domain": "logistics",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.origin.code"
+                },
+                {
+                  "value": "LHR"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.destination.code"
+                },
+                {
+                  "value": "LHR"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.checkpoints"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "c.hub.code"
+                            },
+                            {
+                              "value": "LHR"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "variable": "c"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "exists"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "certifications": [],
+      "hubs": [
+        "LHR"
+      ]
+    },
+    "id": "u-hub1",
+    "roles": [
+      "hub_operator"
+    ]
+  },
+  "principalName": "hubop_lhr",
+  "resourceKind": "shipment"
+}

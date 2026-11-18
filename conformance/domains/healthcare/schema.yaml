@@ -1,0 +1,79 @@
+kind: clinical_note
+note: >
+  Hospital EHR. Notes belong to patients, patients to wards (outpatients have none), wards to
+  hospitals. The column holding the note type is called `type`, a reserved word in several
+  dialects; the soft-delete flag is `is_deleted` but the policy reads `deleted`.
+tables:
+  hospitals:
+    pk: id
+    columns:
+      id: string
+      name: string
+      region: string
+  wards:
+    pk: id
+    columns:
+      id: string
+      name: string
+      hospital_id: string -> hospitals
+      secure: bool
+  patients:
+    pk: id
+    columns:
+      id: string
+      mrn: string
+      ward_id: string? -> wards
+      consent_research: bool
+      vip: bool?
+      birth_year: int
+  clinical_notes:
+    pk: note_id
+    columns:
+      note_id: string
+      patient_id: string -> patients
+      author_id: string
+      type: string
+      sensitivity: int?
+      signed_at: timestamp?
+      is_deleted: bool
+  note_care_team:
+    pk: [note_id, clinician_id]
+    columns:
+      note_id: string -> clinical_notes
+      clinician_id: string
+  note_codes:
+    pk: id
+    columns:
+      id: string
+      note_id: string -> clinical_notes
+      system: string
+      code: string
+resource:
+  table: clinical_notes
+  attributes:
+    noteType: type
+    authorId: author_id
+    sensitivity: sensitivity
+    signedAt: signed_at
+    deleted: is_deleted
+    careTeam: {many: note_care_team, fk: note_id, value: clinician_id}
+    codes:
+      many: note_codes
+      fk: note_id
+      orderBy: id
+      attributes: {system: system, code: code}
+    patient:
+      one: patient_id
+      attributes:
+        mrn: mrn
+        consentResearch: consent_research
+        vip: vip
+        birthYear: birth_year
+        ward:
+          one: ward_id
+          attributes:
+            id: id
+            secure: secure
+            hospital:
+              one: hospital_id
+              attributes: {region: region}

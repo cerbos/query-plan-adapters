@@ -1,0 +1,93 @@
+{
+  "action": "cancel",
+  "allowed": [
+    "o02"
+  ],
+  "domain": "retail",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.customer.id"
+                },
+                {
+                  "value": "cu1"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": [
+                    "placed",
+                    "paid"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.lines"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "l.quantity"
+                            },
+                            {
+                              "value": 2
+                            }
+                          ],
+                          "operator": "le"
+                        }
+                      },
+                      {
+                        "variable": "l"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "all"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "tier": "gold"
+    },
+    "id": "cu1",
+    "roles": [
+      "customer"
+    ]
+  },
+  "principalName": "shopper_c1",
+  "resourceKind": "order"
+}

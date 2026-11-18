@@ -1,0 +1,49 @@
+model Store {
+  id      String  @id
+  region  String
+  country String
+  orders  Order[]
+
+  @@map("stores")
+}
+
+model Customer {
+  id            String  @id
+  email         String
+  tier          String
+  loyaltyPoints Int     @map("loyalty_points")
+  orders        Order[]
+
+  @@map("customers")
+}
+
+model Order {
+  id         String      @id
+  customerId String      @map("customer_id")
+  storeId    String?     @map("store_id")
+  status     String
+  channel    String
+  totalCents BigInt      @map("total_cents")
+  currency   String
+  couponCode String?     @map("coupon_code")
+  placedAt   DateTime    @map("placed_at")
+  gift       Boolean
+  customer   Customer    @relation(fields: [customerId], references: [id])
+  store      Store?      @relation(fields: [storeId], references: [id])
+  lines      OrderLine[]
+
+  @@map("order")
+}
+
+model OrderLine {
+  id             String @id
+  orderId        String @map("order_id")
+  lineNo         Int    @map("line_no")
+  sku            String
+  category       String
+  quantity       Int
+  unitPriceCents BigInt @map("unit_price_cents")
+  order          Order  @relation(fields: [orderId], references: [id])
+
+  @@map("order_line")
+}

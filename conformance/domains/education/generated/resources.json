@@ -1,0 +1,340 @@
+{
+  "kind": "submission",
+  "nulls": "omitted",
+  "resources": [
+    {
+      "id": "sb01",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "CS101",
+            "department": {
+              "id": "cs"
+            },
+            "staff": [
+              {
+                "role": "instructor",
+                "userId": "f-jones"
+              },
+              {
+                "role": "ta",
+                "userId": "ta-lee"
+              }
+            ],
+            "term": "2024-FA"
+          },
+          "dueAt": "2024-10-01T23:59:59Z",
+          "groupWork": false,
+          "maxPoints": 20
+        },
+        "late": false,
+        "locked": true,
+        "members": [],
+        "plagiarismScore": 0.05,
+        "score": 18.5,
+        "status": "graded",
+        "studentId": "st-sam",
+        "submittedAt": "2024-10-01T22:00:00Z"
+      }
+    },
+    {
+      "id": "sb02",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "CS101",
+            "department": {
+              "id": "cs"
+            },
+            "staff": [
+              {
+                "role": "instructor",
+                "userId": "f-jones"
+              },
+              {
+                "role": "ta",
+                "userId": "ta-lee"
+              }
+            ],
+            "term": "2024-FA"
+          },
+          "dueAt": "2024-10-01T23:59:59Z",
+          "groupWork": false,
+          "maxPoints": 20
+        },
+        "late": true,
+        "locked": false,
+        "members": [],
+        "plagiarismScore": 0.41,
+        "status": "submitted",
+        "studentId": "st-ann",
+        "submittedAt": "2024-10-02T01:00:00Z"
+      }
+    },
+    {
+      "id": "sb03",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "CS101",
+            "department": {
+              "id": "cs"
+            },
+            "staff": [
+              {
+                "role": "instructor",
+                "userId": "f-jones"
+              },
+              {
+                "role": "ta",
+                "userId": "ta-lee"
+              }
+            ],
+            "term": "2024-FA"
+          },
+          "dueAt": "2024-12-01T23:59:59Z",
+          "groupWork": true,
+          "maxPoints": 100
+        },
+        "late": false,
+        "locked": false,
+        "members": [
+          "st-ann",
+          "st-sam"
+        ],
+        "status": "submitted",
+        "studentId": "st-ann",
+        "submittedAt": "2024-12-01T23:59:59Z"
+      }
+    },
+    {
+      "id": "sb04",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "CS101",
+            "department": {
+              "id": "cs"
+            },
+            "staff": [
+              {
+                "role": "instructor",
+                "userId": "f-jones"
+              },
+              {
+                "role": "ta",
+                "userId": "ta-lee"
+              }
+            ],
+            "term": "2024-FA"
+          },
+          "dueAt": "2024-12-01T23:59:59Z",
+          "groupWork": true,
+          "maxPoints": 100
+        },
+        "late": false,
+        "locked": false,
+        "members": [
+          "st-bo",
+          "st-cy"
+        ],
+        "plagiarismScore": 0.4,
+        "status": "submitted",
+        "studentId": "st-bo",
+        "submittedAt": "2024-12-02T00:00:00Z"
+      }
+    },
+    {
+      "id": "sb05",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "MA201",
+            "department": {
+              "id": "math"
+            },
+            "staff": [
+              {
+                "role": "instructor",
+                "userId": "ta-lee"
+              },
+              {
+                "role": "ta",
+                "userId": "f-jones"
+              }
+            ],
+            "term": "2024-FA"
+          },
+          "dueAt": "2024-10-15T12:00:00.5Z",
+          "groupWork": false,
+          "maxPoints": 50
+        },
+        "late": false,
+        "locked": false,
+        "members": [],
+        "plagiarismScore": 0.9,
+        "status": "submitted",
+        "studentId": "st-sam",
+        "submittedAt": "2024-10-15T12:00:00Z"
+      }
+    },
+    {
+      "id": "sb06",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "MA201",
+            "department": {
+              "id": "math"
+            },
+            "staff": [
+              {
+                "role": "instructor",
+                "userId": "ta-lee"
+              },
+              {
+                "role": "ta",
+                "userId": "f-jones"
+              }
+            ],
+            "term": "2024-FA"
+          },
+          "dueAt": "2024-10-15T12:00:00.5Z",
+          "groupWork": false,
+          "maxPoints": 50
+        },
+        "late": false,
+        "locked": false,
+        "members": [],
+        "status": "submitted",
+        "studentId": "st-cy",
+        "submittedAt": "2024-10-15T12:00:00.75Z"
+      }
+    },
+    {
+      "id": "sb07",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "HI110",
+            "department": {
+              "id": "hist"
+            },
+            "staff": [
+              {
+                "role": "Instructor",
+                "userId": "f-jones"
+              }
+            ],
+            "term": "2025-SP"
+          },
+          "dueAt": "2025-03-01T00:00:00Z",
+          "groupWork": false,
+          "maxPoints": 40
+        },
+        "late": false,
+        "locked": false,
+        "members": [],
+        "status": "draft",
+        "studentId": "st-cy"
+      }
+    },
+    {
+      "id": "sb08",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "HI110",
+            "department": {
+              "id": "hist"
+            },
+            "staff": [
+              {
+                "role": "Instructor",
+                "userId": "f-jones"
+              }
+            ],
+            "term": "2025-SP"
+          },
+          "dueAt": "2025-03-01T00:00:00Z",
+          "groupWork": false,
+          "maxPoints": 40
+        },
+        "late": false,
+        "locked": false,
+        "members": [],
+        "plagiarismScore": 0.6,
+        "score": 30,
+        "status": "graded",
+        "studentId": "st-sam",
+        "submittedAt": "2025-03-02T00:00:00Z"
+      }
+    },
+    {
+      "id": "sb09",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "CS101",
+            "department": {
+              "id": "cs"
+            },
+            "staff": [
+              {
+                "role": "instructor",
+                "userId": "f-jones"
+              },
+              {
+                "role": "ta",
+                "userId": "ta-lee"
+              }
+            ],
+            "term": "2024-FA"
+          },
+          "dueAt": "2024-10-01T23:59:59Z",
+          "groupWork": false,
+          "maxPoints": 20
+        },
+        "late": false,
+        "locked": false,
+        "members": [],
+        "status": "submitted",
+        "studentId": "ST-SAM",
+        "submittedAt": "2024-09-30T10:00:00Z"
+      }
+    },
+    {
+      "id": "sb10",
+      "attr": {
+        "assignment": {
+          "course": {
+            "code": "MA201",
+            "department": {
+              "id": "math"
+            },
+            "staff": [
+              {
+                "role": "instructor",
+                "userId": "ta-lee"
+              },
+              {
+                "role": "ta",
+                "userId": "f-jones"
+              }
+            ],
+            "term": "2024-FA"
+          },
+          "dueAt": "2024-10-15T12:00:00.5Z",
+          "groupWork": false,
+          "maxPoints": 50
+        },
+        "late": false,
+        "locked": true,
+        "members": [],
+        "plagiarismScore": 0.99,
+        "status": "draft",
+        "studentId": "st-dee"
+      }
+    }
+  ]
+}

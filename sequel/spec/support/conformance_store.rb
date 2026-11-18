@@ -25,6 +25,8 @@ module ConformanceStore
     String :scope
     column :created_at, Database::TIMESTAMP_TYPE
     column :updated_at, Database::TIMESTAMP_TYPE
+    String :peer_id
+    String :step_parent_id
   end
 
   # The one REAL to-one relation of the corpus (ADR 0005). `parent` and `parent.inner` are
@@ -33,14 +35,14 @@ module ConformanceStore
   #
   # The unique index on the foreign key is what makes each level to-ONE. Without it, Sequel
   # would still accept the one_to_one association and the adapter would make a subquery that
-  # can give more than one row.
+  # can give more than one row. A `stepParent` row also lives here, with a NULL `resource_id`.
   DB.create_table!(:adversarial_parents, **Database::TABLE_OPTIONS) do
     String :id, primary_key: true
     TrueClass :a_bool, null: false
     String :a_string, null: false
     Integer :a_number, null: false
     String :a_optional_string
-    String :resource_id, null: false, unique: true
+    String :resource_id, unique: true
   end
 
   DB.create_table!(:adversarial_inners, **Database::TABLE_OPTIONS) do
@@ -146,8 +148,21 @@ module ConformanceStore
         created_by: ConformanceCorpus.derived(seed, "createdBy"),
         scope: ConformanceCorpus.derived(seed, "scope"),
         created_at: ConformanceCorpus.derived(seed, "createdAt")&.then { |iso| Time.iso8601(iso) },
-        updated_at: ConformanceCorpus.derived(seed, "updatedAt")&.then { |iso| Time.iso8601(iso) }
+        updated_at: ConformanceCorpus.derived(seed, "updatedAt")&.then { |iso| Time.iso8601(iso) },
+        peer_id: seed["peerSeedId"],
+        step_parent_id: seed["stepParentSeedId"] && "#{id}-step"
       )
+
+      step_seed = seed["stepParentSeedId"] && ConformanceCorpus::SEEDS_BY_ID.fetch(seed["stepParentSeedId"])
+      if step_seed
+        DB[:adversarial_parents].insert(
+          id: "#{id}-step",
+          a_bool: step_seed.fetch("aBool"),
+          a_string: step_seed.fetch("aString"),
+          a_number: step_seed.fetch("aNumber"),
+          a_optional_string: step_seed.fetch("aOptionalString")
+        )
+      end
 
       # The to-one chain, with one owned row for each level. A seed with no parent gets no row
       # at all, and that is what makes the absent-parent hazard possible through a SCALAR and
@@ -242,4 +257,6 @@ class AdvResource < Sequel::Model(Database::DB[:adversarial_resources])
   # correlated scalar subquery. A one_to_many here would make the adapter refuse the mapping,
   # which is the point of the unique index on the foreign key.
   one_to_one :parent, class: :AdvParent, key: :resource_id
+  many_to_one :peer, class: :AdvResource, key: :peer_id
+  many_to_one :step_parent, class: :AdvParent, key: :step_parent_id
 end

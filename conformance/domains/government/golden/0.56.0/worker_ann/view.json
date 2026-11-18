@@ -1,0 +1,96 @@
+{
+  "action": "view",
+  "allowed": [
+    "k01",
+    "k02",
+    "k04",
+    "k08"
+  ],
+  "domain": "government",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.agency.code"
+                },
+                {
+                  "value": "DSS"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.clearanceLevel"
+                },
+                {
+                  "value": 2
+                }
+              ],
+              "operator": "le"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.assignedTo"
+                      },
+                      {
+                        "value": "cw-ann"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.assignedTo"
+                      },
+                      {
+                        "value": null
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "agency": "DSS",
+      "clearance": 2,
+      "counties": [],
+      "state": ""
+    },
+    "id": "cw-ann",
+    "roles": [
+      "caseworker"
+    ]
+  },
+  "principalName": "worker_ann",
+  "resourceKind": "benefit_case"
+}

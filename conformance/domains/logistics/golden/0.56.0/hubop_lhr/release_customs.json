@@ -1,0 +1,25 @@
+{
+  "action": "release_customs",
+  "allowed": [],
+  "domain": "logistics",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "certifications": [],
+      "hubs": [
+        "LHR"
+      ]
+    },
+    "id": "u-hub1",
+    "roles": [
+      "hub_operator"
+    ]
+  },
+  "principalName": "hubop_lhr",
+  "resourceKind": "shipment"
+}

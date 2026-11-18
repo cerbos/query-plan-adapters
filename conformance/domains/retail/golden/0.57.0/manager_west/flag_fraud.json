@@ -1,0 +1,23 @@
+{
+  "action": "flag_fraud",
+  "allowed": [],
+  "domain": "retail",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "refundLimitCents": 20000,
+      "region": "west"
+    },
+    "id": "sm-w",
+    "roles": [
+      "store_manager"
+    ]
+  },
+  "principalName": "manager_west",
+  "resourceKind": "order"
+}

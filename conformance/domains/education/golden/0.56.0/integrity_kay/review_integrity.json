@@ -1,0 +1,66 @@
+{
+  "action": "review_integrity",
+  "allowed": [
+    "sb02",
+    "sb05",
+    "sb10"
+  ],
+  "domain": "education",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.plagiarismScore"
+                },
+                {
+                  "value": 0.4
+                }
+              ],
+              "operator": "gt"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.assignment.course.department.id"
+                },
+                {
+                  "value": [
+                    "cs",
+                    "math"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [
+        "cs",
+        "math"
+      ],
+      "term": ""
+    },
+    "id": "io-kay",
+    "roles": [
+      "integrity_officer"
+    ]
+  },
+  "principalName": "integrity_kay",
+  "resourceKind": "submission"
+}

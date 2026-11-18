@@ -55,6 +55,9 @@ func (Resource) Edges() []ent.Edge {
 		edge.To("parent", Parent.Type).Unique().StorageKey(edge.Column("resource_id")),
 		edge.To("number_elems", NumberElem.Type).StorageKey(edge.Column("resource_id")),
 		edge.To("bool_elems", BoolElem.Type).StorageKey(edge.Column("resource_id")),
+		edge.To("peered_by", Resource.Type).StorageKey(edge.Column("peer_id")),
+		edge.From("peer", Resource.Type).Ref("peered_by").Unique(),
+		edge.From("step_parent", Parent.Type).Ref("step_children").Unique(),
 	}
 }
 
@@ -115,8 +118,9 @@ func (Parent) Fields() []ent.Field { return append(scalars(), field.String("id")
 
 func (Parent) Edges() []ent.Edge {
 	return []ent.Edge{
-		edge.From("resource", Resource.Type).Ref("parent").Unique().Required(),
+		edge.From("resource", Resource.Type).Ref("parent").Unique(),
 		edge.To("inner", Inner.Type).Unique().StorageKey(edge.Column("parent_id")),
+		edge.To("step_children", Resource.Type).StorageKey(edge.Column("step_parent_id")),
 	}
 }
 

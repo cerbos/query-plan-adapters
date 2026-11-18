@@ -9,8 +9,8 @@ import org.jetbrains.exposed.v1.javatime.timestamp
  * corpus is read back through.
  *
  * Every relation key is a single-column `references(...)`, and every to-one key carries a unique
- * index, so [MAPPING] declares no key and no cardinality: `relation(...)` infers both from that
- * schema. [DECLARED_MAPPING] states them by hand. There is no DAO layer: an association the ORM filters would carry predicates the
+ * index, so [MAPPING] declares no cardinality: `relation(...)` infers it from that schema, and the
+ * key too except where two foreign keys link the same tables (`relation(via = ...)`). [DECLARED_MAPPING] states them by hand. There is no DAO layer: an association the ORM filters would carry predicates the
  * correlated subquery cannot see, the class-1 mapping hazard `conformance/README.md` describes.
  *
  * Both the mapping and the tables live in one file on purpose: the adapter resolves a reference
@@ -39,6 +39,7 @@ internal object Resources : Table("adversarial_resources") {
     val scope = varchar("scope", 255).nullable()
     val createdAt = timestamp("created_at").nullable()
     val updatedAt = timestamp("updated_at").nullable()
+    val peerId = varchar("peer_id", 64).references(id).nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -55,7 +56,10 @@ internal object Parents : Table("adversarial_parents") {
     val aString = varchar("a_string", 255).nullable()
     val aNumber = integer("a_number").nullable()
     val aOptionalString = varchar("a_optional_string", 255).nullable()
-    val resourceId = varchar("resource_id", 64).references(Resources.id).uniqueIndex()
+    val resourceId = varchar("resource_id", 64).references(Resources.id).uniqueIndex().nullable()
+
+    /** `stepParent`: a second to-one relation into this table, on rows of its own. */
+    val stepResourceId = varchar("step_resource_id", 64).references(Resources.id).uniqueIndex().nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -74,6 +78,10 @@ internal object Inners : Table("adversarial_inners") {
  * The object-valued collection. `name` is NULLABLE on purpose: a NULL tag name is a missing element
  * attribute on the check side (a CEL error, so a deny) and must stay UNKNOWN — never FALSE — in
  * SQL, or a negation readmits the row.
+ *
+ * `(resource_id, name)` is indexed as a real schema keys a membership lookup. On MySQL a correlated
+ * subquery served by that index can drop a binary-collated comparison on `name`, which c1's
+ * `Public` turns into an over-grant.
  */
 internal object Tags : Table("adversarial_tags") {
     val tagId = varchar("tag_id", 64)
@@ -81,6 +89,10 @@ internal object Tags : Table("adversarial_tags") {
     val resourceId = varchar("resource_id", 64).references(Resources.id)
     val position = integer("position")
     override val primaryKey = PrimaryKey(tagId)
+
+    init {
+        index(false, resourceId, name)
+    }
 }
 
 internal object Categories : Table("adversarial_categories") {
@@ -160,8 +172,12 @@ private fun <T : Table> MappingBuilder.link(
     toOne: Boolean = false,
     element: Column<*>? = null,
     orderBy: Column<*>? = null,
+    via: Column<*>? = null,
     block: RelationBuilder<T>.() -> Unit = {},
 ): AttributeMapping.Relation = when {
+    mode == RelationMode.INFERRED && via != null ->
+        @Suppress("UNCHECKED_CAST")
+        (this as ScopedMappingBuilder).relation(via, block = block as RelationBuilder<Table>.() -> Unit)
     mode == RelationMode.INFERRED ->
         (this as ScopedMappingBuilder).relation(table, element = element, orderBy = orderBy, block = block)
     toOne -> one(table, from = from, to = to, block = block)
@@ -211,7 +227,7 @@ private fun MappingBuilder.corpusEntries(mode: RelationMode) {
     // hop can be ABSENT, which the negated shapes discriminate: a row with no parent sends no
     // attribute, so CEL raises a missing-path error and the PDP denies, while an unguarded
     // two-valued read of the hop is TRUE for exactly those rows.
-    "request.resource.attr.parent" to link(mode, Parents, Resources.id, Parents.resourceId, toOne = true) {
+    "request.resource.attr.parent" to link(mode, Parents, Resources.id, Parents.resourceId, toOne = true, via = Parents.resourceId) {
         "aBool" to omitted(Parents.aBool)
         "aString" to omitted(Parents.aString)
         "aNumber" to omitted(Parents.aNumber)
@@ -222,6 +238,21 @@ private fun MappingBuilder.corpusEntries(mode: RelationMode) {
             "aNumber" to omitted(Inners.aNumber)
             "aOptionalString" to omitted(Inners.aOptionalString)
         }
+    }
+    // Two more to-one relations that reach a table twice: `peer` from the resource table to itself,
+    // and `stepParent` into the parent table beside `parent`. Each names its key, since a second
+    // foreign key between the same tables makes inference ambiguous.
+    "request.resource.attr.peer" to link(mode, Resources, Resources.peerId, Resources.id, toOne = true, via = Resources.peerId) {
+        "aBool" to omitted(Resources.aBool)
+        "aString" to omitted(Resources.aString)
+        "aNumber" to omitted(Resources.aNumber)
+        "aOptionalString" to omitted(Resources.aOptionalString)
+    }
+    "request.resource.attr.stepParent" to link(mode, Parents, Resources.id, Parents.stepResourceId, toOne = true, via = Parents.stepResourceId) {
+        "aBool" to omitted(Parents.aBool)
+        "aString" to omitted(Parents.aString)
+        "aNumber" to omitted(Parents.aNumber)
+        "aOptionalString" to omitted(Parents.aOptionalString)
     }
     // Scalar lists, one related row per element; a NULL element column is a null element.
     "request.resource.attr.aNumberList" to

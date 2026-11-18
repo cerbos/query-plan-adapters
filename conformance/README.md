@@ -36,6 +36,7 @@ conformance/scripts/run-harness.sh <adapter>   # one adapter's harness, its stor
 | `golden/<tag>/<case id>.json` | For each PDP: the plan, the allowed ids, and the case's intent and trap. | generator |
 | `golden/CHANGES.md` | What changed between the previous and current PDP. | generator |
 | `generator/` | The Go program that writes everything marked "generator". | hand |
+| `domains/` | The domain stress kit: ten domain models with their own policies and goldens, and each adapter's harness for them, run by hand and outside CI ([domains/README.md](domains/README.md)). | hand, `domains/kit` |
 
 A file marked "generator" changes only by editing the cases or the dataset and re-running the
 generator. CI's `-check` fails on a hand-edited or stale one.
@@ -276,6 +277,13 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   - Materialise a *separate* parent row per resource.
   - An absent level is a missing attribute, so it is UNKNOWN under negation, never false. See
     [ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
+- **Two more to-one relations, for joins that reach a table twice.**
+  - `peerSeedId` names the seed whose own row is this resource's `peer`: a foreign key from the
+    resource table to itself. c1 is its own peer, as the top of a hierarchy often is.
+  - `stepParentSeedId` is a second relation into the parent table, materialised as a separate
+    row there like `parent`.
+  - Both carry `aBool`, `aNumber`, `aString` and `aOptionalString`, and no `inner`. A join
+    must alias each occurrence of a table, and correlate a self-relation with the outer row.
 - **The store's default collation is part of conformance.** CEL string comparison is byte-exact,
   and CEL orders strings by code point, so a SQL adapter collates its own strings rather than
   trusting the column's:

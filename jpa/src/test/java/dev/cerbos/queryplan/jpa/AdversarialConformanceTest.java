@@ -282,7 +282,7 @@ class AdversarialConformanceTest {
     private record Seed(String id, Boolean aBool, String aString, Integer aNumber,
                         String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
                         List<Tag> tags, List<String> subCategoryNames, String parentSeedId,
-                        List<String> requires) {}
+                        String peerSeedId, String stepParentSeedId, List<String> requires) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record SeedsFile(List<Seed> seeds) {}
@@ -360,6 +360,17 @@ class AdversarialConformanceTest {
                 cats.add(cat);
             }
             r.setCategories(cats);
+            Seed stepSeed = s.stepParentSeedId() == null ? null : byId.get(s.stepParentSeedId());
+            if (stepSeed != null) {
+                AdversarialParentEntity step = new AdversarialParentEntity();
+                step.setId(s.id() + "-step");
+                step.setaBool(stepSeed.aBool());
+                step.setaString(stepSeed.aString());
+                step.setaNumber(stepSeed.aNumber());
+                step.setaOptionalString(stepSeed.aOptionalString());
+                em.persist(step);
+                r.setStepParent(step);
+            }
             em.persist(r);
 
             // The to-one chain, one owned row per level: a seed with no parent gets no row, so an
@@ -386,6 +397,12 @@ class AdversarialConformanceTest {
                     inner.setParent(parent);
                     em.persist(inner);
                 }
+            }
+        }
+        // The peer is the named seed's own row, so it is set once every row exists.
+        for (Seed s : seeds) {
+            if (s.peerSeedId() != null) {
+                em.find(ResourceEntity.class, s.id()).setPeer(em.find(ResourceEntity.class, s.peerSeedId()));
             }
         }
         em.getTransaction().commit();

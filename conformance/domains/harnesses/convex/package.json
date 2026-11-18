@@ -1,0 +1,10 @@
+{
+  "name": "domain-harness-convex",
+  "private": true,
+  "//": "A Convex project of its own (convex.json points at backend/). npm ci here deploys it; the replay runs with the adapter's toolchain: npm ci in ../../../../convex first.",
+  "dependencies": { "convex": "1.50.0" },
+  "scripts": {
+    "deploy": "convex deploy --url ${CONVEX_URL:-http://127.0.0.1:3210} --admin-key ${CONVEX_ADMIN_KEY}",
+    "test": "../../../../convex/node_modules/.bin/jest -c jest.config.js --runInBand"
+  }
+}

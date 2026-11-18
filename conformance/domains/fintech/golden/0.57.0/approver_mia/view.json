@@ -1,0 +1,141 @@
+{
+  "action": "view",
+  "allowed": [
+    "pay01",
+    "pay02",
+    "pay10"
+  ],
+  "domain": "fintech",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": "pending"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.amount"
+                },
+                {
+                  "value": 5000.5
+                }
+              ],
+              "operator": "le"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.initiatedBy"
+                },
+                {
+                  "value": "u-mia"
+                }
+              ],
+              "operator": "ne"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.approvals"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "a.approverId"
+                                  },
+                                  {
+                                    "value": "u-mia"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            },
+                            {
+                              "variable": "a"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.currency"
+                },
+                {
+                  "variable": "request.resource.attr.account.currency"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.account.status"
+                },
+                {
+                  "value": "frozen"
+                }
+              ],
+              "operator": "ne"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 5000.5,
+      "branches": [
+        "LON01"
+      ]
+    },
+    "id": "u-mia",
+    "roles": [
+      "approver"
+    ]
+  },
+  "principalName": "approver_mia",
+  "resourceKind": "payment"
+}

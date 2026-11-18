@@ -1,0 +1,82 @@
+kind: submission
+note: >
+  University coursework. A submission belongs to an assignment, which belongs to a course, which
+  belongs to a department; course staff are a child table of the course, two to-one hops away
+  from the resource. Group submissions list their members in a join table. Timestamps are
+  compared field to field across the assignment relation.
+tables:
+  departments:
+    pk: id
+    columns:
+      id: string
+      name: string
+  courses:
+    pk: id
+    columns:
+      id: string
+      code: string
+      term: string
+      department_id: string -> departments
+  course_staff:
+    pk: id
+    columns:
+      id: string
+      course_id: string -> courses
+      user_id: string
+      role: string
+  assignments:
+    pk: id
+    columns:
+      id: string
+      course_id: string -> courses
+      title: string
+      due_at: timestamp
+      max_points: int
+      group_work: bool
+  submissions:
+    pk: id
+    columns:
+      id: string
+      assignment_id: string -> assignments
+      student_id: string
+      submitted_at: timestamp?
+      score: float?
+      late: bool
+      plagiarism_score: float?
+      status: string
+      locked: bool
+  submission_members:
+    pk: [submission_id, student_id]
+    columns:
+      submission_id: string -> submissions
+      student_id: string
+resource:
+  table: submissions
+  attributes:
+    studentId: student_id
+    submittedAt: submitted_at
+    score: score
+    late: late
+    plagiarismScore: plagiarism_score
+    status: status
+    locked: locked
+    members: {many: submission_members, fk: submission_id, value: student_id, orderBy: student_id}
+    assignment:
+      one: assignment_id
+      attributes:
+        dueAt: due_at
+        maxPoints: max_points
+        groupWork: group_work
+        course:
+          one: course_id
+          attributes:
+            code: code
+            term: term
+            department:
+              one: department_id
+              attributes: {id: id}
+            staff:
+              many: course_staff
+              fk: course_id
+              orderBy: id
+              attributes: {userId: user_id, role: role}

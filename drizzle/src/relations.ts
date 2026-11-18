@@ -1,13 +1,18 @@
 import {
   aliasedTableColumn,
   and,
+  Column,
   eq,
   exists,
   getTableName,
+  is,
+  SQL,
   sql,
 } from "drizzle-orm";
-import type { SQL, Table } from "drizzle-orm";
+import type { AnyColumn, SQLChunk, Table } from "drizzle-orm";
 
+import { columnTable } from "./compat";
+import { isString } from "./narrowing";
 import { FALSE_CONDITION, TRUE_CONDITION } from "./predicates";
 import type { BuildFilterOptions, RelationMapping } from "./types";
 
@@ -19,12 +24,110 @@ import type { BuildFilterOptions, RelationMapping } from "./types";
  * applying to it.
  */
 
+const ORIGINAL_NAME = Symbol.for("drizzle:OriginalName");
+const SCHEMA = Symbol.for("drizzle:Schema");
+
+const originalName = (table: Table): string | undefined =>
+  ORIGINAL_NAME in table && isString(table[ORIGINAL_NAME]) ? table[ORIGINAL_NAME] : undefined;
+
+const schemaName = (table: Table): string | undefined =>
+  SCHEMA in table && isString(table[SCHEMA]) ? table[SCHEMA] : undefined;
+
+/** The table's own name, also for a drizzle `alias()` of it. */
 export const resolveTableName = (table: Table, reference: string): string => {
+  const original = originalName(table);
+
+  if (original !== undefined) return original;
+
   try {
     return getTableName(table);
   } catch {
     throw new Error(`Unable to resolve table name for relation: ${reference}`);
   }
+};
+
+const sameTable = (a: Table, b: Table): boolean =>
+  originalName(a) === originalName(b) && schemaName(a) === schemaName(b);
+
+/** `column` read from the row `alias` names, when it is a column of `table`. */
+export const rebindColumn = (column: AnyColumn, table: Table, alias: string): AnyColumn =>
+  sameTable(columnTable(column), table) ? aliasedTableColumn(column, alias) : column;
+
+const rebindChunk = (chunk: SQLChunk, table: Table, alias: string): SQLChunk => {
+  if (Array.isArray(chunk)) return chunk.map((item: SQLChunk) => rebindChunk(item, table, alias));
+
+  if (is(chunk, Column)) return rebindColumn(chunk, table, alias);
+
+  if (is(chunk, SQL)) return rebindColumns(chunk, table, alias);
+
+  return chunk;
+};
+
+/** `query` with every column of `table` read from the row `alias` names. */
+export const rebindColumns = (query: SQL, table: Table, alias: string): SQL =>
+  new SQL(query.queryChunks.map((chunk) => rebindChunk(chunk, table, alias)));
+
+/**
+ * Each relation reached from the root ranges under its own alias, named by its path, so two
+ * relations into one table, and a relation from a table to itself, each read their own row
+ * rather than the innermost subquery's.
+ */
+const aliases = new WeakMap<RelationMapping, string>();
+const bound = new WeakMap<RelationMapping, Map<RelationMapping | undefined, RelationMapping>>();
+
+export const relationAlias = (relation: RelationMapping): string | undefined =>
+  aliases.get(relation);
+
+const MAX_ALIAS = 60;
+
+const aliasFor = (source: RelationMapping | undefined, segment: string): string => {
+  const name = `${(source && aliases.get(source)) ?? "cerbos"}_${segment.replace(/[^A-Za-z0-9_]/g, "_")}`;
+
+  if (name.length <= MAX_ALIAS) return name;
+
+  let hash = 0x811c9dc5;
+
+  for (const char of name) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193) >>> 0;
+
+  return `${name.slice(0, MAX_ALIAS - 9)}_${hash.toString(16).padStart(8, "0")}`;
+};
+
+/** `relation` reached through `source` (the root when undefined) as path `segment`, aliased. */
+export const bindRelation = (
+  relation: RelationMapping,
+  source: RelationMapping | undefined,
+  segment: string,
+): RelationMapping => {
+  const bySource = bound.get(relation) ?? new Map<RelationMapping | undefined, RelationMapping>();
+
+  bound.set(relation, bySource);
+
+  const cached = bySource.get(source);
+
+  if (cached !== undefined) return cached;
+
+  const alias = aliasFor(source, segment);
+  const sourceAlias = source && aliases.get(source);
+
+  const binding: RelationMapping = {
+    ...relation,
+    sourceColumn:
+      source === undefined || sourceAlias === undefined
+        ? relation.sourceColumn
+        : rebindColumn(relation.sourceColumn, source.table, sourceAlias),
+    targetColumn: aliasedTableColumn(relation.targetColumn, alias),
+  };
+
+  if (relation.position !== undefined) binding.position = aliasedTableColumn(relation.position, alias);
+
+  if (relation.subqueryFilter !== undefined) {
+    binding.subqueryFilter = rebindColumns(relation.subqueryFilter, relation.table, alias);
+  }
+
+  aliases.set(binding, alias);
+  bySource.set(source, binding);
+
+  return binding;
 };
 
 /**
@@ -50,13 +153,14 @@ export const relationCorrelation = (
 };
 
 /**
- * The FROM item of a subquery over `relation`: the bare table, or the table under `alias` when
- * an enclosing subquery already ranges over it (see `CollectionScope.alias`).
+ * The FROM item of a subquery over `relation`: the table under the relation's own alias, or
+ * under `alias` when an enclosing subquery already ranges over the same path (see
+ * `CollectionScope.alias`).
  */
 export const relationSource = (
   relation: RelationMapping,
   reference: string,
-  alias?: string,
+  alias: string | undefined = relationAlias(relation),
 ): SQL => {
   const table = sql.identifier(resolveTableName(relation.table, reference));
 

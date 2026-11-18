@@ -1,0 +1,407 @@
+{
+  "kind": "legal_document",
+  "nulls": "explicit",
+  "rootTable": "documents",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "industry",
+          "nullable": true,
+          "type": "string"
+        }
+      ],
+      "name": "clients",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "id": "cl1",
+          "industry": "software",
+          "name": "Initech"
+        },
+        {
+          "id": "cl2",
+          "industry": null,
+          "name": "Globex"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "client_id",
+          "nullable": false,
+          "references": "clients",
+          "type": "string"
+        },
+        {
+          "name": "practice_area",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "opened_at",
+          "nullable": false,
+          "type": "timestamp"
+        },
+        {
+          "name": "lead_partner_id",
+          "nullable": true,
+          "type": "string"
+        }
+      ],
+      "name": "matters",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "client_id": "cl1",
+          "id": "m1",
+          "lead_partner_id": "p-cho",
+          "opened_at": "2022-01-01T00:00:00Z",
+          "practice_area": "litigation",
+          "status": "open"
+        },
+        {
+          "client_id": "cl2",
+          "id": "m2",
+          "lead_partner_id": null,
+          "opened_at": "2022-06-01T00:00:00Z",
+          "practice_area": "m\u0026a",
+          "status": "open"
+        },
+        {
+          "client_id": "cl2",
+          "id": "m3",
+          "lead_partner_id": "p-zed",
+          "opened_at": "2015-01-01T00:00:00Z",
+          "practice_area": "Litigation",
+          "status": "closed"
+        },
+        {
+          "client_id": "cl1",
+          "id": "m4",
+          "lead_partner_id": "p-cho",
+          "opened_at": "2012-01-01T00:00:00Z",
+          "practice_area": "employment",
+          "status": "closed"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "matter_id",
+          "nullable": false,
+          "references": "matters",
+          "type": "string"
+        },
+        {
+          "name": "user_id",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "matter_team",
+      "primaryKey": [
+        "matter_id",
+        "user_id"
+      ],
+      "rows": [
+        {
+          "matter_id": "m1",
+          "user_id": "l-ali"
+        },
+        {
+          "matter_id": "m1",
+          "user_id": "l-bea"
+        },
+        {
+          "matter_id": "m1",
+          "user_id": "pl-dan"
+        },
+        {
+          "matter_id": "m2",
+          "user_id": "l-ali"
+        },
+        {
+          "matter_id": "m2",
+          "user_id": "pl-dan"
+        },
+        {
+          "matter_id": "m3",
+          "user_id": "l-bea"
+        },
+        {
+          "matter_id": "m4",
+          "user_id": "L-ALI"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "matter_id",
+          "nullable": false,
+          "references": "matters",
+          "type": "string"
+        },
+        {
+          "name": "user_id",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "matter_screens",
+      "primaryKey": [
+        "matter_id",
+        "user_id"
+      ],
+      "rows": [
+        {
+          "matter_id": "m2",
+          "user_id": "l-ali"
+        },
+        {
+          "matter_id": "m3",
+          "user_id": "p-cho"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "matter_id",
+          "nullable": false,
+          "references": "matters",
+          "type": "string"
+        },
+        {
+          "name": "title",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "privilege",
+          "nullable": true,
+          "type": "string"
+        },
+        {
+          "name": "classification",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "legal_hold",
+          "nullable": false,
+          "type": "bool"
+        },
+        {
+          "name": "created_by",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "retention_until",
+          "nullable": true,
+          "type": "timestamp"
+        }
+      ],
+      "name": "documents",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "classification": 2,
+          "created_by": "l-ali",
+          "id": "d01",
+          "legal_hold": true,
+          "matter_id": "m1",
+          "privilege": "work-product",
+          "retention_until": null,
+          "title": "Complaint"
+        },
+        {
+          "classification": 1,
+          "created_by": "pl-dan",
+          "id": "d02",
+          "legal_hold": false,
+          "matter_id": "m1",
+          "privilege": null,
+          "retention_until": null,
+          "title": "Exhibit A"
+        },
+        {
+          "classification": 3,
+          "created_by": "l-bea",
+          "id": "d03",
+          "legal_hold": false,
+          "matter_id": "m1",
+          "privilege": "attorney-client",
+          "retention_until": null,
+          "title": "Strategy memo"
+        },
+        {
+          "classification": 2,
+          "created_by": "l-ali",
+          "id": "d04",
+          "legal_hold": false,
+          "matter_id": "m2",
+          "privilege": "attorney-client",
+          "retention_until": null,
+          "title": "SPA draft"
+        },
+        {
+          "classification": 1,
+          "created_by": "pl-dan",
+          "id": "d05",
+          "legal_hold": false,
+          "matter_id": "m2",
+          "privilege": null,
+          "retention_until": null,
+          "title": "Data room index"
+        },
+        {
+          "classification": 4,
+          "created_by": "l-bea",
+          "id": "d06",
+          "legal_hold": false,
+          "matter_id": "m3",
+          "privilege": "",
+          "retention_until": "2020-01-01T00:00:00Z",
+          "title": "Settlement"
+        },
+        {
+          "classification": 1,
+          "created_by": "l-bea",
+          "id": "d07",
+          "legal_hold": true,
+          "matter_id": "m3",
+          "privilege": null,
+          "retention_until": "2019-06-30T00:00:00Z",
+          "title": "Court order"
+        },
+        {
+          "classification": 2,
+          "created_by": "p-cho",
+          "id": "d08",
+          "legal_hold": false,
+          "matter_id": "m4",
+          "privilege": null,
+          "retention_until": "2099-01-01T00:00:00Z",
+          "title": "Severance"
+        },
+        {
+          "classification": 2,
+          "created_by": "p-cho",
+          "id": "d09",
+          "legal_hold": false,
+          "matter_id": "m4",
+          "privilege": "work-product",
+          "retention_until": "2018-01-01T00:00:00Z",
+          "title": "HR notes"
+        },
+        {
+          "classification": 2,
+          "created_by": "l-ali",
+          "id": "d10",
+          "legal_hold": false,
+          "matter_id": "m2",
+          "privilege": null,
+          "retention_until": null,
+          "title": "Board minutes"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "document_id",
+          "nullable": false,
+          "references": "documents",
+          "type": "string"
+        },
+        {
+          "name": "party_type",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "party_id",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "document_shares",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "document_id": "d05",
+          "id": "sh1",
+          "party_id": "cl2",
+          "party_type": "client"
+        },
+        {
+          "document_id": "d06",
+          "id": "sh2",
+          "party_id": "cl2",
+          "party_type": "client"
+        },
+        {
+          "document_id": "d07",
+          "id": "sh3",
+          "party_id": "cl2",
+          "party_type": "court"
+        },
+        {
+          "document_id": "d04",
+          "id": "sh4",
+          "party_id": "cl2",
+          "party_type": "opposing_counsel"
+        },
+        {
+          "document_id": "d10",
+          "id": "sh5",
+          "party_id": "cl2",
+          "party_type": "Client"
+        }
+      ]
+    }
+  ]
+}

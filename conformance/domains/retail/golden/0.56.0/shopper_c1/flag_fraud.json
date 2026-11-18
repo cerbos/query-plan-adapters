@@ -1,0 +1,22 @@
+{
+  "action": "flag_fraud",
+  "allowed": [],
+  "domain": "retail",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "tier": "gold"
+    },
+    "id": "cu1",
+    "roles": [
+      "customer"
+    ]
+  },
+  "principalName": "shopper_c1",
+  "resourceKind": "order"
+}

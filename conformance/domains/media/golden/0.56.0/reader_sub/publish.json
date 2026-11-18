@@ -1,0 +1,27 @@
+{
+  "action": "publish",
+  "allowed": [],
+  "domain": "media",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [],
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "subscriber": true
+    },
+    "id": "rd2",
+    "roles": [
+      "reader"
+    ]
+  },
+  "principalName": "reader_sub",
+  "resourceKind": "article"
+}

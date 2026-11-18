@@ -1,0 +1,45 @@
+{
+  "action": "view",
+  "allowed": [
+    "e01",
+    "e02",
+    "e03",
+    "e04",
+    "e05",
+    "e07"
+  ],
+  "domain": "hr",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.id"
+          },
+          {
+            "value": "e01"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 9
+    },
+    "id": "e01",
+    "roles": [
+      "employee",
+      "manager"
+    ]
+  },
+  "principalName": "ceo_e01",
+  "resourceKind": "employee_record"
+}

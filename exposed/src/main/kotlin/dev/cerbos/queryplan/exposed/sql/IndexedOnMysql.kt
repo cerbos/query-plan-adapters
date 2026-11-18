@@ -18,6 +18,9 @@ import org.jetbrains.exposed.v1.core.vendors.currentDialect
  * every byte-equal value satisfies. The pair has [exact]'s three-valued result, and an index on the
  * column serves the prefilter, with its order for `ORDER BY ... LIMIT`, where the byte-exact form
  * reads every row. [exact] alone on every other dialect. Read at render time.
+ *
+ * [exact] collates the column side: MySQL drops `col = (v COLLATE utf8mb4_0900_bin)` when an index
+ * lookup on `col` serves the prefilter inside a correlated subquery.
  */
 internal class IndexedOnMysql(val prefilter: Op<Boolean>, val exact: Op<Boolean>) : Op<Boolean>() {
     override fun toQueryBuilder(queryBuilder: QueryBuilder): Unit = queryBuilder {

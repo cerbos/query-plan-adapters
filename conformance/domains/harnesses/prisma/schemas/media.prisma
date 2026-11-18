@@ -1,0 +1,48 @@
+model Author {
+  id            String               @id
+  displayName   String               @map("display_name")
+  staff         Boolean
+  articles      Article[]
+  contributions ArticleContributor[]
+
+  @@map("authors")
+}
+
+model Section {
+  slug     String    @id
+  name     String
+  desk     String
+  articles Article[]
+
+  @@map("sections")
+}
+
+model Article {
+  id           String               @id
+  slug         String
+  sectionSlug  String               @map("section_slug")
+  authorId     String               @map("author_id")
+  status       String
+  language     String
+  embargoUntil DateTime?            @map("embargo_until")
+  publishedAt  DateTime?            @map("published_at")
+  paywalled    Boolean
+  wordCount    Int                  @map("word_count")
+  keywords     String[] // @postgres
+  keywords     Json // @sqlite @mysql
+  section      Section              @relation(fields: [sectionSlug], references: [slug])
+  author       Author               @relation(fields: [authorId], references: [id])
+  contributors ArticleContributor[]
+
+  @@map("articles")
+}
+
+model ArticleContributor {
+  articleId String  @map("article_id")
+  authorId  String  @map("author_id")
+  article   Article @relation(fields: [articleId], references: [id])
+  author    Author  @relation(fields: [authorId], references: [id])
+
+  @@id([articleId, authorId])
+  @@map("article_contributors")
+}

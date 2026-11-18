@@ -218,6 +218,17 @@ final class Corpus {
                     omitted("parent.inner.aNumber")),
             Map.entry("request.resource.attr.parent.inner.aOptionalString",
                     omitted("parent.inner.aOptionalString")),
+            // Two more to-one relations: `peer` from the resource table to itself, and `stepParent`
+            // into the parent table beside `parent`.
+            Map.entry("request.resource.attr.peer.aBool", omitted("peer.aBool")),
+            Map.entry("request.resource.attr.peer.aString", omitted("peer.aString")),
+            Map.entry("request.resource.attr.peer.aNumber", omitted("peer.aNumber")),
+            Map.entry("request.resource.attr.peer.aOptionalString", omitted("peer.aOptionalString")),
+            Map.entry("request.resource.attr.stepParent.aBool", omitted("stepParent.aBool")),
+            Map.entry("request.resource.attr.stepParent.aString", omitted("stepParent.aString")),
+            Map.entry("request.resource.attr.stepParent.aNumber", omitted("stepParent.aNumber")),
+            Map.entry("request.resource.attr.stepParent.aOptionalString",
+                    omitted("stepParent.aOptionalString")),
             // `owner` and `coOwner` reuse the aOptionalString and scope columns, but send a NULL
             // column as an explicit null instead of omitting the attribute.
             Map.entry("request.resource.attr.owner",

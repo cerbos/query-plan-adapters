@@ -1,0 +1,20 @@
+{
+  "action": "refund",
+  "allowed": [],
+  "domain": "retail",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {},
+    "id": "ag-sue",
+    "roles": [
+      "support_agent"
+    ]
+  },
+  "principalName": "agent_sue",
+  "resourceKind": "order"
+}

@@ -1,0 +1,66 @@
+model Hospital {
+  id     String @id
+  name   String
+  region String
+  wards  Ward[]
+
+  @@map("hospitals")
+}
+
+model Ward {
+  id         String    @id
+  name       String
+  hospitalId String    @map("hospital_id")
+  secure     Boolean
+  hospital   Hospital  @relation(fields: [hospitalId], references: [id])
+  patients   Patient[]
+
+  @@map("wards")
+}
+
+model Patient {
+  id              String         @id
+  mrn             String
+  wardId          String?        @map("ward_id")
+  consentResearch Boolean        @map("consent_research")
+  vip             Boolean?
+  birthYear       Int            @map("birth_year")
+  ward            Ward?          @relation(fields: [wardId], references: [id])
+  notes           ClinicalNote[]
+
+  @@map("patients")
+}
+
+model ClinicalNote {
+  noteId      String         @id @map("note_id")
+  patientId   String         @map("patient_id")
+  authorId    String         @map("author_id")
+  type        String
+  sensitivity Int?
+  signedAt    DateTime?      @map("signed_at")
+  isDeleted   Boolean        @map("is_deleted")
+  patient     Patient        @relation(fields: [patientId], references: [id])
+  careTeam    NoteCareTeam[]
+  codes       NoteCode[]
+
+  @@map("clinical_notes")
+}
+
+model NoteCareTeam {
+  noteId      String       @map("note_id")
+  clinicianId String       @map("clinician_id")
+  note        ClinicalNote @relation(fields: [noteId], references: [noteId])
+
+  @@id([noteId, clinicianId])
+  @@map("note_care_team")
+}
+
+model NoteCode {
+  id     String       @id
+  noteId String       @map("note_id")
+  system String
+  code   String
+  note   ClinicalNote @relation(fields: [noteId], references: [noteId])
+
+  @@map("note_codes")
+}

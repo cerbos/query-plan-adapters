@@ -7,6 +7,8 @@ on:
     paths:
       - "conformance/**"
       - ".github/workflows/conformance.yaml"
+      # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
+      - "!conformance/domains/**"
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this
       # result. A negation must come after every pattern it narrows.
       - "!**/*.md"
@@ -16,6 +18,8 @@ on:
     paths:
       - "conformance/**"
       - ".github/workflows/conformance.yaml"
+      # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
+      - "!conformance/domains/**"
       # No script, harness or build reads Markdown, so a prose-only change cannot alter this
       # result. A negation must come after every pattern it narrows.
       - "!**/*.md"

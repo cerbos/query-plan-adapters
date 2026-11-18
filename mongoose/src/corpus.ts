@@ -477,6 +477,30 @@ export const MAPPER: ConformanceMapper = {
       },
     },
   },
+  "request.resource.attr.peer": {
+    relation: {
+      name: "peer",
+      type: "one",
+      fields: {
+        aBool: { field: "aBool", nullable: true },
+        aString: { field: "aString", nullable: true },
+        aNumber: { field: "aNumber", nullable: true },
+        aOptionalString: { field: "aOptionalString", nullable: true },
+      },
+    },
+  },
+  "request.resource.attr.stepParent": {
+    relation: {
+      name: "stepParent",
+      type: "one",
+      fields: {
+        aBool: { field: "aBool", nullable: true },
+        aString: { field: "aString", nullable: true },
+        aNumber: { field: "aNumber", nullable: true },
+        aOptionalString: { field: "aOptionalString", nullable: true },
+      },
+    },
+  },
   "request.resource.attr.tags": {
     relation: {
       name: "tags",
@@ -579,6 +603,8 @@ export const SCHEMA_MAPPER: ConformanceMapper = {
   ...Object.fromEntries(SHARED_ATTRIBUTES.map(([reference, application]) => [reference, application])),
   "request.resource.attr.parent": { relation: { name: "parent", fields: nullableLevel } },
   "request.resource.attr.parent.inner": { relation: { name: "parent.inner", fields: nullableLevel } },
+  "request.resource.attr.peer": { relation: { name: "peer", fields: nullableLevel } },
+  "request.resource.attr.stepParent": { relation: { name: "stepParent", fields: nullableLevel } },
   "request.resource.attr.tags": { relation: { name: "tags", fields: { name: { nullable: true } } } },
   "request.resource.attr.tagNames": { relation: { name: "tags", field: "name" } },
   "request.resource.attr.categories": {

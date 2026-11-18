@@ -1,0 +1,41 @@
+actions: [view, update_status, release_customs]
+principals:
+  hubop_lhr: {id: u-hub1, roles: [hub_operator], attr: {hubs: [LHR], certifications: []}}
+  carrier_dhlx: {id: u-car1, roles: [carrier], attr: {scac: DHLX, certifications: [hazmat]}}
+  carrier_upsn: {id: u-car2, roles: [carrier], attr: {scac: UPSN, certifications: [cold-chain]}}
+  customer_acme: {id: u-acme, roles: [customer], attr: {account: ACME-001}}
+  customs_us: {id: u-cbp, roles: [customs_officer], attr: {country: US}}
+tables:
+  hubs:
+    - {id: hb1, code: LHR, country: GB, region: EMEA}
+    - {id: hb2, code: JFK, country: US, region: AMER}
+    - {id: hb3, code: FRA, country: DE, region: EMEA}
+    - {id: hb4, code: lhr, country: GB, region: EMEA}
+    - {id: hb5, code: ORD, country: US, region: AMER}
+  carriers:
+    - {id: cr1, name: Express, scac: DHLX}
+    - {id: cr2, name: Parcel, scac: UPSN}
+  shipments:
+    - {id: s01, tracking_no: TRK-001, status: in_transit, origin_hub_id: hb1, destination_hub_id: hb2, carrier_id: cr1, weight_kg: 12.5, hazmat: false, customs_hold: true, shipper_account: ACME-001, eta: 2030-01-01T00:00:00Z, declared_value: 1500.00}
+    - {id: s02, tracking_no: TRK-002, status: delivered, origin_hub_id: hb3, destination_hub_id: hb1, carrier_id: cr1, weight_kg: 3.0, hazmat: true, shipper_account: ACME-001, declared_value: 99.99}
+    - {id: s03, tracking_no: TRK-003, status: booked, origin_hub_id: hb2, destination_hub_id: hb5, weight_kg: 800, hazmat: false, customs_hold: true, shipper_account: GLOBEX, declared_value: 25000}
+    - {id: s04, tracking_no: TRK-004, status: in_transit, origin_hub_id: hb3, destination_hub_id: hb2, carrier_id: cr2, weight_kg: 40.25, hazmat: true, customs_hold: true, shipper_account: acme-001, eta: 2030-02-01T00:00:00Z, declared_value: 1000.00}
+    - {id: s05, tracking_no: TRK-005, status: in_transit, origin_hub_id: hb4, destination_hub_id: hb5, carrier_id: cr2, weight_kg: 1, hazmat: false, customs_hold: false, shipper_account: INITECH, declared_value: 1000.01}
+    - {id: s06, tracking_no: TRK-006, status: exception, origin_hub_id: hb3, destination_hub_id: hb3, carrier_id: cr1, weight_kg: 5, hazmat: false, shipper_account: GLOBEX, declared_value: 5000}
+    - {id: s07, tracking_no: TRK-007, status: in_transit, origin_hub_id: hb2, destination_hub_id: hb3, carrier_id: cr2, weight_kg: 2, hazmat: false, shipper_account: ACME-001, declared_value: 10}
+    - {id: s08, tracking_no: TRK-008, status: in_transit, origin_hub_id: hb3, destination_hub_id: hb2, carrier_id: cr1, weight_kg: 60, hazmat: true, customs_hold: true, shipper_account: GLOBEX, declared_value: 1200.5}
+    - {id: s09, tracking_no: TRK-009, status: in_transit, origin_hub_id: hb4, destination_hub_id: hb2, carrier_id: cr1, weight_kg: 7, hazmat: false, customs_hold: true, shipper_account: INITECH, declared_value: 999.99}
+  shipment_handling:
+    - {shipment_id: s01, code: fragile}
+    - {shipment_id: s03, code: cold-chain}
+    - {shipment_id: s04, code: cold-chain}
+    - {shipment_id: s04, code: fragile}
+    - {shipment_id: s07, code: Cold-Chain}
+    - {shipment_id: s08, code: oversized}
+  checkpoints:
+    - {id: k01, shipment_id: s01, hub_id: hb1, event: picked_up, scanned_at: 2024-01-01T08:00:00Z}
+    - {id: k02, shipment_id: s04, hub_id: hb3, event: picked_up, scanned_at: 2024-01-02T08:00:00Z}
+    - {id: k03, shipment_id: s04, hub_id: hb1, event: transit, scanned_at: 2024-01-03T08:00:00Z}
+    - {id: k04, shipment_id: s06, hub_id: hb3, event: exception, scanned_at: 2024-01-04T08:00:00Z}
+    - {id: k05, shipment_id: s07, hub_id: hb4, event: transit, scanned_at: 2024-01-05T08:00:00Z}
+    - {id: k06, shipment_id: s08, hub_id: hb3, event: picked_up, scanned_at: 2024-01-06T08:00:00Z}

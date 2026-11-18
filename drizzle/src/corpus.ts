@@ -21,6 +21,7 @@ import {
   json as pgJson,
   jsonb,
   pgTable,
+  type AnyPgColumn,
   text as pgText,
   timestamp,
 } from "drizzle-orm/pg-core";
@@ -31,9 +32,10 @@ import {
   int as mysqlInt,
   json as mysqlJson,
   mysqlTable,
+  type AnyMySqlColumn,
   varchar,
 } from "drizzle-orm/mysql-core";
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import type { DeclaredRelation, MapperEntry } from ".";
 import { loadModule } from "./compat";
@@ -412,6 +414,8 @@ export interface AdversarialSchema {
     tagNamesJson: AnyColumn;
     aNumberListJson: AnyColumn;
     aBoolListJson: AnyColumn;
+    peerId: AnyColumn;
+    stepParentId: AnyColumn;
   };
   parents: Table & {
     id: AnyColumn;
@@ -453,7 +457,10 @@ interface LegacyRelationRef {
 }
 
 interface LegacyRelationHelpers {
-  one(table: Table, config?: { fields: AnyColumn[]; references: AnyColumn[] }): LegacyRelationRef;
+  one(
+    table: Table,
+    config?: { fields: AnyColumn[]; references: AnyColumn[] },
+  ): LegacyRelationRef;
   many(table: Table): LegacyRelationRef;
 }
 
@@ -522,6 +529,8 @@ function withRelations<T extends AdversarialSchema>(tables: T) {
       (r) => ({
         resources: {
           parent: relationV2(r, "one", "parents", ["resources", "id"], ["parents", "resourceId"]),
+          stepParent: relationV2(r, "one", "parents", ["resources", "stepParentId"], ["parents", "id"]),
+          peer: relationV2(r, "one", "resources", ["resources", "peerId"], ["resources", "id"]),
           tags: relationV2(r, "many", "tags", ["resources", "id"], ["tags", "resourceId"]),
           categories: relationV2(r, "many", "categories", ["resources", "id"], ["categories", "resourceId"]),
         },
@@ -555,6 +564,11 @@ function withRelations<T extends AdversarialSchema>(tables: T) {
     labels,
     resourcesRelations: relations(resources, ({ one, many }) => ({
       parent: one(parents),
+      stepParent: one(parents, {
+        fields: [resources.stepParentId],
+        references: [parents.id],
+      }),
+      peer: one(resources, { fields: [resources.peerId], references: [resources.id] }),
       tags: many(tags),
       categories: many(categories),
     })),
@@ -600,6 +614,8 @@ export function sqliteSchema() {
     tagNamesJson: text("tag_names_json", { mode: "json" }).$type<(string | null)[]>(),
     aNumberListJson: text("a_number_list_json", { mode: "json" }).$type<(number | null)[]>(),
     aBoolListJson: text("a_bool_list_json", { mode: "json" }).$type<(boolean | null)[]>(),
+    peerId: text("peer_id").references((): AnySQLiteColumn => resources.id),
+    stepParentId: text("step_parent_id").unique().references((): AnySQLiteColumn => parents.id),
   });
 
   // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -609,7 +625,7 @@ export function sqliteSchema() {
     aString: text("a_string"),
     aNumber: integer("a_number"),
     aOptionalString: text("a_optional_string"),
-    resourceId: text("resource_id").notNull().unique().references(() => resources.id),
+    resourceId: text("resource_id").unique().references(() => resources.id),
   });
 
   const inners = sqliteTable("adversarial_inners", {
@@ -686,6 +702,8 @@ export function postgresSchema() {
       withTimezone: true,
       mode: "string",
     }),
+    peerId: pgText("peer_id").references((): AnyPgColumn => resources.id),
+    stepParentId: pgText("step_parent_id").unique().references((): AnyPgColumn => parents.id),
   });
 
   // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -695,7 +713,7 @@ export function postgresSchema() {
     aString: pgText("a_string"),
     aNumber: pgInteger("a_number"),
     aOptionalString: pgText("a_optional_string"),
-    resourceId: pgText("resource_id").notNull().unique().references(() => resources.id),
+    resourceId: pgText("resource_id").unique().references(() => resources.id),
   });
 
   const inners = pgTable("adversarial_inners", {
@@ -775,6 +793,8 @@ export function mysqlSchema() {
     tagNamesJson: mysqlJson("tag_names_json").$type<(string | null)[]>(),
     aNumberListJson: mysqlJson("a_number_list_json").$type<(number | null)[]>(),
     aBoolListJson: mysqlJson("a_bool_list_json").$type<(boolean | null)[]>(),
+    peerId: varchar("peer_id", { length: 64 }).references((): AnyMySqlColumn => resources.id),
+    stepParentId: varchar("step_parent_id", { length: 64 }).unique().references((): AnyMySqlColumn => parents.id),
   });
 
   // The corpus's one real to-one chain, one owned row per level and per resource.
@@ -784,7 +804,7 @@ export function mysqlSchema() {
     aString: varchar("a_string", { length: 255 }),
     aNumber: mysqlInt("a_number"),
     aOptionalString: varchar("a_optional_string", { length: 255 }),
-    resourceId: varchar("resource_id", { length: 64 }).notNull().unique().references(() => resources.id),
+    resourceId: varchar("resource_id", { length: 64 }).unique().references(() => resources.id),
   });
 
   const inners = mysqlTable("adversarial_inners", {
@@ -963,6 +983,30 @@ export function buildMapper(
               },
             },
           },
+        },
+      },
+    },
+    // Two more to-one relations for joins that reach a table twice: `peer` is a resource row (a
+    // foreign key from the resource table to itself) and `stepParent` a second row in the parent table.
+    "request.resource.attr.peer": {
+      relation: {
+        ...join({ name: "peer" }, "one", schema.resources, schema.resources.peerId, schema.resources.id),
+        fields: {
+          aBool: { column: schema.resources.aBool, nullAttributeRepresentation: "omitted" },
+          aString: { column: schema.resources.aString, nullAttributeRepresentation: "omitted" },
+          aNumber: { column: schema.resources.aNumber, nullAttributeRepresentation: "omitted" },
+          aOptionalString: { column: schema.resources.aOptionalString, nullAttributeRepresentation: "omitted" },
+        },
+      },
+    },
+    "request.resource.attr.stepParent": {
+      relation: {
+        ...join({ name: "stepParent" }, "one", schema.parents, schema.resources.stepParentId, schema.parents.id),
+        fields: {
+          aBool: { column: schema.parents.aBool, nullAttributeRepresentation: "omitted" },
+          aString: { column: schema.parents.aString, nullAttributeRepresentation: "omitted" },
+          aNumber: { column: schema.parents.aNumber, nullAttributeRepresentation: "omitted" },
+          aOptionalString: { column: schema.parents.aOptionalString, nullAttributeRepresentation: "omitted" },
         },
       },
     },

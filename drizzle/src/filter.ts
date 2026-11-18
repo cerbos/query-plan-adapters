@@ -1,5 +1,5 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
-import { and, or, sql } from "drizzle-orm";
+import { and, getTableName, or, sql } from "drizzle-orm";
 import { columnTable, dataTypeOf, not } from "./compat";
 import type { AnyColumn, SQL } from "drizzle-orm";
 
@@ -49,7 +49,7 @@ import {
 } from "./predicates";
 import type { StringMatchOperator } from "./predicates";
 import { compileRegex } from "./regex";
-import { wrapCombinedRelations, wrapRelationChain } from "./relations";
+import { relationAlias, wrapCombinedRelations, wrapRelationChain } from "./relations";
 import type { BaseMapperEntry, BuildFilterOptions, ResolvedMapper } from "./types";
 import { resolveScalarOperand } from "./values";
 import { isBoolean, isFunction, isNumber, isString, pair, typeofValue } from "./narrowing";
@@ -213,7 +213,7 @@ const buildVariableMembershipFilter = (
     collection.relations.some(
       (relation) =>
         !options.skipRelations?.has(relation) &&
-        relation.table === columnTable(memberColumn),
+        relationAlias(relation) === getTableName(columnTable(memberColumn)),
     )
   ) {
     throw new UnsupportedQueryPlanError(

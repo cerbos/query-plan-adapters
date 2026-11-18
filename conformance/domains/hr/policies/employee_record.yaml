@@ -1,0 +1,65 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: employee_record
+  version: default
+  variables:
+    local:
+      direct_report: has(R.attr.manager) && R.attr.manager.id == P.id
+      skip_level: has(R.attr.manager) && has(R.attr.manager.manager) && R.attr.manager.manager.id == P.id
+      active: "!has(R.attr.terminatedOn)"
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [employee]
+      condition:
+        match:
+          expr: R.id == P.id
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [manager]
+      condition:
+        match:
+          expr: (V.direct_report || V.skip_level) && V.active
+    - actions: [view_compensation]
+      effect: EFFECT_ALLOW
+      roles: [manager]
+      condition:
+        match:
+          all:
+            of:
+              - expr: V.direct_report
+              - expr: R.attr.level < P.attr.level
+              - expr: has(R.attr.salaryBand)
+    - actions: [view, edit]
+      effect: EFFECT_ALLOW
+      roles: [hrbp]
+      condition:
+        match:
+          expr: R.attr.department.id in P.attr.departments
+    - actions: [view_compensation]
+      effect: EFFECT_ALLOW
+      roles: [hrbp]
+      condition:
+        match:
+          expr: R.attr.department.id in P.attr.departments && R.attr.location.country == P.attr.country
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [recruiter]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.employmentType == "contractor"
+              - expr: R.attr.email.endsWith("@contractors.example.com")
+              - expr: V.active
+    - actions: [terminate]
+      effect: EFFECT_ALLOW
+      roles: [hr_admin]
+      condition:
+        match:
+          all:
+            of:
+              - expr: V.active
+              - expr: R.id != P.id
+              - expr: timestamp(R.attr.hiredOn) < timestamp("2024-01-01T00:00:00Z")
+              - expr: '!("payroll" in R.attr.skills)'

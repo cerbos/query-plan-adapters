@@ -260,7 +260,7 @@ internal class MembershipTranslator(private val translation: Translation) {
                 ScalarColumnTypes.knownMismatch(element, value) -> null
                 !ScalarColumnTypes.accepts(element, value) ->
                     throw ScalarRefusals.constantTypeMismatch("in", reference, element, value)
-                else -> EqOp(element, Params.of(value)).let { if (value is String) IndexedOnMysql.eq(element, value, it) else it }
+                else -> EqOp(ExactString.of(element, "eq"), Params.of(value)).let { if (value is String) IndexedOnMysql.eq(element, value, it) else it }
             }
         }
         return if (arms.isEmpty()) Op.FALSE else TriLogic.or(arms)

@@ -1,0 +1,61 @@
+{
+  "action": "view",
+  "allowed": [
+    "s01",
+    "s04",
+    "s05",
+    "s08",
+    "s09"
+  ],
+  "domain": "logistics",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.destination.country"
+                },
+                {
+                  "value": "US"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.origin.country"
+                },
+                {
+                  "variable": "request.resource.attr.destination.country"
+                }
+              ],
+              "operator": "ne"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "US"
+    },
+    "id": "u-cbp",
+    "roles": [
+      "customs_officer"
+    ]
+  },
+  "principalName": "customs_us",
+  "resourceKind": "shipment"
+}

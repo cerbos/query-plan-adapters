@@ -1,0 +1,112 @@
+{
+  "action": "release_customs",
+  "allowed": [
+    "s01",
+    "s04",
+    "s08"
+  ],
+  "domain": "logistics",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.customsHold"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.destination.country"
+                },
+                {
+                  "value": "US"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.declaredValue"
+                      },
+                      {
+                        "value": 1000
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                },
+                {
+                  "variable": "request.resource.attr.hazmat"
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.checkpoints"
+                            }
+                          ],
+                          "operator": "size"
+                        }
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.weightKg"
+                      },
+                      {
+                        "value": 50
+                      }
+                    ],
+                    "operator": "lt"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "US"
+    },
+    "id": "u-cbp",
+    "roles": [
+      "customs_officer"
+    ]
+  },
+  "principalName": "customs_us",
+  "resourceKind": "shipment"
+}

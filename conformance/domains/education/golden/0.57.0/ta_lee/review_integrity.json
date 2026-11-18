@@ -1,0 +1,23 @@
+{
+  "action": "review_integrity",
+  "allowed": [],
+  "domain": "education",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [],
+      "term": ""
+    },
+    "id": "ta-lee",
+    "roles": [
+      "ta"
+    ]
+  },
+  "principalName": "ta_lee",
+  "resourceKind": "submission"
+}

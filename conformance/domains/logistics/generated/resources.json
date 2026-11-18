@@ -1,0 +1,303 @@
+{
+  "kind": "shipment",
+  "nulls": "omitted",
+  "resources": [
+    {
+      "id": "s01",
+      "attr": {
+        "carrier": {
+          "scac": "DHLX"
+        },
+        "checkpoints": [
+          {
+            "event": "picked_up",
+            "hub": {
+              "code": "LHR"
+            },
+            "scannedAt": "2024-01-01T08:00:00Z"
+          }
+        ],
+        "customsHold": true,
+        "declaredValue": 1500,
+        "destination": {
+          "code": "JFK",
+          "country": "US",
+          "region": "AMER"
+        },
+        "eta": "2030-01-01T00:00:00Z",
+        "handling": [
+          "fragile"
+        ],
+        "hazmat": false,
+        "origin": {
+          "code": "LHR",
+          "country": "GB",
+          "region": "EMEA"
+        },
+        "shipper": "ACME-001",
+        "status": "in_transit",
+        "trackingNumber": "TRK-001",
+        "weightKg": 12.5
+      }
+    },
+    {
+      "id": "s02",
+      "attr": {
+        "carrier": {
+          "scac": "DHLX"
+        },
+        "checkpoints": [],
+        "declaredValue": 99.99,
+        "destination": {
+          "code": "LHR",
+          "country": "GB",
+          "region": "EMEA"
+        },
+        "handling": [],
+        "hazmat": true,
+        "origin": {
+          "code": "FRA",
+          "country": "DE",
+          "region": "EMEA"
+        },
+        "shipper": "ACME-001",
+        "status": "delivered",
+        "trackingNumber": "TRK-002",
+        "weightKg": 3
+      }
+    },
+    {
+      "id": "s03",
+      "attr": {
+        "checkpoints": [],
+        "customsHold": true,
+        "declaredValue": 25000,
+        "destination": {
+          "code": "ORD",
+          "country": "US",
+          "region": "AMER"
+        },
+        "handling": [
+          "cold-chain"
+        ],
+        "hazmat": false,
+        "origin": {
+          "code": "JFK",
+          "country": "US",
+          "region": "AMER"
+        },
+        "shipper": "GLOBEX",
+        "status": "booked",
+        "trackingNumber": "TRK-003",
+        "weightKg": 800
+      }
+    },
+    {
+      "id": "s04",
+      "attr": {
+        "carrier": {
+          "scac": "UPSN"
+        },
+        "checkpoints": [
+          {
+            "event": "picked_up",
+            "hub": {
+              "code": "FRA"
+            },
+            "scannedAt": "2024-01-02T08:00:00Z"
+          },
+          {
+            "event": "transit",
+            "hub": {
+              "code": "LHR"
+            },
+            "scannedAt": "2024-01-03T08:00:00Z"
+          }
+        ],
+        "customsHold": true,
+        "declaredValue": 1000,
+        "destination": {
+          "code": "JFK",
+          "country": "US",
+          "region": "AMER"
+        },
+        "eta": "2030-02-01T00:00:00Z",
+        "handling": [
+          "cold-chain",
+          "fragile"
+        ],
+        "hazmat": true,
+        "origin": {
+          "code": "FRA",
+          "country": "DE",
+          "region": "EMEA"
+        },
+        "shipper": "acme-001",
+        "status": "in_transit",
+        "trackingNumber": "TRK-004",
+        "weightKg": 40.25
+      }
+    },
+    {
+      "id": "s05",
+      "attr": {
+        "carrier": {
+          "scac": "UPSN"
+        },
+        "checkpoints": [],
+        "customsHold": false,
+        "declaredValue": 1000.01,
+        "destination": {
+          "code": "ORD",
+          "country": "US",
+          "region": "AMER"
+        },
+        "handling": [],
+        "hazmat": false,
+        "origin": {
+          "code": "lhr",
+          "country": "GB",
+          "region": "EMEA"
+        },
+        "shipper": "INITECH",
+        "status": "in_transit",
+        "trackingNumber": "TRK-005",
+        "weightKg": 1
+      }
+    },
+    {
+      "id": "s06",
+      "attr": {
+        "carrier": {
+          "scac": "DHLX"
+        },
+        "checkpoints": [
+          {
+            "event": "exception",
+            "hub": {
+              "code": "FRA"
+            },
+            "scannedAt": "2024-01-04T08:00:00Z"
+          }
+        ],
+        "declaredValue": 5000,
+        "destination": {
+          "code": "FRA",
+          "country": "DE",
+          "region": "EMEA"
+        },
+        "handling": [],
+        "hazmat": false,
+        "origin": {
+          "code": "FRA",
+          "country": "DE",
+          "region": "EMEA"
+        },
+        "shipper": "GLOBEX",
+        "status": "exception",
+        "trackingNumber": "TRK-006",
+        "weightKg": 5
+      }
+    },
+    {
+      "id": "s07",
+      "attr": {
+        "carrier": {
+          "scac": "UPSN"
+        },
+        "checkpoints": [
+          {
+            "event": "transit",
+            "hub": {
+              "code": "lhr"
+            },
+            "scannedAt": "2024-01-05T08:00:00Z"
+          }
+        ],
+        "declaredValue": 10,
+        "destination": {
+          "code": "FRA",
+          "country": "DE",
+          "region": "EMEA"
+        },
+        "handling": [
+          "Cold-Chain"
+        ],
+        "hazmat": false,
+        "origin": {
+          "code": "JFK",
+          "country": "US",
+          "region": "AMER"
+        },
+        "shipper": "ACME-001",
+        "status": "in_transit",
+        "trackingNumber": "TRK-007",
+        "weightKg": 2
+      }
+    },
+    {
+      "id": "s08",
+      "attr": {
+        "carrier": {
+          "scac": "DHLX"
+        },
+        "checkpoints": [
+          {
+            "event": "picked_up",
+            "hub": {
+              "code": "FRA"
+            },
+            "scannedAt": "2024-01-06T08:00:00Z"
+          }
+        ],
+        "customsHold": true,
+        "declaredValue": 1200.5,
+        "destination": {
+          "code": "JFK",
+          "country": "US",
+          "region": "AMER"
+        },
+        "handling": [
+          "oversized"
+        ],
+        "hazmat": true,
+        "origin": {
+          "code": "FRA",
+          "country": "DE",
+          "region": "EMEA"
+        },
+        "shipper": "GLOBEX",
+        "status": "in_transit",
+        "trackingNumber": "TRK-008",
+        "weightKg": 60
+      }
+    },
+    {
+      "id": "s09",
+      "attr": {
+        "carrier": {
+          "scac": "DHLX"
+        },
+        "checkpoints": [],
+        "customsHold": true,
+        "declaredValue": 999.99,
+        "destination": {
+          "code": "JFK",
+          "country": "US",
+          "region": "AMER"
+        },
+        "handling": [],
+        "hazmat": false,
+        "origin": {
+          "code": "lhr",
+          "country": "GB",
+          "region": "EMEA"
+        },
+        "shipper": "INITECH",
+        "status": "in_transit",
+        "trackingNumber": "TRK-009",
+        "weightKg": 7
+      }
+    }
+  ]
+}

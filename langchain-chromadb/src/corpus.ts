@@ -460,6 +460,30 @@ export const FIELD_NAME_MAPPER: ConformanceMapper =
     "request.resource.attr.parent.inner.aOptionalString": {
       field: "parent.inner.aOptionalString",
     },
+    "request.resource.attr.peer.aBool": {
+      field: "peer.aBool",
+      valueType: "boolean",
+    },
+    "request.resource.attr.peer.aString": { field: "peer.aString" },
+    "request.resource.attr.peer.aNumber": {
+      field: "peer.aNumber",
+      numericType: "integer",
+    },
+    "request.resource.attr.peer.aOptionalString": {
+      field: "peer.aOptionalString",
+    },
+    "request.resource.attr.stepParent.aBool": {
+      field: "stepParent.aBool",
+      valueType: "boolean",
+    },
+    "request.resource.attr.stepParent.aString": { field: "stepParent.aString" },
+    "request.resource.attr.stepParent.aNumber": {
+      field: "stepParent.aNumber",
+      numericType: "integer",
+    },
+    "request.resource.attr.stepParent.aOptionalString": {
+      field: "stepParent.aOptionalString",
+    },
     // The attributes Chroma metadata cannot hold as the PDP sees them — lists (empty, with null
     // elements, of objects), maps, and the explicit nulls `owner`, `coOwner` and the lists send —
     // stored as JSON text under one key each. No `Where` clause reads them; the post-filter parses
@@ -485,6 +509,8 @@ export const FIELD_NAME_MAPPER: ConformanceMapper =
     "request.resource.attr.categories": { field: "categories", valueType: "json" },
     "request.resource.attr.mainCategory": { field: "mainCategory", valueType: "json" },
     "request.resource.attr.parent": { field: "parent", valueType: "json" },
+    "request.resource.attr.peer": { field: "peer", valueType: "json" },
+    "request.resource.attr.stepParent": { field: "stepParent", valueType: "json" },
     "request.resource.attr.obj": { field: "obj", valueType: "json" },
   };
 

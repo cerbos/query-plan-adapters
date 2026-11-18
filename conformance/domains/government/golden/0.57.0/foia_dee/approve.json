@@ -1,0 +1,23 @@
+{
+  "action": "approve",
+  "allowed": [],
+  "domain": "government",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "counties": [],
+      "state": ""
+    },
+    "id": "fo-dee",
+    "roles": [
+      "foia_officer"
+    ]
+  },
+  "principalName": "foia_dee",
+  "resourceKind": "benefit_case"
+}

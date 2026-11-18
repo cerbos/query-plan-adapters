@@ -1,0 +1,130 @@
+{
+  "action": "destroy",
+  "allowed": [
+    "d06",
+    "d09"
+  ],
+  "domain": "legal",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "rm-eli"
+                      },
+                      {
+                        "variable": "request.resource.attr.matter.screened"
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.legalHold"
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.retentionUntil"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "ne"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.retentionUntil"
+                                  }
+                                ],
+                                "operator": "timestamp"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "value": "2026-11-18T12:20:03.563486353Z"
+                                  }
+                                ],
+                                "operator": "timestamp"
+                              }
+                            }
+                          ],
+                          "operator": "lt"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.matter.status"
+                      },
+                      {
+                        "value": "closed"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clientId": "",
+      "practiceAreas": []
+    },
+    "id": "rm-eli",
+    "roles": [
+      "records_manager"
+    ]
+  },
+  "principalName": "records_eli",
+  "resourceKind": "legal_document"
+}

@@ -1,0 +1,84 @@
+{
+  "action": "sign",
+  "allowed": [
+    "n02"
+  ],
+  "domain": "healthcare",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.signedAt"
+                            }
+                          ],
+                          "operator": "has"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.deleted"
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.authorId"
+                },
+                {
+                  "value": "u-ortiz"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "north",
+      "specialties": [
+        "cardiology"
+      ],
+      "wards": [
+        "w1"
+      ]
+    },
+    "id": "u-ortiz",
+    "roles": [
+      "physician"
+    ]
+  },
+  "principalName": "dr_ortiz",
+  "resourceKind": "clinical_note"
+}

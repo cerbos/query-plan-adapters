@@ -1,0 +1,410 @@
+{
+  "kind": "order",
+  "nulls": "omitted",
+  "rootTable": "order",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "region",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "country",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "stores",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "country": "US",
+          "id": "st1",
+          "region": "west"
+        },
+        {
+          "country": "US",
+          "id": "st2",
+          "region": "east"
+        },
+        {
+          "country": "CA",
+          "id": "st3",
+          "region": "West"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "email",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "tier",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "loyalty_points",
+          "nullable": false,
+          "type": "int"
+        }
+      ],
+      "name": "customers",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "email": "a@example.com",
+          "id": "cu1",
+          "loyalty_points": 1200,
+          "tier": "gold"
+        },
+        {
+          "email": "b@example.com",
+          "id": "cu2",
+          "loyalty_points": 0,
+          "tier": "staff"
+        },
+        {
+          "email": "c@example.com",
+          "id": "cu3",
+          "loyalty_points": 15,
+          "tier": "bronze"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "customer_id",
+          "nullable": false,
+          "references": "customers",
+          "type": "string"
+        },
+        {
+          "name": "store_id",
+          "nullable": true,
+          "references": "stores",
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "channel",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "total_cents",
+          "nullable": false,
+          "type": "bigint"
+        },
+        {
+          "name": "currency",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "coupon_code",
+          "nullable": true,
+          "type": "string"
+        },
+        {
+          "name": "placed_at",
+          "nullable": false,
+          "type": "timestamp"
+        },
+        {
+          "name": "gift",
+          "nullable": false,
+          "type": "bool"
+        }
+      ],
+      "name": "order",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "channel": "in_store",
+          "coupon_code": null,
+          "currency": "USD",
+          "customer_id": "cu1",
+          "gift": false,
+          "id": "o01",
+          "placed_at": "2023-05-01T10:00:00Z",
+          "status": "delivered",
+          "store_id": "st1",
+          "total_cents": 19999
+        },
+        {
+          "channel": "online",
+          "coupon_code": "STAFF10",
+          "currency": "USD",
+          "customer_id": "cu1",
+          "gift": true,
+          "id": "o02",
+          "placed_at": "2023-05-02T10:00:00Z",
+          "status": "placed",
+          "store_id": null,
+          "total_cents": 5000
+        },
+        {
+          "channel": "online",
+          "coupon_code": "STAFF20",
+          "currency": "USD",
+          "customer_id": "cu2",
+          "gift": false,
+          "id": "o03",
+          "placed_at": "2023-05-03T10:00:00Z",
+          "status": "paid",
+          "store_id": null,
+          "total_cents": 120000
+        },
+        {
+          "channel": "in_store",
+          "coupon_code": null,
+          "currency": "USD",
+          "customer_id": "cu3",
+          "gift": false,
+          "id": "o04",
+          "placed_at": "2023-05-04T10:00:00Z",
+          "status": "returned",
+          "store_id": "st1",
+          "total_cents": 20000
+        },
+        {
+          "channel": "in_store",
+          "coupon_code": "staff5",
+          "currency": "USD",
+          "customer_id": "cu3",
+          "gift": false,
+          "id": "o05",
+          "placed_at": "2023-05-05T10:00:00Z",
+          "status": "delivered",
+          "store_id": "st2",
+          "total_cents": 300
+        },
+        {
+          "channel": "in_store",
+          "coupon_code": null,
+          "currency": "CAD",
+          "customer_id": "cu3",
+          "gift": false,
+          "id": "o06",
+          "placed_at": "2023-05-06T10:00:00Z",
+          "status": "delivered",
+          "store_id": "st3",
+          "total_cents": 100
+        },
+        {
+          "channel": "online",
+          "coupon_code": null,
+          "currency": "USD",
+          "customer_id": "cu1",
+          "gift": false,
+          "id": "o07",
+          "placed_at": "2023-05-07T10:00:00Z",
+          "status": "paid",
+          "store_id": null,
+          "total_cents": 9000000000
+        },
+        {
+          "channel": "Online",
+          "coupon_code": "",
+          "currency": "USD",
+          "customer_id": "cu3",
+          "gift": false,
+          "id": "o08",
+          "placed_at": "2023-05-08T10:00:00Z",
+          "status": "placed",
+          "store_id": null,
+          "total_cents": 0
+        },
+        {
+          "channel": "in_store",
+          "coupon_code": null,
+          "currency": "USD",
+          "customer_id": "cu1",
+          "gift": false,
+          "id": "o09",
+          "placed_at": "2023-05-09T10:00:00Z",
+          "status": "shipped",
+          "store_id": "st1",
+          "total_cents": 20001
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "order_id",
+          "nullable": false,
+          "references": "order",
+          "type": "string"
+        },
+        {
+          "name": "line_no",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "sku",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "category",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "quantity",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "unit_price_cents",
+          "nullable": false,
+          "type": "bigint"
+        }
+      ],
+      "name": "order_line",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "category": "apparel",
+          "id": "l01",
+          "line_no": 1,
+          "order_id": "o01",
+          "quantity": 1,
+          "sku": "SHOE-1",
+          "unit_price_cents": 19999
+        },
+        {
+          "category": "gift_card",
+          "id": "l02",
+          "line_no": 1,
+          "order_id": "o02",
+          "quantity": 1,
+          "sku": "GC-50",
+          "unit_price_cents": 5000
+        },
+        {
+          "category": "gift_card",
+          "id": "l03",
+          "line_no": 1,
+          "order_id": "o03",
+          "quantity": 6,
+          "sku": "GC-100",
+          "unit_price_cents": 10000
+        },
+        {
+          "category": "electronics",
+          "id": "l04",
+          "line_no": 2,
+          "order_id": "o03",
+          "quantity": 1,
+          "sku": "TV-1",
+          "unit_price_cents": 60000
+        },
+        {
+          "category": "apparel",
+          "id": "l05",
+          "line_no": 1,
+          "order_id": "o04",
+          "quantity": 2,
+          "sku": "HAT-1",
+          "unit_price_cents": 10000
+        },
+        {
+          "category": "grocery",
+          "id": "l06",
+          "line_no": 1,
+          "order_id": "o05",
+          "quantity": 3,
+          "sku": "GUM",
+          "unit_price_cents": 100
+        },
+        {
+          "category": "gift_card",
+          "id": "l07",
+          "line_no": 1,
+          "order_id": "o07",
+          "quantity": 90000,
+          "sku": "GC-BULK",
+          "unit_price_cents": 100000
+        },
+        {
+          "category": "apparel",
+          "id": "l08",
+          "line_no": 1,
+          "order_id": "o09",
+          "quantity": 1,
+          "sku": "SOCK",
+          "unit_price_cents": 1
+        },
+        {
+          "category": "apparel",
+          "id": "l09",
+          "line_no": 2,
+          "order_id": "o09",
+          "quantity": 1,
+          "sku": "SOCK",
+          "unit_price_cents": 20000
+        },
+        {
+          "category": "apparel",
+          "id": "l10",
+          "line_no": 3,
+          "order_id": "o09",
+          "quantity": 1,
+          "sku": "BELT",
+          "unit_price_cents": 0
+        },
+        {
+          "category": "apparel",
+          "id": "l11",
+          "line_no": 4,
+          "order_id": "o09",
+          "quantity": 1,
+          "sku": "TIE",
+          "unit_price_cents": 0
+        }
+      ]
+    }
+  ]
+}

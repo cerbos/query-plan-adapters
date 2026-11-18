@@ -1,0 +1,24 @@
+apiVersion: api.cerbos.dev/v1
+derivedRoles:
+  name: clinical_roles
+  definitions:
+    - name: care_team_member
+      parentRoles: [physician, nurse]
+      condition:
+        match:
+          expr: P.id in R.attr.careTeam
+    - name: physician_on_ward
+      parentRoles: [physician]
+      condition:
+        match:
+          expr: has(R.attr.patient.ward) && R.attr.patient.ward.id in P.attr.wards
+    - name: nurse_on_ward
+      parentRoles: [nurse]
+      condition:
+        match:
+          expr: has(R.attr.patient.ward) && R.attr.patient.ward.id in P.attr.wards
+    - name: note_author
+      parentRoles: [physician, nurse, researcher]
+      condition:
+        match:
+          expr: R.attr.authorId == P.id

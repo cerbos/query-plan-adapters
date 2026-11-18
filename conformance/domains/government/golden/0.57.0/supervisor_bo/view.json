@@ -1,0 +1,188 @@
+{
+  "action": "view",
+  "allowed": [
+    "k01",
+    "k04",
+    "k07",
+    "k08"
+  ],
+  "domain": "government",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.agency.code"
+                      },
+                      {
+                        "value": "DSS"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.clearanceLevel"
+                      },
+                      {
+                        "value": 3
+                      }
+                    ],
+                    "operator": "le"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.assignedTo"
+                            },
+                            {
+                              "value": "sv-bo"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.assignedTo"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      }
+                    ],
+                    "operator": "or"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.applicant.countyFips"
+                      },
+                      {
+                        "value": [
+                          "06037",
+                          "48201"
+                        ]
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.status"
+                      },
+                      {
+                        "value": "pending_review"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.monthlyAmount"
+                            },
+                            {
+                              "value": null
+                            }
+                          ],
+                          "operator": "ne"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.monthlyAmount"
+                            },
+                            {
+                              "value": 2500
+                            }
+                          ],
+                          "operator": "le"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.assignedTo"
+                      },
+                      {
+                        "value": "sv-bo"
+                      }
+                    ],
+                    "operator": "ne"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "agency": "DSS",
+      "clearance": 3,
+      "counties": [
+        "06037",
+        "48201"
+      ],
+      "state": ""
+    },
+    "id": "sv-bo",
+    "roles": [
+      "supervisor"
+    ]
+  },
+  "principalName": "supervisor_bo",
+  "resourceKind": "benefit_case"
+}

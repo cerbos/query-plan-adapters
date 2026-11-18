@@ -1,0 +1,69 @@
+model Branch {
+  code      String     @id
+  country   String
+  customers Customer[]
+
+  @@map("branches")
+}
+
+model Customer {
+  id         String    @id
+  legalName  String    @map("legal_name")
+  kycLevel   Int       @map("kyc_level")
+  branchCode String    @map("branch_code")
+  pep        Boolean?
+  branch     Branch    @relation(fields: [branchCode], references: [code])
+  accounts   Account[]
+
+  @@map("customers")
+}
+
+model Account {
+  id             String    @id
+  customerId     String    @map("customer_id")
+  currency       String
+  status         String
+  overdraftLimit Decimal?  @map("overdraft_limit")
+  customer       Customer  @relation(fields: [customerId], references: [id])
+  payments       Payment[]
+
+  @@map("accounts")
+}
+
+model Payment {
+  id          String            @id
+  accountId   String            @map("account_id")
+  amount      Decimal
+  currency    String
+  status      String
+  riskScore   Float?            @map("risk_score")
+  createdAt   DateTime          @map("created_at")
+  cpName      String            @map("cp_name")
+  cpIban      String            @map("cp_iban")
+  cpCountry   String            @map("cp_country")
+  initiatedBy String            @map("initiated_by")
+  account     Account           @relation(fields: [accountId], references: [id])
+  flags       PaymentFlag[]
+  approvals   PaymentApproval[]
+
+  @@map("payments")
+}
+
+model PaymentFlag {
+  paymentId String  @map("payment_id")
+  flag      String
+  payment   Payment @relation(fields: [paymentId], references: [id])
+
+  @@id([paymentId, flag])
+  @@map("payment_flags")
+}
+
+model PaymentApproval {
+  id         String  @id
+  paymentId  String  @map("payment_id")
+  approverId String  @map("approver_id")
+  decision   String
+  payment    Payment @relation(fields: [paymentId], references: [id])
+
+  @@map("payment_approvals")
+}

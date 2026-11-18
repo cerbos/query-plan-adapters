@@ -1,0 +1,57 @@
+actions: [view, sign, export, delete]
+principals:
+  dr_ortiz: {id: u-ortiz, roles: [physician], attr: {wards: [w1], specialties: [cardiology], region: north}}
+  dr_ng: {id: u-ng, roles: [physician], attr: {wards: [w3], specialties: [mental_health], region: south}}
+  nurse_ana: {id: u-ana, roles: [nurse], attr: {wards: [w1, w2], specialties: [], region: north}}
+  researcher_li: {id: u-li, roles: [researcher], attr: {wards: [], specialties: [], region: north}}
+  patient_p3: {id: u-p3, roles: [patient], attr: {mrn: MRN-0003, wards: [], specialties: []}}
+  admin_kim: {id: u-kim, roles: [admin], attr: {wards: [], specialties: []}}
+tables:
+  hospitals:
+    - {id: h1, name: St Mary, region: north}
+    - {id: h2, name: Riverside, region: south}
+  wards:
+    - {id: w1, name: Cardiology, hospital_id: h1, secure: false}
+    - {id: w2, name: Psychiatry, hospital_id: h1, secure: true}
+    - {id: w3, name: General, hospital_id: h2, secure: false}
+  patients:
+    - {id: p1, mrn: MRN-0001, ward_id: w1, consent_research: true, birth_year: 1950}
+    - {id: p2, mrn: MRN-0002, ward_id: w2, consent_research: false, vip: true, birth_year: 1981}
+    - {id: p3, mrn: MRN-0003, consent_research: true, vip: false, birth_year: 1999}
+    - {id: p4, mrn: MRN-0004, ward_id: w3, consent_research: true, birth_year: 2004}
+    - {id: p5, mrn: mrn-0003, ward_id: w1, consent_research: true, vip: false, birth_year: 1977}
+  clinical_notes:
+    - {note_id: n01, patient_id: p1, author_id: u-ortiz, type: progress, sensitivity: 1, signed_at: 2021-03-01T09:00:00Z, is_deleted: false}
+    - {note_id: n02, patient_id: p1, author_id: u-ortiz, type: progress, sensitivity: 4, is_deleted: false}
+    - {note_id: n03, patient_id: p2, author_id: u-ng, type: psychotherapy, sensitivity: 5, signed_at: 2021-04-11T10:30:00Z, is_deleted: false}
+    - {note_id: n04, patient_id: p2, author_id: u-ana, type: nursing, sensitivity: 2, signed_at: 2021-04-12T08:00:00Z, is_deleted: false}
+    - {note_id: n05, patient_id: p3, author_id: u-ortiz, type: discharge, signed_at: 2022-01-05T16:45:00Z, is_deleted: false}
+    - {note_id: n06, patient_id: p3, author_id: u-ng, type: psychotherapy, sensitivity: 2, signed_at: 2022-02-01T12:00:00Z, is_deleted: false}
+    - {note_id: n07, patient_id: p4, author_id: u-ng, type: progress, sensitivity: 2, signed_at: 2023-07-19T07:15:00Z, is_deleted: false}
+    - {note_id: n08, patient_id: p4, author_id: u-ng, type: progress, sensitivity: 0, is_deleted: true}
+    - {note_id: n09, patient_id: p1, author_id: u-ana, type: nursing, sensitivity: 1, signed_at: 2021-03-02T21:00:00Z, is_deleted: true}
+    - {note_id: n10, patient_id: p5, author_id: u-ortiz, type: Progress, sensitivity: 2, signed_at: 2024-11-30T23:59:59Z, is_deleted: false}
+    - {note_id: n11, patient_id: p1, author_id: u-ortiz, type: progress, sensitivity: 2, signed_at: 2021-05-01T09:00:00Z, is_deleted: false}
+    - {note_id: n12, patient_id: p4, author_id: u-ortiz, type: consult, sensitivity: 3, signed_at: 2023-08-01T09:00:00Z, is_deleted: false}
+    - {note_id: n13, patient_id: p3, author_id: u-li, type: consult, is_deleted: false}
+    - {note_id: n14, patient_id: p2, author_id: u-ortiz, type: progress, sensitivity: 1, signed_at: 2021-06-01T09:00:00Z, is_deleted: false}
+  note_care_team:
+    - {note_id: n01, clinician_id: u-ortiz}
+    - {note_id: n01, clinician_id: u-ana}
+    - {note_id: n03, clinician_id: u-ng}
+    - {note_id: n05, clinician_id: u-ortiz}
+    - {note_id: n05, clinician_id: u-ng}
+    - {note_id: n06, clinician_id: u-ng}
+    - {note_id: n10, clinician_id: U-ORTIZ}
+    - {note_id: n12, clinician_id: u-ortiz}
+    - {note_id: n14, clinician_id: u-ortiz}
+  note_codes:
+    - {id: c01, note_id: n01, system: ICD-10, code: I21.4}
+    - {id: c02, note_id: n03, system: ICD-10, code: F32.1}
+    - {id: c03, note_id: n05, system: SNOMED, code: F-1234}
+    - {id: c04, note_id: n06, system: ICD-10, code: F41.0}
+    - {id: c05, note_id: n06, system: ICD-10, code: Z63.0}
+    - {id: c06, note_id: n07, system: icd-10, code: F10.2}
+    - {id: c07, note_id: n11, system: ICD-10, code: I10}
+    - {id: c08, note_id: n11, system: ICD-10, code: F17.2}
+    - {id: c09, note_id: n14, system: ICD-10, code: E11.9}

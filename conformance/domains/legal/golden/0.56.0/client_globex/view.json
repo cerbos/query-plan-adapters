@@ -1,0 +1,139 @@
+{
+  "action": "view",
+  "allowed": [
+    "d05",
+    "d06"
+  ],
+  "domain": "legal",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "cu-1"
+                      },
+                      {
+                        "variable": "request.resource.attr.matter.screened"
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.matter.client.id"
+                      },
+                      {
+                        "value": "cl2"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.shares"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "s.partyType"
+                                        },
+                                        {
+                                          "value": "client"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  },
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "s.partyId"
+                                        },
+                                        {
+                                          "value": "cl2"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  }
+                                ],
+                                "operator": "and"
+                              }
+                            },
+                            {
+                              "variable": "s"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.privilege"
+                      },
+                      {
+                        "value": null
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clientId": "cl2",
+      "practiceAreas": []
+    },
+    "id": "cu-1",
+    "roles": [
+      "client_user"
+    ]
+  },
+  "principalName": "client_globex",
+  "resourceKind": "legal_document"
+}

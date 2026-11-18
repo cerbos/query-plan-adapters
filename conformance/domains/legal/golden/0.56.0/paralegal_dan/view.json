@@ -1,0 +1,88 @@
+{
+  "action": "view",
+  "allowed": [
+    "d02",
+    "d05",
+    "d10"
+  ],
+  "domain": "legal",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "pl-dan"
+                      },
+                      {
+                        "variable": "request.resource.attr.matter.screened"
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "pl-dan"
+                      },
+                      {
+                        "variable": "request.resource.attr.matter.team"
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.privilege"
+                      },
+                      {
+                        "value": null
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clearance": 1,
+      "clientId": "",
+      "practiceAreas": []
+    },
+    "id": "pl-dan",
+    "roles": [
+      "paralegal"
+    ]
+  },
+  "principalName": "paralegal_dan",
+  "resourceKind": "legal_document"
+}

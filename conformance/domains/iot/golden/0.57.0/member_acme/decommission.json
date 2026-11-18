@@ -1,0 +1,23 @@
+{
+  "action": "decommission",
+  "allowed": [],
+  "domain": "iot",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "orgId": "org-acme",
+      "regions": []
+    },
+    "id": "m1",
+    "roles": [
+      "org_member"
+    ]
+  },
+  "principalName": "member_acme",
+  "resourceKind": "device"
+}

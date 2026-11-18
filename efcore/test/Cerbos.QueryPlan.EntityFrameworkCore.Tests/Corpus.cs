@@ -124,7 +124,7 @@ public static class Corpus
     public sealed record Seed(
         string Id, bool? ABool, string? AString, double? ANumber, string? AOptionalString,
         List<double?>? ANumberList, List<bool?>? ABoolList, List<SeedTag> Tags, List<string> SubCategoryNames,
-        string? ParentSeedId, List<string>? Requires);
+        string? ParentSeedId, string? PeerSeedId, string? StepParentSeedId, List<string>? Requires);
 
     public sealed record SeedsFile(List<Seed> Seeds);
 

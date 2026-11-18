@@ -1,0 +1,24 @@
+{
+  "action": "edit",
+  "allowed": [],
+  "domain": "hr",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 3
+    },
+    "id": "e05",
+    "roles": [
+      "employee"
+    ]
+  },
+  "principalName": "emp_e05",
+  "resourceKind": "employee_record"
+}

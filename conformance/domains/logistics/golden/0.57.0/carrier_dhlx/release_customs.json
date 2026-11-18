@@ -1,0 +1,25 @@
+{
+  "action": "release_customs",
+  "allowed": [],
+  "domain": "logistics",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "certifications": [
+        "hazmat"
+      ],
+      "scac": "DHLX"
+    },
+    "id": "u-car1",
+    "roles": [
+      "carrier"
+    ]
+  },
+  "principalName": "carrier_dhlx",
+  "resourceKind": "shipment"
+}

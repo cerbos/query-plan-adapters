@@ -1,0 +1,45 @@
+actions: [view, edit, destroy]
+principals:
+  lawyer_ali: {id: l-ali, roles: [lawyer], attr: {clearance: 2, practiceAreas: [], clientId: ""}}
+  lawyer_bea: {id: l-bea, roles: [lawyer], attr: {clearance: 3, practiceAreas: [], clientId: ""}}
+  partner_cho: {id: p-cho, roles: [partner], attr: {clearance: 5, practiceAreas: [litigation], clientId: ""}}
+  paralegal_dan: {id: pl-dan, roles: [paralegal], attr: {clearance: 1, practiceAreas: [], clientId: ""}}
+  client_globex: {id: cu-1, roles: [client_user], attr: {clientId: cl2, practiceAreas: []}}
+  records_eli: {id: rm-eli, roles: [records_manager], attr: {practiceAreas: [], clientId: ""}}
+tables:
+  clients:
+    - {id: cl1, name: Initech, industry: software}
+    - {id: cl2, name: Globex}
+  matters:
+    - {id: m1, client_id: cl1, practice_area: litigation, status: open, opened_at: 2022-01-01T00:00:00Z, lead_partner_id: p-cho}
+    - {id: m2, client_id: cl2, practice_area: m&a, status: open, opened_at: 2022-06-01T00:00:00Z}
+    - {id: m3, client_id: cl2, practice_area: Litigation, status: closed, opened_at: 2015-01-01T00:00:00Z, lead_partner_id: p-zed}
+    - {id: m4, client_id: cl1, practice_area: employment, status: closed, opened_at: 2012-01-01T00:00:00Z, lead_partner_id: p-cho}
+  matter_team:
+    - {matter_id: m1, user_id: l-ali}
+    - {matter_id: m1, user_id: l-bea}
+    - {matter_id: m1, user_id: pl-dan}
+    - {matter_id: m2, user_id: l-ali}
+    - {matter_id: m2, user_id: pl-dan}
+    - {matter_id: m3, user_id: l-bea}
+    - {matter_id: m4, user_id: L-ALI}
+  matter_screens:
+    - {matter_id: m2, user_id: l-ali}
+    - {matter_id: m3, user_id: p-cho}
+  documents:
+    - {id: d01, matter_id: m1, title: Complaint, privilege: work-product, classification: 2, legal_hold: true, created_by: l-ali}
+    - {id: d02, matter_id: m1, title: Exhibit A, classification: 1, legal_hold: false, created_by: pl-dan}
+    - {id: d03, matter_id: m1, title: Strategy memo, privilege: attorney-client, classification: 3, legal_hold: false, created_by: l-bea}
+    - {id: d04, matter_id: m2, title: SPA draft, privilege: attorney-client, classification: 2, legal_hold: false, created_by: l-ali}
+    - {id: d05, matter_id: m2, title: Data room index, classification: 1, legal_hold: false, created_by: pl-dan}
+    - {id: d06, matter_id: m3, title: Settlement, privilege: "", classification: 4, legal_hold: false, created_by: l-bea, retention_until: 2020-01-01T00:00:00Z}
+    - {id: d07, matter_id: m3, title: Court order, classification: 1, legal_hold: true, created_by: l-bea, retention_until: 2019-06-30T00:00:00Z}
+    - {id: d08, matter_id: m4, title: Severance, classification: 2, legal_hold: false, created_by: p-cho, retention_until: 2099-01-01T00:00:00Z}
+    - {id: d09, matter_id: m4, title: HR notes, privilege: work-product, classification: 2, legal_hold: false, created_by: p-cho, retention_until: 2018-01-01T00:00:00Z}
+    - {id: d10, matter_id: m2, title: Board minutes, classification: 2, legal_hold: false, created_by: l-ali}
+  document_shares:
+    - {id: sh1, document_id: d05, party_type: client, party_id: cl2}
+    - {id: sh2, document_id: d06, party_type: client, party_id: cl2}
+    - {id: sh3, document_id: d07, party_type: court, party_id: cl2}
+    - {id: sh4, document_id: d04, party_type: opposing_counsel, party_id: cl2}
+    - {id: sh5, document_id: d10, party_type: Client, party_id: cl2}

@@ -1,0 +1,27 @@
+{
+  "action": "terminate",
+  "allowed": [],
+  "domain": "hr",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "GB",
+      "departments": [
+        "eng",
+        "ops"
+      ],
+      "level": 0
+    },
+    "id": "hr1",
+    "roles": [
+      "hrbp"
+    ]
+  },
+  "principalName": "hrbp_uk",
+  "resourceKind": "employee_record"
+}

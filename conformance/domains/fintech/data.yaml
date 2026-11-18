@@ -1,0 +1,48 @@
+actions: [view, approve, file_sar]
+principals:
+  holder_c1: {id: u-c1, roles: [customer], attr: {customerId: c1, branches: [], approvalLimit: 0}}
+  teller_lon: {id: u-teller, roles: [teller], attr: {branches: [LON01, LON02], approvalLimit: 0}}
+  approver_mia: {id: u-mia, roles: [approver], attr: {branches: [LON01], approvalLimit: 5000.5}}
+  approver_raj: {id: u-raj, roles: [approver], attr: {branches: [], approvalLimit: 100000}}
+  compliance_eve: {id: u-eve, roles: [compliance], attr: {branches: [], approvalLimit: 0}}
+tables:
+  branches:
+    - {code: LON01, country: GB}
+    - {code: LON02, country: GB}
+    - {code: FRA01, country: DE}
+  customers:
+    - {id: c1, legal_name: Ada Ltd, kyc_level: 3, branch_code: LON01, pep: false}
+    - {id: c2, legal_name: Bob Holdings, kyc_level: 1, branch_code: LON02}
+    - {id: c3, legal_name: Clara GmbH, kyc_level: 2, branch_code: FRA01, pep: true}
+    - {id: c4, legal_name: lon01 Traders, kyc_level: 2, branch_code: FRA01}
+  accounts:
+    - {id: a1, customer_id: c1, currency: GBP, status: active, overdraft_limit: 500.00}
+    - {id: a2, customer_id: c1, currency: EUR, status: active}
+    - {id: a3, customer_id: c2, currency: GBP, status: frozen, overdraft_limit: 0}
+    - {id: a4, customer_id: c3, currency: EUR, status: active, overdraft_limit: 2500.75}
+    - {id: a5, customer_id: c4, currency: USD, status: active}
+  payments:
+    - {id: pay01, account_id: a1, amount: 120.50, currency: GBP, status: pending, risk_score: 0.10, created_at: 2023-01-10T09:00:00Z, cp_name: Acme, cp_iban: GB00ACME, cp_country: GB, initiated_by: u-c1}
+    - {id: pay02, account_id: a1, amount: 5000.50, currency: GBP, status: pending, risk_score: 0.79999, created_at: 2023-01-11T09:00:00Z, cp_name: Beta, cp_iban: DE00BETA, cp_country: DE, initiated_by: u-c1}
+    - {id: pay03, account_id: a1, amount: 5000.51, currency: GBP, status: pending, created_at: 2023-01-12T09:00:00Z, cp_name: Gamma, cp_iban: GB00GAMA, cp_country: GB, initiated_by: u-mia}
+    - {id: pay04, account_id: a2, amount: 9999.99, currency: GBP, status: pending, risk_score: 0.8, created_at: 2023-02-01T09:00:00Z, cp_name: Delta, cp_iban: IR00DELT, cp_country: IR, initiated_by: u-c1}
+    - {id: pay05, account_id: a3, amount: 10000.00, currency: GBP, status: completed, risk_score: 0.2, created_at: 2023-02-02T09:00:00Z, cp_name: Echo, cp_iban: GB00ECHO, cp_country: GB, initiated_by: u-teller}
+    - {id: pay06, account_id: a3, amount: 0.01, currency: GBP, status: pending, created_at: 2023-02-03T09:00:00Z, cp_name: Fox, cp_iban: KP00FOXX, cp_country: KP, initiated_by: u-c2}
+    - {id: pay07, account_id: a4, amount: 4999.99, currency: EUR, status: pending, risk_score: 0.95, created_at: 2023-03-01T09:00:00Z, cp_name: Golf, cp_iban: FR00GOLF, cp_country: FR, initiated_by: u-c3}
+    - {id: pay08, account_id: a4, amount: 75000.00, currency: EUR, status: pending, risk_score: 0.3, created_at: 2023-03-02T09:00:00Z, cp_name: Hotel, cp_iban: ir00HOTL, cp_country: ir, initiated_by: u-c3}
+    - {id: pay09, account_id: a5, amount: 250.00, currency: USD, status: rejected, risk_score: 0.0, created_at: 2023-03-03T09:00:00Z, cp_name: India, cp_iban: US00INDI, cp_country: US, initiated_by: u-c4}
+    - {id: pay10, account_id: a5, amount: 3000.00, currency: USD, status: pending, created_at: 2023-03-04T09:00:00Z, cp_name: Juliet, cp_iban: SY00JULI, cp_country: SY, initiated_by: u-c4}
+    - {id: pay11, account_id: a1, amount: 4000.00, currency: GBP, status: pending, risk_score: 0.5, created_at: 2023-03-05T09:00:00Z, cp_name: Kilo, cp_iban: GB00KILO, cp_country: GB, initiated_by: u-c1}
+    - {id: pay12, account_id: a2, amount: 100.00, currency: EUR, status: Pending, created_at: 2023-03-06T09:00:00Z, cp_name: Lima, cp_iban: GB00LIMA, cp_country: GB, initiated_by: u-c1}
+  payment_flags:
+    - {payment_id: pay02, flag: velocity}
+    - {payment_id: pay04, flag: sanctions}
+    - {payment_id: pay04, flag: velocity}
+    - {payment_id: pay07, flag: structuring}
+    - {payment_id: pay10, flag: Sanctions}
+  payment_approvals:
+    - {id: ap1, payment_id: pay02, approver_id: u-raj, decision: approved}
+    - {id: ap2, payment_id: pay07, approver_id: u-mia, decision: approved}
+    - {id: ap3, payment_id: pay08, approver_id: u-mia, decision: rejected}
+    - {id: ap4, payment_id: pay11, approver_id: u-raj, decision: approved}
+    - {id: ap5, payment_id: pay11, approver_id: u-mia, decision: approved}

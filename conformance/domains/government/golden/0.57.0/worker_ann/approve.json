@@ -1,0 +1,25 @@
+{
+  "action": "approve",
+  "allowed": [],
+  "domain": "government",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "agency": "DSS",
+      "clearance": 2,
+      "counties": [],
+      "state": ""
+    },
+    "id": "cw-ann",
+    "roles": [
+      "caseworker"
+    ]
+  },
+  "principalName": "worker_ann",
+  "resourceKind": "benefit_case"
+}

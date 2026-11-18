@@ -42,7 +42,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import aliased, declarative_base, relationship
 
 from cerbos_sqlalchemy import CollectionColumn, Relation, related, relation_overrides
 
@@ -378,12 +378,28 @@ class AdvResource(AdvBase):
     a_bool_list_json = Column(_COLLECTION_JSON, nullable=True)
     a_number_list_array = Column(_NUMBER_ARRAY, nullable=True)
     a_bool_list_array = Column(_BOOL_ARRAY, nullable=True)
+    peer_id = Column(_STRING, ForeignKey("adversarial_resource.id"), nullable=True)
+    step_parent_id = Column(
+        _STRING,
+        ForeignKey("adversarial_parent.id", use_alter=True),
+        nullable=True,
+        unique=True,
+    )
 
     tags = relationship("AdvTag", viewonly=True)
     categories = relationship("AdvCategory", viewonly=True)
     # The same rows as `categories`; the unique foreign key makes it to-one.
     main_category = relationship("AdvCategory", uselist=False, viewonly=True)
-    parent = relationship("AdvParent", uselist=False, viewonly=True)
+    parent = relationship(
+        "AdvParent",
+        uselist=False,
+        viewonly=True,
+        foreign_keys="AdvParent.resource_id",
+    )
+    peer = relationship("AdvResource", remote_side=[id], uselist=False, viewonly=True)
+    step_parent = relationship(
+        "AdvParent", uselist=False, viewonly=True, foreign_keys=[step_parent_id]
+    )
 
 
 class AdvTag(AdvBase):
@@ -427,8 +443,9 @@ class AdvLabel(AdvBase):
     )
 
 
-# The corpus's one real to-one relation (ADR 0005). Unlike `obj.inner`, `parent` and
-# `parent.inner` are separate rows. The unique foreign key makes it to-one.
+# The real to-one relations (ADR 0005). Unlike `obj.inner`, `parent` and `parent.inner` are
+# separate rows. The unique foreign key makes it to-one. A `stepParent` row has no
+# resource_id; the resource points at it.
 class AdvParent(AdvBase):
     __tablename__ = "adversarial_parent"
 
@@ -438,7 +455,7 @@ class AdvParent(AdvBase):
     a_number = Column(Integer, nullable=False)
     a_optional_string = Column(_STRING, nullable=True)
     resource_id = Column(
-        _STRING, ForeignKey("adversarial_resource.id"), nullable=False, unique=True
+        _STRING, ForeignKey("adversarial_resource.id"), nullable=True, unique=True
     )
 
     inner = relationship("AdvInner", uselist=False, viewonly=True)
@@ -553,6 +570,11 @@ ATTRIBUTE_NULL_REPRESENTATION = {
     "request.resource.attr.parent.inner.aString": "omitted",
     "request.resource.attr.parent.inner.aNumber": "omitted",
     "request.resource.attr.parent.inner.aOptionalString": "omitted",
+    **{
+        f"request.resource.attr.{relation}.{field}": "omitted"
+        for relation in ("peer", "stepParent")
+        for field in ("aBool", "aString", "aNumber", "aOptionalString")
+    },
     "tagName": "explicit",
     "t": "explicit",
     # A nameless tag sends no `name` key (resources.json), so `has(t.name)` is a
@@ -560,6 +582,31 @@ ATTRIBUTE_NULL_REPRESENTATION = {
     "t.name": "omitted",
     "request.resource.attr.owner": "explicit",
     "request.resource.attr.coOwner": "explicit",
+}
+
+
+_PEER = aliased(AdvResource, name="peer")
+
+
+def _peer_scalar(column):
+    """One scalar of the self-relation `peer`, read from an aliased resource row."""
+    return (
+        select(getattr(_PEER, column.key))
+        .where(_PEER.id == AdvResource.peer_id)
+        .correlate(AdvResource)
+        .scalar_subquery()
+    )
+
+
+#: Inference refuses a self-referential relationship, so `peer` is written out.
+_PEER_ATTRS = {
+    f"request.resource.attr.peer.{field}": _peer_scalar(column)
+    for field, column in (
+        ("aBool", AdvResource.a_bool),
+        ("aString", AdvResource.a_string),
+        ("aNumber", AdvResource.a_number),
+        ("aOptionalString", AdvResource.a_optional_string),
+    )
 }
 
 
@@ -581,6 +628,7 @@ ATTR_MAP = {
     # A key of the parent map (collection/exists/map-keys). It has no column: the
     # body translates, and the `exists` override then refuses the map it ranges over.
     "k": literal(None, String),
+    **_PEER_ATTRS,
 }
 
 # -- the declared mapping -------------------------------------------------------
@@ -660,6 +708,16 @@ def _parent_scalar(column):
     )
 
 
+def _step_parent_scalar(column):
+    """One scalar of `stepParent`, a second relation into the parent table."""
+    return (
+        select(column)
+        .where(AdvParent.id == AdvResource.step_parent_id)
+        .correlate(AdvResource)
+        .scalar_subquery()
+    )
+
+
 def _inner_scalar(column):
     """The same for `parent.inner`, looked up through the parent."""
     return (
@@ -707,6 +765,13 @@ DECLARED_ATTR_MAP = {
     "request.resource.attr.parent.inner.aNumber": _inner_scalar(AdvInner.a_number),
     "request.resource.attr.parent.inner.aOptionalString": _inner_scalar(
         AdvInner.a_optional_string
+    ),
+    **_PEER_ATTRS,
+    "request.resource.attr.stepParent.aBool": _step_parent_scalar(AdvParent.a_bool),
+    "request.resource.attr.stepParent.aString": _step_parent_scalar(AdvParent.a_string),
+    "request.resource.attr.stepParent.aNumber": _step_parent_scalar(AdvParent.a_number),
+    "request.resource.attr.stepParent.aOptionalString": _step_parent_scalar(
+        AdvParent.a_optional_string
     ),
     "request.resource.attr.tags": TAGS,
     "request.resource.attr.tagNames": TAG_NAMES,

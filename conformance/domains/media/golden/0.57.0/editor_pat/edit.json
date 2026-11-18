@@ -1,0 +1,68 @@
+{
+  "action": "edit",
+  "allowed": [
+    "ar03",
+    "ar04",
+    "ar05",
+    "ar06",
+    "ar07",
+    "ar08",
+    "ar11"
+  ],
+  "domain": "media",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.section.desk"
+                },
+                {
+                  "value": "news"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": "retracted"
+                }
+              ],
+              "operator": "ne"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [
+        "news"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    "id": "ed1",
+    "roles": [
+      "editor"
+    ]
+  },
+  "principalName": "editor_pat",
+  "resourceKind": "article"
+}

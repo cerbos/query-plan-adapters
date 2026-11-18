@@ -129,19 +129,25 @@ public sealed class Store : IAsyncLifetime
             // The to-one chain, one owned row per level: no parent seed, no row.
             if (ParentOf(s) is { } ps)
             {
-                r.Parent = new Parent { Id = s.Id + "-parent", ABool = ps.ABool, AString = ps.AString, ANumber = ps.ANumber, AOptionalString = ps.AOptionalString };
+                r.Parent = new Parent { Id = s.Id + "-parent", ABool = ps.ABool, AString = ps.AString, ANumber = (decimal?)ps.ANumber, AOptionalString = ps.AOptionalString };
                 if (ParentOf(ps) is { } inner)
                 {
                     r.Parent.Inner = new Inner { Id = s.Id + "-inner", ABool = inner.ABool, AString = inner.AString, ANumber = inner.ANumber, AOptionalString = inner.AOptionalString };
                 }
             }
+            if (s.StepParentSeedId is { } sp)
+            {
+                var step = byId[sp];
+                r.StepParent = new Parent { Id = s.Id + "-step", ABool = step.ABool, AString = step.AString, ANumber = (decimal?)step.ANumber, AOptionalString = step.AOptionalString };
+            }
             db.Resources.Add(r);
         }
         await db.SaveChangesAsync();
-        // A second pass: the resource and its category each hold a key to the other.
+        // A second pass: the resource and its category each hold a key to the other, and a peer may be the row itself.
         foreach (var r in db.Resources.Local)
         {
             if (mainCategories.TryGetValue(r.Id, out var category)) r.MainCategoryId = category;
+            r.PeerId = byId[r.Id].PeerSeedId;
         }
         await db.SaveChangesAsync();
     }

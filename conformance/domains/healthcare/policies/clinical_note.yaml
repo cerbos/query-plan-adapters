@@ -1,0 +1,77 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: clinical_note
+  version: default
+  importDerivedRoles: [clinical_roles]
+  rules:
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      derivedRoles: [care_team_member, physician_on_ward]
+      condition:
+        match:
+          expr: "!R.attr.deleted"
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      derivedRoles: [nurse_on_ward]
+      condition:
+        match:
+          all:
+            of:
+              - expr: "!R.attr.deleted"
+              - expr: R.attr.noteType != "psychotherapy"
+              - expr: "!(has(R.attr.patient.vip) && R.attr.patient.vip)"
+              - expr: "!R.attr.patient.ward.secure"
+    - actions: [view, export]
+      effect: EFFECT_ALLOW
+      roles: [researcher]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.patient.consentResearch
+              - expr: has(R.attr.signedAt)
+              - expr: has(R.attr.sensitivity) && R.attr.sensitivity < 3
+              - expr: "!R.attr.deleted"
+    - actions: [export]
+      effect: EFFECT_DENY
+      roles: [researcher]
+      condition:
+        match:
+          none:
+            of:
+              - expr: has(R.attr.patient.ward) && R.attr.patient.ward.hospital.region == P.attr.region
+    - actions: [view]
+      effect: EFFECT_ALLOW
+      roles: [patient]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.patient.mrn == P.attr.mrn
+              - expr: R.attr.noteType != "psychotherapy"
+              - expr: has(R.attr.signedAt)
+              - expr: "!R.attr.deleted"
+    - actions: [view]
+      effect: EFFECT_DENY
+      roles: ["*"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.codes.exists(c, c.system == "ICD-10" && c.code.startsWith("F"))
+              - expr: '!("mental_health" in P.attr.specialties)'
+    - actions: [sign]
+      effect: EFFECT_ALLOW
+      derivedRoles: [note_author]
+      condition:
+        match:
+          expr: "!has(R.attr.signedAt) && !R.attr.deleted"
+    - actions: [delete]
+      effect: EFFECT_ALLOW
+      roles: [admin]
+      condition:
+        match:
+          any:
+            of:
+              - expr: "!has(R.attr.signedAt)"
+              - expr: timestamp(R.attr.signedAt) < timestamp("2022-01-01T00:00:00Z") && R.attr.patient.birthYear < 1960

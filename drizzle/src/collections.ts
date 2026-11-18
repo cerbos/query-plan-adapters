@@ -5,7 +5,7 @@ import type { SQL } from "drizzle-orm";
 
 import { UnsupportedQueryPlanError } from "./errors";
 import { buildFilterFromExpression } from "./filter";
-import { createCollectionScope } from "./mapper";
+import { createCollectionScope, openSource } from "./mapper";
 import type { CollectionScope } from "./mapper";
 import {
   extractLambdaComponents,
@@ -26,7 +26,6 @@ import {
   relationCorrelation,
   relationSource,
   requireLeadingHops,
-  resolveTableName,
   wrapWithRelations,
 } from "./relations";
 import type { BuildFilterOptions, ResolvedMapper, RelationMapping } from "./types";
@@ -113,7 +112,7 @@ const buildRowCondition = (
     skipRelations: scope.skipRelations,
     openTables: [
       ...(options.openTables ?? []),
-      resolveTableName(scope.primaryRelation.table, scope.collectionName),
+      openSource(scope.primaryRelation, scope.collectionName),
     ],
   });
 

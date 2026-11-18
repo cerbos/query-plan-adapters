@@ -1,0 +1,169 @@
+{
+  "action": "view",
+  "allowed": [
+    "n01",
+    "n02",
+    "n05",
+    "n10",
+    "n12",
+    "n14"
+  ],
+  "domain": "healthcare",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.codes"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "c.system"
+                                        },
+                                        {
+                                          "value": "ICD-10"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  },
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "c.code"
+                                        },
+                                        {
+                                          "value": "F"
+                                        }
+                                      ],
+                                      "operator": "startsWith"
+                                    }
+                                  }
+                                ],
+                                "operator": "and"
+                              }
+                            },
+                            {
+                              "variable": "c"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.deleted"
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "u-ortiz"
+                            },
+                            {
+                              "variable": "request.resource.attr.careTeam"
+                            }
+                          ],
+                          "operator": "in"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.deleted"
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.patient.ward.id"
+                            },
+                            {
+                              "value": "w1"
+                            }
+                          ],
+                          "operator": "eq"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "north",
+      "specialties": [
+        "cardiology"
+      ],
+      "wards": [
+        "w1"
+      ]
+    },
+    "id": "u-ortiz",
+    "roles": [
+      "physician"
+    ]
+  },
+  "principalName": "dr_ortiz",
+  "resourceKind": "clinical_note"
+}

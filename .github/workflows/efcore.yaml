@@ -8,6 +8,8 @@ on:
       - "demo/**"
       - ".github/workflows/efcore.yaml"
       - ".github/workflows/efcore-publish.yaml"
+      # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
+      - "!conformance/domains/**"
       # No script, harness or build reads Markdown, except the package README, which only
       # `dotnet pack` reads and the example job packs. A negation must come after every pattern it
       # narrows.

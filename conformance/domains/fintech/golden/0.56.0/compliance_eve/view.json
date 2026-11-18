@@ -1,0 +1,97 @@
+{
+  "action": "view",
+  "allowed": [
+    "pay02",
+    "pay04",
+    "pay06",
+    "pay07",
+    "pay08",
+    "pay10"
+  ],
+  "domain": "fintech",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.riskScore"
+                      },
+                      {
+                        "value": 0.8
+                      }
+                    ],
+                    "operator": "ge"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.flags"
+                            }
+                          ],
+                          "operator": "size"
+                        }
+                      },
+                      {
+                        "value": 0
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.counterparty.country"
+                },
+                {
+                  "value": [
+                    "IR",
+                    "KP",
+                    "SY"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "variable": "request.resource.attr.account.customer.pep"
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 0,
+      "branches": []
+    },
+    "id": "u-eve",
+    "roles": [
+      "compliance"
+    ]
+  },
+  "principalName": "compliance_eve",
+  "resourceKind": "payment"
+}

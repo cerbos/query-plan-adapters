@@ -1,0 +1,333 @@
+{
+  "kind": "benefit_case",
+  "nulls": "explicit",
+  "rootTable": "cases",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "code",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "agencies",
+      "primaryKey": [
+        "code"
+      ],
+      "rows": [
+        {
+          "code": "DSS",
+          "name": "Social Services",
+          "state": "CA"
+        },
+        {
+          "code": "HHS",
+          "name": "Health and Human Services",
+          "state": "TX"
+        },
+        {
+          "code": "dss",
+          "name": "Lowercase Office",
+          "state": "CA"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "county_fips",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "household_size",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "citizenship",
+          "nullable": true,
+          "type": "string"
+        }
+      ],
+      "name": "applicants",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "citizenship": "US",
+          "county_fips": "06037",
+          "household_size": 4,
+          "id": "ap1"
+        },
+        {
+          "citizenship": null,
+          "county_fips": "6037",
+          "household_size": 1,
+          "id": "ap2"
+        },
+        {
+          "citizenship": "",
+          "county_fips": "48201",
+          "household_size": 2,
+          "id": "ap3"
+        },
+        {
+          "citizenship": "MX",
+          "county_fips": "06001",
+          "household_size": 6,
+          "id": "ap4"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "case_number",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "agency_code",
+          "nullable": false,
+          "references": "agencies",
+          "type": "string"
+        },
+        {
+          "name": "applicant_id",
+          "nullable": false,
+          "references": "applicants",
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "clearance_level",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "program",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "opened_on",
+          "nullable": false,
+          "type": "timestamp"
+        },
+        {
+          "name": "closed_on",
+          "nullable": true,
+          "type": "timestamp"
+        },
+        {
+          "name": "pii",
+          "nullable": false,
+          "type": "bool"
+        },
+        {
+          "name": "assigned_to",
+          "nullable": true,
+          "type": "string"
+        },
+        {
+          "name": "monthly_amount",
+          "nullable": true,
+          "type": "decimal"
+        }
+      ],
+      "name": "cases",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "agency_code": "DSS",
+          "applicant_id": "ap1",
+          "assigned_to": null,
+          "case_number": "CA-2023-1001",
+          "clearance_level": 1,
+          "closed_on": null,
+          "id": "k01",
+          "monthly_amount": 2500,
+          "opened_on": "2023-01-01T00:00:00Z",
+          "pii": true,
+          "program": "snap",
+          "status": "pending_review"
+        },
+        {
+          "agency_code": "DSS",
+          "applicant_id": "ap2",
+          "assigned_to": "cw-ann",
+          "case_number": "CA-2023-1002",
+          "clearance_level": 2,
+          "closed_on": null,
+          "id": "k02",
+          "monthly_amount": 300,
+          "opened_on": "2023-02-01T00:00:00Z",
+          "pii": true,
+          "program": "snap",
+          "status": "pending_review"
+        },
+        {
+          "agency_code": "HHS",
+          "applicant_id": "ap3",
+          "assigned_to": "sv-bo",
+          "case_number": "TX-2022-77",
+          "clearance_level": 3,
+          "closed_on": "2023-01-01T00:00:00Z",
+          "id": "k03",
+          "monthly_amount": 2500.01,
+          "opened_on": "2022-01-01T00:00:00Z",
+          "pii": false,
+          "program": "medicaid",
+          "status": "closed"
+        },
+        {
+          "agency_code": "DSS",
+          "applicant_id": "ap4",
+          "assigned_to": null,
+          "case_number": "ca-2021-5",
+          "clearance_level": 1,
+          "closed_on": "2021-12-31T00:00:00Z",
+          "id": "k04",
+          "monthly_amount": null,
+          "opened_on": "2021-01-01T00:00:00Z",
+          "pii": false,
+          "program": "tanf",
+          "status": "closed"
+        },
+        {
+          "agency_code": "DSS",
+          "applicant_id": "ap1",
+          "assigned_to": "cw-zed",
+          "case_number": "CA-2020-12",
+          "clearance_level": 4,
+          "closed_on": "2020-06-01T00:00:00Z",
+          "id": "k05",
+          "monthly_amount": null,
+          "opened_on": "2020-01-01T00:00:00Z",
+          "pii": false,
+          "program": "tanf",
+          "status": "closed"
+        },
+        {
+          "agency_code": "dss",
+          "applicant_id": "ap1",
+          "assigned_to": null,
+          "case_number": "CA-2019-3",
+          "clearance_level": 0,
+          "closed_on": "2019-02-01T00:00:00Z",
+          "id": "k06",
+          "monthly_amount": null,
+          "opened_on": "2019-01-01T00:00:00Z",
+          "pii": false,
+          "program": "snap",
+          "status": "closed"
+        },
+        {
+          "agency_code": "DSS",
+          "applicant_id": "ap3",
+          "assigned_to": "sv-bo",
+          "case_number": "CA-2024-9",
+          "clearance_level": 2,
+          "closed_on": null,
+          "id": "k07",
+          "monthly_amount": 100,
+          "opened_on": "2024-01-01T00:00:00Z",
+          "pii": true,
+          "program": "snap",
+          "status": "pending_review"
+        },
+        {
+          "agency_code": "DSS",
+          "applicant_id": "ap4",
+          "assigned_to": null,
+          "case_number": "CA-2024-10",
+          "clearance_level": 2,
+          "closed_on": null,
+          "id": "k08",
+          "monthly_amount": 50,
+          "opened_on": "2024-02-01T00:00:00Z",
+          "pii": false,
+          "program": "snap",
+          "status": "pending_review"
+        },
+        {
+          "agency_code": "HHS",
+          "applicant_id": "ap3",
+          "assigned_to": null,
+          "case_number": "TX-2024-1",
+          "clearance_level": 1,
+          "closed_on": null,
+          "id": "k09",
+          "monthly_amount": null,
+          "opened_on": "2024-03-01T00:00:00Z",
+          "pii": false,
+          "program": "medicaid",
+          "status": "pending_review"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "case_id",
+          "nullable": false,
+          "references": "cases",
+          "type": "string"
+        },
+        {
+          "name": "flag",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "case_flags",
+      "primaryKey": [
+        "case_id",
+        "flag"
+      ],
+      "rows": [
+        {
+          "case_id": "k03",
+          "flag": "appeal"
+        },
+        {
+          "case_id": "k05",
+          "flag": "sealed"
+        },
+        {
+          "case_id": "k06",
+          "flag": "Sealed"
+        }
+      ]
+    }
+  ]
+}

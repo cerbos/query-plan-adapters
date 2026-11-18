@@ -1,0 +1,24 @@
+{
+  "action": "destroy",
+  "allowed": [],
+  "domain": "legal",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clearance": 3,
+      "clientId": "",
+      "practiceAreas": []
+    },
+    "id": "l-bea",
+    "roles": [
+      "lawyer"
+    ]
+  },
+  "principalName": "lawyer_bea",
+  "resourceKind": "legal_document"
+}

@@ -50,20 +50,22 @@ module ConformanceStore
         t.string :scope
         t.datetime :created_at
         t.datetime :updated_at
+        t.string :peer_id
+        t.string :step_parent_id
       end
 
       # The corpus's one real to-one relation (ADR 0005): `parent` and `parent.inner` are
       # joined rows. (`obj.inner` looks similar but maps to the row's own `a_string`.)
       #
       # The unique foreign-key index makes each level to-one. Without it the subquery could
-      # return more than one row.
+      # return more than one row. A `stepParent` row also lives here, with a NULL `resource_id`.
       create_table :adversarial_parents, id: false, force: true do |t|
         t.string :id, null: false, primary_key: true
         t.boolean :a_bool, null: false
         t.string :a_string, null: false
         t.integer :a_number, null: false
         t.string :a_optional_string
-        t.string :resource_id, null: false, index: {unique: true}
+        t.string :resource_id, index: {unique: true}
       end
 
       create_table :adversarial_inners, id: false, force: true do |t|
@@ -133,8 +135,21 @@ module ConformanceStore
         created_by: ConformanceCorpus.derived(seed, "createdBy"),
         scope: ConformanceCorpus.derived(seed, "scope"),
         created_at: ConformanceCorpus.derived(seed, "createdAt")&.then { |iso| Time.iso8601(iso) },
-        updated_at: ConformanceCorpus.derived(seed, "updatedAt")&.then { |iso| Time.iso8601(iso) }
+        updated_at: ConformanceCorpus.derived(seed, "updatedAt")&.then { |iso| Time.iso8601(iso) },
+        peer_id: seed["peerSeedId"],
+        step_parent_id: seed["stepParentSeedId"] && "#{id}-step"
       )
+
+      step_seed = seed["stepParentSeedId"] && ConformanceCorpus::SEEDS_BY_ID.fetch(seed["stepParentSeedId"])
+      if step_seed
+        AdvParent.create!(
+          id: "#{id}-step",
+          a_bool: step_seed.fetch("aBool"),
+          a_string: step_seed.fetch("aString"),
+          a_number: step_seed.fetch("aNumber"),
+          a_optional_string: step_seed.fetch("aOptionalString")
+        )
+      end
 
       # One row per level. A seed with no parent gets no row, which tests the absent-parent
       # case through a scalar, not only through mainCategory.
@@ -241,4 +256,6 @@ class AdvResource < ActiveRecord::Base
   has_many :categories, class_name: "AdvCategory", foreign_key: :resource_id, primary_key: :id
   # To-one, so `parent.<column>` becomes a scalar subquery. The adapter refuses a `has_many`.
   has_one :parent, class_name: "AdvParent", foreign_key: :resource_id, primary_key: :id
+  belongs_to :peer, class_name: "AdvResource", optional: true
+  belongs_to :step_parent, class_name: "AdvParent", optional: true
 end

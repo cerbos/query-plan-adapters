@@ -51,6 +51,17 @@ module CorpusAttributes
     "request.resource.attr.parent.inner.aNumber" => omitted("parent.inner.a_number"),
     "request.resource.attr.parent.inner.aOptionalString" =>
       omitted("parent.inner.a_optional_string"),
+    # `peer` is the resource table itself; `stepParent` is a second relation into the parents table.
+    "request.resource.attr.peer" => association(:peer),
+    "request.resource.attr.peer.aBool" => omitted("peer.a_bool"),
+    "request.resource.attr.peer.aString" => omitted("peer.a_string"),
+    "request.resource.attr.peer.aNumber" => omitted("peer.a_number"),
+    "request.resource.attr.peer.aOptionalString" => omitted("peer.a_optional_string"),
+    "request.resource.attr.stepParent" => association(:step_parent),
+    "request.resource.attr.stepParent.aBool" => omitted("step_parent.a_bool"),
+    "request.resource.attr.stepParent.aString" => omitted("step_parent.a_string"),
+    "request.resource.attr.stepParent.aNumber" => omitted("step_parent.a_number"),
+    "request.resource.attr.stepParent.aOptionalString" => omitted("step_parent.a_optional_string"),
 
     "request.resource.attr.tags" => association(
       :tags, fields: {"id" => field("tag_id"), "name" => field("name")}

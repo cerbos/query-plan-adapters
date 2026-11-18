@@ -1,0 +1,39 @@
+{
+  "action": "view",
+  "allowed": [
+    "s01",
+    "s02",
+    "s07"
+  ],
+  "domain": "logistics",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.shipper"
+          },
+          {
+            "value": "ACME-001"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "account": "ACME-001"
+    },
+    "id": "u-acme",
+    "roles": [
+      "customer"
+    ]
+  },
+  "principalName": "customer_acme",
+  "resourceKind": "shipment"
+}

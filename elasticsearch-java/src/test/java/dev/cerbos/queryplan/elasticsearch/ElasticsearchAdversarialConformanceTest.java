@@ -65,7 +65,8 @@ class ElasticsearchAdversarialConformanceTest {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record Seed(String id, Boolean aBool, String aString, Integer aNumber,
                         String aOptionalString, List<Double> aNumberList, List<Boolean> aBoolList,
-                        List<Tag> tags, List<String> subCategoryNames, String parentSeedId) {}
+                        List<Tag> tags, List<String> subCategoryNames, String parentSeedId,
+                        String peerSeedId, String stepParentSeedId) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record SeedsFile(List<Seed> seeds) {}
@@ -253,6 +254,8 @@ class ElasticsearchAdversarialConformanceTest {
         Map<String, Object> parentProperties = new LinkedHashMap<>(relationLevel);
         parentProperties.put("inner", Map.of("properties", relationLevel));
         properties.put("parent", Map.of("properties", parentProperties));
+        properties.put("peer", Map.of("properties", relationLevel));
+        properties.put("stepParent", Map.of("properties", relationLevel));
 
         es.createIndex(INDEX, Map.of("properties", properties));
     }
@@ -308,6 +311,11 @@ class ElasticsearchAdversarialConformanceTest {
                 if (innerSeed != null) parent.put("inner", relationDocument(innerSeed));
                 document.put("parent", parent);
             }
+            // `peer` and `stepParent`, one level each, held the same way.
+            Seed peerSeed = seedNamed(seed, "peer", seed.peerSeedId());
+            if (peerSeed != null) document.put("peer", relationDocument(peerSeed));
+            Seed stepSeed = seedNamed(seed, "step parent", seed.stepParentSeedId());
+            if (stepSeed != null) document.put("stepParent", relationDocument(stepSeed));
             es.index(INDEX, seed.id(), document);
         }
     }
@@ -334,12 +342,16 @@ class ElasticsearchAdversarialConformanceTest {
 
     /** The seed one hop out, or null when this level has no parent. A null argument returns null. */
     private static Seed parentSeedOf(Seed seed) {
-        if (seed == null || seed.parentSeedId() == null) return null;
+        return seed == null ? null : seedNamed(seed, "parent", seed.parentSeedId());
+    }
+
+    private static Seed seedNamed(Seed seed, String relation, String id) {
+        if (id == null) return null;
         return SEEDS.stream()
-                .filter(candidate -> candidate.id().equals(seed.parentSeedId()))
+                .filter(candidate -> candidate.id().equals(id))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
-                        "seeds.json: \"" + seed.id() + "\" names parent \"" + seed.parentSeedId()
+                        "seeds.json: \"" + seed.id() + "\" names " + relation + " \"" + id
                                 + "\", which is not a seed id"));
     }
 

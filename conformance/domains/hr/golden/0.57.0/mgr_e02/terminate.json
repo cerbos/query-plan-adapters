@@ -1,0 +1,25 @@
+{
+  "action": "terminate",
+  "allowed": [],
+  "domain": "hr",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "country": "",
+      "departments": [],
+      "level": 6
+    },
+    "id": "e02",
+    "roles": [
+      "employee",
+      "manager"
+    ]
+  },
+  "principalName": "mgr_e02",
+  "resourceKind": "employee_record"
+}

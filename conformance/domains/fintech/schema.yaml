@@ -1,0 +1,85 @@
+kind: payment
+note: >
+  Retail bank payments. Money is DECIMAL(18,2) in the store and a double in Cerbos. The
+  counterparty is three flattened columns the application sends as one nested object. Payment
+  flags are a child table of strings; approvals are a child table of objects.
+tables:
+  branches:
+    pk: code
+    columns:
+      code: string
+      country: string
+  customers:
+    pk: id
+    columns:
+      id: string
+      legal_name: string
+      kyc_level: int
+      branch_code: string -> branches
+      pep: bool?
+  accounts:
+    pk: id
+    columns:
+      id: string
+      customer_id: string -> customers
+      currency: string
+      status: string
+      overdraft_limit: decimal?
+  payments:
+    pk: id
+    columns:
+      id: string
+      account_id: string -> accounts
+      amount: decimal
+      currency: string
+      status: string
+      risk_score: float?
+      created_at: timestamp
+      cp_name: string
+      cp_iban: string
+      cp_country: string
+      initiated_by: string
+  payment_flags:
+    pk: [payment_id, flag]
+    columns:
+      payment_id: string -> payments
+      flag: string
+  payment_approvals:
+    pk: id
+    columns:
+      id: string
+      payment_id: string -> payments
+      approver_id: string
+      decision: string
+resource:
+  table: payments
+  attributes:
+    amount: amount
+    currency: currency
+    status: status
+    riskScore: risk_score
+    createdAt: created_at
+    initiatedBy: initiated_by
+    counterparty:
+      attributes: {name: cp_name, iban: cp_iban, country: cp_country}
+    flags: {many: payment_flags, fk: payment_id, value: flag, orderBy: flag}
+    approvals:
+      many: payment_approvals
+      fk: payment_id
+      orderBy: id
+      attributes: {approverId: approver_id, decision: decision}
+    account:
+      one: account_id
+      attributes:
+        currency: currency
+        status: status
+        overdraftLimit: overdraft_limit
+        customer:
+          one: customer_id
+          attributes:
+            id: id
+            kycLevel: kyc_level
+            pep: pep
+            branch:
+              one: branch_code
+              attributes: {code: code, country: country}

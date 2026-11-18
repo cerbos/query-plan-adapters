@@ -184,7 +184,19 @@
             "aString": "héllo🚀"
           }
         },
+        "peer": {
+          "aBool": true,
+          "aNumber": 11,
+          "aOptionalString": "Set",
+          "aString": "One"
+        },
         "scope": "dept",
+        "stepParent": {
+          "aBool": true,
+          "aNumber": 2,
+          "aOptionalString": "x",
+          "aString": "100xdone"
+        },
         "tagNames": [
           "public"
         ],
@@ -257,6 +269,11 @@
           "aNumber": 3,
           "aOptionalString": "",
           "aString": "héllo🚀"
+        },
+        "peer": {
+          "aBool": true,
+          "aNumber": 2,
+          "aString": ""
         },
         "scope": "dept.eng.platform",
         "tagNames": [
@@ -536,6 +553,12 @@
           "aString": "mirror"
         },
         "scope": "50%",
+        "stepParent": {
+          "aBool": false,
+          "aNumber": 8,
+          "aOptionalString": "mirror",
+          "aString": "mirror"
+        },
         "tagNames": [
           "same"
         ],
@@ -576,7 +599,19 @@
             "aString": "xA_by"
           }
         },
+        "peer": {
+          "aBool": true,
+          "aNumber": 5,
+          "aOptionalString": "set",
+          "aString": "one"
+        },
         "scope": "50%:a_b:x",
+        "stepParent": {
+          "aBool": true,
+          "aNumber": 5,
+          "aOptionalString": "set",
+          "aString": "one"
+        },
         "tagNames": [],
         "tags": []
       },
@@ -727,6 +762,11 @@
           }
         },
         "scope": "50%.a_b",
+        "stepParent": {
+          "aBool": true,
+          "aNumber": 15,
+          "aString": "nullowner"
+        },
         "tagNames": [
           null,
           "public"
@@ -795,6 +835,12 @@
           "aNumber": 12,
           "aString": "xA_by"
         },
+        "peer": {
+          "aBool": true,
+          "aNumber": 11,
+          "aOptionalString": "Set",
+          "aString": "One"
+        },
         "scope": "Dept.Eng",
         "tagNames": [
           "Public"
@@ -853,7 +899,19 @@
           "aOptionalString": "xSECy",
           "aString": "Secret"
         },
+        "peer": {
+          "aBool": false,
+          "aNumber": 14,
+          "aOptionalString": "xSECy",
+          "aString": "Secret"
+        },
         "scope": "[env]:prod:eu",
+        "stepParent": {
+          "aBool": true,
+          "aNumber": 13,
+          "aOptionalString": "[SEC]",
+          "aString": "[SEC]ret"
+        },
         "tagNames": [],
         "tags": []
       },
@@ -910,6 +968,12 @@
             "aString": "100xdone"
           }
         },
+        "peer": {
+          "aBool": true,
+          "aNumber": 11,
+          "aOptionalString": "Set",
+          "aString": "One"
+        },
         "tagNames": [
           null
         ],
@@ -949,6 +1013,12 @@
             "aOptionalString": "mirror",
             "aString": "mirror"
           }
+        },
+        "stepParent": {
+          "aBool": true,
+          "aNumber": 5,
+          "aOptionalString": "set",
+          "aString": "one"
         },
         "tagNames": [],
         "tags": []

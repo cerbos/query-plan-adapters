@@ -1,0 +1,11 @@
+{
+  "name": "domain-harness-prisma",
+  "private": true,
+  "//": "Runs with the adapter's own toolchain and dependencies: npm ci in ../../../../prisma first.",
+  "scripts": {
+    "test": "npm run test:sqlite && npm run test:postgres && npm run test:mysql",
+    "test:sqlite": "node generate.mjs ${PRISMA_VERSION:-7} sqlite && DOMAIN_STORE=sqlite ../../../../prisma/node_modules/.bin/jest -c jest.config.js",
+    "test:postgres": "node generate.mjs ${PRISMA_VERSION:-7} postgres && DOMAIN_STORE=postgres ../../../../prisma/node_modules/.bin/jest -c jest.config.js",
+    "test:mysql": "node generate.mjs ${PRISMA_VERSION:-7} mysql && DOMAIN_STORE=mysql ../../../../prisma/node_modules/.bin/jest -c jest.config.js"
+  }
+}

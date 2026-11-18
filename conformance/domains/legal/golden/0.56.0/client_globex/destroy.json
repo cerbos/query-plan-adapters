@@ -1,0 +1,23 @@
+{
+  "action": "destroy",
+  "allowed": [],
+  "domain": "legal",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "clientId": "cl2",
+      "practiceAreas": []
+    },
+    "id": "cu-1",
+    "roles": [
+      "client_user"
+    ]
+  },
+  "principalName": "client_globex",
+  "resourceKind": "legal_document"
+}

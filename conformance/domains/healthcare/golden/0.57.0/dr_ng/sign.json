@@ -1,0 +1,82 @@
+{
+  "action": "sign",
+  "allowed": [],
+  "domain": "healthcare",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.signedAt"
+                            }
+                          ],
+                          "operator": "has"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.deleted"
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.authorId"
+                },
+                {
+                  "value": "u-ng"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "south",
+      "specialties": [
+        "mental_health"
+      ],
+      "wards": [
+        "w3"
+      ]
+    },
+    "id": "u-ng",
+    "roles": [
+      "physician"
+    ]
+  },
+  "principalName": "dr_ng",
+  "resourceKind": "clinical_note"
+}

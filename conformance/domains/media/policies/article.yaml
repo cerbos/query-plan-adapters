@@ -1,0 +1,49 @@
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: article
+  version: default
+  rules:
+    - actions: [read]
+      effect: EFFECT_ALLOW
+      roles: [reader]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.status == "published"
+              - expr: "!has(R.attr.embargoUntil) || timestamp(R.attr.embargoUntil) < now()"
+              - expr: "!R.attr.paywalled || P.attr.subscriber"
+              - expr: R.attr.language in P.attr.languages
+    - actions: [read, edit]
+      effect: EFFECT_ALLOW
+      roles: [writer]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.author.id == P.id || R.attr.contributors.exists(c, c.id == P.id)
+              - expr: R.attr.status in ["draft", "review"]
+    - actions: [read, edit]
+      effect: EFFECT_ALLOW
+      roles: [editor]
+      condition:
+        match:
+          expr: R.attr.section.desk in P.attr.desks && R.attr.status != "retracted"
+    - actions: [publish]
+      effect: EFFECT_ALLOW
+      roles: [editor]
+      condition:
+        match:
+          all:
+            of:
+              - expr: R.attr.section.desk in P.attr.desks
+              - expr: R.attr.status == "review"
+              - expr: R.attr.wordCount >= 300
+              - expr: R.attr.slug.matches("^[a-z0-9]+(-[a-z0-9]+)*$")
+              - expr: R.attr.contributors.all(c, c.staff) && R.attr.author.staff
+    - actions: [legal_review, read]
+      effect: EFFECT_ALLOW
+      roles: [legal]
+      condition:
+        match:
+          expr: '"legal" in R.attr.keywords || R.attr.keywords.exists(k, k.startsWith("lawsuit"))'

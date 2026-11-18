@@ -521,9 +521,21 @@
       "status": "unsupported",
       "reason": "Prisma field references only work between fields of the same model; `parent.aBool` and `parent.inner.aBool` are columns of two different models, so the adapter throws"
     },
+    "relation/equals/same-table-field-to-field": {
+      "status": "unsupported",
+      "reason": "Prisma field references only work between fields of the same model row; `parent.aString` and `stepParent.aString` are columns of two different related rows, so the adapter throws"
+    },
+    "relation/equals/self-relation-field-to-field": {
+      "status": "unsupported",
+      "reason": "Prisma field references only work between fields of the same model row; `peer.aNumber` is a column of the related AdversarialResource row and `aNumber` of the root row, so the adapter throws"
+    },
     "relation/not-equals/one-hop-against-explicit-null-field": {
       "status": "unsupported",
       "reason": "Prisma field references only compare fields of the same model, so a parent field against a root field is refused."
+    },
+    "relation/not-equals/same-table-field-to-field": {
+      "status": "unsupported",
+      "reason": "Same refusal as `relation/equals/same-table-field-to-field`, for `!=`."
     },
     "relation/size/less-than-two-to-one-chain": {
       "status": "unsupported",

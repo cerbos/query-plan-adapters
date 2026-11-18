@@ -14,8 +14,11 @@ import (
 // and from every harness's stored row at once, so the differential would agree without testing
 // it: any key outside these sets is an error, and so is a missing one.
 var (
-	seedKeys     = []string{"id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList", "tags", "subCategoryNames", "parentSeedId"}
-	seedNoteKey  = "note"
+	seedKeys    = []string{"id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList", "tags", "subCategoryNames", "parentSeedId"}
+	seedNoteKey = "note"
+	// peerSeedId is a to-one relation from a resource to another resource row (a self-relation);
+	// stepParentSeedId is a second to-one relation into the table parent lives in.
+	relationKeys = []string{"peerSeedId", "stepParentSeedId"}
 	requiresKey  = "requires"
 	tagKeys      = []string{"id", "name"}
 	derivedKeys  = []string{"createdBy", "aDouble", "createdAt", "updatedAt", "scope", "labels"}
@@ -87,7 +90,7 @@ func loadDataset(conformanceDir string) (*Dataset, error) {
 
 	byID := map[string]map[string]any{}
 	for i, seed := range seedsFile.Seeds {
-		if err := assertKeys(fmt.Sprintf("seeds.json seeds[%d]", i), keysOf(seed), seedKeys, []string{seedNoteKey, requiresKey}); err != nil {
+		if err := assertKeys(fmt.Sprintf("seeds.json seeds[%d]", i), keysOf(seed), seedKeys, append([]string{seedNoteKey, requiresKey}, relationKeys...)); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -118,26 +121,31 @@ func loadDataset(conformanceDir string) (*Dataset, error) {
 	}
 	// A harness that does not load a seed must not find a row missing from anything it does load.
 	for _, seed := range seedsFile.Seeds {
-		pid, _ := seed["parentSeedId"].(string)
-		if p, ok := byID[pid]; ok && p[requiresKey] != nil {
-			errs = append(errs, fmt.Errorf("seeds.json: %q names parent %q, which requires %v: a harness that does not load the parent would lose the child's relation", seed["id"], pid, p[requiresKey]))
+		for _, key := range append([]string{"parentSeedId"}, relationKeys...) {
+			pid, _ := seed[key].(string)
+			if p, ok := byID[pid]; ok && p[requiresKey] != nil {
+				errs = append(errs, fmt.Errorf("seeds.json: %q names %s %q, which requires %v: a harness that does not load it would lose the relation", seed["id"], key, pid, p[requiresKey]))
+			}
 		}
 	}
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
 
-	parentOf := func(seed map[string]any) (map[string]any, error) {
-		if seed == nil || seed["parentSeedId"] == nil {
-			return nil, nil
+	relatedOf := func(key string) func(map[string]any) (map[string]any, error) {
+		return func(seed map[string]any) (map[string]any, error) {
+			if seed == nil || seed[key] == nil {
+				return nil, nil
+			}
+			pid := seed[key].(string)
+			p, ok := byID[pid]
+			if !ok {
+				return nil, fmt.Errorf("seeds.json: %q names %s %q, which is not a seed id", seed["id"], key, pid)
+			}
+			return p, nil
 		}
-		pid := seed["parentSeedId"].(string)
-		p, ok := byID[pid]
-		if !ok {
-			return nil, fmt.Errorf("seeds.json: %q names parent %q, which is not a seed id", seed["id"], pid)
-		}
-		return p, nil
 	}
+	parentOf := relatedOf("parentSeedId")
 
 	ds := &Dataset{Principal: seedsFile.Principal}
 	for _, seed := range seedsFile.Seeds {
@@ -145,6 +153,15 @@ func loadDataset(conformanceDir string) (*Dataset, error) {
 		attr, err := checkAttr(seed, derivedFile.Derived[id], parentOf)
 		if err != nil {
 			return nil, err
+		}
+		for _, rel := range []struct{ key, attr string }{{"peerSeedId", "peer"}, {"stepParentSeedId", "stepParent"}} {
+			related, err := relatedOf(rel.key)(seed)
+			if err != nil {
+				return nil, err
+			}
+			if related != nil {
+				attr[rel.attr] = relationAttr(related)
+			}
 		}
 		ds.Resources = append(ds.Resources, Resource{ID: id, Attr: attr})
 	}

@@ -1,0 +1,360 @@
+{
+  "kind": "article",
+  "nulls": "omitted",
+  "rootTable": "articles",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "display_name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "staff",
+          "nullable": false,
+          "type": "bool"
+        }
+      ],
+      "name": "authors",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "display_name": "Ola",
+          "id": "au1",
+          "staff": true
+        },
+        {
+          "display_name": "Pip",
+          "id": "au2",
+          "staff": false
+        },
+        {
+          "display_name": "Ray",
+          "id": "au3",
+          "staff": true
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "slug",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "desk",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "sections",
+      "primaryKey": [
+        "slug"
+      ],
+      "rows": [
+        {
+          "desk": "news",
+          "name": "World",
+          "slug": "world"
+        },
+        {
+          "desk": "features",
+          "name": "Technology",
+          "slug": "tech"
+        },
+        {
+          "desk": "News",
+          "name": "Politics",
+          "slug": "politics"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "slug",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "section_slug",
+          "nullable": false,
+          "references": "sections",
+          "type": "string"
+        },
+        {
+          "name": "author_id",
+          "nullable": false,
+          "references": "authors",
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "language",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "embargo_until",
+          "nullable": true,
+          "type": "timestamp"
+        },
+        {
+          "name": "published_at",
+          "nullable": true,
+          "type": "timestamp"
+        },
+        {
+          "name": "paywalled",
+          "nullable": false,
+          "type": "bool"
+        },
+        {
+          "name": "word_count",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "keywords",
+          "nullable": false,
+          "type": "string[]"
+        }
+      ],
+      "name": "articles",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "author_id": "au3",
+          "embargo_until": null,
+          "id": "ar01",
+          "keywords": [
+            "election",
+            "politics"
+          ],
+          "language": "en",
+          "paywalled": false,
+          "published_at": "2024-11-06T06:00:00Z",
+          "section_slug": "politics",
+          "slug": "election-results",
+          "status": "published",
+          "word_count": 900
+        },
+        {
+          "author_id": "au1",
+          "embargo_until": null,
+          "id": "ar02",
+          "keywords": [
+            "semiconductors"
+          ],
+          "language": "en",
+          "paywalled": true,
+          "published_at": "2024-01-01T00:00:00Z",
+          "section_slug": "tech",
+          "slug": "chip-war",
+          "status": "published",
+          "word_count": 1500
+        },
+        {
+          "author_id": "au2",
+          "embargo_until": "2099-01-01T00:00:00Z",
+          "id": "ar03",
+          "keywords": [],
+          "language": "en",
+          "paywalled": false,
+          "published_at": null,
+          "section_slug": "world",
+          "slug": "future-scoop",
+          "status": "published",
+          "word_count": 400
+        },
+        {
+          "author_id": "au3",
+          "embargo_until": "2020-01-01T00:00:00Z",
+          "id": "ar04",
+          "keywords": [
+            "legal"
+          ],
+          "language": "fr",
+          "paywalled": false,
+          "published_at": "2020-01-01T00:00:00Z",
+          "section_slug": "world",
+          "slug": "old-embargo",
+          "status": "published",
+          "word_count": 350
+        },
+        {
+          "author_id": "au2",
+          "embargo_until": null,
+          "id": "ar05",
+          "keywords": [
+            "lawsuit-pending"
+          ],
+          "language": "en",
+          "paywalled": false,
+          "published_at": null,
+          "section_slug": "world",
+          "slug": "draft-piece",
+          "status": "draft",
+          "word_count": 120
+        },
+        {
+          "author_id": "au3",
+          "embargo_until": null,
+          "id": "ar06",
+          "keywords": [
+            "Legal"
+          ],
+          "language": "en",
+          "paywalled": false,
+          "published_at": null,
+          "section_slug": "world",
+          "slug": "Bad_Slug",
+          "status": "review",
+          "word_count": 800
+        },
+        {
+          "author_id": "au2",
+          "embargo_until": null,
+          "id": "ar07",
+          "keywords": [
+            "lawsuits"
+          ],
+          "language": "en",
+          "paywalled": true,
+          "published_at": null,
+          "section_slug": "world",
+          "slug": "ready-to-go",
+          "status": "review",
+          "word_count": 300
+        },
+        {
+          "author_id": "au3",
+          "embargo_until": null,
+          "id": "ar08",
+          "keywords": [],
+          "language": "en",
+          "paywalled": false,
+          "published_at": null,
+          "section_slug": "world",
+          "slug": "short-one",
+          "status": "review",
+          "word_count": 299
+        },
+        {
+          "author_id": "au1",
+          "embargo_until": null,
+          "id": "ar09",
+          "keywords": [
+            "legal",
+            "retraction"
+          ],
+          "language": "en",
+          "paywalled": false,
+          "published_at": "2023-01-01T00:00:00Z",
+          "section_slug": "tech",
+          "slug": "retracted-story",
+          "status": "retracted",
+          "word_count": 1000
+        },
+        {
+          "author_id": "au3",
+          "embargo_until": null,
+          "id": "ar10",
+          "keywords": [
+            "legal-ish"
+          ],
+          "language": "en",
+          "paywalled": false,
+          "published_at": null,
+          "section_slug": "politics",
+          "slug": "double--dash",
+          "status": "review",
+          "word_count": 500
+        },
+        {
+          "author_id": "au3",
+          "embargo_until": null,
+          "id": "ar11",
+          "keywords": [
+            "budget"
+          ],
+          "language": "en",
+          "paywalled": false,
+          "published_at": null,
+          "section_slug": "world",
+          "slug": "budget-2025",
+          "status": "review",
+          "word_count": 600
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "article_id",
+          "nullable": false,
+          "references": "articles",
+          "type": "string"
+        },
+        {
+          "name": "author_id",
+          "nullable": false,
+          "references": "authors",
+          "type": "string"
+        }
+      ],
+      "name": "article_contributors",
+      "primaryKey": [
+        "article_id",
+        "author_id"
+      ],
+      "rows": [
+        {
+          "article_id": "ar11",
+          "author_id": "au1"
+        },
+        {
+          "article_id": "ar03",
+          "author_id": "au1"
+        },
+        {
+          "article_id": "ar05",
+          "author_id": "au1"
+        },
+        {
+          "article_id": "ar05",
+          "author_id": "au3"
+        },
+        {
+          "article_id": "ar07",
+          "author_id": "au3"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "action": "delete",
+  "allowed": [
+    "n01",
+    "n02",
+    "n08",
+    "n09",
+    "n11",
+    "n13"
+  ],
+  "domain": "healthcare",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.signedAt"
+                      }
+                    ],
+                    "operator": "has"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.signedAt"
+                            }
+                          ],
+                          "operator": "timestamp"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "value": "2022-01-01T00:00:00Z"
+                            }
+                          ],
+                          "operator": "timestamp"
+                        }
+                      }
+                    ],
+                    "operator": "lt"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.patient.birthYear"
+                      },
+                      {
+                        "value": 1960
+                      }
+                    ],
+                    "operator": "lt"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "specialties": [],
+      "wards": []
+    },
+    "id": "u-kim",
+    "roles": [
+      "admin"
+    ]
+  },
+  "principalName": "admin_kim",
+  "resourceKind": "clinical_note"
+}

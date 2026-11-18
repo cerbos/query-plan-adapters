@@ -1,0 +1,312 @@
+{
+  "kind": "employee_record",
+  "nulls": "omitted",
+  "rootTable": "employees",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "cost_center",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "departments",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "cost_center": "CC-100",
+          "id": "eng",
+          "name": "Engineering"
+        },
+        {
+          "cost_center": "CC-200",
+          "id": "ops",
+          "name": "Operations"
+        },
+        {
+          "cost_center": "CC-300",
+          "id": "fin",
+          "name": "Finance"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "code",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "country",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "city",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "locations",
+      "primaryKey": [
+        "code"
+      ],
+      "rows": [
+        {
+          "city": "London",
+          "code": "LDN",
+          "country": "GB"
+        },
+        {
+          "city": "New York",
+          "code": "NYC",
+          "country": "US"
+        },
+        {
+          "city": "Edinburgh",
+          "code": "EDI",
+          "country": "GB"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "manager_id",
+          "nullable": true,
+          "references": "employees",
+          "type": "string"
+        },
+        {
+          "name": "department_id",
+          "nullable": false,
+          "references": "departments",
+          "type": "string"
+        },
+        {
+          "name": "location_code",
+          "nullable": false,
+          "references": "locations",
+          "type": "string"
+        },
+        {
+          "name": "level",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "employment_type",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "salary_band",
+          "nullable": true,
+          "type": "string"
+        },
+        {
+          "name": "hired_on",
+          "nullable": false,
+          "type": "timestamp"
+        },
+        {
+          "name": "terminated_on",
+          "nullable": true,
+          "type": "timestamp"
+        },
+        {
+          "name": "work_email",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "employees",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "department_id": "eng",
+          "employment_type": "full_time",
+          "hired_on": "2010-01-04T09:00:00Z",
+          "id": "e01",
+          "level": 9,
+          "location_code": "LDN",
+          "manager_id": null,
+          "salary_band": "X",
+          "terminated_on": null,
+          "work_email": "ceo@example.com"
+        },
+        {
+          "department_id": "eng",
+          "employment_type": "full_time",
+          "hired_on": "2015-03-01T09:00:00Z",
+          "id": "e02",
+          "level": 6,
+          "location_code": "LDN",
+          "manager_id": "e01",
+          "salary_band": "E",
+          "terminated_on": null,
+          "work_email": "e02@example.com"
+        },
+        {
+          "department_id": "fin",
+          "employment_type": "full_time",
+          "hired_on": "2016-03-01T09:00:00Z",
+          "id": "e03",
+          "level": 7,
+          "location_code": "NYC",
+          "manager_id": "e01",
+          "salary_band": "F",
+          "terminated_on": null,
+          "work_email": "e03@example.com"
+        },
+        {
+          "department_id": "eng",
+          "employment_type": "full_time",
+          "hired_on": "2019-01-01T09:00:00Z",
+          "id": "e04",
+          "level": 4,
+          "location_code": "LDN",
+          "manager_id": "e02",
+          "salary_band": "C",
+          "terminated_on": null,
+          "work_email": "e04@example.com"
+        },
+        {
+          "department_id": "eng",
+          "employment_type": "full_time",
+          "hired_on": "2020-01-01T09:00:00Z",
+          "id": "e05",
+          "level": 3,
+          "location_code": "EDI",
+          "manager_id": "e02",
+          "salary_band": null,
+          "terminated_on": null,
+          "work_email": "e05@example.com"
+        },
+        {
+          "department_id": "ops",
+          "employment_type": "contractor",
+          "hired_on": "2021-01-01T09:00:00Z",
+          "id": "e06",
+          "level": 6,
+          "location_code": "NYC",
+          "manager_id": "e02",
+          "salary_band": null,
+          "terminated_on": "2023-01-01T09:00:00Z",
+          "work_email": "e06@contractors.example.com"
+        },
+        {
+          "department_id": "fin",
+          "employment_type": "full_time",
+          "hired_on": "2018-01-01T09:00:00Z",
+          "id": "e07",
+          "level": 5,
+          "location_code": "LDN",
+          "manager_id": "e03",
+          "salary_band": "D",
+          "terminated_on": null,
+          "work_email": "e07@example.com"
+        },
+        {
+          "department_id": "ops",
+          "employment_type": "contractor",
+          "hired_on": "2022-01-01T09:00:00Z",
+          "id": "e08",
+          "level": 2,
+          "location_code": "LDN",
+          "manager_id": "e04",
+          "salary_band": null,
+          "terminated_on": null,
+          "work_email": "e08@contractors.example.com"
+        },
+        {
+          "department_id": "eng",
+          "employment_type": "intern",
+          "hired_on": "2024-06-01T09:00:00Z",
+          "id": "e09",
+          "level": 2,
+          "location_code": "NYC",
+          "manager_id": "e04",
+          "salary_band": null,
+          "terminated_on": "2024-09-01T09:00:00Z",
+          "work_email": "e09@example.com"
+        },
+        {
+          "department_id": "ops",
+          "employment_type": "contractor",
+          "hired_on": "2024-01-01T09:00:00Z",
+          "id": "e10",
+          "level": 1,
+          "location_code": "EDI",
+          "manager_id": "e05",
+          "salary_band": null,
+          "terminated_on": null,
+          "work_email": "e10@contractors.example.com.evil.io"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "employee_id",
+          "nullable": false,
+          "references": "employees",
+          "type": "string"
+        },
+        {
+          "name": "skill",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "employee_skills",
+      "primaryKey": [
+        "employee_id",
+        "skill"
+      ],
+      "rows": [
+        {
+          "employee_id": "e04",
+          "skill": "go"
+        },
+        {
+          "employee_id": "e04",
+          "skill": "kubernetes"
+        },
+        {
+          "employee_id": "e06",
+          "skill": "payroll"
+        },
+        {
+          "employee_id": "e08",
+          "skill": "Go"
+        },
+        {
+          "employee_id": "e10",
+          "skill": "go"
+        }
+      ]
+    }
+  ]
+}

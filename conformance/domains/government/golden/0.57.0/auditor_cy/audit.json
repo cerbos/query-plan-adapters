@@ -1,0 +1,107 @@
+{
+  "action": "audit",
+  "allowed": [
+    "k04",
+    "k05",
+    "k06"
+  ],
+  "domain": "government",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": "closed"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.agency.state"
+                },
+                {
+                  "value": "CA"
+                }
+              ],
+              "operator": "eq"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.closedOn"
+                      },
+                      {
+                        "value": null
+                      }
+                    ],
+                    "operator": "ne"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.closedOn"
+                            }
+                          ],
+                          "operator": "timestamp"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.openedOn"
+                            }
+                          ],
+                          "operator": "timestamp"
+                        }
+                      }
+                    ],
+                    "operator": "gt"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "counties": [],
+      "state": "CA"
+    },
+    "id": "au-cy",
+    "roles": [
+      "auditor"
+    ]
+  },
+  "principalName": "auditor_cy",
+  "resourceKind": "benefit_case"
+}

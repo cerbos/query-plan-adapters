@@ -1,0 +1,243 @@
+{
+  "action": "flag_late",
+  "allowed": [
+    "sb04",
+    "sb06"
+  ],
+  "domain": "education",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.submittedAt"
+                                  }
+                                ],
+                                "operator": "timestamp"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.assignment.dueAt"
+                                  }
+                                ],
+                                "operator": "timestamp"
+                              }
+                            }
+                          ],
+                          "operator": "gt"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.late"
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.assignment.course.staff"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "s.userId"
+                                        },
+                                        {
+                                          "value": "f-jones"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  },
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "s.role"
+                                        },
+                                        {
+                                          "value": "ta"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  }
+                                ],
+                                "operator": "and"
+                              }
+                            },
+                            {
+                              "variable": "s"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.submittedAt"
+                                  }
+                                ],
+                                "operator": "timestamp"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.assignment.dueAt"
+                                  }
+                                ],
+                                "operator": "timestamp"
+                              }
+                            }
+                          ],
+                          "operator": "gt"
+                        }
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.late"
+                            }
+                          ],
+                          "operator": "not"
+                        }
+                      }
+                    ],
+                    "operator": "and"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.assignment.course.staff"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "s.userId"
+                                        },
+                                        {
+                                          "value": "f-jones"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  },
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "s.role"
+                                        },
+                                        {
+                                          "value": "instructor"
+                                        }
+                                      ],
+                                      "operator": "eq"
+                                    }
+                                  }
+                                ],
+                                "operator": "and"
+                              }
+                            },
+                            {
+                              "variable": "s"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "departments": [
+        "cs"
+      ],
+      "term": ""
+    },
+    "id": "f-jones",
+    "roles": [
+      "faculty"
+    ]
+  },
+  "principalName": "prof_jones",
+  "resourceKind": "submission"
+}

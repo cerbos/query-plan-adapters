@@ -47,7 +47,11 @@ type Seed struct {
 	AOptionalString *string `json:"aOptionalString"`
 	// ParentSeedID names the seed whose scalars this row's to-one `parent` carries, or nil for a
 	// row with no parent. See conformance/README.md, "The dataset".
-	ParentSeedID     *string    `json:"parentSeedId"` //nolint:tagliatelle // The corpus spells it parentSeedId; Go's ID suffix is not the JSON name.
+	ParentSeedID *string `json:"parentSeedId"` //nolint:tagliatelle // The corpus spells it parentSeedId; Go's ID suffix is not the JSON name.
+	// PeerSeedID names the seed whose own row is this row's `peer`; StepParentSeedID the seed
+	// whose scalars a second row in the parent table carries as `stepParent`.
+	PeerSeedID       *string    `json:"peerSeedId"`       //nolint:tagliatelle // As parentSeedId.
+	StepParentSeedID *string    `json:"stepParentSeedId"` //nolint:tagliatelle // As parentSeedId.
 	ID               string     `json:"id"`
 	AString          *string    `json:"aString"`
 	Tags             []Tag      `json:"tags"`
@@ -265,15 +269,23 @@ func (c *Corpus) derived(s Seed) Derived {
 // parentSeedOf returns the seed one hop out along the to-one `parent` relation, or nil. Passing nil
 // returns nil, so `parent.inner` is `parentSeedOf(parentSeedOf(seed))`.
 func (c *Corpus) parentSeedOf(s *Seed) *Seed {
-	if s == nil || s.ParentSeedID == nil {
+	if s == nil {
+		return nil
+	}
+	return c.seedNamed(s.ParentSeedID)
+}
+
+// seedNamed returns the seed a relation key names, or nil.
+func (c *Corpus) seedNamed(id *string) *Seed {
+	if id == nil {
 		return nil
 	}
 	for i := range c.Seeds {
-		if c.Seeds[i].ID == *s.ParentSeedID {
+		if c.Seeds[i].ID == *id {
 			return &c.Seeds[i]
 		}
 	}
-	panic("seeds.json parentSeedId names no seed: " + *s.ParentSeedID)
+	panic("seeds.json names no seed " + *id)
 }
 
 // Each seed owns its own category graph and its own parent chain rows, so no filter can match
@@ -283,6 +295,7 @@ func categoryID(s Seed) string           { return s.ID + "-cat" }
 func subCategoryID(s Seed, i int) string { return fmt.Sprintf("%s-sub%d", s.ID, i) }
 func parentID(s Seed) string             { return s.ID + "-parent" }
 func innerID(s Seed) string              { return s.ID + "-parent-inner" }
+func stepParentID(s Seed) string         { return s.ID + "-step" }
 
 // -- fuzz mode ----------------------------------------------------------------------------------
 

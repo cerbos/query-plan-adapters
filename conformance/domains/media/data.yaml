@@ -1,0 +1,34 @@
+actions: [read, edit, publish, legal_review]
+principals:
+  reader_free: {id: rd1, roles: [reader], attr: {subscriber: false, languages: [en], desks: []}}
+  reader_sub: {id: rd2, roles: [reader], attr: {subscriber: true, languages: [en, fr], desks: []}}
+  writer_ola: {id: au1, roles: [writer], attr: {desks: [], languages: [en]}}
+  editor_pat: {id: ed1, roles: [editor], attr: {desks: [news], languages: [en]}}
+  lawyer_quinn: {id: lg1, roles: [legal], attr: {desks: [], languages: []}}
+tables:
+  authors:
+    - {id: au1, display_name: Ola, staff: true}
+    - {id: au2, display_name: Pip, staff: false}
+    - {id: au3, display_name: Ray, staff: true}
+  sections:
+    - {slug: world, name: World, desk: news}
+    - {slug: tech, name: Technology, desk: features}
+    - {slug: politics, name: Politics, desk: News}
+  articles:
+    - {id: ar01, slug: election-results, section_slug: politics, author_id: au3, status: published, language: en, published_at: 2024-11-06T06:00:00Z, paywalled: false, word_count: 900, keywords: [election, politics]}
+    - {id: ar02, slug: chip-war, section_slug: tech, author_id: au1, status: published, language: en, published_at: 2024-01-01T00:00:00Z, paywalled: true, word_count: 1500, keywords: [semiconductors]}
+    - {id: ar03, slug: future-scoop, section_slug: world, author_id: au2, status: published, language: en, embargo_until: 2099-01-01T00:00:00Z, paywalled: false, word_count: 400, keywords: []}
+    - {id: ar04, slug: old-embargo, section_slug: world, author_id: au3, status: published, language: fr, embargo_until: 2020-01-01T00:00:00Z, published_at: 2020-01-01T00:00:00Z, paywalled: false, word_count: 350, keywords: [legal]}
+    - {id: ar05, slug: draft-piece, section_slug: world, author_id: au2, status: draft, language: en, paywalled: false, word_count: 120, keywords: [lawsuit-pending]}
+    - {id: ar06, slug: Bad_Slug, section_slug: world, author_id: au3, status: review, language: en, paywalled: false, word_count: 800, keywords: [Legal]}
+    - {id: ar07, slug: ready-to-go, section_slug: world, author_id: au2, status: review, language: en, paywalled: true, word_count: 300, keywords: [lawsuits]}
+    - {id: ar08, slug: short-one, section_slug: world, author_id: au3, status: review, language: en, paywalled: false, word_count: 299, keywords: []}
+    - {id: ar09, slug: retracted-story, section_slug: tech, author_id: au1, status: retracted, language: en, published_at: 2023-01-01T00:00:00Z, paywalled: false, word_count: 1000, keywords: [legal, retraction]}
+    - {id: ar10, slug: double--dash, section_slug: politics, author_id: au3, status: review, language: en, paywalled: false, word_count: 500, keywords: [legal-ish]}
+    - {id: ar11, slug: budget-2025, section_slug: world, author_id: au3, status: review, language: en, paywalled: false, word_count: 600, keywords: [budget]}
+  article_contributors:
+    - {article_id: ar11, author_id: au1}
+    - {article_id: ar03, author_id: au1}
+    - {article_id: ar05, author_id: au1}
+    - {article_id: ar05, author_id: au3}
+    - {article_id: ar07, author_id: au3}

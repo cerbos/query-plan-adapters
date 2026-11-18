@@ -28,9 +28,16 @@ model AdversarialResource {
   updatedAt       DateTime?
   tags            AdversarialTag[]
   categories      AdversarialCategory[]
-  parent          AdversarialParent?
+  parent          AdversarialParent?             @relation("Parent")
   numberList      AdversarialNumberListElement[]
   boolList        AdversarialBoolListElement[]
+  // Two more to-one relations (conformance/seeds.json `peerSeedId`, `stepParentSeedId`): `peer` is
+  // another resource row, and `stepParent` a second row in the parent table.
+  peer            AdversarialResource?           @relation("Peer", fields: [peerId], references: [id])
+  peerId          String?
+  peerOf          AdversarialResource[]          @relation("Peer")
+  stepParent      AdversarialParent?             @relation("StepParent", fields: [stepParentId], references: [id])
+  stepParentId    String?                        @unique
 }
 
 model AdversarialTag {
@@ -75,8 +82,9 @@ model AdversarialParent {
   aString         String?
   aNumber         Int?
   aOptionalString String?
-  resource        AdversarialResource @relation(fields: [resourceId], references: [id])
-  resourceId      String              @unique
+  resource        AdversarialResource? @relation("Parent", fields: [resourceId], references: [id])
+  resourceId      String?              @unique
+  stepChild       AdversarialResource? @relation("StepParent")
   inner           AdversarialInner?
 }
 

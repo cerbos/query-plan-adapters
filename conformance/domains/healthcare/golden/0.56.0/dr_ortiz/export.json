@@ -1,0 +1,28 @@
+{
+  "action": "export",
+  "allowed": [],
+  "domain": "healthcare",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "north",
+      "specialties": [
+        "cardiology"
+      ],
+      "wards": [
+        "w1"
+      ]
+    },
+    "id": "u-ortiz",
+    "roles": [
+      "physician"
+    ]
+  },
+  "principalName": "dr_ortiz",
+  "resourceKind": "clinical_note"
+}

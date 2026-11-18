@@ -1,0 +1,256 @@
+{
+  "kind": "order",
+  "nulls": "omitted",
+  "resources": [
+    {
+      "id": "o01",
+      "attr": {
+        "channel": "in_store",
+        "currency": "USD",
+        "customer": {
+          "id": "cu1",
+          "loyaltyPoints": 1200,
+          "tier": "gold"
+        },
+        "isGift": false,
+        "lines": [
+          {
+            "category": "apparel",
+            "quantity": 1,
+            "sku": "SHOE-1",
+            "unitPriceCents": 19999
+          }
+        ],
+        "placedAt": "2023-05-01T10:00:00Z",
+        "status": "delivered",
+        "store": {
+          "country": "US",
+          "region": "west"
+        },
+        "totalCents": 19999
+      }
+    },
+    {
+      "id": "o02",
+      "attr": {
+        "channel": "online",
+        "couponCode": "STAFF10",
+        "currency": "USD",
+        "customer": {
+          "id": "cu1",
+          "loyaltyPoints": 1200,
+          "tier": "gold"
+        },
+        "isGift": true,
+        "lines": [
+          {
+            "category": "gift_card",
+            "quantity": 1,
+            "sku": "GC-50",
+            "unitPriceCents": 5000
+          }
+        ],
+        "placedAt": "2023-05-02T10:00:00Z",
+        "status": "placed",
+        "totalCents": 5000
+      }
+    },
+    {
+      "id": "o03",
+      "attr": {
+        "channel": "online",
+        "couponCode": "STAFF20",
+        "currency": "USD",
+        "customer": {
+          "id": "cu2",
+          "loyaltyPoints": 0,
+          "tier": "staff"
+        },
+        "isGift": false,
+        "lines": [
+          {
+            "category": "gift_card",
+            "quantity": 6,
+            "sku": "GC-100",
+            "unitPriceCents": 10000
+          },
+          {
+            "category": "electronics",
+            "quantity": 1,
+            "sku": "TV-1",
+            "unitPriceCents": 60000
+          }
+        ],
+        "placedAt": "2023-05-03T10:00:00Z",
+        "status": "paid",
+        "totalCents": 120000
+      }
+    },
+    {
+      "id": "o04",
+      "attr": {
+        "channel": "in_store",
+        "currency": "USD",
+        "customer": {
+          "id": "cu3",
+          "loyaltyPoints": 15,
+          "tier": "bronze"
+        },
+        "isGift": false,
+        "lines": [
+          {
+            "category": "apparel",
+            "quantity": 2,
+            "sku": "HAT-1",
+            "unitPriceCents": 10000
+          }
+        ],
+        "placedAt": "2023-05-04T10:00:00Z",
+        "status": "returned",
+        "store": {
+          "country": "US",
+          "region": "west"
+        },
+        "totalCents": 20000
+      }
+    },
+    {
+      "id": "o05",
+      "attr": {
+        "channel": "in_store",
+        "couponCode": "staff5",
+        "currency": "USD",
+        "customer": {
+          "id": "cu3",
+          "loyaltyPoints": 15,
+          "tier": "bronze"
+        },
+        "isGift": false,
+        "lines": [
+          {
+            "category": "grocery",
+            "quantity": 3,
+            "sku": "GUM",
+            "unitPriceCents": 100
+          }
+        ],
+        "placedAt": "2023-05-05T10:00:00Z",
+        "status": "delivered",
+        "store": {
+          "country": "US",
+          "region": "east"
+        },
+        "totalCents": 300
+      }
+    },
+    {
+      "id": "o06",
+      "attr": {
+        "channel": "in_store",
+        "currency": "CAD",
+        "customer": {
+          "id": "cu3",
+          "loyaltyPoints": 15,
+          "tier": "bronze"
+        },
+        "isGift": false,
+        "lines": [],
+        "placedAt": "2023-05-06T10:00:00Z",
+        "status": "delivered",
+        "store": {
+          "country": "CA",
+          "region": "West"
+        },
+        "totalCents": 100
+      }
+    },
+    {
+      "id": "o07",
+      "attr": {
+        "channel": "online",
+        "currency": "USD",
+        "customer": {
+          "id": "cu1",
+          "loyaltyPoints": 1200,
+          "tier": "gold"
+        },
+        "isGift": false,
+        "lines": [
+          {
+            "category": "gift_card",
+            "quantity": 90000,
+            "sku": "GC-BULK",
+            "unitPriceCents": 100000
+          }
+        ],
+        "placedAt": "2023-05-07T10:00:00Z",
+        "status": "paid",
+        "totalCents": 9000000000
+      }
+    },
+    {
+      "id": "o08",
+      "attr": {
+        "channel": "Online",
+        "couponCode": "",
+        "currency": "USD",
+        "customer": {
+          "id": "cu3",
+          "loyaltyPoints": 15,
+          "tier": "bronze"
+        },
+        "isGift": false,
+        "lines": [],
+        "placedAt": "2023-05-08T10:00:00Z",
+        "status": "placed",
+        "totalCents": 0
+      }
+    },
+    {
+      "id": "o09",
+      "attr": {
+        "channel": "in_store",
+        "currency": "USD",
+        "customer": {
+          "id": "cu1",
+          "loyaltyPoints": 1200,
+          "tier": "gold"
+        },
+        "isGift": false,
+        "lines": [
+          {
+            "category": "apparel",
+            "quantity": 1,
+            "sku": "SOCK",
+            "unitPriceCents": 1
+          },
+          {
+            "category": "apparel",
+            "quantity": 1,
+            "sku": "SOCK",
+            "unitPriceCents": 20000
+          },
+          {
+            "category": "apparel",
+            "quantity": 1,
+            "sku": "BELT",
+            "unitPriceCents": 0
+          },
+          {
+            "category": "apparel",
+            "quantity": 1,
+            "sku": "TIE",
+            "unitPriceCents": 0
+          }
+        ],
+        "placedAt": "2023-05-09T10:00:00Z",
+        "status": "shipped",
+        "store": {
+          "country": "US",
+          "region": "west"
+        },
+        "totalCents": 20001
+      }
+    }
+  ]
+}

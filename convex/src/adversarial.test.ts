@@ -53,6 +53,8 @@ interface Seed {
   subCategoryNames: string[];
   /** The seed whose scalars this row's to-one `parent` carries; null for no parent. */
   parentSeedId: string | null;
+  peerSeedId?: string;
+  stepParentSeedId?: string;
   /**
    * Homogeneous scalar lists. A null ELEMENT is a value, not an absent attribute; j4 sends the
    * whole aNumberList as null.
@@ -215,6 +217,12 @@ function storedDocument(seed: Seed): StoredDocument {
   const parent = storedParent(seed);
 
   if (parent !== undefined) document.parent = parent;
+
+  if (seed.peerSeedId !== undefined) document.peer = relationLevelOf(SEEDS_BY_ID.get(seed.peerSeedId)!);
+
+  if (seed.stepParentSeedId !== undefined) {
+    document.stepParent = relationLevelOf(SEEDS_BY_ID.get(seed.stepParentSeedId)!);
+  }
 
   return document;
 }

@@ -1,0 +1,81 @@
+{
+  "action": "sign",
+  "allowed": [],
+  "domain": "healthcare",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.signedAt"
+                            }
+                          ],
+                          "operator": "has"
+                        }
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.deleted"
+                      }
+                    ],
+                    "operator": "not"
+                  }
+                }
+              ],
+              "operator": "and"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.authorId"
+                },
+                {
+                  "value": "u-ana"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "north",
+      "specialties": [],
+      "wards": [
+        "w1",
+        "w2"
+      ]
+    },
+    "id": "u-ana",
+    "roles": [
+      "nurse"
+    ]
+  },
+  "principalName": "nurse_ana",
+  "resourceKind": "clinical_note"
+}

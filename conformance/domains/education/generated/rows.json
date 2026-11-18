@@ -1,0 +1,426 @@
+{
+  "kind": "submission",
+  "nulls": "omitted",
+  "rootTable": "submissions",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "departments",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "id": "cs",
+          "name": "Computer Science"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics"
+        },
+        {
+          "id": "hist",
+          "name": "History"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "code",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "term",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "department_id",
+          "nullable": false,
+          "references": "departments",
+          "type": "string"
+        }
+      ],
+      "name": "courses",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "code": "CS101",
+          "department_id": "cs",
+          "id": "co1",
+          "term": "2024-FA"
+        },
+        {
+          "code": "MA201",
+          "department_id": "math",
+          "id": "co2",
+          "term": "2024-FA"
+        },
+        {
+          "code": "HI110",
+          "department_id": "hist",
+          "id": "co3",
+          "term": "2025-SP"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "course_id",
+          "nullable": false,
+          "references": "courses",
+          "type": "string"
+        },
+        {
+          "name": "user_id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "role",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "course_staff",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "course_id": "co1",
+          "id": "cs1",
+          "role": "instructor",
+          "user_id": "f-jones"
+        },
+        {
+          "course_id": "co1",
+          "id": "cs2",
+          "role": "ta",
+          "user_id": "ta-lee"
+        },
+        {
+          "course_id": "co2",
+          "id": "cs3",
+          "role": "instructor",
+          "user_id": "ta-lee"
+        },
+        {
+          "course_id": "co2",
+          "id": "cs4",
+          "role": "ta",
+          "user_id": "f-jones"
+        },
+        {
+          "course_id": "co3",
+          "id": "cs5",
+          "role": "Instructor",
+          "user_id": "f-jones"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "course_id",
+          "nullable": false,
+          "references": "courses",
+          "type": "string"
+        },
+        {
+          "name": "title",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "due_at",
+          "nullable": false,
+          "type": "timestamp"
+        },
+        {
+          "name": "max_points",
+          "nullable": false,
+          "type": "int"
+        },
+        {
+          "name": "group_work",
+          "nullable": false,
+          "type": "bool"
+        }
+      ],
+      "name": "assignments",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "course_id": "co1",
+          "due_at": "2024-10-01T23:59:59Z",
+          "group_work": false,
+          "id": "as1",
+          "max_points": 20,
+          "title": "Lab 1"
+        },
+        {
+          "course_id": "co1",
+          "due_at": "2024-12-01T23:59:59Z",
+          "group_work": true,
+          "id": "as2",
+          "max_points": 100,
+          "title": "Project"
+        },
+        {
+          "course_id": "co2",
+          "due_at": "2024-10-15T12:00:00.5Z",
+          "group_work": false,
+          "id": "as3",
+          "max_points": 50,
+          "title": "Proofs"
+        },
+        {
+          "course_id": "co3",
+          "due_at": "2025-03-01T00:00:00Z",
+          "group_work": false,
+          "id": "as4",
+          "max_points": 40,
+          "title": "Essay"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "assignment_id",
+          "nullable": false,
+          "references": "assignments",
+          "type": "string"
+        },
+        {
+          "name": "student_id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "submitted_at",
+          "nullable": true,
+          "type": "timestamp"
+        },
+        {
+          "name": "score",
+          "nullable": true,
+          "type": "float"
+        },
+        {
+          "name": "late",
+          "nullable": false,
+          "type": "bool"
+        },
+        {
+          "name": "plagiarism_score",
+          "nullable": true,
+          "type": "float"
+        },
+        {
+          "name": "status",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "locked",
+          "nullable": false,
+          "type": "bool"
+        }
+      ],
+      "name": "submissions",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "assignment_id": "as1",
+          "id": "sb01",
+          "late": false,
+          "locked": true,
+          "plagiarism_score": 0.05,
+          "score": 18.5,
+          "status": "graded",
+          "student_id": "st-sam",
+          "submitted_at": "2024-10-01T22:00:00Z"
+        },
+        {
+          "assignment_id": "as1",
+          "id": "sb02",
+          "late": true,
+          "locked": false,
+          "plagiarism_score": 0.41,
+          "score": null,
+          "status": "submitted",
+          "student_id": "st-ann",
+          "submitted_at": "2024-10-02T01:00:00Z"
+        },
+        {
+          "assignment_id": "as2",
+          "id": "sb03",
+          "late": false,
+          "locked": false,
+          "plagiarism_score": null,
+          "score": null,
+          "status": "submitted",
+          "student_id": "st-ann",
+          "submitted_at": "2024-12-01T23:59:59Z"
+        },
+        {
+          "assignment_id": "as2",
+          "id": "sb04",
+          "late": false,
+          "locked": false,
+          "plagiarism_score": 0.4,
+          "score": null,
+          "status": "submitted",
+          "student_id": "st-bo",
+          "submitted_at": "2024-12-02T00:00:00Z"
+        },
+        {
+          "assignment_id": "as3",
+          "id": "sb05",
+          "late": false,
+          "locked": false,
+          "plagiarism_score": 0.9,
+          "score": null,
+          "status": "submitted",
+          "student_id": "st-sam",
+          "submitted_at": "2024-10-15T12:00:00Z"
+        },
+        {
+          "assignment_id": "as3",
+          "id": "sb06",
+          "late": false,
+          "locked": false,
+          "plagiarism_score": null,
+          "score": null,
+          "status": "submitted",
+          "student_id": "st-cy",
+          "submitted_at": "2024-10-15T12:00:00.75Z"
+        },
+        {
+          "assignment_id": "as4",
+          "id": "sb07",
+          "late": false,
+          "locked": false,
+          "plagiarism_score": null,
+          "score": null,
+          "status": "draft",
+          "student_id": "st-cy",
+          "submitted_at": null
+        },
+        {
+          "assignment_id": "as4",
+          "id": "sb08",
+          "late": false,
+          "locked": false,
+          "plagiarism_score": 0.6,
+          "score": 30,
+          "status": "graded",
+          "student_id": "st-sam",
+          "submitted_at": "2025-03-02T00:00:00Z"
+        },
+        {
+          "assignment_id": "as1",
+          "id": "sb09",
+          "late": false,
+          "locked": false,
+          "plagiarism_score": null,
+          "score": null,
+          "status": "submitted",
+          "student_id": "ST-SAM",
+          "submitted_at": "2024-09-30T10:00:00Z"
+        },
+        {
+          "assignment_id": "as3",
+          "id": "sb10",
+          "late": false,
+          "locked": true,
+          "plagiarism_score": 0.99,
+          "score": null,
+          "status": "draft",
+          "student_id": "st-dee",
+          "submitted_at": null
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "submission_id",
+          "nullable": false,
+          "references": "submissions",
+          "type": "string"
+        },
+        {
+          "name": "student_id",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "submission_members",
+      "primaryKey": [
+        "submission_id",
+        "student_id"
+      ],
+      "rows": [
+        {
+          "student_id": "st-ann",
+          "submission_id": "sb03"
+        },
+        {
+          "student_id": "st-sam",
+          "submission_id": "sb03"
+        },
+        {
+          "student_id": "st-bo",
+          "submission_id": "sb04"
+        },
+        {
+          "student_id": "st-cy",
+          "submission_id": "sb04"
+        }
+      ]
+    }
+  ]
+}

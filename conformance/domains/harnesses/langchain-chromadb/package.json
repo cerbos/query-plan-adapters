@@ -1,0 +1,8 @@
+{
+  "name": "domain-harness-langchain-chromadb",
+  "private": true,
+  "//": "Runs with the adapter's own toolchain and dependencies: npm ci in ../../../../langchain-chromadb first.",
+  "scripts": {
+    "test": "../../../../langchain-chromadb/node_modules/.bin/jest -c jest.config.js --runInBand"
+  }
+}

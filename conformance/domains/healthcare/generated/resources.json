@@ -1,0 +1,382 @@
+{
+  "kind": "clinical_note",
+  "nulls": "omitted",
+  "resources": [
+    {
+      "id": "n01",
+      "attr": {
+        "authorId": "u-ortiz",
+        "careTeam": [
+          "u-ortiz",
+          "u-ana"
+        ],
+        "codes": [
+          {
+            "code": "I21.4",
+            "system": "ICD-10"
+          }
+        ],
+        "deleted": false,
+        "noteType": "progress",
+        "patient": {
+          "birthYear": 1950,
+          "consentResearch": true,
+          "mrn": "MRN-0001",
+          "ward": {
+            "hospital": {
+              "region": "north"
+            },
+            "id": "w1",
+            "secure": false
+          }
+        },
+        "sensitivity": 1,
+        "signedAt": "2021-03-01T09:00:00Z"
+      }
+    },
+    {
+      "id": "n02",
+      "attr": {
+        "authorId": "u-ortiz",
+        "careTeam": [],
+        "codes": [],
+        "deleted": false,
+        "noteType": "progress",
+        "patient": {
+          "birthYear": 1950,
+          "consentResearch": true,
+          "mrn": "MRN-0001",
+          "ward": {
+            "hospital": {
+              "region": "north"
+            },
+            "id": "w1",
+            "secure": false
+          }
+        },
+        "sensitivity": 4
+      }
+    },
+    {
+      "id": "n03",
+      "attr": {
+        "authorId": "u-ng",
+        "careTeam": [
+          "u-ng"
+        ],
+        "codes": [
+          {
+            "code": "F32.1",
+            "system": "ICD-10"
+          }
+        ],
+        "deleted": false,
+        "noteType": "psychotherapy",
+        "patient": {
+          "birthYear": 1981,
+          "consentResearch": false,
+          "mrn": "MRN-0002",
+          "vip": true,
+          "ward": {
+            "hospital": {
+              "region": "north"
+            },
+            "id": "w2",
+            "secure": true
+          }
+        },
+        "sensitivity": 5,
+        "signedAt": "2021-04-11T10:30:00Z"
+      }
+    },
+    {
+      "id": "n04",
+      "attr": {
+        "authorId": "u-ana",
+        "careTeam": [],
+        "codes": [],
+        "deleted": false,
+        "noteType": "nursing",
+        "patient": {
+          "birthYear": 1981,
+          "consentResearch": false,
+          "mrn": "MRN-0002",
+          "vip": true,
+          "ward": {
+            "hospital": {
+              "region": "north"
+            },
+            "id": "w2",
+            "secure": true
+          }
+        },
+        "sensitivity": 2,
+        "signedAt": "2021-04-12T08:00:00Z"
+      }
+    },
+    {
+      "id": "n05",
+      "attr": {
+        "authorId": "u-ortiz",
+        "careTeam": [
+          "u-ortiz",
+          "u-ng"
+        ],
+        "codes": [
+          {
+            "code": "F-1234",
+            "system": "SNOMED"
+          }
+        ],
+        "deleted": false,
+        "noteType": "discharge",
+        "patient": {
+          "birthYear": 1999,
+          "consentResearch": true,
+          "mrn": "MRN-0003",
+          "vip": false
+        },
+        "signedAt": "2022-01-05T16:45:00Z"
+      }
+    },
+    {
+      "id": "n06",
+      "attr": {
+        "authorId": "u-ng",
+        "careTeam": [
+          "u-ng"
+        ],
+        "codes": [
+          {
+            "code": "F41.0",
+            "system": "ICD-10"
+          },
+          {
+            "code": "Z63.0",
+            "system": "ICD-10"
+          }
+        ],
+        "deleted": false,
+        "noteType": "psychotherapy",
+        "patient": {
+          "birthYear": 1999,
+          "consentResearch": true,
+          "mrn": "MRN-0003",
+          "vip": false
+        },
+        "sensitivity": 2,
+        "signedAt": "2022-02-01T12:00:00Z"
+      }
+    },
+    {
+      "id": "n07",
+      "attr": {
+        "authorId": "u-ng",
+        "careTeam": [],
+        "codes": [
+          {
+            "code": "F10.2",
+            "system": "icd-10"
+          }
+        ],
+        "deleted": false,
+        "noteType": "progress",
+        "patient": {
+          "birthYear": 2004,
+          "consentResearch": true,
+          "mrn": "MRN-0004",
+          "ward": {
+            "hospital": {
+              "region": "south"
+            },
+            "id": "w3",
+            "secure": false
+          }
+        },
+        "sensitivity": 2,
+        "signedAt": "2023-07-19T07:15:00Z"
+      }
+    },
+    {
+      "id": "n08",
+      "attr": {
+        "authorId": "u-ng",
+        "careTeam": [],
+        "codes": [],
+        "deleted": true,
+        "noteType": "progress",
+        "patient": {
+          "birthYear": 2004,
+          "consentResearch": true,
+          "mrn": "MRN-0004",
+          "ward": {
+            "hospital": {
+              "region": "south"
+            },
+            "id": "w3",
+            "secure": false
+          }
+        },
+        "sensitivity": 0
+      }
+    },
+    {
+      "id": "n09",
+      "attr": {
+        "authorId": "u-ana",
+        "careTeam": [],
+        "codes": [],
+        "deleted": true,
+        "noteType": "nursing",
+        "patient": {
+          "birthYear": 1950,
+          "consentResearch": true,
+          "mrn": "MRN-0001",
+          "ward": {
+            "hospital": {
+              "region": "north"
+            },
+            "id": "w1",
+            "secure": false
+          }
+        },
+        "sensitivity": 1,
+        "signedAt": "2021-03-02T21:00:00Z"
+      }
+    },
+    {
+      "id": "n10",
+      "attr": {
+        "authorId": "u-ortiz",
+        "careTeam": [
+          "U-ORTIZ"
+        ],
+        "codes": [],
+        "deleted": false,
+        "noteType": "Progress",
+        "patient": {
+          "birthYear": 1977,
+          "consentResearch": true,
+          "mrn": "mrn-0003",
+          "vip": false,
+          "ward": {
+            "hospital": {
+              "region": "north"
+            },
+            "id": "w1",
+            "secure": false
+          }
+        },
+        "sensitivity": 2,
+        "signedAt": "2024-11-30T23:59:59Z"
+      }
+    },
+    {
+      "id": "n11",
+      "attr": {
+        "authorId": "u-ortiz",
+        "careTeam": [],
+        "codes": [
+          {
+            "code": "I10",
+            "system": "ICD-10"
+          },
+          {
+            "code": "F17.2",
+            "system": "ICD-10"
+          }
+        ],
+        "deleted": false,
+        "noteType": "progress",
+        "patient": {
+          "birthYear": 1950,
+          "consentResearch": true,
+          "mrn": "MRN-0001",
+          "ward": {
+            "hospital": {
+              "region": "north"
+            },
+            "id": "w1",
+            "secure": false
+          }
+        },
+        "sensitivity": 2,
+        "signedAt": "2021-05-01T09:00:00Z"
+      }
+    },
+    {
+      "id": "n12",
+      "attr": {
+        "authorId": "u-ortiz",
+        "careTeam": [
+          "u-ortiz"
+        ],
+        "codes": [],
+        "deleted": false,
+        "noteType": "consult",
+        "patient": {
+          "birthYear": 2004,
+          "consentResearch": true,
+          "mrn": "MRN-0004",
+          "ward": {
+            "hospital": {
+              "region": "south"
+            },
+            "id": "w3",
+            "secure": false
+          }
+        },
+        "sensitivity": 3,
+        "signedAt": "2023-08-01T09:00:00Z"
+      }
+    },
+    {
+      "id": "n13",
+      "attr": {
+        "authorId": "u-li",
+        "careTeam": [],
+        "codes": [],
+        "deleted": false,
+        "noteType": "consult",
+        "patient": {
+          "birthYear": 1999,
+          "consentResearch": true,
+          "mrn": "MRN-0003",
+          "vip": false
+        }
+      }
+    },
+    {
+      "id": "n14",
+      "attr": {
+        "authorId": "u-ortiz",
+        "careTeam": [
+          "u-ortiz"
+        ],
+        "codes": [
+          {
+            "code": "E11.9",
+            "system": "ICD-10"
+          }
+        ],
+        "deleted": false,
+        "noteType": "progress",
+        "patient": {
+          "birthYear": 1981,
+          "consentResearch": false,
+          "mrn": "MRN-0002",
+          "vip": true,
+          "ward": {
+            "hospital": {
+              "region": "north"
+            },
+            "id": "w2",
+            "secure": true
+          }
+        },
+        "sensitivity": 1,
+        "signedAt": "2021-06-01T09:00:00Z"
+      }
+    }
+  ]
+}

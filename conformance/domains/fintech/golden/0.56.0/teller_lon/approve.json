@@ -1,0 +1,26 @@
+{
+  "action": "approve",
+  "allowed": [],
+  "domain": "fintech",
+  "oracle": "empty",
+  "pdp": "0.56.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "approvalLimit": 0,
+      "branches": [
+        "LON01",
+        "LON02"
+      ]
+    },
+    "id": "u-teller",
+    "roles": [
+      "teller"
+    ]
+  },
+  "principalName": "teller_lon",
+  "resourceKind": "payment"
+}

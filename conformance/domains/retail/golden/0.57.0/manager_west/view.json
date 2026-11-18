@@ -1,0 +1,40 @@
+{
+  "action": "view",
+  "allowed": [
+    "o01",
+    "o04",
+    "o09"
+  ],
+  "domain": "retail",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.store.region"
+          },
+          {
+            "value": "west"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "refundLimitCents": 20000,
+      "region": "west"
+    },
+    "id": "sm-w",
+    "roles": [
+      "store_manager"
+    ]
+  },
+  "principalName": "manager_west",
+  "resourceKind": "order"
+}

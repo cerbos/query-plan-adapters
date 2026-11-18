@@ -1,0 +1,6 @@
+.gradle/
+build/
+bin/
+obj/
+node_modules/
+__pycache__/

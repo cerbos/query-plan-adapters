@@ -193,7 +193,15 @@ final class Corpus {
             Map.entry("request.resource.attr.parent.inner.aBool", "parent.inner.aBool"),
             Map.entry("request.resource.attr.parent.inner.aString", "parent.inner.aString"),
             Map.entry("request.resource.attr.parent.inner.aNumber", "parent.inner.aNumber"),
-            Map.entry("request.resource.attr.parent.inner.aOptionalString", "parent.inner.aOptionalString"));
+            Map.entry("request.resource.attr.parent.inner.aOptionalString", "parent.inner.aOptionalString"),
+            Map.entry("request.resource.attr.peer.aBool", "peer.aBool"),
+            Map.entry("request.resource.attr.peer.aString", "peer.aString"),
+            Map.entry("request.resource.attr.peer.aNumber", "peer.aNumber"),
+            Map.entry("request.resource.attr.peer.aOptionalString", "peer.aOptionalString"),
+            Map.entry("request.resource.attr.stepParent.aBool", "stepParent.aBool"),
+            Map.entry("request.resource.attr.stepParent.aString", "stepParent.aString"),
+            Map.entry("request.resource.attr.stepParent.aNumber", "stepParent.aNumber"),
+            Map.entry("request.resource.attr.stepParent.aOptionalString", "stepParent.aOptionalString"));
 
     /**
      * Attributes the corpus sends to {@code check()} as explicit nulls ({@code resources.json}
@@ -252,7 +260,7 @@ final class Corpus {
         types.put("categories.name", string);
         types.put("categories.subCategories.name", string);
         types.put("categories.subCategories.labels.name", string);
-        for (String level : List.of("parent.", "parent.inner.")) {
+        for (String level : List.of("parent.", "parent.inner.", "peer.", "stepParent.")) {
             types.put(level + "aBool", bool);
             types.put(level + "aString", string);
             types.put(level + "aNumber", number);

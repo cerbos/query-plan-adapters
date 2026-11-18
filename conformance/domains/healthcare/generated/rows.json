@@ -1,0 +1,487 @@
+{
+  "kind": "clinical_note",
+  "nulls": "omitted",
+  "rootTable": "clinical_notes",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "region",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "hospitals",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "id": "h1",
+          "name": "St Mary",
+          "region": "north"
+        },
+        {
+          "id": "h2",
+          "name": "Riverside",
+          "region": "south"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "hospital_id",
+          "nullable": false,
+          "references": "hospitals",
+          "type": "string"
+        },
+        {
+          "name": "secure",
+          "nullable": false,
+          "type": "bool"
+        }
+      ],
+      "name": "wards",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "hospital_id": "h1",
+          "id": "w1",
+          "name": "Cardiology",
+          "secure": false
+        },
+        {
+          "hospital_id": "h1",
+          "id": "w2",
+          "name": "Psychiatry",
+          "secure": true
+        },
+        {
+          "hospital_id": "h2",
+          "id": "w3",
+          "name": "General",
+          "secure": false
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "mrn",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "ward_id",
+          "nullable": true,
+          "references": "wards",
+          "type": "string"
+        },
+        {
+          "name": "consent_research",
+          "nullable": false,
+          "type": "bool"
+        },
+        {
+          "name": "vip",
+          "nullable": true,
+          "type": "bool"
+        },
+        {
+          "name": "birth_year",
+          "nullable": false,
+          "type": "int"
+        }
+      ],
+      "name": "patients",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "birth_year": 1950,
+          "consent_research": true,
+          "id": "p1",
+          "mrn": "MRN-0001",
+          "vip": null,
+          "ward_id": "w1"
+        },
+        {
+          "birth_year": 1981,
+          "consent_research": false,
+          "id": "p2",
+          "mrn": "MRN-0002",
+          "vip": true,
+          "ward_id": "w2"
+        },
+        {
+          "birth_year": 1999,
+          "consent_research": true,
+          "id": "p3",
+          "mrn": "MRN-0003",
+          "vip": false,
+          "ward_id": null
+        },
+        {
+          "birth_year": 2004,
+          "consent_research": true,
+          "id": "p4",
+          "mrn": "MRN-0004",
+          "vip": null,
+          "ward_id": "w3"
+        },
+        {
+          "birth_year": 1977,
+          "consent_research": true,
+          "id": "p5",
+          "mrn": "mrn-0003",
+          "vip": false,
+          "ward_id": "w1"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "note_id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "patient_id",
+          "nullable": false,
+          "references": "patients",
+          "type": "string"
+        },
+        {
+          "name": "author_id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "type",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "sensitivity",
+          "nullable": true,
+          "type": "int"
+        },
+        {
+          "name": "signed_at",
+          "nullable": true,
+          "type": "timestamp"
+        },
+        {
+          "name": "is_deleted",
+          "nullable": false,
+          "type": "bool"
+        }
+      ],
+      "name": "clinical_notes",
+      "primaryKey": [
+        "note_id"
+      ],
+      "rows": [
+        {
+          "author_id": "u-ortiz",
+          "is_deleted": false,
+          "note_id": "n01",
+          "patient_id": "p1",
+          "sensitivity": 1,
+          "signed_at": "2021-03-01T09:00:00Z",
+          "type": "progress"
+        },
+        {
+          "author_id": "u-ortiz",
+          "is_deleted": false,
+          "note_id": "n02",
+          "patient_id": "p1",
+          "sensitivity": 4,
+          "signed_at": null,
+          "type": "progress"
+        },
+        {
+          "author_id": "u-ng",
+          "is_deleted": false,
+          "note_id": "n03",
+          "patient_id": "p2",
+          "sensitivity": 5,
+          "signed_at": "2021-04-11T10:30:00Z",
+          "type": "psychotherapy"
+        },
+        {
+          "author_id": "u-ana",
+          "is_deleted": false,
+          "note_id": "n04",
+          "patient_id": "p2",
+          "sensitivity": 2,
+          "signed_at": "2021-04-12T08:00:00Z",
+          "type": "nursing"
+        },
+        {
+          "author_id": "u-ortiz",
+          "is_deleted": false,
+          "note_id": "n05",
+          "patient_id": "p3",
+          "sensitivity": null,
+          "signed_at": "2022-01-05T16:45:00Z",
+          "type": "discharge"
+        },
+        {
+          "author_id": "u-ng",
+          "is_deleted": false,
+          "note_id": "n06",
+          "patient_id": "p3",
+          "sensitivity": 2,
+          "signed_at": "2022-02-01T12:00:00Z",
+          "type": "psychotherapy"
+        },
+        {
+          "author_id": "u-ng",
+          "is_deleted": false,
+          "note_id": "n07",
+          "patient_id": "p4",
+          "sensitivity": 2,
+          "signed_at": "2023-07-19T07:15:00Z",
+          "type": "progress"
+        },
+        {
+          "author_id": "u-ng",
+          "is_deleted": true,
+          "note_id": "n08",
+          "patient_id": "p4",
+          "sensitivity": 0,
+          "signed_at": null,
+          "type": "progress"
+        },
+        {
+          "author_id": "u-ana",
+          "is_deleted": true,
+          "note_id": "n09",
+          "patient_id": "p1",
+          "sensitivity": 1,
+          "signed_at": "2021-03-02T21:00:00Z",
+          "type": "nursing"
+        },
+        {
+          "author_id": "u-ortiz",
+          "is_deleted": false,
+          "note_id": "n10",
+          "patient_id": "p5",
+          "sensitivity": 2,
+          "signed_at": "2024-11-30T23:59:59Z",
+          "type": "Progress"
+        },
+        {
+          "author_id": "u-ortiz",
+          "is_deleted": false,
+          "note_id": "n11",
+          "patient_id": "p1",
+          "sensitivity": 2,
+          "signed_at": "2021-05-01T09:00:00Z",
+          "type": "progress"
+        },
+        {
+          "author_id": "u-ortiz",
+          "is_deleted": false,
+          "note_id": "n12",
+          "patient_id": "p4",
+          "sensitivity": 3,
+          "signed_at": "2023-08-01T09:00:00Z",
+          "type": "consult"
+        },
+        {
+          "author_id": "u-li",
+          "is_deleted": false,
+          "note_id": "n13",
+          "patient_id": "p3",
+          "sensitivity": null,
+          "signed_at": null,
+          "type": "consult"
+        },
+        {
+          "author_id": "u-ortiz",
+          "is_deleted": false,
+          "note_id": "n14",
+          "patient_id": "p2",
+          "sensitivity": 1,
+          "signed_at": "2021-06-01T09:00:00Z",
+          "type": "progress"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "note_id",
+          "nullable": false,
+          "references": "clinical_notes",
+          "type": "string"
+        },
+        {
+          "name": "clinician_id",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "note_care_team",
+      "primaryKey": [
+        "note_id",
+        "clinician_id"
+      ],
+      "rows": [
+        {
+          "clinician_id": "u-ortiz",
+          "note_id": "n01"
+        },
+        {
+          "clinician_id": "u-ana",
+          "note_id": "n01"
+        },
+        {
+          "clinician_id": "u-ng",
+          "note_id": "n03"
+        },
+        {
+          "clinician_id": "u-ortiz",
+          "note_id": "n05"
+        },
+        {
+          "clinician_id": "u-ng",
+          "note_id": "n05"
+        },
+        {
+          "clinician_id": "u-ng",
+          "note_id": "n06"
+        },
+        {
+          "clinician_id": "U-ORTIZ",
+          "note_id": "n10"
+        },
+        {
+          "clinician_id": "u-ortiz",
+          "note_id": "n12"
+        },
+        {
+          "clinician_id": "u-ortiz",
+          "note_id": "n14"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "note_id",
+          "nullable": false,
+          "references": "clinical_notes",
+          "type": "string"
+        },
+        {
+          "name": "system",
+          "nullable": false,
+          "type": "string"
+        },
+        {
+          "name": "code",
+          "nullable": false,
+          "type": "string"
+        }
+      ],
+      "name": "note_codes",
+      "primaryKey": [
+        "id"
+      ],
+      "rows": [
+        {
+          "code": "I21.4",
+          "id": "c01",
+          "note_id": "n01",
+          "system": "ICD-10"
+        },
+        {
+          "code": "F32.1",
+          "id": "c02",
+          "note_id": "n03",
+          "system": "ICD-10"
+        },
+        {
+          "code": "F-1234",
+          "id": "c03",
+          "note_id": "n05",
+          "system": "SNOMED"
+        },
+        {
+          "code": "F41.0",
+          "id": "c04",
+          "note_id": "n06",
+          "system": "ICD-10"
+        },
+        {
+          "code": "Z63.0",
+          "id": "c05",
+          "note_id": "n06",
+          "system": "ICD-10"
+        },
+        {
+          "code": "F10.2",
+          "id": "c06",
+          "note_id": "n07",
+          "system": "icd-10"
+        },
+        {
+          "code": "I10",
+          "id": "c07",
+          "note_id": "n11",
+          "system": "ICD-10"
+        },
+        {
+          "code": "F17.2",
+          "id": "c08",
+          "note_id": "n11",
+          "system": "ICD-10"
+        },
+        {
+          "code": "E11.9",
+          "id": "c09",
+          "note_id": "n14",
+          "system": "ICD-10"
+        }
+      ]
+    }
+  ]
+}

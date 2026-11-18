@@ -1,0 +1,22 @@
+{
+  "action": "update_status",
+  "allowed": [],
+  "domain": "logistics",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "account": "ACME-001"
+    },
+    "id": "u-acme",
+    "roles": [
+      "customer"
+    ]
+  },
+  "principalName": "customer_acme",
+  "resourceKind": "shipment"
+}

@@ -1,0 +1,37 @@
+{
+  "action": "view",
+  "allowed": [
+    "o02",
+    "o03",
+    "o07"
+  ],
+  "domain": "retail",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.channel"
+          },
+          {
+            "value": "online"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {},
+    "id": "ag-sue",
+    "roles": [
+      "support_agent"
+    ]
+  },
+  "principalName": "agent_sue",
+  "resourceKind": "order"
+}

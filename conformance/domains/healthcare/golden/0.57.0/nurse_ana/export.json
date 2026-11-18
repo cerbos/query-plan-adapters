@@ -1,0 +1,27 @@
+{
+  "action": "export",
+  "allowed": [],
+  "domain": "healthcare",
+  "oracle": "empty",
+  "pdp": "0.57.0",
+  "plan": {
+    "kind": "KIND_ALWAYS_DENIED"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "region": "north",
+      "specialties": [],
+      "wards": [
+        "w1",
+        "w2"
+      ]
+    },
+    "id": "u-ana",
+    "roles": [
+      "nurse"
+    ]
+  },
+  "principalName": "nurse_ana",
+  "resourceKind": "clinical_note"
+}

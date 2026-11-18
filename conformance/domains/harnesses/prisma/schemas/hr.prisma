@@ -1,0 +1,46 @@
+model Department {
+  id         String     @id
+  name       String
+  costCenter String     @map("cost_center")
+  employees  Employee[]
+
+  @@map("departments")
+}
+
+model Location {
+  code      String     @id
+  country   String
+  city      String
+  employees Employee[]
+
+  @@map("locations")
+}
+
+model Employee {
+  id             String          @id
+  managerId      String?         @map("manager_id")
+  departmentId   String          @map("department_id")
+  locationCode   String          @map("location_code")
+  level          Int
+  employmentType String          @map("employment_type")
+  salaryBand     String?         @map("salary_band")
+  hiredOn        DateTime        @map("hired_on")
+  terminatedOn   DateTime?       @map("terminated_on")
+  workEmail      String          @map("work_email")
+  manager        Employee?       @relation("reports", fields: [managerId], references: [id])
+  reports        Employee[]      @relation("reports")
+  department     Department      @relation(fields: [departmentId], references: [id])
+  location       Location        @relation(fields: [locationCode], references: [code])
+  skills         EmployeeSkill[]
+
+  @@map("employees")
+}
+
+model EmployeeSkill {
+  employeeId String   @map("employee_id")
+  skill      String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  @@id([employeeId, skill])
+  @@map("employee_skills")
+}

@@ -66,6 +66,26 @@ module ConformanceMongoid
     embeds_one :inner, class_name: "ConformanceMongoid::Inner"
   end
 
+  class Peer
+    include ::Mongoid::Document
+
+    embedded_in :resource, class_name: "ConformanceMongoid::Resource"
+    field :aBool, type: ::Mongoid::Boolean
+    field :aString, type: String
+    field :aNumber, type: Integer
+    field :aOptionalString, type: String
+  end
+
+  class StepParent
+    include ::Mongoid::Document
+
+    embedded_in :resource, class_name: "ConformanceMongoid::Resource"
+    field :aBool, type: ::Mongoid::Boolean
+    field :aString, type: String
+    field :aNumber, type: Integer
+    field :aOptionalString, type: String
+  end
+
   class Resource
     include ::Mongoid::Document
 
@@ -86,6 +106,8 @@ module ConformanceMongoid
     embeds_many :tags, class_name: "ConformanceMongoid::Tag"
     embeds_many :categories, class_name: "ConformanceMongoid::Category"
     embeds_one :parent, class_name: "ConformanceMongoid::Parent"
+    embeds_one :peer, class_name: "ConformanceMongoid::Peer"
+    embeds_one :stepParent, class_name: "ConformanceMongoid::StepParent"
   end
 
   module_function

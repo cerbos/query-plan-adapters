@@ -1,0 +1,47 @@
+model Org {
+  id    String @id
+  name  String
+  plan  String
+  sites Site[]
+
+  @@map("orgs")
+}
+
+model Site {
+  id      String   @id
+  orgId   String   @map("org_id")
+  region  String
+  name    String
+  org     Org      @relation(fields: [orgId], references: [id])
+  devices Device[]
+
+  @@map("sites")
+}
+
+model Device {
+  id             String        @id
+  serial         String
+  model          String
+  firmware       String
+  siteId         String        @map("site_id")
+  lastSeenAt     DateTime?     @map("last_seen_at")
+  online         Boolean
+  batteryPct     Int?          @map("battery_pct")
+  labels         Json
+  decommissioned Boolean
+  site           Site          @relation(fields: [siteId], references: [id])
+  alerts         DeviceAlert[]
+
+  @@map("devices")
+}
+
+model DeviceAlert {
+  id           String  @id
+  deviceId     String  @map("device_id")
+  severity     Int
+  acknowledged Boolean
+  code         String
+  device       Device  @relation(fields: [deviceId], references: [id])
+
+  @@map("device_alerts")
+}

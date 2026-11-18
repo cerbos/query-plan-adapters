@@ -1,0 +1,104 @@
+{
+  "action": "read",
+  "allowed": [
+    "ar05",
+    "ar11"
+  ],
+  "domain": "media",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.author.id"
+                      },
+                      {
+                        "value": "au1"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.contributors"
+                      },
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "c.id"
+                                  },
+                                  {
+                                    "value": "au1"
+                                  }
+                                ],
+                                "operator": "eq"
+                              }
+                            },
+                            {
+                              "variable": "c"
+                            }
+                          ],
+                          "operator": "lambda"
+                        }
+                      }
+                    ],
+                    "operator": "exists"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.status"
+                },
+                {
+                  "value": [
+                    "draft",
+                    "review"
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          }
+        ],
+        "operator": "and"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "principal": {
+    "attr": {
+      "desks": [],
+      "languages": [
+        "en"
+      ]
+    },
+    "id": "au1",
+    "roles": [
+      "writer"
+    ]
+  },
+  "principalName": "writer_ola",
+  "resourceKind": "article"
+}
