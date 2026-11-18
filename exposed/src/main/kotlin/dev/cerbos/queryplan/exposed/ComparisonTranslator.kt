@@ -33,6 +33,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
+import java.time.temporal.ChronoUnit
 
 /**
  * Comparisons and string matches: everything the walk does not route by name. Ternary rewrite on
@@ -526,7 +527,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
             )
         }
         val target = scope.scalar(shifted.variable)
-        val base = compare(operator, target.expression, TimestampBinder.bind(solved, target.column, shifted.variable))
+        val base = instantLeaf(operator, target, solved, shifted.variable)
         if (shift.isZero) return base
         // The column values whose sum overflows: past MAX - shift, or before MIN - shift.
         val overflow = if (shift.isNegative) {
@@ -561,11 +562,7 @@ internal class ComparisonTranslator(private val translation: Translation) {
             )
         }
         val target = scope.scalar(since.variable)
-        return compare(
-            NormalizedBinary.mirror(operator),
-            target.expression,
-            TimestampBinder.bind(bound, target.column, since.variable),
-        )
+        return instantLeaf(NormalizedBinary.mirror(operator), target, bound, since.variable)
     }
 
     /**
@@ -816,7 +813,30 @@ internal class ComparisonTranslator(private val translation: Translation) {
     ): Op<Boolean> {
         val instant = constant.instant()
         val target = scope.scalar(field.variable)
-        return compare(operator, target.expression, TimestampBinder.bind(instant, target.column, field.variable))
+        return instantLeaf(operator, target, instant, field.variable)
+    }
+
+    /**
+     * A column against an instant. An instant finer than a microsecond is rounded when bound, and every
+     * store this adapter supports holds whole microseconds, so `x >= c` is solved as `x > floor(c)`, and
+     * no stored value equals it.
+     */
+    private fun instantLeaf(
+        operator: String,
+        target: Resolution.Scalar,
+        instant: Instant,
+        variable: String,
+    ): Op<Boolean> {
+        if (instant.nano % 1_000 == 0) {
+            return compare(operator, target.expression, TimestampBinder.bind(instant, target.column, variable))
+        }
+        val floor = TimestampBinder.bind(instant.truncatedTo(ChronoUnit.MICROS), target.column, variable)
+        return when (operator) {
+            "eq" -> NeqOp(target.expression, target.expression)
+            "ne" -> EqOp(target.expression, target.expression)
+            "gt", "ge" -> compare("gt", target.expression, floor)
+            else -> compare("le", target.expression, floor)
+        }
     }
 
     /**
