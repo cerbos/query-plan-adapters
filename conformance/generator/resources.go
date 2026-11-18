@@ -14,8 +14,8 @@ import (
 // and from every harness's stored row at once, so the differential would agree without testing
 // it: any key outside these sets is an error, and so is a missing one.
 var (
-	seedKeys     = []string{"id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList", "tags", "subCategoryNames", "parentSeedId"}
-	seedNoteKey  = "note"
+	seedKeys    = []string{"id", "aBool", "aString", "aNumber", "aOptionalString", "aNumberList", "aBoolList", "tags", "subCategoryNames", "parentSeedId"}
+	seedNoteKey = "note"
 	// peerSeedId is a to-one relation from a resource to another resource row (a self-relation);
 	// stepParentSeedId is a second to-one relation into the table parent lives in.
 	relationKeys = []string{"peerSeedId", "stepParentSeedId"}

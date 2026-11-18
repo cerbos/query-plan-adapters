@@ -70,20 +70,20 @@ type Attr struct {
 }
 
 type Schema struct {
-	Kind     string
-	Nulls    string
-	Root     string
-	Tables   []*Table
-	byName   map[string]*Table
-	Attrs    []*Attr
-	Note     string
+	Kind   string
+	Nulls  string
+	Root   string
+	Tables []*Table
+	byName map[string]*Table
+	Attrs  []*Attr
+	Note   string
 }
 
 type rawSchema struct {
-	Kind     string               `yaml:"kind"`
-	Nulls    string               `yaml:"nulls"`
-	Note     string               `yaml:"note"`
-	Tables   yaml.Node            `yaml:"tables"`
+	Kind     string    `yaml:"kind"`
+	Nulls    string    `yaml:"nulls"`
+	Note     string    `yaml:"note"`
+	Tables   yaml.Node `yaml:"tables"`
 	Resource struct {
 		Table      string    `yaml:"table"`
 		Attributes yaml.Node `yaml:"attributes"`
