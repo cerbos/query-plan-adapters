@@ -28,6 +28,7 @@ func failing(verdict string) bool { return verdict != verdictMatch && verdict !=
 type fuzzLegResults struct {
 	Adapter string            `json:"adapter"`
 	Store   string            `json:"store"`
+	Variant string            `json:"variant,omitempty"`
 	Results []fuzzCaseVerdict `json:"results"`
 }
 
@@ -40,7 +41,13 @@ type fuzzCaseVerdict struct {
 	Detail   string   `json:"detail,omitempty"`
 }
 
-func (l *fuzzLegResults) leg() string { return l.Adapter + " / " + l.Store }
+// leg names the leg, with the store variant it ran on (conformance/README.md, "Store variants").
+func (l *fuzzLegResults) leg() string {
+	if l.Variant != "" {
+		return l.Adapter + " / " + l.Store + " [" + l.Variant + "]"
+	}
+	return l.Adapter + " / " + l.Store
+}
 
 func readLegResults(dir string) ([]*fuzzLegResults, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "results", "*.json"))

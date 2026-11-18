@@ -5,6 +5,8 @@
 #   conformance/scripts/run-harness.sh <adapter> [store...]   # default: every store leg CI runs
 #   conformance/scripts/run-harness.sh --all                   # every adapter, one after another
 #   conformance/scripts/run-harness.sh --list                  # the roster and each adapter's stores
+#   conformance/scripts/run-harness.sh --variants <adapter> <store>   # the store variants a leg takes
+#   conformance/scripts/run-harness.sh --pick-variant <seed> <adapter> <store>
 #
 # Stores per adapter (the first is the default when CI runs only one):
 #   drizzle             sqlite postgres mysql
@@ -32,6 +34,9 @@
 #
 # With QPA_FUZZ_DIR set to an absolute path, every harness replays that fuzz run instead of the
 # corpus and writes its verdicts to QPA_FUZZ_DIR/results/ (conformance/README.md, "Fuzzing").
+#
+# With QPA_STORE_VARIANT set to a variant (store-variants.sh), each leg that starts that variant's
+# engine runs on it instead of the default configuration (conformance/README.md, "Store variants").
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,6 +46,8 @@ CACHE_DIR="${QPA_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/query-plan-adapter
 # talks to, so it is pinned here rather than in an <adapter>/*_IMAGE file.
 TEMURIN_IMAGE="eclipse-temurin:21-jdk"
 mkdir -p "${CACHE_DIR}"
+# shellcheck source=store-variants.sh
+source "${SCRIPT_DIR}/store-variants.sh"
 
 roster() {
   find "${REPO_ROOT}" -mindepth 2 -maxdepth 2 -name conformance-ledger.json \
@@ -77,7 +84,8 @@ cleanup() {
   CONTAINERS=()
   COMPOSE_DIRS=()
 }
-trap cleanup EXIT INT TERM
+VARIANT_APPLIED=""
+trap 'cleanup; [[ -z "${VARIANT_APPLIED}" ]] || restore_store_images' EXIT INT TERM
 
 wait_for() { # <description> <command...>: up to 60 tries, a second apart
   local what="$1"; shift
@@ -221,20 +229,41 @@ run_adapter() { # <adapter> [store...]
   for store in "${stores[@]}"; do
     [[ " ${known} " == *" ${store} "* ]] || die "${adapter} has no store '${store}' (stores: ${known})"
   done
+  local variant="${QPA_STORE_VARIANT:-default}"
+  [[ "${variant}" == default ]] || variant_known "${variant}" \
+    || die "no store variant '${variant}' (store-variants.sh lists them)"
   for store in "${stores[@]}"; do
-    echo "==> ${adapter} / ${store}" >&2
+    local leg_variant=default marker=""
+    if [[ "${variant}" != default ]] && leg_variants "${adapter}" "${store}" | grep -qx "${variant}"; then
+      leg_variant="${variant}"
+    fi
+    echo "==> ${adapter} / ${store}$([[ "${leg_variant}" == default ]] || echo " [${leg_variant}]")" >&2
+    if [[ "${leg_variant}" != default ]]; then
+      VARIANT_APPLIED=1
+      apply_store_variant "${leg_variant}" || die "could not build store variant ${leg_variant}"
+      if [[ -n "${QPA_FUZZ_DIR:-}" ]]; then
+        mkdir -p "${QPA_FUZZ_DIR}/results"
+        marker="$(mktemp "${QPA_FUZZ_DIR}/results/.leg-XXXX")"
+      fi
+    fi
     # A subshell, so a leg's cd and variables stay in it; it inherits no trap, so it sets its own.
     if (trap cleanup EXIT INT TERM; run_leg "${adapter}" "${store}"); then
-      RESULTS+=("pass  ${adapter} / ${store}")
+      RESULTS+=("pass  ${adapter} / ${store}$([[ "${leg_variant}" == default ]] || echo " [${leg_variant}]")")
     else
-      RESULTS+=("FAIL  ${adapter} / ${store}")
+      RESULTS+=("FAIL  ${adapter} / ${store}$([[ "${leg_variant}" == default ]] || echo " [${leg_variant}]")")
     fi
     cleanup
+    if [[ "${leg_variant}" != default ]]; then
+      [[ -n "${marker}" ]] && { label_fuzz_results "${leg_variant}" "${marker}"; rm -f "${marker}"; }
+      restore_store_images
+    fi
   done
 }
 
 case "${1:-}" in
-  "" | -h | --help) sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "" | -h | --help) sed -n '2,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  --variants) [[ $# -eq 3 ]] || die "--variants <adapter> <store>"; leg_variants "$2" "$3"; exit 0 ;;
+  --pick-variant) [[ $# -eq 4 ]] || die "--pick-variant <seed> <adapter> <store>"; pick_variant "$2" "$3" "$4"; exit 0 ;;
   --list) for adapter in $(roster); do printf '%-20s %s\n' "${adapter}" "$(stores_for "${adapter}" || echo '(not in this script)')"; done; exit 0 ;;
   --all)
     for adapter in $(roster); do
