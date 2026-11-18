@@ -1,0 +1,50 @@
+{
+  "allowed": [
+    "b1",
+    "b6",
+    "d1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/not-equals/same-table-field-to-field",
+  "intent": "The != form of two relations into the same table (parent.aString != stepParent.aString).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.parent.aString"
+          },
+          {
+            "variable": "request.resource.attr.stepParent.aString"
+          }
+        ],
+        "operator": "ne"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/not-equals/same-table-field-to-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aString != R.attr.stepParent.aString"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Unaliased, both operands read one row and != is false everywhere, denying b1, b6, d1 and f1; rows with only one of the two relations are missing attributes and stay denied."
+}

@@ -494,3 +494,31 @@ cases:
   condition:
     match:
       expr: '("finance" in R.attr.mainCategory.subNames) ? R.attr.aBool : !R.attr.aBool'
+- id: 'relation/equals/self-relation-one-hop-string'
+  tier: adversarial
+  intent: 'String equality on a field of peer, a to-one relation from the resource table to itself (peer.aString == "One").'
+  trap: 'c1 is its own peer. A subquery whose join compares the inner table with itself (peer.id = peer.peerId) instead of with the outer row is true for every row once c1 matches, and over-grants all of them; b1''s peer a1 holds "one".'
+  condition:
+    match:
+      expr: 'R.attr.peer.aString == "One"'
+- id: 'relation/equals/self-relation-field-to-field'
+  tier: adversarial
+  intent: 'A field of the self-relation peer compared with the same field on the root (peer.aNumber == aNumber).'
+  trap: 'Both operands live in one table. Binding the root operand to the joined peer row compares the peer with itself and admits every row that has a peer (a1, b1, d1, e1); only c1 (its own peer) and a3 (peer a8, both 2) are equal.'
+  condition:
+    match:
+      expr: 'R.attr.peer.aNumber == R.attr.aNumber'
+- id: 'relation/equals/same-table-field-to-field'
+  tier: adversarial
+  intent: 'Two to-one relations into the same table compared field to field (parent.aString == stepParent.aString).'
+  trap: 'parent and stepParent both join the parent table. Without distinct aliases both operands read one row, so the comparison is true for every row holding both relations (b1, b6, d1 and f1 as well as a1 and a9); b1 compares "One" with "one".'
+  condition:
+    match:
+      expr: 'R.attr.parent.aString == R.attr.stepParent.aString'
+- id: 'relation/not-equals/same-table-field-to-field'
+  tier: adversarial
+  intent: 'The != form of two relations into the same table (parent.aString != stepParent.aString).'
+  trap: 'Unaliased, both operands read one row and != is false everywhere, denying b1, b6, d1 and f1; rows with only one of the two relations are missing attributes and stay denied.'
+  condition:
+    match:
+      expr: 'R.attr.parent.aString != R.attr.stepParent.aString'

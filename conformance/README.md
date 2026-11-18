@@ -276,6 +276,13 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   - Materialise a *separate* parent row per resource.
   - An absent level is a missing attribute, so it is UNKNOWN under negation, never false. See
     [ADR 0005](../docs/adr/0005-the-conformance-corpus-carries-a-real-to-one-relation.md).
+- **Two more to-one relations, for joins that reach a table twice.**
+  - `peerSeedId` names the seed whose own row is this resource's `peer`: a foreign key from the
+    resource table to itself. c1 is its own peer, as the top of a hierarchy often is.
+  - `stepParentSeedId` is a second relation into the parent table, materialised as a separate
+    row there like `parent`.
+  - Both carry `aBool`, `aNumber`, `aString` and `aOptionalString`, and no `inner`. A join
+    must alias each occurrence of a table, and correlate a self-relation with the outer row.
 - **The store's default collation is part of conformance.** CEL string comparison is byte-exact,
   and CEL orders strings by code point, so a SQL adapter collates its own strings rather than
   trusting the column's:
