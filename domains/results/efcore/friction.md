@@ -37,26 +37,25 @@ is one explicit `Field`/`List` line, so the map is roughly one line per projecte
 | Domain | File / map / model lines | Configured beyond the obvious | Could not express | Score |
 |---|---|---|---|---|
 | healthcare | 103 / 18 / 14 | `noteType` → column `type`, `deleted` → `is_deleted`; PK `note_id`; composite-key care team | nothing | 2 |
-| fintech | 123 / 23 / 21 | counterparty as an owned type with three `HasColumnName`s; **`decimal` rejected by `Field`**, mapped as `(double)p.Amount` / `(double?)…OverdraftLimit` | nothing (after the cast) | 3 |
-| logistics | 105 / 22 / 15 | two `HasOne` to `hubs` with explicit FKs and `NoAction`; nullable carrier; `(double)DeclaredValue` cast | `c.hub.code`: a to-one object inside a list element (refused) | 4 |
+| fintech | 123 / 23 / 21 | counterparty as an owned type with three `HasColumnName`s; `decimal` columns mapped directly (`p => p.Amount`) since the fix below | nothing | 3 |
+| logistics | 105 / 22 / 15 | two `HasOne` to `hubs` with explicit FKs and `NoAction`; nullable carrier; `decimal` `DeclaredValue` | `c.hub.code`: a to-one object inside a list element (refused) | 4 |
 | education | 100 / 19 / 9 | list path through two to-one hops (`s.Assignment.Course.Staff`) works as is | nothing | 2 |
 | legal | 103 / 18 / 14 | `Nulls = NullConvention.Explicit` for the call; two scalar lists on the matter | nothing | 2 |
 | retail | 85 / 19 / 7 | `ToTable("order")`; EF quotes it on every provider; BIGINT as `long` | nothing | 1 |
 | hr | 81 / 15 / 12 | self-relation `HasOne(Manager).WithMany().HasForeignKey(ManagerId)`; `e.Manager!.Manager!.Id`; natural key `locations.code` | nothing | 2 |
 | media | 79 / 17 / 14 | many-to-many as an EF skip navigation (`UsingEntity("article_contributors", …)`, shadow FKs); `keywords` as a `List<string>` primitive collection (`text[]` on PostgreSQL, JSON text elsewhere) mapped `List(…, a => a.Keywords, k => k)` | `slug.matches("^[a-z0-9]+(-[a-z0-9]+)*$")` (documented regex refusal) | 3 |
 | iot | 96 / 19 / 13 | `labels` as an owned `ToJson("labels")` type with fixed `Env`/`Tier`/`Restricted` properties, each mapped as `labels.<key>` | `"tier" in R.attr.labels` (the whole map) is refused; a free-form key outside the CLR class cannot be mapped at all | 4 |
-| government | 81 / 17 / 7 | explicit nulls; `(double?)MonthlyAmount` cast; natural key `agencies.code` | `caseNumber.matches("^[A-Z]{2}-[0-9]{4}-[0-9]+$")` (documented regex refusal) | 2 |
+| government | 81 / 17 / 7 | explicit nulls; `decimal?` `MonthlyAmount`; natural key `agencies.code` | `caseNumber.matches("^[A-Z]{2}-[0-9]{4}-[0-9]+$")` (documented regex refusal) | 2 |
 
 Notes:
 
-- **`decimal` is rejected.** The README's Gotchas says "An `int`, `long` or `decimal` column is
-  converted to `double` in SQL". But `ScalarKinds.Of` (Values.cs) has no `decimal`, so
-  `Field("…amount", p => p.Amount)` throws `ArgumentException` when the map is built. The fix in
-  user code is a cast in the path lambda, `p => (double)p.Amount`. EF translates the cast on all
-  three providers, including SQLite, where EF stores `decimal` as TEXT. With the cast, every
-  DECIMAL comparison against a double literal passes (fintech 5000.50 / 5000.51, government
-  nullable amounts, logistics declared value). This is a mismatch between the code and the
-  README. It is not unsafe.
+- **`decimal` was rejected; fixed.** The README's Gotchas says "An `int`, `long` or `decimal` column is
+  converted to `double` in SQL", but `ScalarKinds.Of` (Values.cs) had no `decimal`, so
+  `Field("…amount", p => p.Amount)` threw `ArgumentException` when the map was built. The first run
+  mapped `p => (double)p.Amount`. `ScalarKinds.Of` now accepts `decimal`, the casts are gone, and
+  the results are unchanged on all three stores, including SQLite, where EF stores `decimal` as TEXT
+  (fintech 5000.50 / 5000.51, government nullable amounts, logistics declared value). The
+  conformance harness holds `parent.aNumber` in a `decimal?` column to keep it covered.
 - **No object mapping inside a list element.** At the root, a dotted name such as
   `request.resource.attr.patient.ward.id` maps through navigations. Inside `List(…, fields)`, the
   translator resolves each segment against the element's fields. A field cannot be an object, so

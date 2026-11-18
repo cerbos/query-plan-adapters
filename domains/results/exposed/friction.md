@@ -19,9 +19,13 @@ Plans arrive as `PlanResourcesResponse` (protobuf `JsonFormat`) and go to `Expos
 | h2 | 337 | 14 | 15 | 2 | 0 |
 | sqlite | 337 | 14 | 15 | 2 | 0 |
 | postgres | 337 | 14 | 15 | 2 | 0 |
-| mysql | 335 | 14 | 15 | **4** | 0 |
+| mysql | 337 | 14 | 15 | 2 | 0 |
 
 ## HEADLINE: MySQL over-grant from the index-friendly collation pair (legal `lawyer_ali view`, both PDPs)
+
+**Fixed.** The membership subquery now collates the column side, `(CONVERT(col USING utf8mb4) COLLATE utf8mb4_0900_bin) = ...`,
+as jpa does, and legal `lawyer_ali view` passes on MySQL. The conformance harness indexes `adversarial_tags (resource_id, name)`,
+which reproduced the over-grant on c1's `Public` before the fix. The rest of this section is the original finding.
 
 The plan is the same on both PDPs: `not(in("l-ali", R.matter.screened)) && in("l-ali", R.matter.team) && not(in("l-ali", R.matter.screened))`.
 Allowed: d01, d02, d03. MySQL returns d01, d02, d03, **d08, d09**.
@@ -85,8 +89,8 @@ through a join table (media), which has no declaration at all.
 
 ## Non-pass verdicts by cause
 
-**Adapter bug, MySQL only: the collation prefilter is dropped in a correlated subquery (over-grant).**
-- legal `lawyer_ali view` (0.56.0 and 0.57.0): d08 and d09. Repro above.
+**Adapter bug, MySQL only: the collation prefilter is dropped in a correlated subquery (over-grant). Fixed.**
+- legal `lawyer_ali view` (0.56.0 and 0.57.0): d08 and d09 before the fix; passes now. Repro above.
 
 **PDP 0.56.0 folds `has()` to true (plan wrong, adapter faithful). Every store, 0.56.0 only.**
 - over-grant: healthcare `patient_p3 view` (n13: `has(signedAt)` dropped, `signed_at` NULL); hr `mgr_e02 view_compensation`

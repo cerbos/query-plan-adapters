@@ -2121,9 +2121,14 @@
       "pdp": "0.57.0",
       "principal": "ceo_e01",
       "action": "view",
-      "verdict": "under-grant",
+      "verdict": "pass",
       "returned": [
-        "e01"
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e07"
       ],
       "allowed": [
         "e01",
@@ -2140,8 +2145,11 @@
       "pdp": "0.57.0",
       "principal": "ceo_e01",
       "action": "view_compensation",
-      "verdict": "under-grant",
-      "returned": [],
+      "verdict": "pass",
+      "returned": [
+        "e02",
+        "e03"
+      ],
       "allowed": [
         "e02",
         "e03"
@@ -2365,9 +2373,13 @@
       "pdp": "0.57.0",
       "principal": "mgr_e02",
       "action": "view",
-      "verdict": "under-grant",
+      "verdict": "pass",
       "returned": [
-        "e02"
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
       ],
       "allowed": [
         "e02",
@@ -2383,8 +2395,10 @@
       "pdp": "0.57.0",
       "principal": "mgr_e02",
       "action": "view_compensation",
-      "verdict": "under-grant",
-      "returned": [],
+      "verdict": "pass",
+      "returned": [
+        "e04"
+      ],
       "allowed": [
         "e04"
       ],
@@ -2478,8 +2492,11 @@
       "pdp": "0.56.0",
       "principal": "ceo_e01",
       "action": "view_compensation",
-      "verdict": "under-grant",
-      "returned": [],
+      "verdict": "pass",
+      "returned": [
+        "e02",
+        "e03"
+      ],
       "allowed": [
         "e02",
         "e03"
@@ -2714,8 +2731,11 @@
       "pdp": "0.56.0",
       "principal": "mgr_e02",
       "action": "view_compensation",
-      "verdict": "under-grant",
-      "returned": [],
+      "verdict": "over-grant",
+      "returned": [
+        "e04",
+        "e05"
+      ],
       "allowed": [
         "e04"
       ],
@@ -3912,8 +3932,14 @@
       "pdp": "0.57.0",
       "principal": "customs_us",
       "action": "view",
-      "verdict": "under-grant",
-      "returned": [],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
       "allowed": [
         "s01",
         "s04",
@@ -4128,8 +4154,14 @@
       "pdp": "0.56.0",
       "principal": "customs_us",
       "action": "view",
-      "verdict": "under-grant",
-      "returned": [],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
       "allowed": [
         "s01",
         "s04",

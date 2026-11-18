@@ -26,9 +26,14 @@ Totals out of 368:
 
 | Store | pass | refused | error | under | over |
 |---|---|---|---|---|---|
-| sqlite | 331 | 8 | 1 | 27 | 1 |
-| postgres | 327 | 12 | 1 | 27 | 1 |
-| mysql | 327 | 12 | 1 | 27 | 1 |
+| sqlite | 338 | 8 | 1 | 19 | 2 |
+| postgres | 334 | 12 | 1 | 19 | 2 |
+| mysql | 334 | 12 | 1 | 19 | 2 |
+
+After the alias fix (latent over-grants 2 and 3 below): the 6 hr self-relation and 2 logistics under-grants
+per store pass, except hr 0.56.0 `mgr_e02` `view_compensation`, which is now an over-grant from the 0.56.0
+planner dropping `has(R.attr.salaryBand)` (e05 has no salary band). The two probes below return exactly the
+matching rows.
 
 ## Per domain
 

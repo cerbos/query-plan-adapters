@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const pdpRepository = "ghcr.io/cerbos/cerbos"
+
 type pdpPin struct {
 	Tag    string `json:"tag"`
 	Digest string `json:"digest"`
@@ -130,7 +132,7 @@ func record(ctx context.Context, repo, dir string) error {
 	}
 	sort.Strings(names)
 	for _, pin := range pins {
-		image := "ghcr.io/cerbos/cerbos:" + pin.Tag
+		image := fmt.Sprintf("%s:%s@%s", pdpRepository, pin.Tag, pin.Digest)
 		p, err := startPDP(ctx, image, policies)
 		if err != nil {
 			return fmt.Errorf("%s %s: %w", domain, pin.Tag, err)

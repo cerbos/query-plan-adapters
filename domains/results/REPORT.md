@@ -1,5 +1,11 @@
 # Domain stress results, 2026-11-18
 
+**Follow-up (same day):** the drizzle and exposed over-grants below are fixed on this branch, with
+corpus cases `relation/*/self-relation-*` and `relation/*/same-table-field-to-field` and an indexed
+tag table in the exposed MySQL harness; efcore now accepts `decimal` columns. The verdict table
+reflects the re-runs. The PDP's merging of `x != null` with `x != ""` / `x != false` is an
+over-grant in the plan itself; see the planner section.
+
 Sixteen adapters, ten domains, every store leg the adapter's CI runs, 368 goldens per leg (184 per
 PDP, 0.57.0 and 0.56.0). Each adapter has a hand-written mapping per domain; its `friction.md`
 says what each mapping took.
@@ -36,9 +42,11 @@ reproduced against the real store.
 - **0.56.0 drops `has()` conjuncts.** Both over-grants every adapter shows (healthcare
   `patient_p3 view` returns n13, hr `mgr_e02 view_compensation` returns e05) come from this, plus
   9 to 13 under-grants per leg. 0.57.0 keeps `has()` and those cases pass.
-- **0.57.0 still mis-plans three shapes (under-grants, fail closed):**
-  - `R.attr.privilege == null || R.attr.privilege == ""` (explicit nulls) is planned as
-    `privilege == null` alone, so the `""` row (legal d06) is lost.
+- **The plan merges `x == null` with `x == ""` or `x == false` (0.57.0 and 0.56.0).**
+  `dedupNodes` hashes CEL constants without the oneof case, so `null`, `""` and `false` collide:
+  `x != null && x != ""` plans as `x != null` and over-grants every `""` row, and
+  `x == null || x == ""` plans as `x == null` (legal d06 under-granted here).
+- **0.57.0 also mis-plans two `has()` shapes (under-grants, fail closed):**
   - `!(has(R.attr.patient.vip) && R.attr.patient.vip)` is planned as `!vip`, so a row with no
     `vip` is lost (healthcare nurse_ana).
   - A DENY rule `has(R.attr.labels.restricted) && R.attr.labels.restricted == "yes"` loses its
@@ -69,9 +77,9 @@ reproduced against the real store.
 | activerecord | postgres | 337 | 12 | 0 | 17 | 2 | 175 / 0 |
 | activerecord | sqlite | 337 | 12 | 0 | 17 | 2 | 175 / 0 |
 | convex | convex | 349 | 0 | 0 | 17 | 2 | 181 / 0 |
-| drizzle | mysql | 327 | 12 | 1 | 27 | 1 | 168 / 0 |
-| drizzle | postgres | 327 | 12 | 1 | 27 | 1 | 168 / 0 |
-| drizzle | sqlite | 331 | 8 | 1 | 27 | 1 | 170 / 0 |
+| drizzle | mysql | 334 | 12 | 1 | 19 | 2 | 173 / 0 |
+| drizzle | postgres | 334 | 12 | 1 | 19 | 2 | 173 / 0 |
+| drizzle | sqlite | 338 | 8 | 1 | 19 | 2 | 175 / 0 |
 | efcore | postgres | 341 | 8 | 0 | 17 | 2 | 177 / 0 |
 | efcore | sqlite | 341 | 8 | 0 | 17 | 2 | 177 / 0 |
 | efcore | sqlserver | 341 | 8 | 0 | 17 | 2 | 177 / 0 |
@@ -81,7 +89,7 @@ reproduced against the real store.
 | ent | postgres | 337 | 12 | 0 | 17 | 2 | 175 / 0 |
 | ent | sqlite | 337 | 12 | 0 | 17 | 2 | 175 / 0 |
 | exposed | h2 | 337 | 14 | 0 | 15 | 2 | 175 / 0 |
-| exposed | mysql | 335 | 14 | 0 | 15 | 4 | 174 / 1 |
+| exposed | mysql | 337 | 14 | 0 | 15 | 2 | 175 / 0 |
 | exposed | postgres | 337 | 14 | 0 | 15 | 2 | 175 / 0 |
 | exposed | sqlite | 337 | 14 | 0 | 15 | 2 | 175 / 0 |
 | jpa | h2 | 331 | 20 | 0 | 15 | 2 | 172 / 0 |
