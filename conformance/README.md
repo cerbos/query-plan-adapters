@@ -36,6 +36,7 @@ conformance/scripts/run-harness.sh <adapter>   # one adapter's harness, its stor
 | `golden/<tag>/<case id>.json` | For each PDP: the plan, the allowed ids, and the case's intent and trap. | generator |
 | `golden/CHANGES.md` | What changed between the previous and current PDP. | generator |
 | `generator/` | The Go program that writes everything marked "generator". | hand |
+| `domains/` | The domain stress kit: ten domain models with their own policies and goldens, and each adapter's harness for them, run by hand and outside CI ([domains/README.md](domains/README.md)). | hand, `domains/kit` |
 
 A file marked "generator" changes only by editing the cases or the dataset and re-running the
 generator. CI's `-check` fails on a hand-edited or stale one.

@@ -6,4 +6,3 @@ prisma/dev-adversarial.db
 prisma/dev-adversarial.db-journal
 tsconfig.tsbuildinfo
 src/generated/**
-domains/generated/

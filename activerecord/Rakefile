@@ -39,8 +39,3 @@ rescue LoadError
 end
 
 task default: [:docs, :lint, :test]
-
-desc "Replay the domain stress kit (../domains) and write ../domains/results; not part of CI"
-task "test:domains" do
-  ruby "domains/harness.rb"
-end

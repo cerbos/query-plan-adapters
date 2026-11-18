@@ -1,0 +1,11 @@
+{
+  "name": "domain-harness-drizzle",
+  "private": true,
+  "//": "Runs with the adapter's own toolchain and dependencies: npm ci in ../../../../drizzle first.",
+  "scripts": {
+    "test": "npm run test:sqlite && npm run test:postgres && npm run test:mysql",
+    "test:sqlite": "DOMAIN_STORE=sqlite ../../../../drizzle/node_modules/.bin/jest -c jest.config.js",
+    "test:postgres": "DOMAIN_STORE=postgres ../../../../drizzle/node_modules/.bin/jest -c jest.config.js",
+    "test:mysql": "DOMAIN_STORE=mysql ../../../../drizzle/node_modules/.bin/jest -c jest.config.js"
+  }
+}
