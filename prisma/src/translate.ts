@@ -23,7 +23,12 @@ import {
   handleOverlapsOperator,
 } from "./hierarchy";
 import type { PrismaFilter } from "./index";
-import { isResolvedValue, lookupMapping, resolveFieldReference } from "./mapping";
+import {
+  isResolvedValue,
+  lookupMapping,
+  recordErroringNullElement,
+  resolveFieldReference,
+} from "./mapping";
 import type { ResolvedOperand, TranslationContext } from "./mapping";
 import {
   assertDefined,
@@ -164,6 +169,9 @@ function booleanFieldReference(name: string, context: TranslationContext) {
       `A ${fieldRef.valueType} field in boolean position is a CEL type error`
     );
   }
+
+  // A null element of a boolean list in condition position is an error, not false.
+  recordErroringNullElement(context, { name }, fieldRef);
 
   return fieldRef;
 }

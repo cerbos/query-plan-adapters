@@ -250,6 +250,39 @@ function parseLambdaMacro(expr: OperatorOperand):
 }
 
 /**
+ * When the body is TRUE (`holds`) and FALSE (`fails`) with `name` an error: CEL's && and ||
+ * absorb an erroring operand once another decides them, as SQL's do a NULL. Any other operator
+ * reading `name` is taken as erroring, which can only under-grant.
+ */
+function decidedWithout(
+  expr: PlanExpressionOperand,
+  name: string
+): { holds: PlanExpressionOperand; fails: PlanExpressionOperand } {
+  if (!mentionsVariable(expr, name)) {
+    return { holds: expr, fails: { operator: "not", operands: [expr] } };
+  }
+
+  if (!isOperatorOperand(expr) || !["and", "or", "not"].includes(expr.operator)) {
+    return { holds: { value: false }, fails: { value: false } };
+  }
+
+  const parts = expr.operands.map((operand) => decidedWithout(operand, name));
+
+  if (expr.operator === "not") {
+    return { holds: parts[0]!.fails, fails: parts[0]!.holds };
+  }
+
+  const all = (operands: PlanExpressionOperand[]) => ({ operator: "and", operands });
+  const any = (operands: PlanExpressionOperand[]) => ({ operator: "or", operands });
+  const holds = parts.map((part) => part.holds);
+  const fails = parts.map((part) => part.fails);
+
+  return expr.operator === "and"
+    ? { holds: all(holds), fails: any(fails) }
+    : { holds: any(holds), fails: all(fails) };
+}
+
+/**
  * Rewrites lambda bodies that reference columns of an ENCLOSING scope (the root row, or an
  * outer lambda's element) so that every filter lands on the model it belongs to. Without this,
  * an outer column referenced inside `tags.exists(t, ...)` would be emitted as a field of the
@@ -259,9 +292,9 @@ function parseLambdaMacro(expr: OperatorOperand):
  *   `exists(c, P(c)) && Q`. Valid in three-valued logic (AND distributes over the per-element
  *   OR), including the empty-collection case (both sides are FALSE).
  * - Case split (any collection op): a bare outer boolean reference Q in a boolean position
- *   becomes `(Q && op[Q:=true]) || (!Q && op[Q:=false]) || (Q && !Q && exists(c, true))`. The
- *   contradiction arm keeps the whole expression UNKNOWN (not FALSE) when Q is NULL-derived and
- *   the collection has elements, mirroring the guarded-ternary encoding.
+ *   becomes `(Q && op[Q:=true]) || (!Q && op[Q:=false]) || (Q && !Q && <some body errors>) ||
+ *   op[body holds without Q]`. With Q NULL-derived, the contradiction arm keeps the expression
+ *   UNKNOWN when CEL errors, and the last arm TRUE when CEL holds without reading Q.
  */
 export function hoistOuterScopeReferences(
   expr: PlanExpressionOperand,
@@ -330,6 +363,16 @@ export function hoistOuterScopeReferences(
     const q: PlanExpressionOperand = { name: outerRef };
     const notQ: PlanExpressionOperand = { operator: "not", operands: [q] };
 
+    const overElements = (operator: string, element: PlanExpressionOperand): OperatorOperand => ({
+      operator,
+      operands: [collection, { operator: "lambda", operands: [element, variable] }],
+    });
+    const { holds, fails } = decidedWithout(body, outerRef);
+    const errors: PlanExpressionOperand = {
+      operator: "and",
+      operands: [{ operator: "not", operands: [holds] }, { operator: "not", operands: [fails] }],
+    };
+
     const arms: PlanExpressionOperand[] = [
       {
         operator: "and",
@@ -339,28 +382,23 @@ export function hoistOuterScopeReferences(
         operator: "and",
         operands: [notQ, rebuild(substituteNamedOperand(body, outerRef, false))],
       },
-      // Contradiction arm: UNKNOWN when the reference is NULL-derived, never TRUE. CEL never
-      // evaluates the body over an empty collection, so there the arm is FALSE, not UNKNOWN.
+      // Contradiction arm: UNKNOWN when the reference is NULL-derived and some element's body
+      // errors on it (for all(), with no element false regardless), never TRUE.
       {
         operator: "and",
         operands: [
           q,
           notQ,
-          {
-            operator: "exists",
-            operands: [collection, { operator: "lambda", operands: [{ value: true }, variable] }],
-          },
+          overElements("exists", errors),
+          ...(expr.operator === "all"
+            ? [overElements("all", { operator: "not", operands: [fails] })]
+            : []),
         ],
       },
+      // Elements decided without the reference decide the macro when it is missing: CEL's &&
+      // and || absorb the error. Over an empty collection all() holds this way too (#488).
+      rebuild(holds),
     ];
-
-    // all() over an empty collection never evaluates its body, so CEL holds it TRUE even when
-    // the reference is missing; the arms above are all UNKNOWN on that row. `all(c, false)` is
-    // TRUE exactly when the collection is empty, and definite, so it restores that row without
-    // touching any other (#488).
-    if (expr.operator === "all") {
-      arms.push(rebuild({ value: false }));
-    }
 
     return { operator: "or", operands: arms };
   }
