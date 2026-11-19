@@ -60,6 +60,9 @@ public static class Corpus
 
     public static bool Fuzzing => FuzzDir is not null;
 
+    /// <summary>A fuzz run recorded with generated rows carries its own dataset, which replaces the corpus's.</summary>
+    public static string DatasetDir => FuzzDir is not null && File.Exists(Path.Combine(FuzzDir, "seeds.json")) ? FuzzDir : ConformanceDir;
+
     /// <summary>Every golden file recorded for a tag (in fuzz mode, the run's), by case id.</summary>
     public static SortedDictionary<string, JsonNode> Goldens(string tag) => GoldenCache.GetOrAdd(tag, ReadGoldens);
 
@@ -133,9 +136,9 @@ public static class Corpus
 
     public sealed record DerivedFile(Dictionary<string, Derived> Derived);
 
-    public static List<Seed> Seeds() => Read<SeedsFile>(Path.Combine(ConformanceDir, "seeds.json")).Seeds;
+    public static List<Seed> Seeds() => Read<SeedsFile>(Path.Combine(DatasetDir, "seeds.json")).Seeds;
 
-    public static Dictionary<string, Derived> DerivedFields() => Read<DerivedFile>(Path.Combine(ConformanceDir, "derived-fields.json")).Derived;
+    public static Dictionary<string, Derived> DerivedFields() => Read<DerivedFile>(Path.Combine(DatasetDir, "derived-fields.json")).Derived;
 
     // -- fuzz mode --------------------------------------------------------------------------------
 

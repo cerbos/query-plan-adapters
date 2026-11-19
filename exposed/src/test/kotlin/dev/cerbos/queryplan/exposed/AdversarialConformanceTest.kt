@@ -106,7 +106,7 @@ class AdversarialConformanceTest {
         @BeforeAll
         @JvmStatic
         fun setUp() {
-            val conformance = Corpus.conformanceDir()
+            val conformance = Corpus.datasetDir()
             val lacks = Corpus.lacks(TestStore.selected())
             val all = Corpus.JSON.readTree(conformance.resolve("seeds.json").toFile())["seeds"].toList()
             unheld = all.filter { s -> s.path("requires").any { it.asText() in lacks } }

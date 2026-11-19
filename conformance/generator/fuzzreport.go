@@ -93,7 +93,11 @@ func runFuzzReport(args []string) error {
 	if err != nil {
 		return err
 	}
-	report, failures := fuzzReport(m, cases, legs)
+	unheld, err := requiringRows(*dir)
+	if err != nil {
+		return err
+	}
+	report, failures := fuzzReport(m, cases, legs, unheld)
 	if err := os.WriteFile(filepath.Join(*dir, "report.md"), []byte(report), 0o644); err != nil {
 		return err
 	}
@@ -116,7 +120,7 @@ type legFailure struct {
 // points at the plan and check() disagreeing, which no adapter can fix. A leg that reports fewer
 // results than the run holds is noted with the cases it lacks, since a harness may replay only the
 // cases a store shape reads (sqlalchemy's postgresql-pgArray), but a case that hung leaves a gap too.
-func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults) (string, int) {
+func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults, unheld map[string]bool) (string, int) {
 	describe := map[string]string{}
 	for _, fc := range cases {
 		describe[fc.ID] = fc.describe()
@@ -129,15 +133,24 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults) (stri
 	failures := 0
 
 	fmt.Fprintf(&b, "# Fuzz report: seed %d\n\n", m.Seed)
-	steer := ""
+	reproduce := fmt.Sprintf("fuzz -seed %d -count %d", m.Seed, m.Count)
+	if m.Rows > 0 {
+		reproduce += fmt.Sprintf(" -rows %d", m.Rows)
+	}
 	if m.Steer != nil {
-		steer = fmt.Sprintf(" -steer %s -steer-goal %s", strings.Join(m.Steer.From, ","), m.Steer.Goal)
+		reproduce += fmt.Sprintf(" -steer %s -steer-goal %s", strings.Join(m.Steer.From, ","), m.Steer.Goal)
 		if len(m.Steer.Adapters) > 0 {
-			steer += " -steer-adapters " + strings.Join(m.Steer.Adapters, ",")
+			reproduce += " -steer-adapters " + strings.Join(m.Steer.Adapters, ",")
 		}
 	}
-	fmt.Fprintf(&b, "%d of %d generated cases kept (manifest.json says why the others were dropped), replayed against PDP %s. Reproduce with `go -C conformance/generator run . fuzz -seed %d -count %d%s -out <dir>`.\n\n",
-		m.Kept, m.Count, strings.Join(m.Tags, " and "), m.Seed, m.Count, steer)
+	if m.Kind == "compose" {
+		reproduce = fmt.Sprintf("fuzz-compose -seed %d -count %d", m.Seed, m.Count)
+		if m.From != "" {
+			reproduce += " -from " + m.From
+		}
+	}
+	fmt.Fprintf(&b, "%d of %d generated cases kept (manifest.json says why the others were dropped), replayed against PDP %s. Reproduce with `go -C conformance/generator run . %s -out <dir>`.\n\n",
+		m.Kept, m.Count, strings.Join(m.Tags, " and "), reproduce)
 	b.WriteString("| Leg | Match | Refused | Over-grant | Under-grant | Error | Refusal rate |\n|---|---:|---:|---:|---:|---:|---:|\n")
 	var partial []string
 	for _, l := range legs {
@@ -178,7 +191,7 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults) (stri
 	})
 	var adapter, planner []key
 	for _, k := range keys {
-		if suspectPlanner(byCase[k], legs, k.pdp, k.id) {
+		if suspectPlanner(byCase[k], legs, k.pdp, k.id, unheld) {
 			planner = append(planner, k)
 			continue
 		}
@@ -233,9 +246,10 @@ func missingCases(l *fuzzLegResults, cases []*fuzzCase, tags []string) string {
 }
 
 // suspectPlanner reports whether two or more legs translated the case, and every one that did
-// got the same rows wrong. It compares the wrong rows rather than the rows returned, since a
-// store that cannot hold a seed (j4) expects a different set.
-func suspectPlanner(fails []legFailure, legs []*fuzzLegResults, pdp, id string) bool {
+// got the same rows wrong. It compares the wrong rows rather than the rows returned, and leaves out
+// the rows that require a store capability, since a store that cannot hold one (j4) expects a
+// different set.
+func suspectPlanner(fails []legFailure, legs []*fuzzLegResults, pdp, id string, unheld map[string]bool) bool {
 	translated := 0
 	for _, l := range legs {
 		for _, r := range l.Results {
@@ -247,9 +261,9 @@ func suspectPlanner(fails []legFailure, legs []*fuzzLegResults, pdp, id string) 
 	if translated < 2 || len(fails) != translated {
 		return false
 	}
-	first := wrongRows(fails[0].r)
+	first := wrongRows(fails[0].r, unheld)
 	for _, f := range fails {
-		if f.r.Verdict == verdictError || wrongRows(f.r) != first {
+		if f.r.Verdict == verdictError || wrongRows(f.r, unheld) != first {
 			return false
 		}
 	}
@@ -257,7 +271,7 @@ func suspectPlanner(fails []legFailure, legs []*fuzzLegResults, pdp, id string) 
 }
 
 // wrongRows is the rows a leg returned that it should not have, then the rows it missed.
-func wrongRows(r fuzzCaseVerdict) string {
+func wrongRows(r fuzzCaseVerdict, unheld map[string]bool) string {
 	diff := func(a, b []string) []string {
 		in := map[string]bool{}
 		for _, id := range b {
@@ -265,7 +279,7 @@ func wrongRows(r fuzzCaseVerdict) string {
 		}
 		var out []string
 		for _, id := range a {
-			if !in[id] {
+			if !in[id] && !unheld[id] {
 				out = append(out, id)
 			}
 		}
@@ -282,4 +296,30 @@ func tableCell(s string) string {
 		s = s[:200] + "…"
 	}
 	return s
+}
+
+// requiringRows is the ids of the rows that require a store capability, in the dataset the run was
+// recorded against: the fuzz directory's own, or the corpus's.
+func requiringRows(dir string) (map[string]bool, error) {
+	path := filepath.Join(dir, "seeds.json")
+	if _, err := os.Stat(path); err != nil {
+		conf, err := findConformanceDir()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(conf, "seeds.json")
+	}
+	var f struct {
+		Seeds []map[string]any `json:"seeds"`
+	}
+	if err := decodeJSONFile(path, &f); err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, s := range f.Seeds {
+		if s[requiresKey] != nil {
+			out[s["id"].(string)] = true
+		}
+	}
+	return out, nil
 }

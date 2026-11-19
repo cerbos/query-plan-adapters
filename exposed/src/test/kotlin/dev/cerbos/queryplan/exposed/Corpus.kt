@@ -39,6 +39,12 @@ internal object Corpus {
     fun conformanceDir(): Path =
         Path.of(System.getProperty("user.dir"), "..", "conformance").normalize()
 
+    /** A fuzz run recorded with generated rows carries its own dataset, which replaces the corpus's. */
+    fun datasetDir(): Path {
+        val fuzzDir = System.getenv("QPA_FUZZ_DIR").orEmpty()
+        return if (fuzzDir.isNotEmpty() && Files.exists(Path.of(fuzzDir, "seeds.json"))) Path.of(fuzzDir) else conformanceDir()
+    }
+
     fun readJson(file: Path): JsonNode = JSON.readTree(file.toFile())
 
     // -- the PDPs and their goldens ---------------------------------------------------------------

@@ -212,7 +212,9 @@ harness. A fuzz run is never committed and never gates a pull request; what it f
 
 ```bash
 conformance/scripts/fuzz.sh -s 7 -n 500 [adapter...]   # record, replay every store leg, report
-go -C conformance/generator run . fuzz -seed 7 -count 500 -out <dir>   # record only (Docker)
+conformance/scripts/fuzz.sh -s 7 -r 40 [adapter...]     # the same, with 40 generated rows
+go -C conformance/generator run . fuzz -seed 7 -count 500 [-rows 40] -out <dir>   # record only (Docker)
+go -C conformance/generator run . fuzz-compose -seed 7 -count 500 [-from <dir>] -out <dir>   # no PDP
 QPA_FUZZ_DIR=<dir> conformance/scripts/run-harness.sh <adapter> [store...]   # replay one adapter
 go -C conformance/generator run . fuzz-report -dir <dir>   # <dir>/report.md; exit 1 on a failure
 go -C conformance/generator run . fuzz-shrink -dir <dir> -case <id> -adapter <adapter> -store <store>
@@ -227,6 +229,15 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   or drawn from a typed grammar over the dataset, with literals drawn from the values the seeds hold.
   The grammar reads only attributes, macros and lambda variables some hand-written case already
   reads, so every harness's mapping covers them; the generator stops if a case it relies on goes.
+- **Rows.** With `-rows N` the run adds N generated rows (`g000`, `g001`, ...) to the dataset before
+  recording, from their own seeded stream, so the same seed gives the same rows. A generated row
+  recombines values the hand-written seeds hold for each attribute, so every store that holds the
+  seeds can hold it, with a few boundary values no seed holds (`rowExtras` in
+  `generator/fuzzrows.go`). Its parent, peer and step-parent are earlier rows. A row whose values
+  need a store capability declares it in `requires`, as a hand-written seed would. The run writes its
+  `seeds.json`, `derived-fields.json` and `resources.json` into `<dir>`, and a harness replaying a
+  directory that holds them loads them in place of the corpus's. The case literals are drawn from
+  the extended dataset too.
 - **Recording.** `cerbos compile` (from the current pinned image) checks the policy first, and a
   case that does not compile is bisected out. A case whose plan fails, or folds to always allowed or
   always denied while `check()` disagrees, is dropped. `<dir>/manifest.json` lists every drop and
@@ -254,6 +265,18 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   was rarely checked on; `-steer-goal refusals` piles onto the shapes it refuses, the queue for a
   hill-climb. A boost is held between 0.25 and 8, and the manifest keeps them, so the seed and the
   steering directories fix the run.
+- **Composition.** `fuzz-compose` needs no PDP. CEL's `&&` allows a row exactly when both operands
+  allow it, errors included, and `||` when either does, so `and` and `or` over recorded plans have an
+  exact oracle: the intersection or union of the operands' allowed rows. It draws trees of two or
+  three operands, up to two levels deep, over every recorded case that judges adapters on both
+  PDPs (no plan error, no planner divergence, not folded to always allowed or denied), and writes a
+  directory every harness replays like a `fuzz` run. Without `-from` it composes the corpus
+  goldens; with `-from <fuzz dir>` it composes that run's cases over its dataset, leaving out any case a leg
+  of that run already failed, so a composed failure is a new one. It catches a
+  translation that is right for each operand and wrong in combination: parameter numbering,
+  join or alias reuse, precedence, a NULL that one operand's guard hid. A composed case cannot be
+  shrunk by `fuzz-shrink`; its intent names its operands, and a failure is reduced by hand to the
+  smallest subtree that still fails.
 - **Promotion.** `fuzz-shrink` replays one-step reductions of a failing case through that leg until
   none still fails, and writes the smallest as a YAML entry. Give it an id, intent and trap, add it
   to `cases/<area>.yaml`, and it reaches every adapter through the usual route (["Changing how a

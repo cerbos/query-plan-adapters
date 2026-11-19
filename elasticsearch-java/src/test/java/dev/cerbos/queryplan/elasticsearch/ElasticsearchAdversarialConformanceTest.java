@@ -85,7 +85,7 @@ class ElasticsearchAdversarialConformanceTest {
 
     private static <T> T readJson(String name, Class<T> type) {
         try {
-            return MAPPER.readValue(Corpus.conformanceDir().resolve(name).toFile(), type);
+            return MAPPER.readValue(Corpus.datasetDir().resolve(name).toFile(), type);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

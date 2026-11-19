@@ -40,6 +40,9 @@ func runFuzzShrink(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := in.useFuzzDataset(*dir); err != nil {
+		return err
+	}
 	var m fuzzManifest
 	if err := decodeJSONFile(filepath.Join(*dir, "manifest.json"), &m); err != nil {
 		return err

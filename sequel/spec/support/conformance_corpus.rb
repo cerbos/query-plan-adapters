@@ -9,6 +9,10 @@ require "time"
 # Duplicated across adapters on purpose (ADR 0007). Do not extract or share it.
 module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
+  # A fuzz run recorded with generated rows carries its own dataset, which replaces the corpus's.
+  DATA_DIR = ENV.fetch("QPA_FUZZ_DIR", "").then do |dir|
+    (!dir.empty? && File.exist?(File.join(dir, "seeds.json"))) ? dir : DIR
+  end.freeze
   LEDGER_FILE = File.expand_path("../../conformance-ledger.json", __dir__)
 
   # A seed requiring a store capability the ledger lacks on this store is a resource it cannot
@@ -16,12 +20,12 @@ module ConformanceCorpus
   STORE = ENV.fetch("ADAPTER_TEST_DB", "sqlite")
   LACKS = JSON.parse(File.read(LEDGER_FILE)).fetch("lacks", {})
     .select { |_, entry| entry.fetch("stores", [STORE]).include?(STORE) }.keys.freeze
-  ALL_SEEDS = JSON.parse(File.read(File.join(DIR, "seeds.json"))).fetch("seeds")
+  ALL_SEEDS = JSON.parse(File.read(File.join(DATA_DIR, "seeds.json"))).fetch("seeds")
   UNHELD = ALL_SEEDS.select { |seed| seed.fetch("requires", []).intersect?(LACKS) }
     .map { |seed| seed.fetch("id") }.freeze
   SEEDS = ALL_SEEDS.reject { |seed| UNHELD.include?(seed.fetch("id")) }.freeze
   SEEDS_BY_ID = SEEDS.to_h { |seed| [seed.fetch("id"), seed] }.freeze
-  DERIVED = JSON.parse(File.read(File.join(DIR, "derived-fields.json"))).fetch("derived").freeze
+  DERIVED = JSON.parse(File.read(File.join(DATA_DIR, "derived-fields.json"))).fetch("derived").freeze
 
   PDP_TAGS = JSON.parse(File.read(File.join(DIR, "pdp-versions.json")))
     .values_at("current", "previous").map { |pdp| pdp.fetch("tag") }.freeze
@@ -45,7 +49,7 @@ module ConformanceCorpus
   # The attributes of every resource check() saw, as dotted paths under `request.resource.attr`.
   # A list or scalar ends a path; an object is walked into (`parent.inner.aBool`, `obj.inner`).
   def resource_attribute_paths
-    JSON.parse(File.read(File.join(DIR, "resources.json"))).fetch("resources")
+    JSON.parse(File.read(File.join(DATA_DIR, "resources.json"))).fetch("resources")
       .flat_map { |resource| attribute_paths(resource.fetch("attr"), "request.resource.attr") }
       .uniq.sort
   end

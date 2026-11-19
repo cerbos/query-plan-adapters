@@ -140,13 +140,13 @@ func loadCorpus(tb testing.TB, store string) *Corpus {
 	var seeds struct {
 		Seeds []Seed `json:"seeds"`
 	}
-	readJSON(tb, filepath.Join(dir, "seeds.json"), &seeds)
+	readJSON(tb, filepath.Join(datasetDir(dir), "seeds.json"), &seeds)
 	c.Seeds = seeds.Seeds
 
 	var derived struct {
 		Derived map[string]Derived `json:"derived"`
 	}
-	readJSON(tb, filepath.Join(dir, "derived-fields.json"), &derived)
+	readJSON(tb, filepath.Join(datasetDir(dir), "derived-fields.json"), &derived)
 	c.Derived = derived.Derived
 
 	var ledger struct {
@@ -419,4 +419,15 @@ func writeFuzzResults(tb testing.TB, adapter, store string, results []FuzzVerdic
 	if err := os.WriteFile(filepath.Join(dir, adapter+"-"+store+".json"), append(raw, '\n'), 0o600); err != nil {
 		tb.Fatalf("writing the fuzz results: %v", err)
 	}
+}
+
+// datasetDir is where the dataset is read from: a fuzz run recorded with generated rows carries its
+// own, which replaces the corpus's.
+func datasetDir(conformanceDir string) string {
+	if fuzzDir != "" {
+		if _, err := os.Stat(filepath.Join(fuzzDir, "seeds.json")); err == nil {
+			return fuzzDir
+		}
+	}
+	return conformanceDir
 }

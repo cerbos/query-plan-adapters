@@ -37,7 +37,16 @@ function readJson<T>(file: string): T {
 }
 
 export function readCorpusJson<T>(file: string): T {
-  return readJson(path.join(CONFORMANCE_DIR, file));
+  return readJson(path.join(datasetDir(file), file));
+}
+
+const DATASET_FILES = new Set(["seeds.json", "derived-fields.json", "resources.json"]);
+
+/** A fuzz run recorded with generated rows carries its own dataset, which replaces the corpus's. */
+function datasetDir(file: string): string {
+  const fuzzDir = process.env["QPA_FUZZ_DIR"];
+
+  return fuzzDir && DATASET_FILES.has(file) && fs.existsSync(path.join(fuzzDir, file)) ? fuzzDir : CONFORMANCE_DIR;
 }
 
 // -- the golden files ----------------------------------------------------------------------------
