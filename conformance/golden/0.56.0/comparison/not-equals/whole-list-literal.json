@@ -45,7 +45,9 @@
     "l1",
     "l2",
     "l3",
-    "l4"
+    "l4",
+    "m1",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "comparison/not-equals/whole-list-literal",

@@ -1664,6 +1664,62 @@
         "tags": []
       },
       "id": "l4"
+    },
+    {
+      "attr": {
+        "aBoolList": [],
+        "aDouble": 45.3,
+        "aNumber": 45,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "nullbooltag",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "nullbooltag"
+        },
+        "owner": "set",
+        "tagNames": [
+          "mirror"
+        ],
+        "tags": [
+          {
+            "id": "tm1",
+            "name": "mirror"
+          }
+        ]
+      },
+      "id": "m1"
+    },
+    {
+      "attr": {
+        "aBoolList": [],
+        "aDouble": 46.3,
+        "aNumber": 46,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "nullbooltag",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "nullbooltag"
+        },
+        "owner": "set",
+        "tagNames": [
+          "private"
+        ],
+        "tags": [
+          {
+            "id": "tm2",
+            "name": "private"
+          }
+        ]
+      },
+      "id": "m2"
     }
   ]
 }

@@ -10,7 +10,9 @@
     "a9",
     "b4",
     "b6",
-    "c1"
+    "c1",
+    "m1",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "collection/exists/has-in-lambda",

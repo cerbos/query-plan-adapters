@@ -20,7 +20,9 @@
     "j4",
     "k2",
     "l2",
-    "l3"
+    "l3",
+    "m1",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "comparison/less-than/negated-astral-string-against-high-bmp",

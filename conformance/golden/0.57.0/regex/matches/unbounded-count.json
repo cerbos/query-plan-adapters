@@ -10,7 +10,9 @@
     "j2",
     "j3",
     "j4",
-    "k1"
+    "k1",
+    "m1",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "regex/matches/unbounded-count",

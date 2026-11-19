@@ -100,6 +100,10 @@
       "status": "unsupported",
       "reason": "A list built from a computed element has no SQL value to compare with a list literal."
     },
+    "collection/all/bare-boolean-element": {
+      "status": "unsupported",
+      "reason": "`aBoolList` is a scalar list the mapping holds as an array or JSON column, read by position; a macro ranges over a mapped relation, and a list column has no relation to iterate, so the adapter refuses it."
+    },
     "collection/all/negated-bare-boolean-element": {
       "status": "unsupported",
       "reason": "`aBoolList` is a scalar list the mapping holds as an array or JSON column, read by position; a macro ranges over a mapped relation, and a list column has no relation to iterate, so the adapter refuses it."
@@ -168,6 +172,10 @@
       "status": "unsupported",
       "reason": "Both hierarchies are read from columns, so there is no constant path to expand into prefixes, and splitting a column on a delimiter needs SQL no dialect shares."
     },
+    "logic/and/non-boolean-operand-in-value": {
+      "status": "unsupported",
+      "reason": "`&&` as an operand of `==`: the SQL value-expression walk takes no logical connective as a comparison operand, so the adapter refuses it."
+    },
     "logic/and/non-boolean-operand-in-value-negated": {
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: the SQL value-expression walk takes no logical connective as a comparison operand, so the adapter refuses it."
@@ -179,6 +187,10 @@
     "logic/not/bare-list-attribute": {
       "status": "unsupported",
       "reason": "aBoolList is a column declared indexable, which holds the whole list: it can only be read by constant position, membership or hasIntersection, so a list read as a condition is refused."
+    },
+    "logic/or/non-boolean-operand-in-value": {
+      "status": "unsupported",
+      "reason": "`||` as an operand of `==`: the SQL value-expression walk takes no logical connective as a comparison operand, so the adapter refuses it."
     },
     "membership/in/map-attribute-keys": {
       "status": "unsupported",

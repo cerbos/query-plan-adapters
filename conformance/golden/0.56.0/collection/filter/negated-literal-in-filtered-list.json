@@ -42,7 +42,8 @@
     "l1",
     "l2",
     "l3",
-    "l4"
+    "l4",
+    "m1"
   ],
   "degenerateReason": null,
   "id": "collection/filter/negated-literal-in-filtered-list",

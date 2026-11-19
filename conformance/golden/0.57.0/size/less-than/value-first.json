@@ -12,7 +12,9 @@
     "b5",
     "b6",
     "c1",
-    "e1"
+    "e1",
+    "m1",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "size/less-than/value-first",

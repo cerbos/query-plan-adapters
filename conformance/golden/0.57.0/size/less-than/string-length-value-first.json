@@ -18,7 +18,9 @@
     "j3",
     "j4",
     "k1",
-    "k2"
+    "k2",
+    "m1",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "size/less-than/string-length-value-first",

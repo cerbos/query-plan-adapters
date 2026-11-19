@@ -21,7 +21,8 @@
     "k2",
     "k3",
     "l1",
-    "l3"
+    "l3",
+    "m1"
   ],
   "degenerateReason": null,
   "id": "arithmetic/modulo/negative-dividend",
