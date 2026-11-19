@@ -23,6 +23,9 @@ returning rows the PDP denies: that is an authorization bug, where a throw is a 
 - **Editing `demo/` or an adapter's `example/`** → [demo/README.md](demo/README.md). A usage shape
   lands in every example at once.
 - **Editing `.github/workflows/` or cutting a release** → [docs/ci.md](docs/ci.md).
+- **Changing an adapter's shipped code** → add a line for its callers under `## Unreleased` in that
+  adapter's `CHANGELOG.md`, or label the PR `no-changelog` if they cannot observe it. CI enforces
+  this ([docs/ci.md](docs/ci.md), "Cutting a release").
 - **Writing a translator unit test, a commit message or a PR description** →
   [CODING_STANDARDS.md](CODING_STANDARDS.md), which every review checks a diff against.
 

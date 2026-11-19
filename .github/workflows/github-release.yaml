@@ -1,7 +1,8 @@
 name: GitHub Release
 
 # Called by each publish workflow once its package is published, so every release tag gets a
-# GitHub release listing the commits that touched that adapter since its previous tag.
+# GitHub release. Its notes are the tag's section of the adapter's CHANGELOG.md, or, where that
+# section is missing, the commits that touched the adapter since its previous tag.
 on:
   workflow_call:
     inputs:
@@ -37,9 +38,12 @@ jobs:
           [[ "${tag}" =~ ^(.*[@/]v)[0-9][^@/]*$ ]] || { echo "unexpected tag ${tag}" >&2; exit 1; }
           prefix="${BASH_REMATCH[1]}"
           previous="$(git tag --list "${prefix}*" --sort=-v:refname | grep -vxF "${tag}" | head -n 1 || true)"
+          changelog="$(tools/release/release.sh notes "${ADAPTER_PATH}" "${tag#"${prefix}"}" || true)"
           notes="${RUNNER_TEMP}/notes.md"
           {
-            if [[ -n "${previous}" ]]; then
+            if [[ -n "${changelog}" ]]; then
+              echo "${changelog}"
+            elif [[ -n "${previous}" ]]; then
               echo "## Changes to \`${ADAPTER_PATH}\` since ${previous}"
               echo
               git log --no-merges --format='- %s' "${previous}..${tag}" -- "${ADAPTER_PATH}"
