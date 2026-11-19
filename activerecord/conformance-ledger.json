@@ -97,6 +97,10 @@
       "status": "unsupported",
       "reason": "`==` with a list built from a computed element (`aDouble / 0.0`) is refused: only eq and ne against constant lists are translated."
     },
+    "hierarchy/ancestor-of/mismatched-delimiters-negated": {
+      "status": "unsupported",
+      "reason": "The two hierarchy() operands split on different delimiters; the translator compares segments of one delimiter only, so it refuses rather than re-split either path in SQL."
+    },
     "hierarchy/overlaps/field-to-field": {
       "reason": "The two hierarchies split the column on different delimiters, and a column is a string until the query runs: SQL cannot divide it into segments to compare them.",
       "status": "unsupported"
@@ -112,6 +116,10 @@
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
+    "regex/matches/anchors-inside-group": {
+      "status": "unsupported",
+      "reason": "The anchors sit inside a group, so what the pattern matches is not a finite set of literals under anchors, a character set, or a prefix and suffix; no store regex dialect is RE2, so only those shapes are lowered."
     },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",

@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "a1"
+  ],
+  "degenerateReason": null,
+  "id": "type-mismatch/matches/number-receiver-negated",
+  "intent": "matches() on a number attribute under negation (!aNumber.matches(\"5\")), beside aString == \"one\".",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": "5"
+                      }
+                    ],
+                    "operator": "matches"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aString"
+                },
+                {
+                  "value": "one"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "or"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "type-mismatch/matches/number-receiver-negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.aNumber.matches(\"5\") || R.attr.aString == \"one\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL has no matches() overload for a number, an error that denies under both polarities, so only a1 is allowed; casting the number to text matches a1 and the negation grants the rest, and a store that rejects a regex on a number fails the query."
+}

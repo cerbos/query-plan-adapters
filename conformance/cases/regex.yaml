@@ -353,3 +353,17 @@ cases:
   condition:
     match:
       expr: '!R.attr.aString.matches("^(|ab)$")'
+- id: 'regex/matches/unanchored-bounded-repetition'
+  tier: adversarial
+  intent: 'matches("\\d{2}"): an unanchored pattern that ends in a bounded repetition.'
+  trap: 'Unanchored, the pattern may match anywhere, but the trailing {2} still needs two digits in a row; dropping or loosening the open-ended repetition grants every row, where only those holding two adjacent digits match.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("\\d{2}")'
+- id: 'regex/matches/anchors-inside-group'
+  tier: adversarial
+  intent: 'matches("(^o|e$)"), with each anchor inside one alternative of a group.'
+  trap: 'The group is regex/matches/top-level-alternation-prefix-or-suffix in parentheses: o at the start or e at the end. Reading an anchor inside a group as literal text, or applying it to the whole group, matches other rows.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("(^o|e$)")'

@@ -648,6 +648,13 @@ final class LeafTranslator {
                 || !SCALAR_OPERAND_OPERATORS.contains(operator)) {
             return null;
         }
+        if (bareFieldAgainstTimestamp(operands)) {
+            // A document field reaches the PDP as a string, number or boolean, never a timestamp.
+            if ("eq".equals(operator) || "ne".equals(operator)) {
+                return "ne".equals(operator) == whenTrue ? Queries.exists(field) : Queries.matchNone();
+            }
+            return Queries.matchNone();
+        }
         ScalarType type = declaredType(field, operator);
         if (type == ScalarType.TIMESTAMP && !hasTimestampWrapper(operands)) {
             throw bareTemporalComparison();
@@ -724,6 +731,11 @@ final class LeafTranslator {
         return operands.stream().anyMatch(operand ->
                 operand.getNodeCase() == Operand.NodeCase.EXPRESSION
                         && "timestamp".equals(operand.getExpression().getOperator()));
+    }
+
+    private static boolean bareFieldAgainstTimestamp(List<Operand> operands) {
+        return operands.stream().anyMatch(operand -> operand.getNodeCase() == Operand.NodeCase.VARIABLE)
+                && operands.stream().anyMatch(LeafTranslator::isTimestampLiteral);
     }
 
     private static UnsupportedPlanShapeException bareTemporalComparison() {

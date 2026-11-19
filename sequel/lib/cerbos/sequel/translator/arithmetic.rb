@@ -56,7 +56,7 @@ module Cerbos
             # CEL's `%` by zero is an error, which denies the row under either polarity.
             # PostgreSQL raises instead, failing the whole query; NULLIF makes it UNKNOWN, as
             # SQLite and MySQL already make it.
-            right = SqlSupport.function("NULLIF", [right, 0]) if operator == "mod" && !right.is_a?(Numeric)
+            right = SqlSupport.function("NULLIF", [right, 0]) if operator == "mod" && (!right.is_a?(Numeric) || right.zero?)
             return record_cel_type(SqlSupport.infix(ARITHMETIC.fetch(operator), left, right), :int)
           end
 

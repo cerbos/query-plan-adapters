@@ -137,6 +137,9 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 		return nil
 
 	case queryplan.Cmp:
+		if b.Dialect() != dialect.SQLite {
+			t = queryplan.OnMicrosecondGrid(t)
+		}
 		op, err := symbol(cmpSymbols, "comparison", t.Op)
 		if err != nil {
 			return err

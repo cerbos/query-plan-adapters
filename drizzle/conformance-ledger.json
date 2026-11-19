@@ -44,6 +44,10 @@
       "status": "unsupported",
       "reason": "A map literal can only be compared with a string, number or boolean attribute."
     },
+    "arithmetic/modulo/literal-zero-divisor-negated": {
+      "status": "unsupported",
+      "reason": "A modulo by a zero constant is a CEL error that denies under both polarities, and PostgreSQL raises division by zero rather than returning NULL, so the adapter lowers % only by a non-zero whole constant."
+    },
     "arithmetic/modulo/size-of-string": {
       "status": "unsupported",
       "reason": "Cannot translate '%': CEL's modulo is defined only over integers, so the adapter lowers it only for int() of an integer column by a non-zero whole constant or by int() of an integer column plus or minus a whole constant. A double constant is a no-overload error in CEL, and a zero constant divisor raises on PostgreSQL."
@@ -223,6 +227,10 @@
     "principal/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "regex/matches/anchors-inside-group": {
+      "status": "unsupported",
+      "reason": "The anchors sit inside a group, so what the pattern matches is not a finite set of literals under anchors, a character set, or a prefix and suffix; no store regex dialect is RE2, so only those shapes are lowered."
     },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",
