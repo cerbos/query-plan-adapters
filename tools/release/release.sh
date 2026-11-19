@@ -3,8 +3,8 @@
 #   release.sh prepare [<adapter>=<major|minor|patch|version> ...]  bump each on a branch off $REMOTE/main and open the release PR; no arguments lists unreleased adapters
 #   release.sh bump <adapter> <major|minor|patch|version>  write the version to the manifest and move CHANGELOG.md's Unreleased entries under it
 #   release.sh notes <adapter> <version>                   print that version's CHANGELOG.md section
-#   release.sh tag                                         tag HEAD with every adapter's newest CHANGELOG.md version not yet on $REMOTE (default origin)
-# <adapter> is the adapter's directory name. See docs/ci.md, "Cutting a release".
+#   release.sh tag                                         tag HEAD with every adapter's newest CHANGELOG.md version not yet on $REMOTE
+# $REMOTE defaults to the remote whose URL is cerbos/query-plan-adapters. <adapter> is the adapter's directory name. See docs/ci.md, "Cutting a release".
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -31,6 +31,17 @@ EOF
 }
 
 die() { echo "$*" >&2; exit 1; }
+
+repository=cerbos/query-plan-adapters
+
+remote_name() {
+  if [[ -n "${REMOTE:-}" ]]; then echo "$REMOTE"; return; fi
+  local name url
+  while read -r name url _; do
+    if [[ "$url" =~ [:/]${repository}(\.git)?/?$ ]]; then echo "$name"; return; fi
+  done < <(git remote -v)
+  die "no remote points at $repository; set REMOTE"
+}
 
 load() {
   local row
@@ -102,7 +113,7 @@ display_name() {
 }
 
 prepare() {
-  local remote="${REMOTE:-origin}" spec adapter bump from rows="" sections="" names=()
+  local remote spec adapter bump from rows="" sections="" names=()
   if (($# == 0)); then
     for adapter in $(table | cut -d'|' -f1); do
       load "$adapter"
@@ -111,6 +122,7 @@ prepare() {
     return
   fi
   [[ -z "$(git status --porcelain)" ]] || die "working tree is not clean"
+  remote="$(remote_name)"
   for spec in "$@"; do
     [[ "$spec" == *=* ]] || die "expected <adapter>=<major|minor|patch|version>: $spec"
     load "${spec%%=*}"
@@ -141,7 +153,7 @@ prepare() {
   git add -A
   git commit --quiet --signoff -m "$title"
   git push --quiet --set-upstream "$remote" "$branch"
-  gh pr create --base main --head "$branch" --title "$title" --body "$body"
+  gh pr create --repo "$repository" --base main --head "$branch" --title "$title" --body "$body"
   git switch --quiet -
 }
 
@@ -153,7 +165,8 @@ notes() {
 
 tag() {
   [[ -z "$(git status --porcelain)" ]] || die "working tree is not clean"
-  local remote="${REMOTE:-origin}" remote_tags tags=() adapter
+  local remote remote_tags tags=() adapter
+  remote="$(remote_name)"
   remote_tags="$(git ls-remote --refs --tags "$remote" | sed 's#.*refs/tags/##')"
   for adapter in $(table | cut -d'|' -f1); do
     load "$adapter"

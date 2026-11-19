@@ -53,8 +53,9 @@ top-level directory with a `conformance-ledger.json` as an adapter, and fails a 
 adapter without one. Label the pull request `no-changelog` when a caller cannot observe the change, such as a
 refactor; the label reruns the check. It is the one PR workflow without a path filter, since its subject is a Markdown file.
 
-`tools/release/release.sh` does the steps that touch versions and tags. `<adapter>` is the adapter's directory name. A new
-adapter needs a row in its `table`, naming its tag prefix and where its manifest keeps the version.
+`tools/release/release.sh` does the steps that touch versions and tags. `<adapter>` is the adapter's directory name. It works
+against the remote whose URL is `cerbos/query-plan-adapters`, whatever its name, or the one `REMOTE` names. A new adapter
+needs a row in its `table`, naming its tag prefix and where its manifest keeps the version.
 
 1. `tools/release/release.sh prepare` lists the adapters with `Unreleased` entries. `tools/release/release.sh prepare
    <adapter>=<major|minor|patch|version> ...` branches off `$REMOTE/main`, runs `bump` for each, commits, pushes and opens the
@@ -64,8 +65,7 @@ adapter needs a row in its `table`, naming its tag prefix and where its manifest
    refuses an empty `Unreleased`, writes the version to the adapter's manifest (`package.json`, `version.rb`, the `.csproj` or
    `build.gradle.kts`; ent, pgx and sqlalchemy take theirs from the tag), and moves the `Unreleased` entries under
    `## v<version>`.
-2. Once it is merged, check out the merge commit and run `tools/release/release.sh tag`, with `REMOTE` naming the remote for
-   this repository if it is not `origin`. It finds every adapter whose newest `CHANGELOG.md` version has no tag on that
+2. Once it is merged, check out the merge commit and run `tools/release/release.sh tag`. It finds every adapter whose newest `CHANGELOG.md` version has no tag on that
    remote, checks each against its manifest, asks before tagging, and pushes the tags three per push: a push carrying more
    than three tags creates no push events, so no publish workflow would start.
 3. ent and pgx have no publish workflow, so create their GitHub releases by hand:
