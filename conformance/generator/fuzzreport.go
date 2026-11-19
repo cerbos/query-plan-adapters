@@ -129,8 +129,15 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults) (stri
 	failures := 0
 
 	fmt.Fprintf(&b, "# Fuzz report: seed %d\n\n", m.Seed)
-	fmt.Fprintf(&b, "%d of %d generated cases kept (manifest.json says why the others were dropped), replayed against PDP %s. Reproduce with `go -C conformance/generator run . fuzz -seed %d -count %d -out <dir>`.\n\n",
-		m.Kept, m.Count, strings.Join(m.Tags, " and "), m.Seed, m.Count)
+	steer := ""
+	if m.Steer != nil {
+		steer = fmt.Sprintf(" -steer %s -steer-goal %s", strings.Join(m.Steer.From, ","), m.Steer.Goal)
+		if len(m.Steer.Adapters) > 0 {
+			steer += " -steer-adapters " + strings.Join(m.Steer.Adapters, ",")
+		}
+	}
+	fmt.Fprintf(&b, "%d of %d generated cases kept (manifest.json says why the others were dropped), replayed against PDP %s. Reproduce with `go -C conformance/generator run . fuzz -seed %d -count %d%s -out <dir>`.\n\n",
+		m.Kept, m.Count, strings.Join(m.Tags, " and "), m.Seed, m.Count, steer)
 	b.WriteString("| Leg | Match | Refused | Over-grant | Under-grant | Error | Refusal rate |\n|---|---:|---:|---:|---:|---:|---:|\n")
 	var partial []string
 	for _, l := range legs {
@@ -196,6 +203,10 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults) (stri
 	section("Suspected planner divergences", fmt.Sprintf("%d cases, by PDP, that every leg that translated them answered with the same wrong rows. Not counted as failures: check whether the plan and `check()` disagree before blaming an adapter.", len(planner)), planner)
 	if len(keys) == 0 {
 		b.WriteString("\nNo failures.\n")
+	}
+	if spots := weakSpots(cases, legs, 12); spots != "" {
+		b.WriteString("\n## Weak spots\n\nPer adapter, the grammar productions, attributes and corpus atoms behind most of its refusals, counted per leg, PDP and case. A refused case is put down to its feature the adapter translated least often in this run. `fuzz -steer <this dir> -steer-goal refusals` draws these more often; the default goal, coverage, draws the features this adapter translates but was rarely checked on.\n")
+		b.WriteString(spots)
 	}
 	return b.String(), failures
 }
