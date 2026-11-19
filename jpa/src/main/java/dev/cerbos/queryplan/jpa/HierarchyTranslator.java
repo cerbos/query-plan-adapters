@@ -209,7 +209,7 @@ final class HierarchyTranslator {
         if (strict && !fieldFirst) {
             // The column descends from the constant: strictly longer, with it as a prefix.
             return cb.like(ExactStrings.exact(cb, path.as(String.class)),
-                    PlanValues.escapeLike(constant) + "_%", '\\');
+                    PlanValues.escapeLike(constant) + "_%", PlanValues.LIKE_ESCAPE);
         }
         Predicate ancestorOrEqual = prefixes.isEmpty()
                 ? tri.baseUnlessUnknown(cb.disjunction(), () -> cb.isNull(path))
@@ -219,7 +219,7 @@ final class HierarchyTranslator {
         }
         return cb.or(ancestorOrEqual,
                 cb.like(ExactStrings.exact(cb, path.as(String.class)),
-                        PlanValues.escapeLike(constant) + "%", '\\'));
+                        PlanValues.escapeLike(constant) + "%", PlanValues.LIKE_ESCAPE));
     }
 
     private static boolean isPerCharacter(Hierarchy h) {
@@ -352,7 +352,7 @@ final class HierarchyTranslator {
             return tri.unknown();
         }
         return cb.like(ExactStrings.exact(cb, path.as(String.class)),
-                PlanValues.escapeLike(prefix) + "%", '\\');
+                PlanValues.escapeLike(prefix) + "%", PlanValues.LIKE_ESCAPE);
     }
 
     private static boolean containsFieldSegment(List<Seg> segs) {

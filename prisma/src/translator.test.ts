@@ -133,7 +133,11 @@ describe("nullAttributeRepresentation", () => {
   // the adapter has to be told. The corpus mapping declares it per attribute; these vary the
   // call-level option and the declaration, which the corpus cannot.
   const MISSING = "null/equals/null-literal-on-missing-attribute";
-  const NEVER = { kind: PlanKind.CONDITIONAL, filters: { NOT: { aOptionalString: { startsWith: "" } } } };
+
+  const NEVER = {
+    kind: PlanKind.CONDITIONAL,
+    filters: { NOT: { AND: [{ aOptionalString: { startsWith: "" } }, { aOptionalString: { startsWith: "" } }] } },
+  };
 
   test("unset: the default is omitted, so == null selects no row", async () => {
     // The default is the convention whose wrong guess fails closed (ADR 0011).
@@ -388,7 +392,7 @@ describe("relation subqueryFilter", () => {
         none: {
           AND: [
             { name: { not: "hidden" } },
-            { NOT: { name: { equals: "public" } } },
+            { NOT: { AND: [{ name: { equals: "public" } }, { name: { equals: "public" } }] } },
           ],
         },
       },
@@ -507,14 +511,16 @@ describe("the mapper contract", () => {
     // — so silence means nullable, and only `nullable: false` drops the guard
     // (cerbos/query-plan-adapters#495). The corpus maps one element column per nullability, so
     // it cannot vary the declaration itself.
+    const every = { tags: { every: { AND: [{ name: { equals: "public" } }, { name: { equals: "public" } }] } } };
+
     const guarded = {
       AND: [
-        { tags: { every: { name: { equals: "public" } } } },
+        every,
         { tags: { none: { name: null } } },
       ],
     };
 
-    const unguarded = { tags: { every: { name: { equals: "public" } } } };
+    const unguarded = every;
 
     const allFor = (fields?: Relation["fields"]) => {
       const relation: Relation = { name: "tags", type: "many" };

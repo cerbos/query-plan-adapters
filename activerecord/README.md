@@ -352,6 +352,12 @@ column's collation for that:
 - **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
   point.
 
+On MySQL and MariaDB, `sql_mode` must not include `NO_BACKSLASH_ESCAPES`. Rails quotes a literal
+with backslash escapes, which that mode reads as literal backslashes, so a constant in the SQL is no
+longer the one in the policy. The conformance harness's `mysql-no-backslash-escapes`
+[store variant](../conformance/README.md#store-variants) cannot even create its schema through
+Trilogy in that mode.
+
 The conformance suite runs on SQLite, PostgreSQL (initialised under ICU's `en-US`), MySQL and
 MariaDB (each on the server's default collation). The other suites run on SQLite.
 

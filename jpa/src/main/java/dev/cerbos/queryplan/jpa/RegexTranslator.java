@@ -168,7 +168,7 @@ final class RegexTranslator {
             List<Predicate> likes = new ArrayList<>();
             for (String s : strings) {
                 likes.add(cb.like(column, (start ? "" : "%") + PlanValues.escapeLike(s)
-                        + (end ? "" : "%"), '\\'));
+                        + (end ? "" : "%"), PlanValues.LIKE_ESCAPE));
             }
             return likes.size() == 1 ? likes.get(0) : cb.or(likes.toArray(Predicate[]::new));
         }
@@ -195,7 +195,7 @@ final class RegexTranslator {
         }
         List<Predicate> likes = new ArrayList<>();
         for (String like : likePatterns) {
-            likes.add(cb.like(column, like, '\\'));
+            likes.add(cb.like(column, like, PlanValues.LIKE_ESCAPE));
         }
         Predicate shape = likes.size() == 1 ? likes.get(0) : cb.or(likes.toArray(Predicate[]::new));
         // RE2's . excludes a newline, and no finite part holds one.

@@ -423,6 +423,12 @@ Columns of other types, such as a `customType` or a datetime in string mode, kee
 collation. The conformance MySQL leg runs under the server default `utf8mb4_0900_ai_ci`, and the
 PostgreSQL leg under ICU's `en-US`, so the corpus proves this on every run.
 
+On MySQL, `sql_mode` must not include `NO_BACKSLASH_ESCAPES` when the driver interpolates
+parameters on the client, as `mysql2`'s `query` does: it escapes a value with backslashes, which
+that mode reads as literal backslashes, so a bound constant is no longer the one in the policy. The
+conformance harness's `mysql-no-backslash-escapes`
+[store variant](../conformance/README.md#store-variants) cannot seed its store through it.
+
 `contains` is lowered to `REPLACE`, so a column-valued needle is never read as `LIKE` pattern
 syntax, which also avoids SQLite's case-insensitive `LIKE`.
 

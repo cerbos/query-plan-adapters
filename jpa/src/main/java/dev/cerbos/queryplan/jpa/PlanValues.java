@@ -143,12 +143,14 @@ final class PlanValues {
     }
 
     /**
-     * Escapes {@code LIKE} wildcards; pair with an explicit {@code '\\'} escape character.
-     * {@code [} is escaped because SQL Server treats {@code [...]} as a character class; on
-     * other dialects {@code \[} is just a literal {@code [}.
+     * Escapes {@code LIKE} wildcards; pair with {@link #LIKE_ESCAPE}. Not a backslash: MySQL's
+     * NO_BACKSLASH_ESCAPES and PostgreSQL's standard_conforming_strings=off disagree on how to
+     * spell one in SQL. {@code [} is escaped because SQL Server treats {@code [...]} as a character
+     * class; on other dialects {@code ![} is just a literal {@code [}.
      */
+    static final char LIKE_ESCAPE = '!';
+
     static String escapeLike(String s) {
-        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                .replace("[", "\\[");
+        return s.replace("!", "!!").replace("%", "!%").replace("_", "!_").replace("[", "![");
     }
 }

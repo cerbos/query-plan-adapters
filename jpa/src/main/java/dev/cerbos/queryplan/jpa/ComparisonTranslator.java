@@ -1430,7 +1430,7 @@ final class ComparisonTranslator {
     }
 
     // Escaped in this order: the escape character itself must go first.
-    private static final List<String> LIKE_METACHARACTERS = List.of("\\", "%", "_", "[");
+    private static final List<String> LIKE_METACHARACTERS = List.of("!", "%", "_", "[");
 
     /**
      * {@code haystack LIKE pattern(needle)} for a column needle, escaped with nested {@code REPLACE}. A
@@ -1441,7 +1441,7 @@ final class ComparisonTranslator {
         Expression<String> pattern = needle.as(String.class);
         for (String metacharacter : LIKE_METACHARACTERS) {
             pattern = cb.function("replace", String.class,
-                    pattern, cb.literal(metacharacter), cb.literal("\\" + metacharacter));
+                    pattern, cb.literal(metacharacter), cb.literal("!" + metacharacter));
         }
         if (match.leadingWildcard) {
             pattern = cb.concat(cb.literal("%"), pattern);
@@ -1453,6 +1453,6 @@ final class ComparisonTranslator {
                 cb.<String>selectCase()
                         .when(cb.isNull(needle), cb.nullLiteral(String.class))
                         .otherwise(pattern);
-        return cb.like(ExactStrings.exact(cb, haystack.as(String.class)), guardedPattern, '\\');
+        return cb.like(ExactStrings.exact(cb, haystack.as(String.class)), guardedPattern, PlanValues.LIKE_ESCAPE);
     }
 }

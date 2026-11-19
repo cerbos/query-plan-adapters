@@ -574,7 +574,7 @@ The planner folds `now() - duration("24h")` into a constant instant when it plan
 
 ### Field-to-field string matching builds its pattern with `REPLACE`
 
-`R.attr.a.contains(R.attr.b)` becomes `a LIKE CONCAT('%', <b escaped by nested REPLACE>, '%') ESCAPE '\'`
+`R.attr.a.contains(R.attr.b)` becomes `a LIKE CONCAT('%', <b escaped by nested REPLACE>, '%') ESCAPE '!'`
 (`REPLACE` is portable across H2, PostgreSQL, MySQL, Oracle and SQL Server). A NULL needle excludes
 the row under both polarities, matching CEL, and prevents `CONCAT` dialects that treat NULL as `''`
 from matching everything.
@@ -682,28 +682,41 @@ manage it):
 implementation("com.google.protobuf:protobuf-java:4.35.1")
 ```
 
-### MySQL / MariaDB `LIKE` backslash escaping
+### `LIKE` escapes with `!`, not a backslash
 
-The LIKE family uses `cb.like(path, pattern, '\\')`, escaping `%`, `_`, `\` and `[` and declaring `\`
-as the escape character. MySQL and MariaDB **also** treat `\` as an escape inside string literals, so
-a literal backslash in a value can match incorrectly. If your data contains backslashes, either:
+Every `LIKE` the adapter emits declares `!` as its escape character and escapes `!`, `%`, `_` and
+`[`. A backslash is spelled differently in SQL under MySQL's `NO_BACKSLASH_ESCAPES` and PostgreSQL's
+`standard_conforming_strings = off`, and its query failed under either one.
 
-- enable [`NO_BACKSLASH_ESCAPES`](https://dev.mysql.com/doc/refman/en/sql-mode.html#sqlmode_no_backslash_escapes)
-  (Hibernate 6.4+ emits standard escaping in that mode), or
-- register an `OperatorFunction` for `contains`/`startsWith`/`endsWith` with an escape your dialect
-  handles cleanly.
+### PostgreSQL: keep `standard_conforming_strings` on
 
-Values without backslashes are unaffected.
+Some string constants reach the SQL as literals rather than parameters, such as the constant in
+`"literal".contains(R.attr.x)`. With `standard_conforming_strings = off` PostgreSQL reads a
+backslash in a literal as an escape, so the constant is no longer the one in the policy, and the
+filter can return rows Cerbos denies. The setting has been on by default since PostgreSQL 9.1. The
+conformance harness's `pg-legacy-strings` [store variant](../conformance/README.md#store-variants)
+shows `string/contains/value-first` returning the wrong rows with it off.
+
+### MySQL `sql_mode`: not `ANSI`
+
+Under the composite `ANSI` mode, MySQL aggregates a set function that reads an outer column in the
+outer query. A nested `exists` or `all` over the same collection
+(`R.attr.tags.exists(t, R.attr.tags.exists(u, u.id != t.id && u.name == t.name))`) then fails with
+`Invalid use of group function`. The query errors rather than returning rows, so nothing is
+over-granted, but the request fails.
 
 ### SQL Server `LIKE` `[` character classes
 
 T-SQL treats `[...]` as a character class even with an `ESCAPE` clause, so `'[SEC]%'` would match
-rows starting with S, E or C. The adapter escapes `[` as `\[` in every pattern it generates
+rows starting with S, E or C. The adapter escapes `[` as `![` in every pattern it generates
 (constant LIKE, field-to-field `REPLACE`, hierarchy prefixes); elsewhere the escape is a no-op, which
 the H2, PostgreSQL and MySQL legs verify. `]` is left alone — no class can open once `[` is escaped.
 
 ## Behaviour changes
 
+- `LIKE` escapes with `!` instead of a backslash, so string matching works under MySQL's
+  `NO_BACKSLASH_ESCAPES` and PostgreSQL's `standard_conforming_strings = off`, where the query used
+  to fail.
 - **Breaking:** the `dev.cerbos.queryplan.jpa.maxMacroDepth` system property and
   `JpaQueryPlanAdapter.MAX_MACRO_DEPTH_PROPERTY` are gone; set the bound with
   `Options.withMaxMacroDepth`. `Options.maxMacroDepth()` is an `int`.
