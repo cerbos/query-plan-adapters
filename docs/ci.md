@@ -47,17 +47,21 @@ harness runs on H2 to prove its `Specification` returns what the core's filter d
 
 Every adapter keeps a `CHANGELOG.md` whose first section is `## Unreleased`. A pull request that changes what an adapter
 does, for a caller, adds its line there in the same pull request, written for that adapter's users: commit subjects cover the
-whole repository, so they do not make release notes.
+whole repository, so they do not make release notes. `changelog.yaml` enforces it: `tools/release/check-changelog.sh` fails a
+pull request that changes an adapter's shipped code (`src/`, `lib/`, `src/main/`, ent and pgx's non-test `.go` files) without
+touching that adapter's `CHANGELOG.md`. Label the pull request `no-changelog` when a caller cannot observe the change, such as a
+refactor; the label reruns the check. It is the one PR workflow without a path filter, since its subject is a Markdown file.
 
 `tools/release/release.sh` does the steps that touch versions and tags. `<adapter>` is the adapter's directory name.
 
-1. `tools/release/release.sh bump <adapter> <version>` for each adapter in the release. It refuses an empty `Unreleased`,
-   writes the version to the adapter's manifest (`package.json`, `version.rb`, the `.csproj` or `build.gradle.kts`; ent, pgx
-   and sqlalchemy take theirs from the tag), and moves the `Unreleased` entries under `## v<version>`. Open one release pull
-   request with the result.
-2. Once it is merged, check out the merge commit and run `tools/release/release.sh tag <adapter> <version>` for each
-   adapter, with `REMOTE` naming the remote for this repository if it is not `origin`. It checks the manifest and the
-   changelog section against the version, then pushes that one tag. A push carrying more than three tags creates no push
-   events, so no publish workflow would start: push tags one at a time.
+1. `tools/release/release.sh bump <adapter> <major|minor|patch|version>` for each adapter in the release. A keyword
+   increments the adapter's newest tag (its manifest version before the first release); semver's 0.x rules are not applied,
+   so a breaking change before 1.0 is `minor`. It refuses an empty `Unreleased`, writes the version to the adapter's manifest
+   (`package.json`, `version.rb`, the `.csproj` or `build.gradle.kts`; ent, pgx and sqlalchemy take theirs from the tag), and
+   moves the `Unreleased` entries under `## v<version>`. Open one release pull request with the result.
+2. Once it is merged, check out the merge commit and run `tools/release/release.sh tag`, with `REMOTE` naming the remote for
+   this repository if it is not `origin`. It finds every adapter whose newest `CHANGELOG.md` version has no tag on that
+   remote, checks each against its manifest, asks before tagging, and pushes the tags three per push: a push carrying more
+   than three tags creates no push events, so no publish workflow would start.
 3. ent and pgx have no publish workflow, so create their GitHub releases by hand:
    `gh release create ent/v<version> --verify-tag --title "ent v<version>" --notes "$(tools/release/release.sh notes ent <version>)"`.

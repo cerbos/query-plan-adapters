@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Usage:
-#   release.sh bump <adapter> <version>   write the version to the manifest and move CHANGELOG.md's Unreleased entries under it
-#   release.sh notes <adapter> <version>  print that version's CHANGELOG.md section
-#   release.sh tag <adapter> <version>    tag HEAD and push that tag alone to $REMOTE (default origin)
+#   release.sh bump <adapter> <major|minor|patch|version>  write the version to the manifest and move CHANGELOG.md's Unreleased entries under it
+#   release.sh notes <adapter> <version>                   print that version's CHANGELOG.md section
+#   release.sh tag                                         tag HEAD with every adapter's newest CHANGELOG.md version not yet on $REMOTE (default origin)
 # <adapter> is the adapter's directory name. See docs/ci.md, "Cutting a release".
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -35,8 +35,31 @@ load() {
   local row
   row="$(table | grep "^$1|")" || die "unknown adapter $1"
   IFS='|' read -r dir prefix manifest pattern <<<"$row"
-  version="$2"
-  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "version must be X.Y.Z[-pre], without a v: $version"
+  version="${2:-}"
+}
+
+check_version() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "version must be X.Y.Z[-pre], without a v: $1"
+}
+
+current() {
+  local tagged
+  tagged="$(git tag --list "${prefix}*" --sort=-v:refname | head -n 1)"
+  if [[ -n "$tagged" ]]; then echo "${tagged#"$prefix"}"; else manifest_version; fi
+}
+
+increment() {
+  local major minor patch
+  IFS=. read -r major minor patch <<<"${1%%-*}"
+  case "$2" in
+    major) echo "$((major + 1)).0.0" ;;
+    minor) echo "${major}.$((minor + 1)).0" ;;
+    patch) echo "${major}.${minor}.$((patch + 1))" ;;
+  esac
+}
+
+newest() {
+  awk '/^## v[0-9]/ { sub(/^## v/, ""); sub(/ .*$/, ""); print; exit }' "$dir/CHANGELOG.md"
 }
 
 section() {
@@ -57,6 +80,10 @@ manifest_version() {
 
 bump() {
   load "$@"
+  case "$version" in
+    major | minor | patch) version="$(increment "$(current)" "$version")" ;;
+  esac
+  check_version "$version"
   [[ -f "$dir/CHANGELOG.md" ]] || die "$dir/CHANGELOG.md is missing"
   [[ -n "$(section "$dir" Unreleased)" ]] || die "$dir/CHANGELOG.md has nothing under Unreleased"
   [[ -z "$(section "$dir" "$version")" ]] || die "$dir/CHANGELOG.md already has v$version"
@@ -71,19 +98,38 @@ bump() {
 
 notes() {
   load "$@"
+  check_version "$version"
   section "$dir" "$version"
 }
 
 tag() {
-  load "$@"
   [[ -z "$(git status --porcelain)" ]] || die "working tree is not clean"
-  [[ "$(manifest_version)" == "$version" ]] || die "$dir is at $(manifest_version), not $version"
-  [[ -n "$(section "$dir" "$version")" ]] || die "$dir/CHANGELOG.md has no v$version section"
-  git tag "${prefix}${version}"
-  git push "${REMOTE:-origin}" "refs/tags/${prefix}${version}"
+  local remote="${REMOTE:-origin}" remote_tags tags=() adapter
+  remote_tags="$(git ls-remote --refs --tags "$remote" | sed 's#.*refs/tags/##')"
+  for adapter in $(table | cut -d'|' -f1); do
+    load "$adapter"
+    [[ -f "$dir/CHANGELOG.md" ]] || continue
+    version="$(newest)"
+    [[ -n "$version" ]] || continue
+    grep -qxF "${prefix}${version}" <<<"$remote_tags" && continue
+    [[ "$(manifest_version)" == "$version" ]] || die "$dir: CHANGELOG.md is at v$version but the manifest at $(manifest_version)"
+    tags+=("${prefix}${version}")
+  done
+  ((${#tags[@]})) || die "every adapter's newest CHANGELOG.md version is already tagged on $remote"
+  printf 'tagging %s with:\n' "$(git log -1 --format='%h %s')"
+  printf '  %s\n' "${tags[@]}"
+  read -r -p "proceed? (y/N) " answer
+  [[ "$answer" == [yY] ]] || die "cancelled"
+  local t i batch
+  for t in "${tags[@]}"; do git tag "$t"; done
+  for ((i = 0; i < ${#tags[@]}; i += 3)); do
+    batch=("${tags[@]:i:3}")
+    git push --atomic "$remote" "${batch[@]/#/refs/tags/}"
+  done
 }
 
 case "${1:-}" in
-  bump | notes | tag) [[ $# -eq 3 ]] || die "usage: release.sh $1 <adapter> <version>"; "$@" ;;
-  *) die "usage: release.sh bump|notes|tag <adapter> <version>" ;;
+  bump | notes) [[ $# -eq 3 ]] || die "usage: release.sh $1 <adapter> <version>"; "$@" ;;
+  tag) [[ $# -eq 1 ]] || die "usage: release.sh tag"; tag ;;
+  *) die "usage: release.sh bump|notes <adapter> <version>, or release.sh tag" ;;
 esac
