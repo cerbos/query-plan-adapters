@@ -47,18 +47,23 @@ harness runs on H2 to prove its `Specification` returns what the core's filter d
 
 Every adapter keeps a `CHANGELOG.md` whose first section is `## Unreleased`. A pull request that changes what an adapter
 does, for a caller, adds its line there in the same pull request, written for that adapter's users: commit subjects cover the
-whole repository, so they do not make release notes. `changelog.yaml` enforces it: `tools/release/check-changelog.sh` fails a
-pull request that changes an adapter's shipped code (`src/`, `lib/`, `src/main/`, ent and pgx's non-test `.go` files) without
-touching that adapter's `CHANGELOG.md`. Label the pull request `no-changelog` when a caller cannot observe the change, such as a
+whole repository, so they do not make release notes. `changelog.yaml` enforces it: `tools/release/check-changelog.sh` treats every
+top-level directory with a `conformance-ledger.json` as an adapter, and fails a pull request that changes an adapter's source
+(a source file outside its tests, examples and scripts) without touching that adapter's `CHANGELOG.md`, or that leaves an
+adapter without one. Label the pull request `no-changelog` when a caller cannot observe the change, such as a
 refactor; the label reruns the check. It is the one PR workflow without a path filter, since its subject is a Markdown file.
 
-`tools/release/release.sh` does the steps that touch versions and tags. `<adapter>` is the adapter's directory name.
+`tools/release/release.sh` does the steps that touch versions and tags. `<adapter>` is the adapter's directory name. A new
+adapter needs a row in its `table`, naming its tag prefix and where its manifest keeps the version.
 
-1. `tools/release/release.sh bump <adapter> <major|minor|patch|version>` for each adapter in the release. A keyword
-   increments the adapter's newest tag (its manifest version before the first release); semver's 0.x rules are not applied,
-   so a breaking change before 1.0 is `minor`. It refuses an empty `Unreleased`, writes the version to the adapter's manifest
-   (`package.json`, `version.rb`, the `.csproj` or `build.gradle.kts`; ent, pgx and sqlalchemy take theirs from the tag), and
-   moves the `Unreleased` entries under `## v<version>`. Open one release pull request with the result.
+1. `tools/release/release.sh prepare` lists the adapters with `Unreleased` entries. `tools/release/release.sh prepare
+   <adapter>=<major|minor|patch|version> ...` branches off `$REMOTE/main`, runs `bump` for each, commits, pushes and opens the
+   release pull request with `gh`, its body the version table and each new changelog section. `bump <adapter>
+   <major|minor|patch|version>` alone does one adapter in place. A keyword increments the adapter's newest tag (its manifest
+   version before the first release); semver's 0.x rules are not applied, so a breaking change before 1.0 is `minor`. `bump`
+   refuses an empty `Unreleased`, writes the version to the adapter's manifest (`package.json`, `version.rb`, the `.csproj` or
+   `build.gradle.kts`; ent, pgx and sqlalchemy take theirs from the tag), and moves the `Unreleased` entries under
+   `## v<version>`.
 2. Once it is merged, check out the merge commit and run `tools/release/release.sh tag`, with `REMOTE` naming the remote for
    this repository if it is not `origin`. It finds every adapter whose newest `CHANGELOG.md` version has no tag on that
    remote, checks each against its manifest, asks before tagging, and pushes the tags three per push: a push carrying more

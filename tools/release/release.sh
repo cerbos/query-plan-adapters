@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Usage:
+#   release.sh prepare [<adapter>=<major|minor|patch|version> ...]  bump each on a branch off $REMOTE/main and open the release PR; no arguments lists unreleased adapters
 #   release.sh bump <adapter> <major|minor|patch|version>  write the version to the manifest and move CHANGELOG.md's Unreleased entries under it
 #   release.sh notes <adapter> <version>                   print that version's CHANGELOG.md section
 #   release.sh tag                                         tag HEAD with every adapter's newest CHANGELOG.md version not yet on $REMOTE (default origin)
@@ -96,6 +97,54 @@ bump() {
   echo "$dir: v$version"
 }
 
+display_name() {
+  if [[ "$pattern" == npm ]]; then node -p "require('./$dir/package.json').name"; else echo "$dir"; fi
+}
+
+prepare() {
+  local remote="${REMOTE:-origin}" spec adapter bump from rows="" sections="" names=()
+  if (($# == 0)); then
+    for adapter in $(table | cut -d'|' -f1); do
+      load "$adapter"
+      [[ -f "$dir/CHANGELOG.md" && -n "$(section "$dir" Unreleased)" ]] && echo "$dir (at $(current))"
+    done
+    return
+  fi
+  [[ -z "$(git status --porcelain)" ]] || die "working tree is not clean"
+  for spec in "$@"; do
+    [[ "$spec" == *=* ]] || die "expected <adapter>=<major|minor|patch|version>: $spec"
+    load "${spec%%=*}"
+    [[ -f "$dir/CHANGELOG.md" && -n "$(section "$dir" Unreleased)" ]] || die "$dir/CHANGELOG.md has nothing under Unreleased"
+  done
+  command -v gh >/dev/null || die "prepare needs gh"
+
+  local branch="release-$(date +%Y%m%d-%H%M%S)"
+  git fetch --quiet "$remote" main
+  git switch --quiet --no-track -c "$branch" "$remote/main"
+  for spec in "$@"; do
+    adapter="${spec%%=*}" bump="${spec#*=}"
+    load "$adapter"
+    from="$(current)"
+    bump "$adapter" "$bump" >/dev/null
+    names+=("${dir} ${version}")
+    rows+="| \`$(display_name)\` | ${from} | ${version} |"$'\n'
+    sections+=$'\n'"## \`$(display_name)\` ${version}"$'\n\n'"$(section "$dir" "$version")"$'\n'
+  done
+
+  local title="chore: release ${names[0]}" i
+  for ((i = 1; i < ${#names[@]}; i++)); do
+    if ((i == ${#names[@]} - 1)); then title+=" and ${names[i]}"; else title+=", ${names[i]}"; fi
+  done
+  local body
+  body="$(printf 'Moves each adapter'"'"'s `Unreleased` changelog entries under its new version. Once this is merged, check out the merge commit and run `tools/release/release.sh tag`.\n\n| Package | From | To |\n| --- | --- | --- |\n%s%s' "$rows" "$sections")"
+
+  git add -A
+  git commit --quiet --signoff -m "$title"
+  git push --quiet --set-upstream "$remote" "$branch"
+  gh pr create --base main --head "$branch" --title "$title" --body "$body"
+  git switch --quiet -
+}
+
 notes() {
   load "$@"
   check_version "$version"
@@ -128,8 +177,13 @@ tag() {
   done
 }
 
-case "${1:-}" in
-  bump | notes) [[ $# -eq 3 ]] || die "usage: release.sh $1 <adapter> <version>"; "$@" ;;
-  tag) [[ $# -eq 1 ]] || die "usage: release.sh tag"; tag ;;
-  *) die "usage: release.sh bump|notes <adapter> <version>, or release.sh tag" ;;
-esac
+main() {
+  case "${1:-}" in
+    prepare) shift; prepare "$@" ;;
+    bump | notes) [[ $# -eq 3 ]] || die "usage: release.sh $1 <adapter> <version>"; "$@" ;;
+    tag) [[ $# -eq 1 ]] || die "usage: release.sh tag"; tag ;;
+    *) die "usage: release.sh prepare [<adapter>=<bump> ...], release.sh bump|notes <adapter> <version>, or release.sh tag" ;;
+  esac
+}
+
+main "$@"; exit
