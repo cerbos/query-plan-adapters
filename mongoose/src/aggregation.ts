@@ -450,6 +450,7 @@ export const buildEvaluationGuards = (
 
   if (operand.operator === "and" || operand.operator === "or") {
     const absorbing = logicGuard(operand, mapper);
+
     if (absorbing) return [absorbing];
   }
 
@@ -471,6 +472,7 @@ const isExprGuard = (guard: MongooseFilter): boolean =>
  */
 const logicGuard = (expression: PlanExpression, mapper: ScopedMapper): MongooseFilter | undefined => {
   const decisive = expression.operator === "or";
+
   const operands = expression.operands.map((child) => ({
     guards: buildEvaluationGuards(child, mapper),
     value: build(child, mapper),

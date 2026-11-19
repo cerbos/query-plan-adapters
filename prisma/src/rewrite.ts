@@ -254,10 +254,12 @@ function parseLambdaMacro(expr: OperatorOperand):
  * absorb an erroring operand once another decides them, as SQL's do a NULL. Any other operator
  * reading `name` is taken as erroring, which can only under-grant.
  */
-function decidedWithout(
-  expr: PlanExpressionOperand,
-  name: string
-): { holds: PlanExpressionOperand; fails: PlanExpressionOperand } {
+interface Decided {
+  holds: PlanExpressionOperand;
+  fails: PlanExpressionOperand;
+}
+
+function decidedWithout(expr: PlanExpressionOperand, name: string): Decided {
   if (!mentionsVariable(expr, name)) {
     return { holds: expr, fails: { operator: "not", operands: [expr] } };
   }
@@ -367,7 +369,9 @@ export function hoistOuterScopeReferences(
       operator,
       operands: [collection, { operator: "lambda", operands: [element, variable] }],
     });
+
     const { holds, fails } = decidedWithout(body, outerRef);
+
     const errors: PlanExpressionOperand = {
       operator: "and",
       operands: [{ operator: "not", operands: [holds] }, { operator: "not", operands: [fails] }],
