@@ -191,12 +191,30 @@ module Cerbos
         # the body raises; the collection is guarded where the value is.
         return guard ? [guard] : [] if LAMBDA_OPERATORS.include?(operand.operator)
 
+        if %w[and or].include?(operand.operator)
+          absorbing = logic_guard(operand, mapper)
+          return [absorbing] if absorbing
+        end
+
         nested = if operand.operator == "if" && operand.operands.length == 3
           branch_guards(operand, mapper)
         else
           operand.operands.flat_map { |child| evaluation_guards(child, mapper) }
         end
         guard ? [guard] + nested : nested
+      end
+
+      # CEL's && is false once any operand evaluates to false, whatever the others raise, and ||
+      # true once any is true; otherwise every operand must evaluate to a boolean. Nil when an
+      # operand's guard is not an $expr, and then every guard applies, which never denies less.
+      def logic_guard(expression, mapper)
+        decisive = expression.operator == "or"
+        operands = expression.operands.map { |child| [evaluation_guards(child, mapper), build(child, mapper)] }
+        return nil unless operands.all? { |guards, _| guards.all? { |guard| guard.is_a?(Hash) && guard.keys == ["$expr"] } }
+
+        holds = ->(guards, check) { {"$and" => guards.map { |guard| guard["$expr"] } + [check]} }
+        {"$expr" => {"$or" => operands.map { |guards, value| holds.call(guards, {"$eq" => [value, decisive]}) } +
+          [{"$and" => operands.map { |guards, value| holds.call(guards, {"$eq" => [{"$type" => value}, "bool"]}) }}]}}
       end
 
       # A ternary evaluates only the branch its condition selects, so a branch's guards apply
