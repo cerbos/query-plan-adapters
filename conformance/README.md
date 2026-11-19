@@ -206,6 +206,7 @@ go -C conformance/generator run . fuzz -seed 7 -count 500 -out <dir>   # record 
 QPA_FUZZ_DIR=<dir> conformance/scripts/run-harness.sh <adapter> [store...]   # replay one adapter
 go -C conformance/generator run . fuzz-report -dir <dir>   # <dir>/report.md; exit 1 on a failure
 go -C conformance/generator run . fuzz-shrink -dir <dir> -case <id> -adapter <adapter> -store <store>
+go -C conformance/generator run . fuzz -seed 8 -steer <dir> -steer-adapters exposed -out <dir2>   # steered by <dir>
 ```
 
 `.github/workflows/fuzz.yaml` runs the same round when someone starts it by hand; it has no
@@ -232,6 +233,17 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   translating leg got wrong with the same rows is listed apart as a suspected planner divergence
   and does not fail the run: that agreement points at the plan and `check()` disagreeing. The
   refusal rate is not a failure, but a rise in it is worth a look.
+- **Steering.** Every leaf records its features in `cases.json`: the grammar production it came
+  from (`string.lowerAscii`), the attributes it reads (`attr:R.attr.createdBy`), or the corpus case
+  it was taken from (`corpus:<id>`); a case adds its tree operators (`tree.not`, `tree.deny`). The
+  report's "Weak spots" table puts each adapter's refusals down to the feature in the case it
+  translated least often, with the refusal message. `fuzz -steer <dir>[,<dir>]` reads those
+  directories' verdicts (for `-steer-adapters`, default every leg) and draws each feature in inverse
+  proportion to how many matched cases held it. `-steer-goal coverage`, the default, also weighs
+  that by how often the adapter translated the feature, so the run goes to shapes it translates but
+  was rarely checked on; `-steer-goal refusals` piles onto the shapes it refuses, the queue for a
+  hill-climb. A boost is held between 0.25 and 8, and the manifest keeps them, so the seed and the
+  steering directories fix the run.
 - **Promotion.** `fuzz-shrink` replays one-step reductions of a failing case through that leg until
   none still fails, and writes the smallest as a YAML entry. Give it an id, intent and trap, add it
   to `cases/<area>.yaml`, and it reaches every adapter through the usual route (["Changing how a

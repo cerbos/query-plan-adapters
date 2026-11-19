@@ -28,6 +28,7 @@ type fuzzManifest struct {
 	Tags    []string          `json:"tags"`
 	Kept    int               `json:"kept"`
 	Dropped map[string]string `json:"dropped"`
+	Steer   *fuzzSteer        `json:"steer,omitempty"`
 }
 
 // fuzzCaseFile is <out>/cases.json: every kept case's condition trees, for fuzz-shrink.
@@ -53,6 +54,9 @@ func runFuzz(ctx context.Context, args []string) error {
 	count := fs.Int("count", 500, "how many cases to generate before dropping the ones no adapter can be judged on")
 	out := fs.String("out", "", "the directory to write into; must be empty or missing, and outside conformance/")
 	confFlag := fs.String("conformance", "", "the conformance directory (default: located from the working directory)")
+	steerDirs := fs.String("steer", "", "earlier fuzz directories, comma-separated, whose verdicts steer this run toward the shapes they translated least (fuzzsteer.go)")
+	steerAdapters := fs.String("steer-adapters", "", "the adapters, comma-separated, whose verdicts -steer counts (default: every leg)")
+	steerGoal := fs.String("steer-goal", steerCoverage, "what -steer aims at: coverage (shapes translated but rarely checked) or refusals (shapes refused most, for a hill-climb)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -81,12 +85,18 @@ func runFuzz(ctx context.Context, args []string) error {
 	if f.atoms, err = boolAtoms(ctx, in, f.atoms, *seed); err != nil {
 		return err
 	}
+	var steer *fuzzSteer
+	if *steerDirs != "" {
+		if steer, err = f.steerFrom(splitList(*steerDirs), splitList(*steerAdapters), *steerGoal); err != nil {
+			return err
+		}
+	}
 	cases := f.fuzzCases(*seed, *count)
 	recorded, dropped, err := recordFuzz(ctx, in, cases, *seed)
 	if err != nil {
 		return err
 	}
-	m := fuzzManifest{Seed: *seed, Count: *count, Tags: in.tags(), Dropped: dropped}
+	m := fuzzManifest{Seed: *seed, Count: *count, Tags: in.tags(), Dropped: dropped, Steer: steer}
 	if err := writeFuzzDir(*out, m, recorded); err != nil {
 		return err
 	}
@@ -127,6 +137,16 @@ func loadFuzzInputs(conf string) (*fuzzInputs, error) {
 		return nil, err
 	}
 	return &fuzzInputs{conf: conf, corpus: corpus, ds: ds, versions: []pdpVersion{versions.Previous, versions.Current}}, nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func conformanceDirOr(flagValue string) (string, error) {
