@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.1
 
 - Fixed an over-grant on PostgreSQL and MySQL: a timestamp literal with digits past the microsecond
   was rounded to the stored microsecond grid when bound, so `>=` and `<` could admit the row on
