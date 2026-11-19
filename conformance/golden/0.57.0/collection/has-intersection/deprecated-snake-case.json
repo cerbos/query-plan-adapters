@@ -2,7 +2,8 @@
   "allowed": [
     "a4",
     "a6",
-    "a7"
+    "a7",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "collection/has-intersection/deprecated-snake-case",

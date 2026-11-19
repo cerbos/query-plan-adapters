@@ -1,7 +1,8 @@
 {
   "allowed": [
     "a4",
-    "a6"
+    "a6",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "collection/except/equals-list-literal",

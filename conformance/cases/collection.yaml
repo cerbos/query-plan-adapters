@@ -17,6 +17,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.all(t, t.name == "public")'
+- id: 'collection/all/bare-boolean-element'
+  tier: adversarial
+  intent: 'all over a boolean list whose body is the bare element (aBoolList.all(b, b)).'
+  trap: 'A null element in condition position is an error, not a pass: a4 [null, true] errors and must deny, where a per-element `value = true` that is NULL for the null element lets every() keep the row.'
+  condition:
+    match:
+      expr: 'R.attr.aBoolList.all(b, b)'
 - id: 'collection/all/negated-bare-boolean-element'
   tier: adversarial
   intent: 'A negated all over a boolean list whose body is the bare element (!aBoolList.all(b, b)).'

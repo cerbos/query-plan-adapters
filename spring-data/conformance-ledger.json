@@ -116,6 +116,10 @@
       "status": "unsupported",
       "reason": "Both hierarchies are read from columns, so there is no constant path to expand into prefixes, and JPA Criteria cannot split a column on a delimiter to compare it segment by segment."
     },
+    "logic/and/non-boolean-operand-in-value": {
+      "status": "unsupported",
+      "reason": "`&&` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."
+    },
     "logic/and/non-boolean-operand-in-value-negated": {
       "status": "unsupported",
       "reason": "`&&` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."
@@ -127,6 +131,10 @@
     "logic/not/bare-list-attribute": {
       "status": "unsupported",
       "reason": "aBoolList is mapped as a Relation, a collection with no scalar path, so a list read as a condition is refused."
+    },
+    "logic/or/non-boolean-operand-in-value": {
+      "status": "unsupported",
+      "reason": "`||` as an operand of `==`: JPA Criteria compares expressions, and the adapter does not lower a predicate as a comparison operand."
     },
     "null/in/error-or-boolean-in-list-with-null": {
       "status": "unsupported",

@@ -37,10 +37,18 @@ module Cerbos
 
       # ANDs {field: {$ne: null}} before +filter+ for every nullable field the operands read.
       def with_nullable(filter, operands, mapper)
-        names = operands.flat_map { |operand| variable_names(operand) }.uniq.select { |name| mapper.nullable?(name) }
+        names = operands.flat_map { |operand| names_outside_logic(operand) }.uniq.select { |name| mapper.nullable?(name) }
         return filter if names.empty?
 
         {"$and" => names.map { |name| field_filter(mapper.resolve_field(name).path, {"$ne" => nil}) } + [filter]}
+      end
+
+      # An operand of && or || may be null where another decides it; its evaluation guard says when.
+      def names_outside_logic(operand)
+        return [] if expression?(operand) && %w[and or].include?(operand.operator)
+        return operand.operands.flat_map { |child| names_outside_logic(child) } if expression?(operand)
+
+        variable_names(operand)
       end
 
       # "Every to-one parent this operand dots through is present", or nil when it dots through

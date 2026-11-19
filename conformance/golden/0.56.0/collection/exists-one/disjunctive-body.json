@@ -1,7 +1,8 @@
 {
   "allowed": [
     "a3",
-    "a4"
+    "a4",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "collection/exists-one/disjunctive-body",

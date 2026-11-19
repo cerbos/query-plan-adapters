@@ -3,6 +3,13 @@
 area: logic
 description: 'Boolean composition inside one condition: and, or, not, bare boolean attributes.'
 cases:
+- id: 'logic/and/non-boolean-operand-in-value'
+  tier: adversarial
+  intent: 'A string attribute as an operand of && compared with false ((aString && aBool) == false).'
+  trap: 'A false operand decides CEL''s && whatever the other raises, so every aBool-false row is allowed; requiring both operands to be booleans before comparing denies them all.'
+  condition:
+    match:
+      expr: '(R.attr.aString && R.attr.aBool) == false'
 - id: 'logic/and/non-boolean-operand-in-value-negated'
   tier: adversarial
   intent: 'A string attribute as an operand of && compared with false, negated, OR''d with aNumber == 5 (!((aString && aBool) == false) || aNumber == 5).'
@@ -95,6 +102,13 @@ cases:
   condition:
     match:
       expr: '!(!(!R.attr.aBool))'
+- id: 'logic/or/non-boolean-operand-in-value'
+  tier: adversarial
+  intent: 'A string attribute as an operand of || compared with true ((aString || aBool) == true).'
+  trap: 'A true operand decides CEL''s || whatever the other raises, so every aBool-true row is allowed and every aBool-false row errors; requiring both operands to be booleans denies them all, and reading the string as truthy over-grants the false rows.'
+  condition:
+    match:
+      expr: '(R.attr.aString || R.attr.aBool) == true'
 - id: 'logic/or/at-root'
   tier: core
   intent: A disjunction at the root of the condition (match.any of two comparisons).

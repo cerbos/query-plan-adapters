@@ -341,6 +341,10 @@
       "status": "unsupported",
       "reason": "Both operands carry a column: a_optional_string is compared against a concatenation of a constant with the primary key. Prisma's arithmetic solving inverts the constant off the VALUE side to reach a plain column filter, which requires the other side to be a value; a concatenation involving a second column has no Prisma filter form"
     },
+    "logic/and/non-boolean-operand-in-value": {
+      "status": "unsupported",
+      "reason": "`aString && aBool` reads a string field as a boolean: a CEL no-overload error that only a false aBool absorbs, and Prisma has no filter that answers UNKNOWN for the string operand, so a non-boolean field in boolean position is refused."
+    },
     "logic/and/non-boolean-operand-in-value-negated": {
       "status": "unsupported",
       "reason": "`aString && aBool` reads a string field as a boolean, a CEL no-overload error under both polarities that no Prisma filter keeps out (a NOT over any filter selects it), so it is refused."
@@ -372,6 +376,10 @@
     "logic/not/deep-mixed-nesting": {
       "status": "unsupported",
       "reason": "`t.name == R.attr.aString` inside the exists compares a tag column with a root column, which is cross-model: Prisma field references only compare fields of the same model, so the macro is refused before the negation is pushed through."
+    },
+    "logic/or/non-boolean-operand-in-value": {
+      "status": "unsupported",
+      "reason": "`aString || aBool` reads a string field as a boolean: a CEL no-overload error that only a true aBool absorbs, and Prisma has no filter that answers UNKNOWN for the string operand, so a non-boolean field in boolean position is refused."
     },
     "membership/in/field-in-resource-list": {
       "status": "unsupported",

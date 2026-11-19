@@ -48,7 +48,9 @@
     "l1",
     "l2",
     "l3",
-    "l4"
+    "l4",
+    "m1",
+    "m2"
   ],
   "degenerateReason": "P.attr.emptyTeams is an empty list, so all() over it is true for every seed; the planner folds the plan. The case pins that macro identity and the fold.",
   "id": "principal/all/empty-list",

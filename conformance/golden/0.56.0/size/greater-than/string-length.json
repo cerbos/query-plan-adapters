@@ -26,7 +26,9 @@
     "j4",
     "k1",
     "k2",
-    "l1"
+    "l1",
+    "m1",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "size/greater-than/string-length",

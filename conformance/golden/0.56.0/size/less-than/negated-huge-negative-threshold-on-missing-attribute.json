@@ -45,7 +45,9 @@
     "l1",
     "l2",
     "l3",
-    "l4"
+    "l4",
+    "m1",
+    "m2"
   ],
   "degenerateReason": null,
   "id": "size/less-than/negated-huge-negative-threshold-on-missing-attribute",

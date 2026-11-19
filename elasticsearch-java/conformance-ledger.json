@@ -289,6 +289,10 @@
       "status": "unsupported",
       "reason": "Unexpected list expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing list over a field needs a script."
     },
+    "collection/all/bare-boolean-element": {
+      "status": "unsupported",
+      "reason": "Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping: `aBoolList` is indexed as a flat boolean field, so a null element and a true one are not told apart per element."
+    },
     "collection/all/conjunctive-body": {
       "status": "unsupported",
       "reason": "A positive all() cannot distinguish a missing nested collection from an empty one in Elasticsearch."

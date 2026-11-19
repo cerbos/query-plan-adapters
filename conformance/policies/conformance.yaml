@@ -738,6 +738,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.all(t, t.name == "public")
+    # collection/all/bare-boolean-element
+    - actions:
+        - collection/all/bare-boolean-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aBoolList.all(b, b)
     # collection/all/negated-bare-boolean-element
     - actions:
         - collection/all/negated-bare-boolean-element
@@ -2628,6 +2637,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString != R.id
+    # logic/and/non-boolean-operand-in-value
+    - actions:
+        - logic/and/non-boolean-operand-in-value
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: (R.attr.aString && R.attr.aBool) == false
     # logic/and/non-boolean-operand-in-value-negated
     - actions:
         - logic/and/non-boolean-operand-in-value-negated
@@ -2744,6 +2762,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(!(!R.attr.aBool))'
+    # logic/or/non-boolean-operand-in-value
+    - actions:
+        - logic/or/non-boolean-operand-in-value
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: (R.attr.aString || R.attr.aBool) == true
     # logic/or/at-root
     - actions:
         - logic/or/at-root

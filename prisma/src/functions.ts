@@ -48,6 +48,17 @@ const not = (operand: PlanExpressionOperand): OperatorOperand => ({
   operands: [operand],
 });
 
+/**
+ * `found` once the derived list can be built, and an error when it cannot (`built` is TRUE or an
+ * error, never FALSE): `built && found` alone lets a FALSE `found` absorb that error.
+ */
+function builtAnd(found: PlanExpressionOperand, built: PlanExpressionOperand): OperatorOperand {
+  return {
+    operator: "and",
+    operands: [built, { operator: "or", operands: [found, not(built)] }],
+  };
+}
+
 function macro(
   operator: "exists" | "all",
   collection: PlanExpressionOperand,
@@ -296,13 +307,10 @@ function membershipOfDerivedList(
   if (list.operator === "map") {
     const matches: PlanExpressionOperand = { operator: "eq", operands: [body, member] };
 
-    return {
-      operator: "and",
-      operands: [
-        macro("exists", collection, matches, variable),
-        macro("all", collection, evaluates(matches), variable),
-      ],
-    };
+    return builtAnd(
+      macro("exists", collection, matches, variable),
+      macro("all", collection, evaluates(matches), variable)
+    );
   }
 
   // filter() keeps the element itself, which only a projected scalar list can compare with a
@@ -311,18 +319,15 @@ function membershipOfDerivedList(
 
   if (relations?.[relations.length - 1]?.field === undefined) return undefined;
 
-  return {
-    operator: "and",
-    operands: [
-      macro(
-        "exists",
-        collection,
-        { operator: "and", operands: [{ operator: "eq", operands: [variable, member] }, body] },
-        variable
-      ),
-      macro("all", collection, evaluates(body), variable),
-    ],
-  };
+  return builtAnd(
+    macro(
+      "exists",
+      collection,
+      { operator: "and", operands: [{ operator: "eq", operands: [variable, member] }, body] },
+      variable
+    ),
+    macro("all", collection, evaluates(body), variable)
+  );
 }
 
 /**
@@ -370,13 +375,10 @@ function intersectionWithMappedList(node: OperatorOperand): PlanExpressionOperan
     operands: [projection, { value: values }],
   };
 
-  return {
-    operator: "and",
-    operands: [
-      macro("exists", collection, shared, variable),
-      macro("all", collection, { operator: "or", operands: [shared, not(shared)] }, variable),
-    ],
-  };
+  return builtAnd(
+    macro("exists", collection, shared, variable),
+    macro("all", collection, { operator: "or", operands: [shared, not(shared)] }, variable)
+  );
 }
 
 /**

@@ -176,6 +176,10 @@
       "status": "unsupported",
       "reason": "A list constructed from attributes is lowered only as the range of exists()/all() or the right operand of in: SQL has no list value to concatenate or compare."
     },
+    "collection/all/bare-boolean-element": {
+      "status": "unsupported",
+      "reason": "A macro over `aBoolList`, which the mapping declares only as a collection column (JSON or a PostgreSQL array): size(), an index and membership read that column, but a macro ranges over a relation, and the list has none."
+    },
     "collection/all/negated-bare-boolean-element": {
       "status": "unsupported",
       "reason": "A macro over `aBoolList`, which the mapping declares only as a collection column (JSON or a PostgreSQL array): size(), an index and membership read that column, but a macro ranges over a relation, and the list has none."
