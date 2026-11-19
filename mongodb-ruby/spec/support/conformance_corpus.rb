@@ -11,7 +11,7 @@ module ConformanceCorpus
   DIR = File.expand_path("../../../conformance", __dir__)
   # A fuzz run recorded with generated rows carries its own dataset, which replaces the corpus's.
   DATA_DIR = ENV.fetch("QPA_FUZZ_DIR", "").then do |dir|
-    !dir.empty? && File.exist?(File.join(dir, "seeds.json")) ? dir : DIR
+    (!dir.empty? && File.exist?(File.join(dir, "seeds.json"))) ? dir : DIR
   end.freeze
   LEDGER_FILE = File.expand_path("../../conformance-ledger.json", __dir__)
 
