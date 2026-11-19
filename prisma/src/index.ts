@@ -9,6 +9,7 @@ import type { TranslationContext } from "./mapping";
 import { assertPlannerOperators, isValueOperand } from "./plan";
 import { constantFoldExpression, hoistOuterScopeReferences } from "./rewrite";
 import { buildPrismaFilterFromCerbosExpression } from "./translate";
+import { parenthesiseFilter } from "./negation";
 import { rewriteFunctionCalls } from "./functions";
 import { expandLiteralCollections } from "./literals";
 import { settleTypeMismatches } from "./types";
@@ -226,7 +227,7 @@ export function queryPlanToPrisma({
 
       return {
         kind: PlanKind.CONDITIONAL,
-        filters: buildPrismaFilterFromCerbosExpression(condition, context),
+        filters: parenthesiseFilter(buildPrismaFilterFromCerbosExpression(condition, context)),
       };
     }
 
