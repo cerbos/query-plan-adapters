@@ -9,6 +9,7 @@ copy of this file on purpose (ADR 0007). Test-only.
 """
 
 import atexit
+import copy
 import glob
 import itertools
 import json
@@ -25,7 +26,12 @@ from cerbos.engine.v1 import engine_pb2
 from cerbos.response.v1 import response_pb2
 from cerbos.sdk.client import CerbosClient
 from cerbos.sdk.grpc.client import CerbosClient as GrpcCerbosClient
-from cerbos.sdk.model import PlanResourcesResponse, Principal, ResourceDesc
+from cerbos.sdk.model import (
+    PlanResourcesExpression,
+    PlanResourcesResponse,
+    Principal,
+    ResourceDesc,
+)
 from cerbos.svc.v1 import svc_pb2_grpc
 from google.protobuf.json_format import ParseDict
 from sqlalchemy import (
@@ -823,3 +829,37 @@ def render(query, dialect_name: str) -> tuple[str, dict[str, Any]]:
         dialect=dialect(dialect_name), compile_kwargs={"render_postcompile": True}
     )
     return " ".join(str(compiled).split()), dict(compiled.params)
+
+
+# -- fitness functions for "refuse, never best-effort" ----------------------
+
+UNKNOWN_OPERATOR = "qpa-unknown-operator"
+
+
+def _expressions(operand: Any):
+    if isinstance(operand, PlanResourcesExpression):
+        yield operand.expression
+        for child in operand.expression.operands:
+            yield from _expressions(child)
+
+
+def operator_mutants(plan: PlanResourcesResponse):
+    """One copy of the plan per operator node, each with that node's operator renamed to one no
+    PDP emits. A translator that refuses every one of them has no dispatch that falls through to
+    a filter for an operator it does not know."""
+    condition = plan.filter.condition
+    for index in range(sum(1 for _ in _expressions(condition))):
+        mutant = copy.deepcopy(plan)
+        list(_expressions(mutant.filter.condition))[index].operator = UNKNOWN_OPERATOR
+        yield mutant
+
+
+def reads_clock(case: dict[str, Any]) -> bool:
+    """Whether the golden's plan holds timeSince, which a translator resolves against the clock."""
+
+    def reads(node: Any) -> bool:
+        if isinstance(node, dict):
+            return node.get("operator") == "timeSince" or any(map(reads, node.values()))
+        return isinstance(node, list) and any(map(reads, node))
+
+    return reads(case["plan"])

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import Database from "better-sqlite3";
 import * as drizzleOrm from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import type { AnyColumn, SQL, Table } from "drizzle-orm";
+import type { AnyColumn, Query, SQL, Table } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import type { MySql2Database } from "drizzle-orm/mysql2";
 import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
@@ -32,7 +32,10 @@ import {
   postgresSchema,
   readCorpusJson,
   readGoldens,
+  readsClock,
+  rendered,
   sqliteSchema,
+  unrefusedMutants,
   writeFuzzResults,
 } from "./corpus";
 import type { ConformanceMapper, FuzzVerdict, Golden } from "./corpus";
@@ -407,6 +410,8 @@ interface AdversarialStore {
   start(): Promise<void>;
   stop(): Promise<void>;
   selectIds(filter: SQL | undefined): Promise<string[]>;
+  /** The statement and parameters `selectIds` sends for the filter. */
+  render(filter: SQL | undefined): Query;
   /** The engine's own banner, asked of the connection the suite actually queries through. */
   serverBanner(): Promise<string>;
 }
@@ -522,6 +527,10 @@ function sqliteStore(): AdversarialStore {
         .all();
 
       return selected.map((row) => row.id).sort();
+    },
+
+    render(filter: SQL | undefined): Query {
+      return db.select({ id: resources.id }).from(resources).where(filter).toSQL();
     },
 
     async serverBanner(): Promise<string> {
@@ -725,6 +734,10 @@ function postgresStore(): AdversarialStore {
       return selected.map((row) => row.id).sort();
     },
 
+    render(filter: SQL | undefined): Query {
+      return connected().select({ id: resources.id }).from(resources).where(filter).toSQL();
+    },
+
     async serverBanner(): Promise<string> {
       const result = await connected().execute<{ version: string }>(
         sql`select version() as version`,
@@ -918,6 +931,10 @@ function mysqlStore(): AdversarialStore {
       return selected.map((row) => row.id).sort();
     },
 
+    render(filter: SQL | undefined): Query {
+      return connected().select({ id: resources.id }).from(resources).where(filter).toSQL();
+    },
+
     // `@@version_comment` rather than `version()`: the latter answers `8.4.x` on MySQL and would
     // make the banner assertion a version check, while this one names the engine and is a syntax
     // error on both other stores.
@@ -1043,6 +1060,22 @@ const translatePlan = (queryPlan: PlanResourcesResponse, mapper: Mapper) => {
   return queryPlanToDrizzle(args);
 };
 
+// Two properties "refuse, never best-effort" rests on, checked without running a query
+// (conformance/README.md, "The harness contract").
+function assertFitness(queryPlan: PlanResourcesResponse, mapper: Mapper): void {
+  const render = () => {
+    const result = translatePlan(queryPlan, mapper);
+
+    return result.kind === PlanKind.CONDITIONAL ? store.render(result.filter) : result;
+  };
+
+  if (!readsClock(queryPlan)) expect(rendered(render)).toEqual(rendered(render));
+
+  expect(
+    unrefusedMutants(queryPlan, (mutant) => translatePlan(mutant, mapper), UnsupportedQueryPlanError),
+  ).toEqual([]);
+}
+
 async function selectAllowed(golden: Golden, mapper: Mapper): Promise<string[]> {
   const result = translatePlan(await planOf(golden), mapper);
 
@@ -1147,6 +1180,8 @@ describe(`conformance (${STORE_NAME})`, () => {
         const entry = ledgerEntry(golden, tag);
 
         for (const mapper of MAPPERS) {
+          assertFitness(await planOf(golden), mapper);
+
           if (entry?.status === "unsupported") {
             const queryPlan = await planOf(golden);
             expect(() => translatePlan(queryPlan, mapper)).toThrow(UnsupportedQueryPlanError);

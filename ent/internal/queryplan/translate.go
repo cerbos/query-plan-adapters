@@ -188,7 +188,13 @@ func (b *builder) predicate(n *node, m Mapper, negated bool) (Expr, error) {
 
 	if collectionValued[n.operator] {
 		// A list in boolean position is a CEL type error, which denies the row under both
-		// polarities; it is one UNKNOWN, as the planner's `||` and `&&` absorb it.
+		// polarities; it is one UNKNOWN, as the planner's `||` and `&&` absorb it. A filter or map
+		// is still translated first, so a shape inside it this adapter cannot read is refused.
+		if n.operator == "filter" || n.operator == "map" {
+			if _, err := b.value(n, m); err != nil {
+				return nil, err
+			}
+		}
 		return Lit{V: nil}, nil
 	}
 

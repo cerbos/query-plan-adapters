@@ -37,7 +37,25 @@ module Cerbos
           raise InvalidPlanError, "Conditional query plan has no condition"
         end
 
-        Normalised.new(kind, (kind == CONDITIONAL) ? node(condition) : nil)
+        Normalised.new(kind, (kind == CONDITIONAL) ? assert_planner_operators(node(condition)) : nil)
+      end
+
+      # Every operator a Cerbos plan holds. Some translations decide a subtree from its type
+      # alone, so an unknown operator is refused before translating.
+      PLANNER_OPERATORS = %w[
+        add all ancestorOf and contains descendentOf div double duration dyn endsWith eq except
+        exists exists_one filter ge get-field gt has hasIntersection has_intersection hierarchy if
+        in index int intersect isSubset lambda le list lt map matches mod mult ne not or overlaps
+        set-field size startsWith string struct sub timeSince timestamp upperAscii
+      ].to_set.freeze
+
+      # @api private
+      def assert_planner_operators(operand)
+        return operand unless operand.is_a?(Expression)
+        raise UnsupportedError, "Unsupported operator: #{operand.operator}" unless PLANNER_OPERATORS.include?(operand.operator)
+
+        operand.operands.each { |child| assert_planner_operators(child) }
+        operand
       end
 
       # @api private

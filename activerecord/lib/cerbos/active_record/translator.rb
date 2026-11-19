@@ -557,6 +557,11 @@ module Cerbos
       # --- operators with resolved operands -------------------------------------------
 
       def apply(operator, values)
+        unless operator_overrides[operator] || OPERATORS[operator]
+          raise UnsupportedOperatorError,
+            "Unsupported operator: #{operator}. Supply an operator override if the database " \
+            "can express it faithfully."
+        end
         assert_arity(operator, values)
         # Every operator reaching here is strict in CEL: an error operand makes the result the
         # error, whatever the other operands are. Rendered, `size(aNumber) in [1, null]` would be

@@ -128,6 +128,16 @@ Each adapter implements this once, in its own language. It needs no PDP.
    from every golden's `allowed` before comparing.
 2. **For each PDP in `pdp-versions.json`** (current and previous), **for each golden file**:
    - If `plannerDivergence` is set, skip the case.
+   - **Fitness checks**, whatever the ledger says (skipped in a fuzz run):
+     - *Determinism.* Translate the plan twice and assert both renderings (the SQL and its
+       arguments, or the filter document) are equal, so map or set iteration order never reaches a
+       filter. A plan holding `timeSince` is exempt: its translation reads the clock. Python
+       compares against a child process run under another `PYTHONHASHSEED`.
+     - *Unknown operator.* For each operator node in the plan, rename that one node to
+       `qpa-unknown-operator` and assert translating throws the refusal type. A dispatch that falls
+       through, a fold or rewrite that decides a subtree without reading it, or a positional read
+       that never checks the operator in that position fails here. Adapters whose rewrites skip
+       subtrees refuse any operator outside the set a Cerbos plan holds before translating.
    - Look the case up in the adapter's ledger. An entry applies unless its `pdp` list excludes this tag.
    - Where the adapter's language has a Cerbos SDK that reshapes the `PlanResources` response
      (JavaScript, Python's HTTP client, Ruby), hand the adapter what that SDK returns: serve the

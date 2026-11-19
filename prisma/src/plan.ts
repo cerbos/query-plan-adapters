@@ -123,3 +123,24 @@ export function normalizeBinaryOperands(
 
   return { operator, operands };
 }
+
+// Every operator a Cerbos plan holds. Rewrites decide some subtrees without reading them, so an
+// unknown operator is refused before any rewrite runs.
+const PLANNER_OPERATORS = new Set([
+  "add", "all", "ancestorOf", "and", "contains", "descendentOf", "div", "double", "duration", "dyn",
+  "endsWith", "eq", "except", "exists", "exists_one", "filter", "ge", "get-field", "gt", "has",
+  "hasIntersection", "has_intersection", "hierarchy", "if", "in", "index", "int", "intersect",
+  "isSubset", "lambda", "le", "list", "lt", "map", "matches", "mod", "mult", "ne", "not", "or",
+  "overlaps", "set-field", "size", "startsWith", "string", "struct", "sub", "timeSince",
+  "timestamp", "upperAscii",
+]);
+
+export function assertPlannerOperators(operand: PlanExpressionOperand): void {
+  if (!isOperatorOperand(operand)) return;
+
+  if (!PLANNER_OPERATORS.has(operand.operator)) {
+    throw new UnsupportedQueryPlanError(`Unsupported operator: ${operand.operator}`);
+  }
+
+  operand.operands.forEach(assertPlannerOperators);
+}

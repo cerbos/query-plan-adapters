@@ -49,6 +49,26 @@ RSpec.describe "conformance" do
   # An `unsupported` entry passes on a refusal, and an attribute the map forgot would raise one
   # too. So every attribute check() saw must reach a mapping, exactly or through a mapped
   # ancestor (a relation such as `mainCategory`).
+  # Two properties "refuse, never best-effort" rests on, checked without running a query
+  # (conformance/README.md, "The harness contract").
+  def expect_fitness(plan)
+    unless ConformanceCorpus.reads_clock?(plan)
+      first = ConformanceCorpus.rendered { translate(plan).to_a.inspect }
+      expect(ConformanceCorpus.rendered { translate(plan).to_a.inspect }).to eq(first)
+    end
+
+    unrefused = ConformanceCorpus.operator_mutants(plan).filter_map do |mutant|
+      "#{mutant.condition.inspect}\ntranslated to #{translate(mutant).to_a.inspect}"
+    rescue Cerbos::MongoDB::MapperError => e
+      "#{mutant.condition.inspect}\nraised #{e.inspect}"
+    rescue Cerbos::MongoDB::Error
+      nil
+    rescue => e
+      "#{mutant.condition.inspect}\nraised #{e.inspect}"
+    end
+    expect(unrefused).to be_empty
+  end
+
   it "maps every attribute of every resource" do
     mapped = MAPPER.keys
     unmapped = ConformanceCorpus.resource_attribute_paths.reject { |path|
@@ -107,6 +127,8 @@ RSpec.describe "conformance" do
               expect(%w[match refused]).to include(verdict.fetch("verdict")), verdict.to_s
               next
             end
+
+            expect_fitness(plan) if leg == "driver"
 
             case ConformanceCorpus.ledger_entry(id, tag)&.fetch("status")
             when nil then expect(ids.call(translate(plan))).to eq(allowed)

@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -346,5 +347,52 @@ final class Corpus {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    // -- fitness functions for "refuse, never best-effort" ---------------------------------------
+
+    /** An operator name no PDP emits. */
+    static final String UNKNOWN_OPERATOR = "qpa-unknown-operator";
+
+    /**
+     * One copy of the plan per operator node, each with that node's operator renamed to
+     * {@link #UNKNOWN_OPERATOR}. A translator that refuses every one of them has no dispatch that
+     * falls through to a filter for an operator it does not know.
+     */
+    static List<PlanResourcesResponse> operatorMutants(PlanResourcesResponse plan) {
+        PlanResourcesFilter.Expression.Operand condition = plan.getFilter().getCondition();
+        List<PlanResourcesResponse> mutants = new ArrayList<>();
+        for (int target = 0; target < expressionCount(condition); target++) {
+            PlanResourcesFilter.Expression.Operand renamed = rename(condition, target, new int[1]);
+            mutants.add(plan.toBuilder()
+                    .setFilter(plan.getFilter().toBuilder().setCondition(renamed)).build());
+        }
+        return mutants;
+    }
+
+    /** Whether the plan holds timeSince, which a translator resolves against the clock. */
+    static boolean readsClock(PlanResourcesResponse plan) {
+        return readsClock(plan.getFilter().getCondition());
+    }
+
+    private static boolean readsClock(PlanResourcesFilter.Expression.Operand operand) {
+        return operand.hasExpression() && ("timeSince".equals(operand.getExpression().getOperator())
+                || operand.getExpression().getOperandsList().stream().anyMatch(Corpus::readsClock));
+    }
+
+    private static int expressionCount(PlanResourcesFilter.Expression.Operand operand) {
+        if (!operand.hasExpression()) return 0;
+        return 1 + operand.getExpression().getOperandsList().stream()
+                .mapToInt(Corpus::expressionCount).sum();
+    }
+
+    private static PlanResourcesFilter.Expression.Operand rename(
+            PlanResourcesFilter.Expression.Operand operand, int target, int[] seen) {
+        if (!operand.hasExpression()) return operand;
+        PlanResourcesFilter.Expression expression = operand.getExpression();
+        PlanResourcesFilter.Expression.Builder renamed = expression.toBuilder().clearOperands();
+        if (seen[0]++ == target) renamed.setOperator(UNKNOWN_OPERATOR);
+        expression.getOperandsList().forEach(child -> renamed.addOperands(rename(child, target, seen)));
+        return operand.toBuilder().setExpression(renamed).build();
     }
 }

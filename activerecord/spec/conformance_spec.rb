@@ -20,11 +20,31 @@ RSpec.describe "conformance" do
   # mapping. The call-level value covers what is left, list elements and principal-side literals,
   # which the dataset sends as values; the adapter's own default is pinned in
   # adapter_contract_spec.rb.
-  def ids(plan)
+  def relation(plan)
     Cerbos::ActiveRecord.query_plan_to_relation(
       plan: plan, model: AdvResource, attributes: CorpusAttributes::ATTRIBUTES,
       null_attribute_representation: :explicit
-    ).pluck(:id).sort
+    )
+  end
+
+  def ids(plan) = relation(plan).pluck(:id).sort
+
+  # Two properties "refuse, never best-effort" rests on, checked without running a query
+  # (conformance/README.md, "The harness contract").
+  def expect_fitness(plan)
+    unless ConformanceCorpus.reads_clock?(plan)
+      first = ConformanceCorpus.rendered { relation(plan).to_sql }
+      expect(ConformanceCorpus.rendered { relation(plan).to_sql }).to eq(first)
+    end
+
+    unrefused = ConformanceCorpus.operator_mutants(plan).filter_map do |mutant|
+      "#{mutant.condition.inspect}\ntranslated to #{relation(mutant).to_sql}"
+    rescue Cerbos::ActiveRecord::Error
+      nil
+    rescue => e
+      "#{mutant.condition.inspect}\nraised #{e.inspect}"
+    end
+    expect(unrefused).to be_empty
   end
 
   # An `unsupported` entry passes on any Cerbos::ActiveRecord::Error, and an attribute the map
@@ -60,6 +80,8 @@ RSpec.describe "conformance" do
             expect(%w[match refused]).to include(verdict.fetch("verdict")), verdict.to_s
             next
           end
+
+          expect_fitness(plan)
 
           case ConformanceCorpus.ledger_entry(golden.fetch("id"), tag)&.fetch("status")
           when nil then expect(ids(plan)).to eq(allowed)
