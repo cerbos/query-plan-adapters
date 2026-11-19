@@ -135,7 +135,7 @@ final class LeafTranslator {
                         + "pattern at it.");
             }
             return cb.like(ExactStrings.exact(cb, path.as(String.class)),
-                    match.pattern(PlanValues.escapeLike(needle)), '\\');
+                    match.pattern(PlanValues.escapeLike(needle)), PlanValues.LIKE_ESCAPE);
         }
         if (ComparisonTranslator.COMPARISON_OPS.contains(op) && value != null
                 && !compatibleTypes(path.getJavaType(), value.getClass())) {

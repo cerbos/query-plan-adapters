@@ -344,12 +344,18 @@ internal static class Cel
         _ => TypeName(value),
     };
 
+    /// <summary>
+    /// LIKE's escape character. Not a backslash: MySQL's NO_BACKSLASH_ESCAPES and PostgreSQL's
+    /// standard_conforming_strings=off disagree on how to spell one in SQL.
+    /// </summary>
+    internal const string LikeEscape = "!";
+
     internal static string EscapeLike(string s, bool escapeBracket)
     {
         var sb = new StringBuilder(s.Length + 4);
         foreach (var c in s)
         {
-            if (c is '%' or '_' or '\\' || (escapeBracket && c == '[')) sb.Append('\\');
+            if (c is '%' or '_' or '!' || (escapeBracket && c == '[')) sb.Append('!');
             sb.Append(c);
         }
         return sb.ToString();

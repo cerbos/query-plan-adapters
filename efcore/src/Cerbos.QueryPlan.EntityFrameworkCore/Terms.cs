@@ -182,7 +182,7 @@ internal static class Ex
     public static Expression Like(Expression value, string pattern) => Like(value, Parameter(pattern, typeof(string)));
 
     public static Expression Like(Expression value, Expression pattern) =>
-        Expression.Call(LikeMethod, Functions, value, pattern, Expression.Constant("\\"));
+        Expression.Call(LikeMethod, Functions, value, pattern, Expression.Constant(Cel.LikeEscape));
 
     private static readonly MethodInfo CollateMethod = typeof(RelationalDbFunctionsExtensions)
         .GetMethod(nameof(RelationalDbFunctionsExtensions.Collate))!.MakeGenericMethod(typeof(string));

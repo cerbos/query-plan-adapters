@@ -1190,9 +1190,9 @@ internal sealed class Translator
     /// <summary>Escapes LIKE's metacharacters in a string the query reads, with SQL REPLACE.</summary>
     private static Expression EscapeLikeInQuery(Expression s)
     {
-        foreach (var c in new[] { "\\", "%", "_", "[" })
+        foreach (var c in new[] { Cel.LikeEscape, "%", "_", "[" })
         {
-            s = Expression.Call(s, StringReplace, Expression.Constant(c), Expression.Constant("\\" + c));
+            s = Expression.Call(s, StringReplace, Expression.Constant(c), Expression.Constant(Cel.LikeEscape + c));
         }
         return s;
     }

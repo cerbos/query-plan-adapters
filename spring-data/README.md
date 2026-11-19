@@ -205,6 +205,9 @@ Fix it the usual JPA way: eager-fetch small collections, map to DTOs inside
 
 ## Behaviour changes
 
+- In the jpa translator, `LIKE` escapes with `!` instead of a backslash, so string matching works
+  under MySQL's `NO_BACKSLASH_ESCAPES` and PostgreSQL's `standard_conforming_strings = off`, where
+  the query used to fail.
 - **Breaking:** the `toSpecification(plan, mapper, overrides[, nullAttributeRepresentation])`
   overloads are gone; pass `Options.of(mapper).withOperatorOverrides(...)` instead. The
   macro-depth system property is gone too; use `Options.withMaxMacroDepth`.
