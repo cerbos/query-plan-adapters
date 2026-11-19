@@ -69,6 +69,10 @@
       "reason": "The int() cast that gives % an integer operand has no SQL lowering: PostgreSQL CAST rounds where CEL truncates toward zero.",
       "status": "unsupported"
     },
+    "arithmetic/modulo/literal-zero-divisor-negated": {
+      "status": "unsupported",
+      "reason": "int() has no faithful SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero."
+    },
     "arithmetic/modulo/negated-double-operand": {
       "reason": "% over an attribute is a CEL no-overload error (every attribute number is a double and % is integer-only), which the PDP denies on every row; a SQL modulus would answer it, so the translator refuses instead.",
       "status": "unsupported"
@@ -197,6 +201,10 @@
       "status": "unsupported",
       "reason": "Each list holds `aDouble / 0.0`, a division by a constant zero kept as a conditional value (NaN or a signed infinity per row), which a list constructor cannot hold as a plain SQL expression."
     },
+    "hierarchy/ancestor-of/mismatched-delimiters-negated": {
+      "status": "unsupported",
+      "reason": "The two hierarchy() operands split on different delimiters; the translator compares segments of one delimiter only, so it refuses rather than re-split either path in SQL."
+    },
     "hierarchy/overlaps/field-to-field": {
       "reason": "The translator lowers a hierarchy relation only against a constant path, whose prefixes it expands at translation time; here both sides are the column split on different delimiters, so there is nothing to expand.",
       "status": "unsupported"
@@ -236,6 +244,10 @@
     "principal/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "CEL needs a boolean where the dyn()-wrapped map() list stands, a no-overload error; the planner keeps the wrapper as operator `dyn`, which the adapter does not translate."
+    },
+    "regex/matches/anchors-inside-group": {
+      "status": "unsupported",
+      "reason": "The anchors sit inside a group, so what the pattern matches is not a finite set of literals under anchors, a character set, or a prefix and suffix; no store regex dialect is RE2, so only those shapes are lowered."
     },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",

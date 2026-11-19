@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "a3"
+  ],
+  "degenerateReason": null,
+  "id": "collection/index/integral-double-position",
+  "intent": "A list indexed by a double with no fractional part (aNumberList[1.0] == 3).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumberList"
+                },
+                {
+                  "value": 1
+                }
+              ],
+              "operator": "index"
+            }
+          },
+          {
+            "value": 3
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/index/integral-double-position",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumberList[1.0] == 3"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL accepts an integral double as a list index, so a3 [2, 3] is allowed; collection/index/fractional-position is the error case. Treating every double index as an error under-grants a3, and rounding a fractional one would over-grant."
+}

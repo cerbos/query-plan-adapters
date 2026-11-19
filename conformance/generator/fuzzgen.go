@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,8 @@ type fnode struct {
 	CEL  string   `json:"cel,omitempty"`
 	From string   `json:"from,omitempty"`
 	Kids []*fnode `json:"kids,omitempty"`
+	// Feats names what an atom was drawn from: its production and attributes, or its corpus case.
+	Feats []string `json:"feats,omitempty"`
 }
 
 // fuzzCase is one generated action.
@@ -69,7 +72,7 @@ func (fc *fuzzCase) size() int {
 }
 
 func (n *fnode) clone() *fnode {
-	c := &fnode{Op: n.Op, CEL: n.CEL, From: n.From}
+	c := &fnode{Op: n.Op, CEL: n.CEL, From: n.From, Feats: n.Feats}
 	for _, k := range n.Kids {
 		c.Kids = append(c.Kids, k.clone())
 	}
@@ -158,6 +161,10 @@ type fuzzer struct {
 	rng   *rand.Rand
 	atoms []corpusAtom
 	pools map[string][]any
+	// steer multiplies a feature's chance of being drawn; a feature it does not name keeps 1.
+	steer map[string]float64
+	// feats collects the attributes the leaf being drawn reads.
+	feats []string
 }
 
 func newFuzzer(seed uint64, corpus *Corpus, ds *Dataset) *fuzzer {
@@ -278,6 +285,37 @@ func (f *fuzzer) pick(xs []string) string { return xs[f.rng.IntN(len(xs))] }
 
 func (f *fuzzer) chance(p float64) bool { return f.rng.Float64() < p }
 
+func (f *fuzzer) boost(feature string) float64 {
+	if b, ok := f.steer[feature]; ok {
+		return b
+	}
+	return 1
+}
+
+// weighted draws an index in [0, n) with chance proportional to weight(i).
+func (f *fuzzer) weighted(n int, weight func(i int) float64) int {
+	ws := make([]float64, n)
+	total := 0.0
+	for i := range ws {
+		ws[i] = weight(i)
+		total += ws[i]
+	}
+	x := f.rng.Float64() * total
+	for i, w := range ws {
+		if x < w {
+			return i
+		}
+		x -= w
+	}
+	return n - 1
+}
+
+// steeredChance is p with its odds multiplied by the feature's boost.
+func (f *fuzzer) steeredChance(p float64, feature string) bool {
+	b := f.boost(feature)
+	return f.chance(p * b / (p*b + 1 - p))
+}
+
 // celString quotes s as a CEL string literal, escaping only what CEL requires.
 func celString(s string) string {
 	var b strings.Builder
@@ -367,160 +405,216 @@ func (f *fuzzer) numLit(path string, double bool) string {
 }
 
 // atom draws one leaf: a hand-written expression from the corpus, or a fresh one from the grammar.
+// The leaf keeps the features it was drawn from, so a later run can be steered by how they fared.
 func (f *fuzzer) atom() *fnode {
 	if len(f.atoms) > 0 && f.chance(0.45) {
-		a := f.atoms[f.rng.IntN(len(f.atoms))]
-		return &fnode{Op: "atom", CEL: a.CEL, From: a.ID}
+		a := f.atoms[f.weighted(len(f.atoms), func(i int) float64 { return f.boost(corpusFeature(f.atoms[i].ID)) })]
+		return &fnode{Op: "atom", CEL: a.CEL, From: a.ID, Feats: []string{corpusFeature(a.ID)}}
 	}
-	return &fnode{Op: "atom", CEL: f.grammarAtom()}
+	f.feats = nil
+	p := productions[f.weighted(len(productions), func(i int) float64 { return productions[i].weight * f.boost(productions[i].name) })]
+	cel := p.draw(f)
+	return &fnode{Op: "atom", CEL: cel, Feats: append([]string{p.name}, f.feats...)}
 }
 
-func (f *fuzzer) grammarAtom() string {
-	switch f.rng.IntN(9) {
-	case 0, 1:
-		return f.stringAtom()
-	case 2:
-		return f.numberAtom()
-	case 3:
-		return f.boolAtom()
-	case 4, 5:
-		return f.listAtom()
-	case 6:
-		return f.structListAtom()
-	case 7:
-		return f.nullAtom()
-	default:
-		return f.timeAtom()
+// production is one shape the grammar draws: its feature name, its share of draws before any
+// steering, and how it renders.
+type production struct {
+	name   string
+	weight float64
+	draw   func(f *fuzzer) string
+}
+
+// alt is one alternative inside a group of productions; its share of the group is relative to its
+// siblings'.
+type alt struct {
+	name  string
+	share float64
+	draw  func(f *fuzzer) string
+}
+
+// group spreads share across alts in proportion to their own shares.
+func group(prefix string, share float64, alts ...alt) []production {
+	total := 0.0
+	for _, a := range alts {
+		total += a.share
+	}
+	out := make([]production, len(alts))
+	for i, a := range alts {
+		out[i] = production{name: prefix + "." + a.name, weight: share * a.share / total, draw: a.draw}
+	}
+	return out
+}
+
+func eachOf(name string, draw func(f *fuzzer) string) alt {
+	return alt{name: name, share: 1, draw: draw}
+}
+
+// productions is the grammar, flat, with every alternative's unsteered probability.
+var productions = slices.Concat(
+	group("string", 2.0/9, stringAlts()...),
+	group("number", 1.0/9, numberAlts()...),
+	group("bool", 1.0/9, boolAlts()...),
+	group("list", 2.0/9, listAlts()...),
+	group("structList", 1.0/9, structListAlts()...),
+	group("null", 1.0/9, nullAlts()...),
+	group("time", 1.0/9, timeAlts()...),
+)
+
+func stringAlts() []alt {
+	s := func(f *fuzzer) string { return f.attr(fuzzStrings) }
+	return []alt{
+		eachOf("eq", func(f *fuzzer) string {
+			a := s(f)
+			return fmt.Sprintf("%s %s %s", a, f.pick(fuzzEqs), f.strLit(a))
+		}),
+		eachOf("startsWith", func(f *fuzzer) string { a := s(f); return fmt.Sprintf("%s.startsWith(%s)", a, f.strLit(a)) }),
+		eachOf("endsWith", func(f *fuzzer) string { a := s(f); return fmt.Sprintf("%s.endsWith(%s)", a, f.strLit(a)) }),
+		eachOf("contains", func(f *fuzzer) string { a := s(f); return fmt.Sprintf("%s.contains(%s)", a, f.strLit(a)) }),
+		eachOf("inLiterals", func(f *fuzzer) string {
+			a := s(f)
+			return fmt.Sprintf("%s in [%s, %s]", a, f.strLit(a), f.strLit(a))
+		}),
+		eachOf("ordering", func(f *fuzzer) string {
+			a := s(f)
+			return fmt.Sprintf("%s %s %s", a, f.pick(fuzzOrderings[2:]), f.strLit(a))
+		}),
+		eachOf("size", func(f *fuzzer) string {
+			return fmt.Sprintf("size(%s) %s %d", s(f), f.pick(fuzzOrderings), f.rng.IntN(6))
+		}),
+		eachOf("matches", func(f *fuzzer) string {
+			return fmt.Sprintf("%s.matches(%s)", s(f), celString(f.pick(fuzzRegexes)))
+		}),
+		eachOf("eqAttribute", func(f *fuzzer) string {
+			return fmt.Sprintf("%s %s %s", s(f), f.pick(fuzzEqs), f.attr(fuzzStrings))
+		}),
+		eachOf("eqPrincipal", func(f *fuzzer) string {
+			return fmt.Sprintf("%s %s %s", s(f), f.pick(fuzzEqs), f.attr(fuzzPStrings))
+		}),
+		eachOf("inPrincipalList", func(f *fuzzer) string { return fmt.Sprintf("%s in %s", s(f), f.attr(fuzzPStrLists)) }),
+		eachOf("lowerAscii", func(f *fuzzer) string { a := s(f); return fmt.Sprintf("%s.lowerAscii() == %s", a, f.strLit(a)) }),
 	}
 }
 
-func (f *fuzzer) stringAtom() string {
-	s := f.pick(fuzzStrings)
-	switch f.rng.IntN(12) {
-	case 0:
-		return fmt.Sprintf("%s %s %s", s, f.pick(fuzzEqs), f.strLit(s))
-	case 1:
-		return fmt.Sprintf("%s.startsWith(%s)", s, f.strLit(s))
-	case 2:
-		return fmt.Sprintf("%s.endsWith(%s)", s, f.strLit(s))
-	case 3:
-		return fmt.Sprintf("%s.contains(%s)", s, f.strLit(s))
-	case 4:
-		return fmt.Sprintf("%s in [%s, %s]", s, f.strLit(s), f.strLit(s))
-	case 5:
-		return fmt.Sprintf("%s %s %s", s, f.pick(fuzzOrderings[2:]), f.strLit(s))
-	case 6:
-		return fmt.Sprintf("size(%s) %s %d", s, f.pick(fuzzOrderings), f.rng.IntN(6))
-	case 7:
-		return fmt.Sprintf("%s.matches(%s)", s, celString(f.pick(fuzzRegexes)))
-	case 8:
-		return fmt.Sprintf("%s %s %s", s, f.pick(fuzzEqs), f.pick(fuzzStrings))
-	case 9:
-		return fmt.Sprintf("%s %s %s", s, f.pick(fuzzEqs), f.pick(fuzzPStrings))
-	case 10:
-		return fmt.Sprintf("%s in %s", s, f.pick(fuzzPStrLists))
-	default:
-		return fmt.Sprintf("%s.lowerAscii() == %s", s, f.strLit(s))
+func numberAlts() []alt {
+	n := func(f *fuzzer) (string, bool) {
+		a := f.attr(append(append([]string{}, fuzzInts...), fuzzDoubles...))
+		return a, a == "R.attr.aDouble"
 	}
-}
-
-func (f *fuzzer) numberAtom() string {
-	n := f.pick(append(append([]string{}, fuzzInts...), fuzzDoubles...))
-	double := n == "R.attr.aDouble"
-	switch f.rng.IntN(7) {
-	case 0, 1:
-		return fmt.Sprintf("%s %s %s", n, f.pick(fuzzOrderings), f.numLit(n, double))
-	case 2:
+	return []alt{
+		{name: "ordering", share: 2, draw: func(f *fuzzer) string {
+			a, double := n(f)
+			return fmt.Sprintf("%s %s %s", a, f.pick(fuzzOrderings), f.numLit(a, double))
+		}},
 		// The operand is always a double literal: every numeric attribute reaches CEL as a double,
 		// which has no double + int overload, and the planner drops an int literal's type, so an
 		// int operand only rediscovers that planner divergence (#544) on every leg.
-		op := f.pick([]string{"+", "-", "*"})
-		return fmt.Sprintf("%s %s %s %s %s", n, op, f.numLit(n, true), f.pick(fuzzOrderings), f.numLit(n, double))
-	case 3:
-		if double {
-			return fmt.Sprintf("%s / 2.0 %s %s", n, f.pick(fuzzOrderings), f.numLit(n, true))
-		}
-		return fmt.Sprintf("%s %% %d %s %d", n, 2+f.rng.IntN(3), f.pick(fuzzEqs), f.rng.IntN(2))
-	case 4:
-		return fmt.Sprintf("%s in [%s, %s]", n, f.numLit(n, double), f.numLit(n, double))
-	case 5:
-		return fmt.Sprintf("%s %s %s", n, f.pick(fuzzOrderings), f.pick(append(append([]string{"P.attr.zero"}, fuzzInts...), fuzzDoubles...)))
-	default:
-		if double {
-			return fmt.Sprintf("int(%s) %s %s", n, f.pick(fuzzOrderings), f.numLit(n, false))
-		}
-		return fmt.Sprintf("double(%s) %s %s", n, f.pick(fuzzOrderings), f.numLit(n, true))
+		eachOf("arithmetic", func(f *fuzzer) string {
+			a, double := n(f)
+			op := f.pick([]string{"+", "-", "*"})
+			return fmt.Sprintf("%s %s %s %s %s", a, op, f.numLit(a, true), f.pick(fuzzOrderings), f.numLit(a, double))
+		}),
+		eachOf("divideOrModulo", func(f *fuzzer) string {
+			a, double := n(f)
+			if double {
+				return fmt.Sprintf("%s / 2.0 %s %s", a, f.pick(fuzzOrderings), f.numLit(a, true))
+			}
+			return fmt.Sprintf("%s %% %d %s %d", a, 2+f.rng.IntN(3), f.pick(fuzzEqs), f.rng.IntN(2))
+		}),
+		eachOf("inLiterals", func(f *fuzzer) string {
+			a, double := n(f)
+			return fmt.Sprintf("%s in [%s, %s]", a, f.numLit(a, double), f.numLit(a, double))
+		}),
+		eachOf("orderingAttribute", func(f *fuzzer) string {
+			a, _ := n(f)
+			return fmt.Sprintf("%s %s %s", a, f.pick(fuzzOrderings), f.attr(append(append([]string{"P.attr.zero"}, fuzzInts...), fuzzDoubles...)))
+		}),
+		eachOf("conversion", func(f *fuzzer) string {
+			a, double := n(f)
+			if double {
+				return fmt.Sprintf("int(%s) %s %s", a, f.pick(fuzzOrderings), f.numLit(a, false))
+			}
+			return fmt.Sprintf("double(%s) %s %s", a, f.pick(fuzzOrderings), f.numLit(a, true))
+		}),
 	}
 }
 
-func (f *fuzzer) boolAtom() string {
-	b := f.pick(fuzzBools)
-	switch f.rng.IntN(4) {
-	case 0:
-		return b
-	case 1:
-		return "!" + b
-	case 2:
-		return fmt.Sprintf("%s %s %v", b, f.pick(fuzzEqs), f.chance(0.5))
-	default:
-		return fmt.Sprintf("%s %s %s", b, f.pick(fuzzEqs), f.pick(fuzzBools))
+func boolAlts() []alt {
+	b := func(f *fuzzer) string { return f.attr(fuzzBools) }
+	return []alt{
+		eachOf("bare", b),
+		eachOf("negated", func(f *fuzzer) string { return "!" + b(f) }),
+		eachOf("eqLiteral", func(f *fuzzer) string { return fmt.Sprintf("%s %s %v", b(f), f.pick(fuzzEqs), f.chance(0.5)) }),
+		eachOf("eqAttribute", func(f *fuzzer) string { return fmt.Sprintf("%s %s %s", b(f), f.pick(fuzzEqs), b(f)) }),
 	}
 }
 
-// listAtom reads a list attribute in the shapes the hand-written cases do, with the lambda
-// variables they bind (t): a harness maps a lambda variable by name, so a fresh name, or a macro over
-// a list no case iterates, fails on the harness's mapping rather than on the adapter.
-func (f *fuzzer) listAtom() string {
-	switch f.rng.IntN(5) {
-	case 0:
-		return fmt.Sprintf("%s in R.attr.aNumberList", f.numLit("aNumberList[]", false))
-	case 1:
-		return fmt.Sprintf("R.attr.aBoolList[0] %s %v", f.pick(fuzzEqs), f.chance(0.5))
-	case 2:
-		return fmt.Sprintf("hasIntersection(%s, %s)", f.pick(fuzzStrLists), f.pick(fuzzPStrLists))
-	case 3:
-		s := f.pick([]string{"R.attr.aOptionalString", "R.attr.owner", "R.attr.aString"})
-		return f.pick([]string{
-			fmt.Sprintf("%s.exists(t, %s == t)", f.pick(fuzzPStrLists), s),
-			fmt.Sprintf("%s.all(t, %s != t)", f.pick(fuzzPStrLists), s),
-			fmt.Sprintf("%s.exists_one(t, t == %s)", f.pick(fuzzPStrLists), s),
-		})
+// listAlts read a list attribute in the shapes the hand-written cases do, with the lambda variables
+// they bind (t): a harness maps a lambda variable by name, so a fresh name, or a macro over a list
+// no case iterates, fails on the harness's mapping rather than on the adapter.
+func listAlts() []alt {
+	optional := func(f *fuzzer) string {
+		return f.attr([]string{"R.attr.aOptionalString", "R.attr.owner", "R.attr.aString"})
 	}
-	l := "R.attr.tagNames"
-	switch f.rng.IntN(5) {
-	case 0:
-		return fmt.Sprintf("%s in %s", f.strLit("tagNames[]"), l)
-	case 1:
-		return fmt.Sprintf("%s.exists(t, t.startsWith(%s))", l, f.strLit("tagNames[]"))
-	case 2:
-		return fmt.Sprintf("%s.all(t, t != %s)", l, f.strLit("tagNames[]"))
-	case 3:
-		return fmt.Sprintf("%s.filter(t, t != %s).size() %s %d", l, f.strLit("tagNames[]"), f.pick(fuzzOrderings), f.rng.IntN(3))
-	default:
-		return fmt.Sprintf("%s.exists(t, t == %s)", l, f.strLit("tagNames[]"))
-	}
-}
-
-func (f *fuzzer) structListAtom() string {
-	switch f.rng.IntN(7) {
-	case 0:
-		return fmt.Sprintf("R.attr.tags.exists(t, t.name == %s)", f.strLit("tags[].name"))
-	case 1:
-		return fmt.Sprintf("R.attr.tags.all(t, t.name != %s)", f.strLit("tags[].name"))
-	case 2:
-		return fmt.Sprintf("R.attr.tags.exists(t, t.name.startsWith(%s) && t.id != %s)", f.strLit("tags[].name"), f.strLit("tags[].id"))
-	case 3:
-		return fmt.Sprintf("R.attr.tags.exists_one(t, t.name == %s)", f.strLit("tags[].name"))
-	case 4:
-		return fmt.Sprintf("R.attr.tags.exists(t, t.name in %s)", f.pick(fuzzPStrLists))
-	case 5:
-		return fmt.Sprintf("R.attr.categories.exists(c, c.subCategories.exists(s, s.name == %s))", f.strLit("categories[].subCategories[].name"))
-	default:
-		return fmt.Sprintf("R.attr.tags.exists(t, has(t.name) && t.name %s %s)", f.pick(fuzzEqs), f.strLit("tags[].name"))
+	tags := func(f *fuzzer) string { return f.strLit("tagNames[]") }
+	return []alt{
+		eachOf("numberIn", func(f *fuzzer) string {
+			return fmt.Sprintf("%s in %s", f.numLit("aNumberList[]", false), f.attr([]string{"R.attr.aNumberList"}))
+		}),
+		eachOf("boolIndex", func(f *fuzzer) string {
+			return fmt.Sprintf("%s[0] %s %v", f.attr([]string{"R.attr.aBoolList"}), f.pick(fuzzEqs), f.chance(0.5))
+		}),
+		eachOf("hasIntersection", func(f *fuzzer) string {
+			return fmt.Sprintf("hasIntersection(%s, %s)", f.attr(fuzzStrLists), f.attr(fuzzPStrLists))
+		}),
+		{name: "principalExists", share: 1.0 / 3, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("%s.exists(t, %s == t)", f.attr(fuzzPStrLists), optional(f))
+		}},
+		{name: "principalAll", share: 1.0 / 3, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("%s.all(t, %s != t)", f.attr(fuzzPStrLists), optional(f))
+		}},
+		{name: "principalExistsOne", share: 1.0 / 3, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("%s.exists_one(t, t == %s)", f.attr(fuzzPStrLists), optional(f))
+		}},
+		{name: "tagIn", share: 1.0 / 5, draw: func(f *fuzzer) string { return fmt.Sprintf("%s in %s", tags(f), f.attr([]string{"R.attr.tagNames"})) }},
+		{name: "tagExistsStartsWith", share: 1.0 / 5, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("%s.exists(t, t.startsWith(%s))", f.attr([]string{"R.attr.tagNames"}), tags(f))
+		}},
+		{name: "tagAll", share: 1.0 / 5, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("%s.all(t, t != %s)", f.attr([]string{"R.attr.tagNames"}), tags(f))
+		}},
+		{name: "tagFilterSize", share: 1.0 / 5, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("%s.filter(t, t != %s).size() %s %d", f.attr([]string{"R.attr.tagNames"}), tags(f), f.pick(fuzzOrderings), f.rng.IntN(3))
+		}},
+		{name: "tagExists", share: 1.0 / 5, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("%s.exists(t, t == %s)", f.attr([]string{"R.attr.tagNames"}), tags(f))
+		}},
 	}
 }
 
-func (f *fuzzer) nullAtom() string {
+func structListAlts() []alt {
+	tags := func(f *fuzzer) string { return f.attr([]string{"R.attr.tags"}) }
+	name := func(f *fuzzer) string { return f.strLit("tags[].name") }
+	return []alt{
+		eachOf("exists", func(f *fuzzer) string { return fmt.Sprintf("%s.exists(t, t.name == %s)", tags(f), name(f)) }),
+		eachOf("all", func(f *fuzzer) string { return fmt.Sprintf("%s.all(t, t.name != %s)", tags(f), name(f)) }),
+		eachOf("existsTwoFields", func(f *fuzzer) string {
+			return fmt.Sprintf("%s.exists(t, t.name.startsWith(%s) && t.id != %s)", tags(f), name(f), f.strLit("tags[].id"))
+		}),
+		eachOf("existsOne", func(f *fuzzer) string { return fmt.Sprintf("%s.exists_one(t, t.name == %s)", tags(f), name(f)) }),
+		eachOf("existsInPrincipal", func(f *fuzzer) string {
+			return fmt.Sprintf("%s.exists(t, t.name in %s)", tags(f), f.attr(fuzzPStrLists))
+		}),
+		eachOf("nested", func(f *fuzzer) string {
+			return fmt.Sprintf("%s.exists(c, c.subCategories.exists(s, s.name == %s))", f.attr([]string{"R.attr.categories"}), f.strLit("categories[].subCategories[].name"))
+		}),
+		eachOf("existsHas", func(f *fuzzer) string {
+			return fmt.Sprintf("%s.exists(t, has(t.name) && t.name %s %s)", tags(f), f.pick(fuzzEqs), name(f))
+		}),
+	}
+}
+
+func nullAlts() []alt {
 	// R.id is always present, so has() and null say nothing about it.
 	var all []string
 	for _, s := range fuzzStrings {
@@ -529,33 +623,41 @@ func (f *fuzzer) nullAtom() string {
 		}
 	}
 	all = append(append(all, fuzzInts...), fuzzBools...)
-	a := f.pick(all)
-	switch f.rng.IntN(3) {
-	case 0:
-		return fmt.Sprintf("%s %s null", a, f.pick(fuzzEqs))
-	case 1:
-		return fmt.Sprintf("has(%s)", a)
-	default:
-		return fmt.Sprintf("!has(%s)", a)
+	return []alt{
+		eachOf("eqNull", func(f *fuzzer) string { return fmt.Sprintf("%s %s null", f.attr(all), f.pick(fuzzEqs)) }),
+		eachOf("has", func(f *fuzzer) string { return fmt.Sprintf("has(%s)", f.attr(all)) }),
+		eachOf("notHas", func(f *fuzzer) string { return fmt.Sprintf("!has(%s)", f.attr(all)) }),
 	}
 }
 
-func (f *fuzzer) timeAtom() string {
-	t := f.pick(fuzzTimes)
-	lits := []string{"2020-03-15T10:30:00Z", "2024-06-01T00:00:00Z", "2030-01-01T00:00:00Z", "2000-01-01T00:00:00Z", "2020-03-15T10:30:00.001Z"}
-	for _, v := range f.pools[poolPath(t)] {
-		// A seed may hold a string that is not a timestamp (the type-mismatch rows); as a literal it
-		// would stop the policy compiling.
-		if s, ok := v.(string); ok {
-			if _, err := time.Parse(time.RFC3339Nano, s); err == nil {
-				lits = append(lits, s)
+func timeAlts() []alt {
+	return []alt{
+		{name: "getFullYear", share: 0.25, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("timestamp(%s).getFullYear() %s %d", f.attr(fuzzTimes), f.pick(fuzzOrderings), 2018+f.rng.IntN(20))
+		}},
+		{name: "compare", share: 0.75, draw: func(f *fuzzer) string {
+			t := f.attr(fuzzTimes)
+			lits := []string{"2020-03-15T10:30:00Z", "2024-06-01T00:00:00Z", "2030-01-01T00:00:00Z", "2000-01-01T00:00:00Z", "2020-03-15T10:30:00.001Z"}
+			for _, v := range f.pools[poolPath(t)] {
+				// A seed may hold a string that is not a timestamp (the type-mismatch rows); as a
+				// literal it would stop the policy compiling.
+				if s, ok := v.(string); ok {
+					if _, err := time.Parse(time.RFC3339Nano, s); err == nil {
+						lits = append(lits, s)
+					}
+				}
 			}
-		}
+			return fmt.Sprintf("timestamp(%s) %s timestamp(%s)", t, f.pick(fuzzOrderings), celString(f.pick(lits)))
+		}},
 	}
-	if f.chance(0.25) {
-		return fmt.Sprintf("timestamp(%s).getFullYear() %s %d", t, f.pick(fuzzOrderings), 2018+f.rng.IntN(20))
-	}
-	return fmt.Sprintf("timestamp(%s) %s timestamp(%s)", t, f.pick(fuzzOrderings), celString(f.pick(lits)))
+}
+
+// attr picks one attribute path from paths, weighted by its steering boost, and records it as a
+// feature of the leaf being drawn.
+func (f *fuzzer) attr(paths []string) string {
+	p := paths[f.weighted(len(paths), func(i int) float64 { return f.boost(attrFeature(paths[i])) })]
+	f.feats = append(f.feats, attrFeature(p))
+	return p
 }
 
 // tree draws a condition of at most depth levels of and/or/not/ternary above its leaves.
@@ -563,20 +665,18 @@ func (f *fuzzer) tree(depth int) *fnode {
 	if depth == 0 || f.chance(0.3) {
 		return f.atom()
 	}
-	switch r := f.rng.IntN(10); {
-	case r < 4:
-		n := &fnode{Op: "and"}
+	ops := []struct {
+		op    string
+		share float64
+	}{{"and", 4}, {"or", 3}, {"not", 2}, {"cond", 1}}
+	switch op := ops[f.weighted(len(ops), func(i int) float64 { return ops[i].share * f.boost(treeFeature(ops[i].op)) })].op; op {
+	case "and", "or":
+		n := &fnode{Op: op}
 		for range 2 + f.rng.IntN(2) {
 			n.Kids = append(n.Kids, f.tree(depth-1))
 		}
 		return n
-	case r < 7:
-		n := &fnode{Op: "or"}
-		for range 2 + f.rng.IntN(2) {
-			n.Kids = append(n.Kids, f.tree(depth-1))
-		}
-		return n
-	case r < 9:
+	case "not":
 		return &fnode{Op: "not", Kids: []*fnode{f.tree(depth - 1)}}
 	default:
 		return &fnode{Op: "cond", Kids: []*fnode{f.tree(depth - 1), f.tree(depth - 1), f.tree(depth - 1)}}
@@ -588,7 +688,7 @@ func (f *fuzzer) fuzzCases(seed uint64, count int) []*fuzzCase {
 	cases := make([]*fuzzCase, count)
 	for i := range cases {
 		fc := &fuzzCase{ID: fmt.Sprintf("fuzz/s%d/%04d", seed, i), Allow: f.tree(1 + f.rng.IntN(3))}
-		if f.chance(0.15) {
+		if f.steeredChance(0.15, denyFeature) {
 			fc.Deny = f.tree(f.rng.IntN(2))
 		}
 		cases[i] = fc

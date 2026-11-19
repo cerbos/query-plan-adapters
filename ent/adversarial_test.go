@@ -15,6 +15,7 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
+	responsev1 "github.com/cerbos/cerbos/api/genpb/cerbos/response/v1"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
@@ -774,7 +775,30 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 	if err != nil {
 		return nil, err
 	}
+	query, args, err := s.query(mapper, plan)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("executing the translated predicate: %w\nSQL: %s", err, query)
+	}
+	defer rows.Close()
 
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids, rows.Err()
+}
+
+// query translates plan for this store's dialect into the SQL and arguments filteredIDs executes.
+func (s *store) query(mapper cerbosent.Mapper, plan *responsev1.PlanResourcesResponse) (string, []any, error) {
 	// Translate wraps every mapper miss in ErrUnsupported, so a resource attribute this harness
 	// forgot to map would satisfy an `unsupported` ledger entry vacuously. A miss on a
 	// `request.resource.*` reference is therefore a harness defect, reported as such rather than as
@@ -796,10 +820,10 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 	result, err := cerbosent.Translate(plan, resourceTable, recording,
 		cerbosent.WithDialect(s.target.dialect), cerbosent.WithNullRepresentation(cerbosent.NullExplicit))
 	if len(unmapped) > 0 {
-		return nil, fmt.Errorf("the harness mapping has no entry for %s (a harness defect, not a refusal)", strings.Join(unmapped, ", "))
+		return "", nil, fmt.Errorf("the harness mapping has no entry for %s (a harness defect, not a refusal)", strings.Join(unmapped, ", "))
 	}
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	// The outer FROM holds only the resource table — every relation is reached through a
 	// correlated subquery — so an unqualified `id` is unambiguous here. The predicate is applied
@@ -815,25 +839,33 @@ func (s *store) filteredIDs(ctx context.Context, mapper cerbosent.Mapper, golden
 	// (cerbos/query-plan-adapters#319).
 	query, args := selector.Query()
 	if err := selector.Err(); err != nil {
-		return nil, fmt.Errorf("building the translated query: %w\nSQL: %s", err, query)
+		return "", nil, fmt.Errorf("building the translated query: %w\nSQL: %s", err, query)
+	}
+	return query, args, nil
+}
+
+// fitness checks two properties "refuse, never best-effort" rests on, without running a query
+// (conformance/README.md, "The harness contract"): translating the plan twice gives the same SQL
+// and arguments, and the plan with any one operator renamed to one the adapter cannot know is
+// refused.
+func (s *store) fitness(t *testing.T, mapper cerbosent.Mapper, golden Golden) {
+	t.Helper()
+	plan, err := golden.PlanResponse(time.Now())
+	require.NoError(t, err)
+
+	if !readsClock(plan.GetFilter().GetCondition()) {
+		first, firstArgs, firstErr := s.query(mapper, plan)
+		second, secondArgs, secondErr := s.query(mapper, plan)
+		require.Equal(t, firstErr, secondErr, "translating the same plan twice failed differently")
+		require.Equal(t, first, second, "translating the same plan twice gave different SQL")
+		require.Equal(t, firstArgs, secondArgs, "translating the same plan twice gave different arguments")
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("executing the translated predicate: %w\nSQL: %s", err, query)
+	for _, mutant := range operatorMutants(plan) {
+		query, _, err := s.query(mapper, mutant)
+		require.ErrorIs(t, err, cerbosent.ErrUnsupported,
+			"an operator the adapter cannot know must be refused, not translated\nplan: %v\nSQL: %s", mutant.GetFilter(), query)
 	}
-	defer rows.Close()
-
-	ids := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	return ids, rows.Err()
 }
 
 // -- the suite ----------------------------------------------------------------------------------
@@ -896,6 +928,7 @@ func (s *store) replay(t *testing.T, corpus *Corpus, mapper cerbosent.Mapper, le
 						require.NotEqual(t, sortedCopy(golden.Allowed), ids,
 							"ledger says divergent (%s), but the result matches: remove the entry", entry.Issue)
 					}
+					s.fitness(t, mapper, golden)
 				})
 				if ok && !listed && !golden.Skipped() {
 					passed[golden.Tier]++

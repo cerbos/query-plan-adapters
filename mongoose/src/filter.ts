@@ -694,7 +694,7 @@ const negatedRewrite = (
     return buildFilter(everyElementIn("exists", left, right, true), ctx);
   }
 
-  if (matchesInvalidPattern(operand)) {
+  if (matchesInvalidPattern(operand) || matchesNonString(operand, ctx.mapper)) {
     return buildFilter(operand, ctx);
   }
 
@@ -1416,6 +1416,11 @@ const translateMatches = (
 
   const lowered = lowerRe2PatternForMongo(patternOperand.value);
 
+  // matches() over a number or boolean has no overload: an error to CEL, false either way.
+  if (!isStringOrUntyped(resolveMapperConfig(fieldOperand.name, ctx.mapper)?.valueType)) {
+    return emitLeafComparison(ctx, fieldOperand.name, { $in: [] }, { nullable: false, requireExists: false });
+  }
+
   return emitLeafComparison(
     ctx,
     fieldOperand.name,
@@ -1436,6 +1441,17 @@ const matchesInvalidPattern = (operand: PlanExpression): boolean => {
     isValue(pattern) &&
     isString(pattern.value) &&
     "invalid" in lowerRe2PatternForMongo(pattern.value)
+  );
+};
+
+const matchesNonString = (operand: PlanExpression, mapper: TranslateContext["mapper"]): boolean => {
+  const receiver = operand.operands[0];
+
+  return (
+    operand.operator === "matches" &&
+    receiver !== undefined &&
+    isVariable(receiver) &&
+    !isStringOrUntyped(resolveMapperConfig(receiver.name, mapper)?.valueType)
   );
 };
 

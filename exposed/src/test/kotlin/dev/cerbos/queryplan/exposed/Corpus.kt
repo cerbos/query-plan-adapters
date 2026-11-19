@@ -198,4 +198,45 @@ internal object Corpus {
                 .writeValueAsString(mapOf("adapter" to ADAPTER, "store" to store, "results" to sorted)) + "\n",
         )
     }
+
+    // -- fitness functions for "refuse, never best-effort" ---------------------------------------
+
+    /** An operator name no PDP emits. */
+    const val UNKNOWN_OPERATOR = "qpa-unknown-operator"
+
+    /**
+     * One copy of the plan per operator node, each with that node's operator renamed to
+     * [UNKNOWN_OPERATOR]. A translator that refuses every one of them has no dispatch that falls
+     * through to a filter for an operator it does not know.
+     */
+    fun operatorMutants(plan: PlanResourcesResponse): List<PlanResourcesResponse> {
+        val condition = plan.filter.condition
+        return (0 until expressionCount(condition)).map { target ->
+            val renamed = rename(condition, target, intArrayOf(0))
+            plan.toBuilder().setFilter(plan.filter.toBuilder().setCondition(renamed)).build()
+        }
+    }
+
+    /** Whether the plan holds timeSince, which a translator resolves against the clock. */
+    fun readsClock(plan: PlanResourcesResponse): Boolean = operandReadsClock(plan.filter.condition)
+
+    private fun operandReadsClock(operand: PlanResourcesFilter.Expression.Operand): Boolean =
+        operand.hasExpression() && (operand.expression.operator == "timeSince" ||
+            operand.expression.operandsList.any { operandReadsClock(it) })
+
+    private fun expressionCount(operand: PlanResourcesFilter.Expression.Operand): Int =
+        if (!operand.hasExpression()) 0 else 1 + operand.expression.operandsList.sumOf { expressionCount(it) }
+
+    private fun rename(
+        operand: PlanResourcesFilter.Expression.Operand,
+        target: Int,
+        seen: IntArray,
+    ): PlanResourcesFilter.Expression.Operand {
+        if (!operand.hasExpression()) return operand
+        val expression = operand.expression
+        val renamed = expression.toBuilder().clearOperands()
+        if (seen[0]++ == target) renamed.operator = UNKNOWN_OPERATOR
+        expression.operandsList.forEach { renamed.addOperands(rename(it, target, seen)) }
+        return operand.toBuilder().setExpression(renamed).build()
+    }
 }

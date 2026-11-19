@@ -248,3 +248,10 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.contains("\u0000")'
+- id: 'string/upper-ascii/equals-mixed-case-literal'
+  tier: adversarial
+  intent: 'upperAscii() compared with a literal that holds a lowercase letter (aString.upperAscii() == "One"), beside aNumber == 2.'
+  trap: 'An upper-cased string never holds an ASCII lowercase letter, so the comparison is false on every row; under a case-insensitive collation such as MySQL''s default, UPPER("one") = "One" holds and a1 is granted.'
+  condition:
+    match:
+      expr: 'R.attr.aString.upperAscii() == "One" || R.attr.aNumber == 2'

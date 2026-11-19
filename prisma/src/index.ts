@@ -6,7 +6,7 @@ import type { PrismaDatamodel } from "./datamodel";
 import { rejectConstantFalse } from "./fields";
 import { assertStructuralNulls } from "./mapping";
 import type { TranslationContext } from "./mapping";
-import { isValueOperand } from "./plan";
+import { assertPlannerOperators, isValueOperand } from "./plan";
 import { constantFoldExpression, hoistOuterScopeReferences } from "./rewrite";
 import { buildPrismaFilterFromCerbosExpression } from "./translate";
 import { rewriteFunctionCalls } from "./functions";
@@ -193,6 +193,8 @@ export function queryPlanToPrisma({
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
+      assertPlannerOperators(queryPlan.condition);
+
       const settled = settleTypeMismatches(
         hoistOuterScopeReferences(
           expandLiteralCollections(rewriteFunctionCalls(queryPlan.condition, context)),

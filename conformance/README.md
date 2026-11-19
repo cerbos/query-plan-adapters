@@ -128,6 +128,16 @@ Each adapter implements this once, in its own language. It needs no PDP.
    from every golden's `allowed` before comparing.
 2. **For each PDP in `pdp-versions.json`** (current and previous), **for each golden file**:
    - If `plannerDivergence` is set, skip the case.
+   - **Fitness checks**, whatever the ledger says (skipped in a fuzz run):
+     - *Determinism.* Translate the plan twice and assert both renderings (the SQL and its
+       arguments, or the filter document) are equal, so map or set iteration order never reaches a
+       filter. A plan holding `timeSince` is exempt: its translation reads the clock. Python
+       compares against a child process run under another `PYTHONHASHSEED`.
+     - *Unknown operator.* For each operator node in the plan, rename that one node to
+       `qpa-unknown-operator` and assert translating throws the refusal type. A dispatch that falls
+       through, a fold or rewrite that decides a subtree without reading it, or a positional read
+       that never checks the operator in that position fails here. Adapters whose rewrites skip
+       subtrees refuse any operator outside the set a Cerbos plan holds before translating.
    - Look the case up in the adapter's ledger. An entry applies unless its `pdp` list excludes this tag.
    - Where the adapter's language has a Cerbos SDK that reshapes the `PlanResources` response
      (JavaScript, Python's HTTP client, Ruby), hand the adapter what that SDK returns: serve the
@@ -208,6 +218,7 @@ go -C conformance/generator run . fuzz-compose -seed 7 -count 500 [-from <dir>] 
 QPA_FUZZ_DIR=<dir> conformance/scripts/run-harness.sh <adapter> [store...]   # replay one adapter
 go -C conformance/generator run . fuzz-report -dir <dir>   # <dir>/report.md; exit 1 on a failure
 go -C conformance/generator run . fuzz-shrink -dir <dir> -case <id> -adapter <adapter> -store <store>
+go -C conformance/generator run . fuzz -seed 8 -steer <dir> -steer-adapters exposed -out <dir2>   # steered by <dir>
 ```
 
 `.github/workflows/fuzz.yaml` runs the same round when someone starts it by hand; it has no
@@ -243,6 +254,17 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   translating leg got wrong with the same rows is listed apart as a suspected planner divergence
   and does not fail the run: that agreement points at the plan and `check()` disagreeing. The
   refusal rate is not a failure, but a rise in it is worth a look.
+- **Steering.** Every leaf records its features in `cases.json`: the grammar production it came
+  from (`string.lowerAscii`), the attributes it reads (`attr:R.attr.createdBy`), or the corpus case
+  it was taken from (`corpus:<id>`); a case adds its tree operators (`tree.not`, `tree.deny`). The
+  report's "Weak spots" table puts each adapter's refusals down to the feature in the case it
+  translated least often, with the refusal message. `fuzz -steer <dir>[,<dir>]` reads those
+  directories' verdicts (for `-steer-adapters`, default every leg) and draws each feature in inverse
+  proportion to how many matched cases held it. `-steer-goal coverage`, the default, also weighs
+  that by how often the adapter translated the feature, so the run goes to shapes it translates but
+  was rarely checked on; `-steer-goal refusals` piles onto the shapes it refuses, the queue for a
+  hill-climb. A boost is held between 0.25 and 8, and the manifest keeps them, so the seed and the
+  steering directories fix the run.
 - **Composition.** `fuzz-compose` needs no PDP. CEL's `&&` allows a row exactly when both operands
   allow it, errors included, and `||` when either does, so `and` and `or` over recorded plans have an
   exact oracle: the intersection or union of the operands' allowed rows. It draws trees of two or

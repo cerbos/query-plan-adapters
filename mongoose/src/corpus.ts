@@ -1,13 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isDeepStrictEqual } from "node:util";
+import { inspect, isDeepStrictEqual } from "node:util";
 
 import { fromBinary, fromJson, fromJsonString, toBinary } from "@bufbuild/protobuf";
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import type { PlanResourcesRequest } from "@cerbos/api/cerbos/request/v1/request_pb";
 import type { PlanResourcesResponse as PlanResourcesResponseMessage } from "@cerbos/api/cerbos/response/v1/response_pb";
 import { CerbosService } from "@cerbos/api/cerbos/svc/v1/svc_pb";
-import type { PlanResourcesResponse } from "@cerbos/core";
+import { PlanExpression } from "@cerbos/core";
+import type { PlanExpressionOperand, PlanResourcesResponse } from "@cerbos/core";
 import { GRPC } from "@cerbos/grpc";
 import { HTTP } from "@cerbos/http";
 import { Server, ServerCredentials } from "@grpc/grpc-js";
@@ -632,3 +633,71 @@ export const SCHEMA_MAPPER: ConformanceMapper = {
     relation: { name: "categories.subCategories", field: "name", requiresParent: "categories" },
   },
 };
+
+// -- fitness functions for "refuse, never best-effort" ---------------------------------------------
+
+/** An operator name no PDP emits. */
+export const UNKNOWN_OPERATOR = "qpa-unknown-operator";
+
+/**
+ * One copy of the plan per operator node, each with that node's operator renamed to
+ * UNKNOWN_OPERATOR. A translator that refuses every one of them has no dispatch that falls through
+ * to a filter for an operator it does not know.
+ */
+export function operatorMutants(queryPlan: PlanResourcesResponse): PlanResourcesResponse[] {
+  if (!("condition" in queryPlan)) return [];
+
+  const mutants: PlanResourcesResponse[] = [];
+
+  for (let target = 0; ; target++) {
+    let seen = 0;
+
+    const rename = (operand: PlanExpressionOperand): PlanExpressionOperand => {
+      if (!("operator" in operand)) return operand;
+
+      const operator = seen++ === target ? UNKNOWN_OPERATOR : operand.operator;
+
+      return new PlanExpression(operator, operand.operands.map(rename));
+    };
+
+    const condition = rename(queryPlan.condition);
+
+    if (seen <= target) return mutants;
+
+    mutants.push({ ...queryPlan, condition });
+  }
+}
+
+/** Whether the plan holds timeSince, which a translator resolves against the clock. */
+export function readsClock(queryPlan: PlanResourcesResponse): boolean {
+  const reads = (operand: PlanExpressionOperand): boolean =>
+    "operator" in operand && (operand.operator === "timeSince" || operand.operands.some(reads));
+
+  return "condition" in queryPlan && reads(queryPlan.condition);
+}
+
+/** What a translation gave, as text two translations of the same plan can be compared by. */
+export function rendered<T>(translate: () => T): string {
+  try {
+    return inspect(translate(), { depth: null });
+  } catch (error) {
+    return error instanceof Error ? `${error.name}: ${error.message}` : `throws ${inspect(error)}`;
+  }
+}
+
+/** Every operator mutant of the plan that translating does not refuse with the refusal type. */
+export function unrefusedMutants<T>(
+  queryPlan: PlanResourcesResponse,
+  translate: (mutant: PlanResourcesResponse) => T,
+  refusal: abstract new (...args: never[]) => Error
+): string[] {
+  return operatorMutants(queryPlan).flatMap((mutant) => {
+    try {
+      const result = translate(mutant);
+
+      return [`${inspect(mutant, { depth: null })}\ntranslated to ${inspect(result, { depth: null })}`];
+    } catch (error) {
+      return error instanceof refusal ? [] : [`${inspect(mutant, { depth: null })}\nthrew ${inspect(error)}`];
+    }
+  });
+}

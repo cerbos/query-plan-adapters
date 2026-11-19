@@ -19,6 +19,7 @@ import (
 	enginev1 "github.com/cerbos/cerbos/api/genpb/cerbos/engine/v1"
 	responsev1 "github.com/cerbos/cerbos/api/genpb/cerbos/response/v1"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // The shared conformance corpus, read from ../conformance/ at runtime: the dataset, the recorded
@@ -313,6 +314,57 @@ func subCategoryID(s Seed, i int) string { return fmt.Sprintf("%s-sub%d", s.ID, 
 func parentID(s Seed) string             { return s.ID + "-parent" }
 func innerID(s Seed) string              { return s.ID + "-parent-inner" }
 func stepParentID(s Seed) string         { return s.ID + "-step" }
+
+// -- fitness functions for "refuse, never best-effort" -----------------------------------------
+
+// unknownOperator is an operator name no PDP emits.
+const unknownOperator = "qpa-unknown-operator"
+
+// operatorMutants returns one copy of the plan per operator node, each with that node's operator
+// renamed to unknownOperator. A translator that refuses every one of them has no dispatch that
+// falls through to a filter for an operator it does not know.
+func operatorMutants(plan *responsev1.PlanResourcesResponse) []*responsev1.PlanResourcesResponse {
+	var mutants []*responsev1.PlanResourcesResponse
+	for i := 0; ; i++ {
+		mutant, ok := proto.Clone(plan).(*responsev1.PlanResourcesResponse)
+		if !ok {
+			panic("cloning a PlanResourcesResponse")
+		}
+		n := i
+		if !renameNth(mutant.GetFilter().GetCondition(), &n) {
+			return mutants
+		}
+		mutants = append(mutants, mutant)
+	}
+}
+
+// readsClock reports whether the plan holds timeSince, which a translator resolves against the
+// clock, so two translations of it may differ by the time that passed between them.
+func readsClock(operand *enginev1.PlanResourcesFilter_Expression_Operand) bool {
+	expr := operand.GetExpression()
+	if expr == nil {
+		return false
+	}
+	return expr.GetOperator() == "timeSince" || slices.ContainsFunc(expr.GetOperands(), readsClock)
+}
+
+func renameNth(operand *enginev1.PlanResourcesFilter_Expression_Operand, n *int) bool {
+	expr := operand.GetExpression()
+	if expr == nil {
+		return false
+	}
+	if *n == 0 {
+		expr.Operator = unknownOperator
+		return true
+	}
+	*n--
+	for _, child := range expr.GetOperands() {
+		if renameNth(child, n) {
+			return true
+		}
+	}
+	return false
+}
 
 // -- fuzz mode ----------------------------------------------------------------------------------
 

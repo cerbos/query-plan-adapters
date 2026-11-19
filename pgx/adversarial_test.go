@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	responsev1 "github.com/cerbos/cerbos/api/genpb/cerbos/response/v1"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -481,30 +482,7 @@ func filteredIDs(ctx context.Context, pool *pgxpool.Pool, mapper cerbospgx.Mappe
 	if err != nil {
 		return nil, err
 	}
-
-	// Translate wraps every mapper miss in ErrUnsupported, so a resource attribute this harness
-	// forgot to map would satisfy an `unsupported` ledger entry vacuously. A miss on a
-	// `request.resource.*` reference is therefore a harness defect, reported as such rather than as
-	// the adapter's refusal. (Lambda-local names such as `t.name` also reach the root mapper, as a
-	// probe before the element scope answers them, and a `request.principal.*` reference the
-	// planner left unresolved has no column to map, so only `request.resource.*` is checked.)
-	var unmapped []string
-	recording := cerbospgx.MapperFunc(func(reference string) (cerbospgx.Entry, bool) {
-		entry, ok := mapper.Resolve(reference)
-		if !ok && strings.HasPrefix(reference, "request.resource.") {
-			unmapped = append(unmapped, reference)
-		}
-		return entry, ok
-	})
-
-	// Every column the dataset omits when NULL is declared NullConventionOmitted in the mapping. The
-	// call-level option covers what is left, list elements and principal-side literals, which the
-	// dataset sends as values; the adapter's own default is pinned in translate_test.go.
-	result, err := cerbospgx.Translate(plan, resourceTable, recording,
-		cerbospgx.WithNullRepresentation(cerbospgx.NullExplicit))
-	if len(unmapped) > 0 {
-		return nil, fmt.Errorf("the harness mapping has no entry for %s (a harness defect, not a refusal)", strings.Join(unmapped, ", "))
-	}
+	result, err := translateGolden(mapper, plan)
 	if err != nil {
 		return nil, err
 	}
@@ -532,6 +510,58 @@ func filteredIDs(ctx context.Context, pool *pgxpool.Pool, mapper cerbospgx.Mappe
 		return nil, fmt.Errorf("composing with AppendTo returned %v where Where alone returned %v\nSQL: %s", composed, ids, where)
 	}
 	return ids, nil
+}
+
+// translateGolden translates plan into the fragment filteredIDs executes.
+func translateGolden(mapper cerbospgx.Mapper, plan *responsev1.PlanResourcesResponse) (cerbospgx.Result, error) {
+	// Translate wraps every mapper miss in ErrUnsupported, so a resource attribute this harness
+	// forgot to map would satisfy an `unsupported` ledger entry vacuously. A miss on a
+	// `request.resource.*` reference is therefore a harness defect, reported as such rather than as
+	// the adapter's refusal. (Lambda-local names such as `t.name` also reach the root mapper, as a
+	// probe before the element scope answers them, and a `request.principal.*` reference the
+	// planner left unresolved has no column to map, so only `request.resource.*` is checked.)
+	var unmapped []string
+	recording := cerbospgx.MapperFunc(func(reference string) (cerbospgx.Entry, bool) {
+		entry, ok := mapper.Resolve(reference)
+		if !ok && strings.HasPrefix(reference, "request.resource.") {
+			unmapped = append(unmapped, reference)
+		}
+		return entry, ok
+	})
+
+	// Every column the dataset omits when NULL is declared NullConventionOmitted in the mapping. The
+	// call-level option covers what is left, list elements and principal-side literals, which the
+	// dataset sends as values; the adapter's own default is pinned in translate_test.go.
+	result, err := cerbospgx.Translate(plan, resourceTable, recording,
+		cerbospgx.WithNullRepresentation(cerbospgx.NullExplicit))
+	if len(unmapped) > 0 {
+		return cerbospgx.Result{}, fmt.Errorf("the harness mapping has no entry for %s (a harness defect, not a refusal)", strings.Join(unmapped, ", "))
+	}
+	return result, err
+}
+
+// fitness checks two properties "refuse, never best-effort" rests on, without running a query
+// (conformance/README.md, "The harness contract"): translating the plan twice gives the same SQL
+// and arguments, and the plan with any one operator renamed to one the adapter cannot know is
+// refused.
+func fitness(t *testing.T, mapper cerbospgx.Mapper, golden Golden) {
+	t.Helper()
+	plan, err := golden.PlanResponse(time.Now())
+	require.NoError(t, err)
+
+	if !readsClock(plan.GetFilter().GetCondition()) {
+		first, firstErr := translateGolden(mapper, plan)
+		second, secondErr := translateGolden(mapper, plan)
+		require.Equal(t, firstErr, secondErr, "translating the same plan twice failed differently")
+		require.Equal(t, first.Where, second.Where, "translating the same plan twice gave different SQL")
+		require.Equal(t, first.Args, second.Args, "translating the same plan twice gave different arguments")
+	}
+
+	for _, mutant := range operatorMutants(plan) {
+		result, err := translateGolden(mapper, mutant)
+		require.ErrorIs(t, err, cerbospgx.ErrUnsupported,
+			"an operator the adapter cannot know must be refused, not translated\nplan: %v\nSQL: %s", mutant.GetFilter(), result.Where)
+	}
 }
 
 // selfDelimitingContexts splice Where where an unparenthesised top-level AND, OR, NOT or comparison
@@ -618,6 +648,7 @@ func TestAdversarialConformance(t *testing.T) {
 						require.NotEqual(t, sortedCopy(golden.Allowed), ids,
 							"ledger says divergent (%s), but the result matches: remove the entry", entry.Issue)
 					}
+					fitness(t, mapper, golden)
 				})
 				if ok && !listed && !golden.Skipped() {
 					passed[golden.Tier]++

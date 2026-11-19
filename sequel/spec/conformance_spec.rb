@@ -16,11 +16,31 @@
 RSpec.describe "conformance" do
   before { ConformanceStore.establish! }
 
-  def ids(plan)
+  def dataset(plan)
     Cerbos::Sequel.query_plan_to_dataset(
       plan: plan, model: AdvResource, attributes: CorpusAttributes::ATTRIBUTES,
       null_attribute_representation: :explicit
-    ).select_map(:id).sort
+    )
+  end
+
+  def ids(plan) = dataset(plan).select_map(:id).sort
+
+  # Two properties "refuse, never best-effort" rests on, checked without running a query
+  # (conformance/README.md, "The harness contract").
+  def expect_fitness(plan)
+    unless ConformanceCorpus.reads_clock?(plan)
+      first = ConformanceCorpus.rendered { dataset(plan).sql }
+      expect(ConformanceCorpus.rendered { dataset(plan).sql }).to eq(first)
+    end
+
+    unrefused = ConformanceCorpus.operator_mutants(plan).filter_map do |mutant|
+      "#{mutant.condition.inspect}\ntranslated to #{dataset(mutant).sql}"
+    rescue Cerbos::Sequel::Error
+      nil
+    rescue => e
+      "#{mutant.condition.inspect}\nraised #{e.inspect}"
+    end
+    expect(unrefused).to be_empty
   end
 
   # An `unsupported` entry passes on any Cerbos::Sequel::Error, and an attribute the map
@@ -56,6 +76,8 @@ RSpec.describe "conformance" do
             expect(%w[match refused]).to include(verdict.fetch("verdict")), verdict.to_s
             next
           end
+
+          expect_fitness(plan)
 
           case ConformanceCorpus.ledger_entry(golden.fetch("id"), tag)&.fetch("status")
           when nil then expect(ids(plan)).to eq(allowed)

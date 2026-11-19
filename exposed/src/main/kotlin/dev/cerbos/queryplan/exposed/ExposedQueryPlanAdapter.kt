@@ -50,7 +50,25 @@ public object ExposedQueryPlanAdapter {
         else -> throw Refusals.malformed("Unknown filter kind: ${filter.kind}")
     }
 
+    /** Every operator a Cerbos plan holds. Rewrites decide some subtrees without reading them. */
+    private val PLANNER_OPERATORS = setOf(
+        "add", "all", "ancestorOf", "and", "contains", "descendentOf", "div", "double", "duration",
+        "dyn", "endsWith", "eq", "except", "exists", "exists_one", "filter", "ge", "get-field", "gt",
+        "has", "hasIntersection", "has_intersection", "hierarchy", "if", "in", "index", "int",
+        "intersect", "isSubset", "lambda", "le", "list", "lt", "map", "matches", "mod", "mult", "ne",
+        "not", "or", "overlaps", "set-field", "size", "startsWith", "string", "struct", "sub",
+        "timeSince", "timestamp", "upperAscii",
+    )
+
+    private fun assertPlannerOperators(operand: Operand) {
+        if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return
+        val operator = operand.expression.operator
+        if (operator !in PLANNER_OPERATORS) throw Refusals.unsupported("Unsupported operator: $operator")
+        operand.expression.operandsList.forEach(::assertPlannerOperators)
+    }
+
     private fun conditional(planned: Operand, options: Options): QueryPlanFilter {
+        assertPlannerOperators(planned)
         val condition = PositionalRead.rewrite(PlanRewrites.selectMapKeys(PlanRewrites.withoutDyn(planned), options.mapping), options.mapping)
         NullOperandScan.assertTranslatable(condition, options)
         val translation = Translation(options)

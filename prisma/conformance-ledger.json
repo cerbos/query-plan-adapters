@@ -73,6 +73,10 @@
       "status": "unsupported",
       "reason": "Same gap as arithmetic/modulo/negative-dividend: Prisma filters have no column arithmetic and `mod` is not in the translator's operator set, so a divisor that is itself a column expression (with CEL's truncating sign and its divide-by-zero error) has no where-filter form"
     },
+    "arithmetic/modulo/literal-zero-divisor-negated": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no column arithmetic, and `mod` is not in the translator's operator set."
+    },
     "arithmetic/modulo/negated-double-operand": {
       "status": "unsupported",
       "reason": "`mod` is not in the translator's operator set, so the walk refuses it before it could tell that % over a double is a CEL no-overload error; Prisma filters have no column arithmetic to evaluate it with either way"
@@ -265,6 +269,10 @@
       "status": "unsupported",
       "reason": "Prisma where filters expose no scalar cast, positional array index, or RE2 expression for this planner shape."
     },
+    "collection/index/integral-double-position": {
+      "status": "unsupported",
+      "reason": "Prisma where filters expose no positional array index, so a list read at a position is refused."
+    },
     "collection/index/negated-first-element-of-boolean-list": {
       "status": "unsupported",
       "reason": "A positional read of a boolean list has no Prisma filter form: Prisma's scalar-list filters (has, hasSome, hasEvery, isEmpty, equals) test membership or the whole list, never one position, and exist only where the provider has array columns, which SQLite and MySQL do not. `index` has no case in the translator's operator switch, so the walk throws at the index node itself, before the list is resolved against the mapper or the element's type meets the literal — the same site as collection/index/first-element-of-string-list"
@@ -436,6 +444,10 @@
     "regex/matches/anchored-prefix-dot-star": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and matches() is lowered only to LIKE filters that decide it exactly; a .* in a pattern not anchored at both ends is refused."
+    },
+    "regex/matches/anchors-inside-group": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and an anchor inside a group is not a shape a combination of LIKE filters decides exactly."
     },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",
@@ -676,6 +688,10 @@
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Prisma DateTime values retain instants but discard RFC-3339 lexical spelling; raw field equality cannot reproduce CEL string equality, so both operands require timestamp wrappers."
+    },
+    "timestamp/not-equals/bare-attribute-against-timestamp-literal": {
+      "status": "unsupported",
+      "reason": "A bare dateTime column compared with a timestamp() operand is refused: the attribute the PDP sees is the column's RFC 3339 string, which CEL never equals to a timestamp, while a Prisma DateTime filter compares instants."
     },
     "type-mismatch/add/negated-boolean-plus-number": {
       "status": "unsupported",

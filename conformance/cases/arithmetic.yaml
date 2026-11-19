@@ -408,3 +408,10 @@ cases:
     - 0.56.0
     - 0.57.0
     reason: 'The planner drops the double type of the substituted P.attr.zero: the plan is byte-identical to int(aNumber) - 0 > 0 || aNumber == 5, which allows rows, while check() has no int - double overload and allows only a1.'
+- id: 'arithmetic/modulo/literal-zero-divisor-negated'
+  tier: adversarial
+  intent: 'A modulus by a literal 0 under negation (!(int(aNumber) % 0 == 1)), beside aString == "one".'
+  trap: 'x % 0 is a CEL error, which denies the row under both polarities, so only a1 is allowed; SQL MOD(x, 0) is NULL or a query error, and JavaScript gives NaN, which the negation turns into a grant of every row.'
+  condition:
+    match:
+      expr: '!(int(R.attr.aNumber) % 0 == 1) || R.attr.aString == "one"'

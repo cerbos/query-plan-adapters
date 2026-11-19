@@ -7,6 +7,7 @@ package dev.cerbos.queryplan.elasticsearch;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.queryplan.elasticsearch.Corpus.Golden;
 import dev.cerbos.queryplan.elasticsearch.Corpus.LedgerEntry;
 import dev.cerbos.queryplan.elasticsearch.ElasticsearchQueryPlanAdapter.Result;
@@ -172,6 +173,7 @@ class ElasticsearchAdversarialConformanceTest {
             assertTrue(verdict.ok(), verdict::toString);
             return;
         }
+        assertFitness(golden.id(), golden.plan());
         LedgerEntry entry = Corpus.ledgerEntry(golden.id(), tag);
         String status = entry == null ? null : entry.status();
         if (status == null) {
@@ -184,6 +186,35 @@ class ElasticsearchAdversarialConformanceTest {
         } else {
             throw new IllegalStateException(golden.id() + ": unknown ledger status " + status);
         }
+    }
+
+    // -- fitness functions for "refuse, never best-effort" --------------------------------------
+    // conformance/README.md, "The harness contract". Neither runs a query.
+
+    private static String rendered(PlanResourcesResponse plan) {
+        try {
+            return MAPPER.writeValueAsString(ElasticsearchQueryPlanAdapter.toElasticsearchQuery(plan, Corpus.OPTIONS));
+        } catch (RuntimeException | IOException e) {
+            return e.getClass().getName() + ": " + e.getMessage();
+        }
+    }
+
+    private static void assertFitness(String id, PlanResourcesResponse plan) {
+        if (!Corpus.readsClock(plan)) {
+            assertEquals(rendered(plan), rendered(plan), id + ": translating the same plan twice differed");
+        }
+        List<String> unrefused = new ArrayList<>();
+        for (PlanResourcesResponse mutant : Corpus.operatorMutants(plan)) {
+            try {
+                Result result = ElasticsearchQueryPlanAdapter.toElasticsearchQuery(mutant, Corpus.OPTIONS);
+                unrefused.add(mutant.getFilter().getCondition() + "\ntranslated to " + result);
+            } catch (UnsupportedPlanShapeException refused) {
+                // The adapter's refusal type, as an `unsupported` ledger entry expects.
+            } catch (RuntimeException e) {
+                unrefused.add(mutant.getFilter().getCondition() + "\nthrew " + e);
+            }
+        }
+        assertEquals(List.of(), unrefused, id + ": an operator the adapter cannot know must be refused");
     }
 
     /** Translates the recorded plan and runs it, returning the matching seed ids sorted. */

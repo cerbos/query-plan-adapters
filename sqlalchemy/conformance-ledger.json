@@ -72,6 +72,10 @@
       "status": "unsupported",
       "reason": "int() is what gives `%` an integer operand, and it has no faithful SQL lowering (CAST rounds where CEL truncates toward zero), so the cast is refused before the modulo is reached."
     },
+    "arithmetic/modulo/literal-zero-divisor-negated": {
+      "status": "unsupported",
+      "reason": "int() has no faithful SQL CAST: CAST reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero."
+    },
     "arithmetic/modulo/negated-double-operand": {
       "status": "unsupported",
       "reason": "CEL's `%` is defined only over integers and attribute numbers are doubles, so this is a no-such-overload error that must stay denied under negation; SQL `%` over the column would compute a remainder, so `%` over a column is refused."
@@ -344,6 +348,10 @@
       "status": "unsupported",
       "reason": "An empty delimiter is refused when the hierarchy operand is parsed, as for hierarchy/ancestor-of/empty-delimiter."
     },
+    "hierarchy/ancestor-of/mismatched-delimiters-negated": {
+      "status": "unsupported",
+      "reason": "The two hierarchy() operands split on different delimiters; the adapter compares segments of one delimiter only, so it refuses rather than re-split either path in SQL."
+    },
     "hierarchy/descendent-of/empty-delimiter": {
       "status": "unsupported",
       "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the descendant LIKE `prefix + delimiter + '%'` would become a bare prefix match that also matches the path itself."
@@ -399,6 +407,10 @@
     "principal/map/as-whole-condition": {
       "status": "unsupported",
       "reason": "Once dyn() is unwrapped, map() over a principal list is folded only under exists(), all() and exists_one(); as a whole condition it is a CEL no-overload error."
+    },
+    "regex/matches/anchors-inside-group": {
+      "status": "unsupported",
+      "reason": "The anchors sit inside a group, so what the pattern matches is not a finite set of literals under anchors, a character set, or a prefix and suffix, the only shapes lowered without an RE2 regex dialect in the store."
     },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",
@@ -491,9 +503,17 @@
       "status": "unsupported",
       "reason": "A needle holding a NUL character is refused on every store: PostgreSQL text cannot hold one, so binding it errors, and MySQL's LIKE stops reading the pattern at it."
     },
+    "timestamp/equals/bare-attribute-against-timestamp-literal": {
+      "status": "unsupported",
+      "reason": "A bare temporal attribute is an RFC 3339 string to CEL, which a timestamp never equals; the adapter refuses bare temporal attributes, since a stored timestamp loses the original spelling, and asks for timestamp() on the attribute."
+    },
     "timestamp/equals/field-to-field-without-conversion": {
       "status": "unsupported",
       "reason": "Bare temporal attributes compare RFC 3339 strings in CEL; a stored timestamp loses the original spelling, so both operands need timestamp()."
+    },
+    "timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a microsecond is refused: SQL stores and binds instants to the microsecond, so the literal would be rounded to a different instant than the policy names."
     },
     "timestamp/greater-than/relative-window-value-first": {
       "status": "unsupported",
@@ -503,9 +523,17 @@
       "status": "unsupported",
       "reason": "timeSince() measures from the PDP's evaluation clock, and the plan carries no instant for it (the planner folds now() but leaves timeSince() unevaluated), so the database's clock would move the boundary."
     },
+    "timestamp/less-than/nanosecond-literal-past-stored-microsecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a microsecond is refused: SQL stores and binds instants to the microsecond, so the literal would be rounded to a different instant than the policy names."
+    },
     "timestamp/less-than/relative-window": {
       "status": "unsupported",
       "reason": "The planner folds now() into a nanosecond-precision literal, which a SQLAlchemy DateTime (microseconds) cannot hold without changing the instant."
+    },
+    "timestamp/not-equals/bare-attribute-against-timestamp-literal": {
+      "status": "unsupported",
+      "reason": "A bare temporal attribute is an RFC 3339 string to CEL, which a timestamp never equals; the adapter refuses bare temporal attributes, since a stored timestamp loses the original spelling, and asks for timestamp() on the attribute."
     },
     "type-mismatch/add/negated-boolean-plus-number": {
       "status": "unsupported",

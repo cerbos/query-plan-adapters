@@ -134,6 +134,15 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults, unhel
 
 	fmt.Fprintf(&b, "# Fuzz report: seed %d\n\n", m.Seed)
 	reproduce := fmt.Sprintf("fuzz -seed %d -count %d", m.Seed, m.Count)
+	if m.Rows > 0 {
+		reproduce += fmt.Sprintf(" -rows %d", m.Rows)
+	}
+	if m.Steer != nil {
+		reproduce += fmt.Sprintf(" -steer %s -steer-goal %s", strings.Join(m.Steer.From, ","), m.Steer.Goal)
+		if len(m.Steer.Adapters) > 0 {
+			reproduce += " -steer-adapters " + strings.Join(m.Steer.Adapters, ",")
+		}
+	}
 	if m.Kind == "compose" {
 		reproduce = fmt.Sprintf("fuzz-compose -seed %d -count %d", m.Seed, m.Count)
 		if m.From != "" {
@@ -207,6 +216,10 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults, unhel
 	section("Suspected planner divergences", fmt.Sprintf("%d cases, by PDP, that every leg that translated them answered with the same wrong rows. Not counted as failures: check whether the plan and `check()` disagree before blaming an adapter.", len(planner)), planner)
 	if len(keys) == 0 {
 		b.WriteString("\nNo failures.\n")
+	}
+	if spots := weakSpots(cases, legs, 12); spots != "" {
+		b.WriteString("\n## Weak spots\n\nPer adapter, the grammar productions, attributes and corpus atoms behind most of its refusals, counted per leg, PDP and case. A refused case is put down to its feature the adapter translated least often in this run. `fuzz -steer <this dir> -steer-goal refusals` draws these more often; the default goal, coverage, draws the features this adapter translates but was rarely checked on.\n")
+		b.WriteString(spots)
 	}
 	return b.String(), failures
 }

@@ -143,6 +143,47 @@ module ConformanceCorpus
     parent_id = seed&.fetch("parentSeedId")
     parent_id && SEEDS_BY_ID.fetch(parent_id)
   end
+
+  # -- fitness functions for "refuse, never best-effort" ------------------------------------------
+
+  # An operator name no PDP emits.
+  UNKNOWN_OPERATOR = "qpa-unknown-operator"
+
+  # One copy of the plan per operator node, each with that node's operator renamed to
+  # UNKNOWN_OPERATOR. A translator that refuses every one of them has no dispatch that falls
+  # through to a filter for an operator it does not know.
+  def operator_mutants(plan)
+    Array.new(expressions(plan.condition).size) do |target|
+      seen = -1
+      rename = lambda do |operand|
+        next operand unless operand.is_a?(Cerbos::Output::PlanResources::Expression)
+
+        seen += 1
+        operator = (seen == target) ? UNKNOWN_OPERATOR : operand.operator
+        Cerbos::Output::PlanResources::Expression.new(operator: operator, operands: operand.operands.map(&rename))
+      end
+      plan.class.new(
+        request_id: plan.request_id, kind: plan.kind, condition: rename.call(plan.condition),
+        validation_errors: plan.validation_errors, metadata: plan.metadata
+      )
+    end
+  end
+
+  # Whether the plan holds timeSince, which a translator resolves against the clock.
+  def reads_clock?(plan) = expressions(plan.condition).any? { |expression| expression.operator == "timeSince" }
+
+  # What a translation gave, as text two translations of the same plan can be compared by.
+  def rendered
+    yield.to_s
+  rescue => e
+    "#{e.class}: #{e.message}"
+  end
+
+  def expressions(operand)
+    return [] unless operand.is_a?(Cerbos::Output::PlanResources::Expression)
+
+    [operand, *operand.operands.flat_map { |child| expressions(child) }]
+  end
 end
 
 RSpec.configure do |config|

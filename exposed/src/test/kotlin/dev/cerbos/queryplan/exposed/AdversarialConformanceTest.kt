@@ -2,6 +2,7 @@ package dev.cerbos.queryplan.exposed
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.databind.JsonNode
+import dev.cerbos.api.v1.response.Response.PlanResourcesResponse
 import dev.cerbos.queryplan.exposed.Corpus.LedgerEntry
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.Op
@@ -303,6 +304,42 @@ class AdversarialConformanceTest {
                 }
             }
 
+        // -- fitness functions for "refuse, never best-effort" --------------------------------
+        // conformance/README.md, "The harness contract". Neither runs a query.
+
+        private fun filter(plan: PlanResourcesResponse, mapping: AttributeMappings): QueryPlanFilter =
+            ExposedQueryPlanAdapter.toFilter(plan, Options.of(mapping).withNullAttributeRepresentation(NullAttributeRepresentation.EXPLICIT))
+
+        /** The statement a caller's query sends under the plan's filter, its values inlined. */
+        private fun sql(plan: PlanResourcesResponse, mapping: AttributeMappings): String =
+            when (val filter = filter(plan, mapping)) {
+                is QueryPlanFilter.Conditional -> transaction(testStore!!.database) {
+                    Resources.select(Resources.id).withDistinct().where(filter.op).prepareSQL(this, false)
+                }
+                else -> filter.toString()
+            }
+
+        private fun rendered(plan: PlanResourcesResponse, mapping: AttributeMappings): String =
+            runCatching { sql(plan, mapping) }.getOrElse { "${it.javaClass.name}: ${it.message}" }
+
+        fun assertFitness(id: String, plan: PlanResourcesResponse) {
+            for (mapping in listOf(MAPPING, DECLARED_MAPPING)) {
+                if (!Corpus.readsClock(plan)) {
+                    assertEquals(rendered(plan, mapping), rendered(plan, mapping), "$id: translating the same plan twice differed")
+                }
+                val unrefused = Corpus.operatorMutants(plan).mapNotNull { mutant ->
+                    runCatching { sql(mutant, mapping) }.fold(
+                        { "${mutant.filter.condition}\ntranslated to $it" },
+                        {
+                            if (it is UnsupportedPlanShapeException || it is UnmappedAttributeException) null
+                            else "${mutant.filter.condition}\nthrew $it"
+                        },
+                    )
+                }
+                assertEquals(emptyList<String>(), unrefused, "$id: an operator the adapter cannot know must be refused")
+            }
+        }
+
         /** Sorted in Kotlin, as `allowed` is: the database's collation must not decide the order. */
         private fun selectIds(predicate: Op<Boolean>?): List<String> {
             var query = Resources.select(Resources.id).withDistinct()
@@ -344,6 +381,7 @@ class AdversarialConformanceTest {
             assertTrue(verdict.isOk()) { verdict.toString() }
             return
         }
+        assertFitness(id, Corpus.plan(golden))
         val entry = LEDGER[id]
         val status = if (entry != null && entry.appliesTo(tag)) entry.status else "pass"
         val outcome = runCatching { ids(golden) }

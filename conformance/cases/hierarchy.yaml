@@ -136,3 +136,10 @@ cases:
   condition:
     match:
       expr: 'hierarchy("dept", ".").overlaps(hierarchy(["dept", R.attr.scope]))'
+- id: 'hierarchy/ancestor-of/mismatched-delimiters-negated'
+  tier: adversarial
+  intent: 'A negated ancestorOf between hierarchies built with different delimiters (!hierarchy(scope, ":").ancestorOf(hierarchy("dept:eng", "."))).'
+  trap: 'Each hierarchy splits its own string on its own delimiter, so "dept:eng" under "." is one segment and no scope is its ancestor: every row with a scope is allowed. Splitting both sides on ":" makes a1 ("dept") an ancestor, and the negation denies it.'
+  condition:
+    match:
+      expr: '!hierarchy(R.attr.scope, ":").ancestorOf(hierarchy("dept:eng", "."))'

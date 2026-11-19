@@ -3,12 +3,14 @@ import * as path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import { ConvexHttpClient } from "convex/browser";
-import type { GenericDocument } from "convex/server";
+import type { FilterBuilder, GenericDocument, GenericTableInfo } from "convex/server";
+import type { PlanResourcesResponse } from "@cerbos/core";
 
 import { api } from "../convex/_generated/api.js";
 import { MAPPER } from "../convex/adversarialMapper";
 import type { AdversarialDocument } from "../convex/schema";
 import { queryPlanToConvex, UnsupportedQueryPlanError } from ".";
+import type { ConvexFilter } from ".";
 import {
   assertFuzzVerdict,
   FUZZ_DIR,
@@ -18,6 +20,9 @@ import {
   planOf,
   readCorpusJson,
   readGoldens,
+  readsClock,
+  rendered,
+  unrefusedMutants,
   writeFuzzResults,
 } from "./corpus";
 import type { FuzzVerdict, Golden } from "./corpus";
@@ -271,6 +276,44 @@ async function selectAllowed(
   });
 }
 
+const translatePlan = (queryPlan: PlanResourcesResponse) =>
+  queryPlanToConvex({
+    queryPlan,
+    mapper: MAPPER,
+    allowPostFilter: true,
+    nullAttributeRepresentation: "explicit",
+  });
+
+// Each FilterBuilder call, recorded as `{ method: args }`, so a Convex filter renders as data.
+// SAFETY: the Proxy answers every FilterBuilder method, so any filter can call it; what it returns
+// is only rendered, never read as an Expression.
+const recorder = new Proxy(
+  {},
+  { get: (_target, method) => (...args: unknown[]) => ({ [String(method)]: args }) },
+) as FilterBuilder<GenericTableInfo>;
+
+const render = (queryPlan: PlanResourcesResponse) => {
+  const result = translatePlan(queryPlan);
+  const record = (filter: ConvexFilter) => filter(recorder);
+
+  if (result.path === "db") return { ...result, filter: record(result.filter) };
+
+  if (result.path === "split") return { ...result, prefilter: record(result.prefilter) };
+
+  return result;
+};
+
+// Two properties "refuse, never best-effort" rests on, checked without running a query
+// (conformance/README.md, "The harness contract"). A post-filter is a closure, so only the
+// Convex filter beside it is compared.
+function assertFitness(queryPlan: PlanResourcesResponse): void {
+  if (!readsClock(queryPlan)) {
+    expect(rendered(() => render(queryPlan))).toEqual(rendered(() => render(queryPlan)));
+  }
+
+  expect(unrefusedMutants(queryPlan, translatePlan, UnsupportedQueryPlanError)).toEqual([]);
+}
+
 const TAGS = pdpTags();
 const GOLDENS = new Map(TAGS.map((tag) => [tag, readGoldens(tag)]));
 const passed: Record<string, Record<string, number>> = {};
@@ -396,17 +439,12 @@ describe("conformance (convex)", () => {
         }
 
         const entry = ledgerEntry(golden, tag);
+        const queryPlan = await planOf(golden);
+
+        assertFitness(queryPlan);
 
         if (entry?.status === "unsupported") {
-          const queryPlan = await planOf(golden);
-          expect(() =>
-            queryPlanToConvex({
-              queryPlan,
-              mapper: MAPPER,
-              allowPostFilter: true,
-              nullAttributeRepresentation: "explicit",
-            }),
-          ).toThrow(UnsupportedQueryPlanError);
+          expect(() => translatePlan(queryPlan)).toThrow(UnsupportedQueryPlanError);
 
           return;
         }

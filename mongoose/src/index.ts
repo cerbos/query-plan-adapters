@@ -4,6 +4,7 @@ import { UnsupportedQueryPlanError } from "./errors";
 import type { TranslateContext } from "./context";
 import { translateCondition } from "./filter";
 import { rootMapper } from "./mapper";
+import { assertPlannerOperators } from "./operands";
 import type { SchemaSource } from "./schema";
 import { isMongoDocument } from "./expression";
 import type { MongoValue, MongooseFilter } from "./expression";
@@ -131,6 +132,8 @@ export function queryPlanToMongoose({
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
+      assertPlannerOperators(queryPlan.condition);
+
       const filters = shieldExpressions(translateCondition(queryPlan.condition, ctx));
 
       if (!isMongoDocument(filters)) {
