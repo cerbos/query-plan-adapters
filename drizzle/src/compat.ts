@@ -9,7 +9,7 @@ import type { RelationV2, RelationsSchema } from "./types";
  * reads a column or builds SQL the same way on both.
  */
 
-export const not = (condition: SQLWrapper): SQL => sql`not ${condition}`;
+export const not = (condition: SQLWrapper): SQL => sql`not (${condition})`;
 
 /** 1.0 still sets `column.table` but no longer declares it. */
 export const columnTable = (column: AnyColumn): Table => {

@@ -463,7 +463,7 @@ describe("nullAttributeRepresentation", () => {
       // NOT EXISTS that denies a row whose projected relation element is missing.
       const unguarded = render("postgresql", result.filter)
         .sql.replace(/case when (?:(?!then).)*? then null/g, "")
-        .replace(/not exists \(select 1 from [^()]* where \((?:\([^()]*\) and \()?[^()]* is null\)\)?\)/g, "");
+        .replace(/not \(?exists \(select 1 from [^()]* where \((?:\([^()]*\) and \()?[^()]* is null\)\)?\)\)?/g, "");
 
       return /\bis null\b/.test(unguarded);
     });

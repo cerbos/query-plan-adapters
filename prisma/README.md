@@ -18,8 +18,8 @@ npm install @cerbos/grpc   # or @cerbos/http — whichever client your deploymen
   and Yarn expect you to declare it.
 - **A Cerbos client** (`@cerbos/grpc` or `@cerbos/http`). The adapter depends on neither.
 - **Cerbos PDP** 0.55 or later is recommended; the contract below is tested against 0.57.0.
-- **A byte-exact database collation** on mapped columns, and on SQLite
-  `PRAGMA case_sensitive_like = ON`. See
+- **A byte-exact database collation** on mapped columns, on SQLite
+  `PRAGMA case_sensitive_like = ON`, and on MySQL a `sql_mode` without `HIGH_NOT_PRECEDENCE`. See
   [Database collation is an authorization invariant](#database-collation-is-an-authorization-invariant).
 
 ## Quick start
@@ -396,6 +396,11 @@ The adapter cannot set a collation or a pragma from inside a `where`.
   184 compared cases disagree with the PDP** (`string/equals/case-sensitive` returns `"One"` for a
   policy that allowed `"one"`); under `utf8mb4_0900_as_cs`, **17** disagree, all on the
   soft-hyphen seed `h6`.
+  **`sql_mode` must not include `HIGH_NOT_PRECEDENCE`.** Prisma renders `NOT: { x: { lt: 3 } }`
+  as `(NOT x < 3)` without inner parentheses, and that mode parses it as `(NOT x) < 3`, so a negated
+  comparison, `LIKE` or `IN` returns rows Cerbos denies. The conformance harness's
+  `mysql-high-not-precedence` [store variant](../conformance/README.md#store-variants) shows 292
+  disagreeing cases on Prisma 7.10.
 - **SQL Server:** a case-sensitive (`_CS_`) collation, not `_CI_`.
 - **SQLite:** no `COLLATE NOCASE` on mapped fields (the default `BINARY` orders by code point, as
   CEL does), **and** `PRAGMA case_sensitive_like = ON` on

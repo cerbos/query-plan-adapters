@@ -22,6 +22,11 @@ on:
         description: "Space-separated adapters to replay (run-harness.sh --list); empty replays every store leg of every adapter"
         required: false
         default: ""
+      store_variants:
+        description: "Run each PostgreSQL and MySQL leg on a store variant the seed picks (conformance/README.md, \"Store variants\")"
+        type: boolean
+        required: false
+        default: true
 
 permissions: {}
 
@@ -53,20 +58,28 @@ jobs:
           ROWS: ${{ inputs.rows }}
         run: go -C conformance/generator run . fuzz -seed "${SEED}" -count "${COUNT}" -rows "${ROWS}" -out "${RUNNER_TEMP}/fuzz"
 
-      # One matrix leg per adapter and store, from the same roster run-harness.sh runs locally.
+      # One matrix leg per adapter and store, from the same roster run-harness.sh runs locally, each
+      # with the store variant fuzz.sh would pick for it from the same seed.
       - name: List the store legs
         id: legs
         env:
           ADAPTERS: ${{ inputs.adapters }}
+          SEED: ${{ inputs.seed || github.run_number }}
+          STORE_VARIANTS: ${{ inputs.store_variants }}
         run: |
           legs="$(conformance/scripts/run-harness.sh --list | python3 -c '
-          import json, os, sys
+          import json, os, subprocess, sys
           wanted = os.environ["ADAPTERS"].split()
           roster = {line.split()[0]: line.split()[1:] for line in sys.stdin if line.strip()}
           unknown = sorted(set(wanted) - set(roster))
           if unknown:
               sys.exit(f"not in run-harness.sh: {unknown}")
-          print(json.dumps([{"adapter": a, "store": s} for a in (wanted or sorted(roster)) for s in roster[a]]))
+          def variant(a, s):
+              if os.environ["STORE_VARIANTS"] != "true":
+                  return "default"
+              return subprocess.run(["conformance/scripts/run-harness.sh", "--pick-variant", os.environ["SEED"], a, s],
+                                    check=True, capture_output=True, text=True).stdout.strip()
+          print(json.dumps([{"adapter": a, "store": s, "variant": variant(a, s)} for a in (wanted or sorted(roster)) for s in roster[a]]))
           ')"
           echo "legs=${legs}" >> "${GITHUB_OUTPUT}"
 
@@ -77,7 +90,7 @@ jobs:
           if-no-files-found: error
 
   replay:
-    name: Replay (${{ matrix.adapter }} / ${{ matrix.store }})
+    name: Replay (${{ matrix.adapter }} / ${{ matrix.store }} / ${{ matrix.variant }})
     needs: record
     # mongoose.yaml says why its legs run on ubuntu-24.04 (MongoDB 8.0 and the 6.19 kernel).
     runs-on: ${{ matrix.adapter == 'mongoose' && 'ubuntu-24.04' || 'ubuntu-latest' }}
@@ -136,6 +149,7 @@ jobs:
           QPA_FUZZ_DIR: ${{ runner.temp }}/fuzz
           ADAPTER: ${{ matrix.adapter }}
           STORE: ${{ matrix.store }}
+          QPA_STORE_VARIANT: ${{ matrix.variant }}
         run: |
           conformance/scripts/run-harness.sh "${ADAPTER}" "${STORE}" || true
           compgen -G "${QPA_FUZZ_DIR}/results/${ADAPTER}-*.json" >/dev/null \

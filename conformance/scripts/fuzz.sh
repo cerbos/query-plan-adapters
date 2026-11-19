@@ -7,9 +7,12 @@
 #   conformance/scripts/fuzz.sh -s 7 -n 200 drizzle prisma
 #   conformance/scripts/fuzz.sh -o ~/fuzz/s7 -s 7        # keep the run somewhere other than a temp dir
 #   conformance/scripts/fuzz.sh -s 7 -r 40               # add 40 generated rows to the dataset
+#   conformance/scripts/fuzz.sh -d -s 7                  # every leg on its default store configuration
 #
-# Each adapter replays every store leg run-harness.sh knows for it, one at a time. The report is
-# <out>/report.md; the run fails when the report finds an adapter failure. Needs Docker.
+# Each adapter replays every store leg run-harness.sh knows for it, one at a time. A PostgreSQL or
+# MySQL leg runs on a store variant the seed picks for it (conformance/README.md, "Store
+# variants"); -d keeps every leg on its default. The report is <out>/report.md; the run fails when
+# the report finds an adapter failure. Needs Docker.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,13 +22,15 @@ seed="$(date -u +%Y%m%d)"
 count=500
 rows=0
 out=""
-while getopts "s:n:r:o:h" opt; do
+variants=1
+while getopts "s:n:r:o:dh" opt; do
   case "${opt}" in
     s) seed="${OPTARG}" ;;
     n) count="${OPTARG}" ;;
     r) rows="${OPTARG}" ;;
     o) out="${OPTARG}" ;;
-    *) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    d) variants=0 ;;
+    *) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -43,7 +48,15 @@ for adapter in "${adapters[@]}"; do
   # A failing case fails the harness; the report, not the exit status, says what failed. A harness
   # that wrote no verdicts (it did not build, or its store did not start) is absent from the
   # report, so it is caught here, as the workflow's replay job does.
-  QPA_FUZZ_DIR="${out}" "${SCRIPT_DIR}/run-harness.sh" "${adapter}" || true
+  if [[ "${variants}" -eq 0 ]]; then
+    QPA_FUZZ_DIR="${out}" "${SCRIPT_DIR}/run-harness.sh" "${adapter}" || true
+  else
+    for store in $("${SCRIPT_DIR}/run-harness.sh" --list | awk -v a="${adapter}" '$1 == a { $1 = ""; print }'); do
+      QPA_FUZZ_DIR="${out}" \
+        QPA_STORE_VARIANT="$("${SCRIPT_DIR}/run-harness.sh" --pick-variant "${seed}" "${adapter}" "${store}")" \
+        "${SCRIPT_DIR}/run-harness.sh" "${adapter}" "${store}" || true
+    done
+  fi
   compgen -G "${out}/results/${adapter}-*.json" >/dev/null || silent+=("${adapter}")
 done
 

@@ -559,6 +559,9 @@ applies to every operator reached through the relation — `exists`, `all`, `exc
 
 ## Behaviour changes
 
+- Fixed over-grants on MySQL with `HIGH_NOT_PRECEDENCE` in `sql_mode`: a negated comparison, `LIKE`
+  or `IN` was emitted as `not x < ?`, which that mode parses as `(not x) < ?`. Every `not` now wraps
+  its operand in parentheses.
 - Supports drizzle 1.0 (from `1.0.0-rc.5`) as well as 0.44 and 0.45.
 - Fixed over-grants: every relation subquery now ranges under its own alias, named by its path
   (`cerbos_<relation>`). Two relations into one table (`origin.country == destination.country`)

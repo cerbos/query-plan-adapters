@@ -277,10 +277,50 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   join or alias reuse, precedence, a NULL that one operand's guard hid. A composed case cannot be
   shrunk by `fuzz-shrink`; its intent names its operands, and a failure is reduced by hand to the
   smallest subtree that still fails.
+- **Store variants.** Each PostgreSQL and MySQL leg runs on one non-default store configuration
+  the seed picks for it (next section), and the report names it beside the leg, as
+  `drizzle / mysql [mysql-ansi]`. `fuzz.sh -d`, or the workflow's `store_variants: false`, keeps
+  every leg on its default.
 - **Promotion.** `fuzz-shrink` replays one-step reductions of a failing case through that leg until
   none still fails, and writes the smallest as a YAML entry. Give it an id, intent and trap, add it
   to `cases/<area>.yaml`, and it reaches every adapter through the usual route (["Changing how a
   condition is translated"](#changing-how-a-condition-is-translated)).
+
+## Store variants
+
+#690, #700 and the trailing-space cases were bugs in the store's configuration, not in the condition:
+a collation, a session time zone, a server one major behind. A harness pins one configuration per
+leg, so the corpus proves that one. `scripts/store-variants.sh` names the others worth trying, one
+setting each:
+
+| Variant | Setting |
+|---|---|
+| `pg-previous`, `mysql-previous` | the previous major (PostgreSQL N-1, MySQL 8.0 for 8.4) |
+| `pg-timezone-east`, `pg-timezone-west` | `timezone` Pacific/Chatham (+12:45/+13:45), America/St_Johns (-03:30/-02:30) |
+| `pg-extra-float-digits` | `extra_float_digits = 0`, so a double prints 15 significant digits |
+| `pg-datestyle` | `datestyle = 'SQL, DMY'`, `intervalstyle = 'postgres_verbose'` |
+| `pg-legacy-strings` | `standard_conforming_strings = off`, so a backslash escapes in a string literal |
+| `mysql-timezone` | `default-time-zone = '-09:30'` |
+| `mysql-high-not-precedence` | `HIGH_NOT_PRECEDENCE` added to `sql_mode`, so `NOT a = b` is `(NOT a) = b` |
+| `mysql-no-backslash-escapes` | `NO_BACKSLASH_ESCAPES` added to `sql_mode` |
+| `mysql-ansi` | `sql_mode = 'ANSI,STRICT_TRANS_TABLES'`: `\|\|` concatenates, `"` quotes identifiers |
+| `mysql-lax` | `sql_mode = ''` |
+| `mysql-collation-general` | `collation-server = utf8mb4_general_ci` (PAD SPACE, case-folding) |
+
+`QPA_STORE_VARIANT=<variant> scripts/run-harness.sh <adapter> [store...]` runs the legs that start
+that engine on it, the corpus or a fuzz run alike; `--variants <adapter> <store>` lists what a leg
+takes. No harness knows about variants: for the leg, the script tags a derived image (an
+`ALTER SYSTEM` init script, a `conf.d` file, or the previous major) as the image name the harness
+already starts, from `*/POSTGRES_IMAGE` and `*/MYSQL_IMAGE`, and tags the original back afterwards,
+or on the next run if it was killed. A setting a harness passes itself, such as `--collation-server`
+or an initdb locale, still wins over the variant's. A harness that checks its store, as the MySQL
+harnesses check that columns fold case, accepts any variant that keeps what it checks. A fuzz leg's verdicts carry the variant, and `fuzz-shrink` replays a failure on it when
+`QPA_STORE_VARIANT` is set the same way.
+
+A corpus case that passes on the default configuration and fails on a variant is a finding like any
+other: a fix, a refusal, or, where the store or driver rather than the adapter decides the SQL, a
+line in the adapter README's configuration requirements. A leg that errors on every case, or cannot
+seed its store, fails closed: name the setting in that README and move on.
 
 ## The dataset
 
