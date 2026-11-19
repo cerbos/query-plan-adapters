@@ -5,6 +5,8 @@
 - The package no longer ships the test suites or the conformance harness (`src/*.test.ts`,
   `src/corpus.ts`).
 
+## v0.3.0
+
 - `postFilter` compares two `bytes` values by their contents. It used to read each as an empty
   map, so any two were equal.
 
@@ -99,8 +101,6 @@
   does; `string()` over a double prints Go's `%g` spelling (`1e+06`, `-0`) instead of refusing
   outside a measured magnitude band; and division by a zero read from the document yields the
   signed infinity CEL does instead of throwing.
-
-## 0.3.0
 
 - **Breaking:** `QueryPlanToConvexResult` now requires a `path` discriminator on conditional
   results: `db` requires `filter`, `post` requires `postFilter`, and `split` requires both.

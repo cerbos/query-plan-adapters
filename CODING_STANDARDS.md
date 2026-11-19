@@ -90,6 +90,8 @@ Three kinds of material live only there, and they are not equal:
 - Name the affected adapters, link the related Cerbos issues, and attach logs for a significant
   behaviour change.
 - Name any service a reviewer needs to reproduce the change locally.
+- A change a caller of an adapter can observe adds a line under `## Unreleased` in that
+  adapter's `CHANGELOG.md`, as [docs/ci.md](docs/ci.md), "Cutting a release", describes.
 - A change to what an adapter can translate is stated explicitly and documented as a **breaking
   change**: a shape that used to return a filter and now throws is a consumer-visible break, even
   when the old filter was wrong.

@@ -30,9 +30,10 @@ filenames stable: npm trusted publishing is configured against them.
 Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` and `sequel/v*` -> RubyGems (each checks the tag against the gem's
 version), `efcore/v*` -> NuGet (trusted publishing, configured against `efcore-publish.yaml`, which checks the tag against the
 project's `<Version>`). Their publish workflows call the adapter's test workflow the same way and publish only after it
-passes. Every publish workflow then calls `github-release.yaml`, which creates the tag's GitHub release, listing the
-commits that touched the adapter's directory since its previous tag; it skips a tag that already has a release, and marks none
-as "Latest", since the repository releases many packages. `ent/v*` and `pgx/v*` are Go
+passes. Every publish workflow then calls `github-release.yaml`, which creates the tag's GitHub release with the tag's
+section of the adapter's `CHANGELOG.md` as its notes, falling back to the commits that touched the adapter's directory since its
+previous tag where that section is missing; it skips a tag that already has a release, and marks none as "Latest", since the
+repository releases many packages. `ent/v*` and `pgx/v*` are Go
 module tags resolved directly from the repository. `elasticsearch-java/v*`, `jpa/v*`, `spring-data/v*` and `exposed/v*` only run that adapter's CI
 workflow: none of those builds configures a Maven Central release (all are `publishToMavenLocal` only, and their `publishing` blocks
 say what wiring a release still needs), so no Maven Central publish is wired yet. `spring-data` depends on `cerbos-jpa` at the same
@@ -41,3 +42,22 @@ version, so a release publishes `jpa` first.
 `spring-data` wraps `jpa` ([ADR 0013](adr/0013-spring-data-wraps-the-jpa-core.md)) and builds against it through `includeBuild("../jpa")`,
 so `spring-data.yaml` also triggers on `jpa/**`. The store legs run in `jpa.yaml` only: the SQL is the core's, and spring-data's
 harness runs on H2 to prove its `Specification` returns what the core's filter does.
+
+## Cutting a release
+
+Every adapter keeps a `CHANGELOG.md` whose first section is `## Unreleased`. A pull request that changes what an adapter
+does, for a caller, adds its line there in the same pull request, written for that adapter's users: commit subjects cover the
+whole repository, so they do not make release notes.
+
+`tools/release/release.sh` does the steps that touch versions and tags. `<adapter>` is the adapter's directory name.
+
+1. `tools/release/release.sh bump <adapter> <version>` for each adapter in the release. It refuses an empty `Unreleased`,
+   writes the version to the adapter's manifest (`package.json`, `version.rb`, the `.csproj` or `build.gradle.kts`; ent, pgx
+   and sqlalchemy take theirs from the tag), and moves the `Unreleased` entries under `## v<version>`. Open one release pull
+   request with the result.
+2. Once it is merged, check out the merge commit and run `tools/release/release.sh tag <adapter> <version>` for each
+   adapter, with `REMOTE` naming the remote for this repository if it is not `origin`. It checks the manifest and the
+   changelog section against the version, then pushes that one tag. A push carrying more than three tags creates no push
+   events, so no publish workflow would start: push tags one at a time.
+3. ent and pgx have no publish workflow, so create their GitHub releases by hand:
+   `gh release create ent/v<version> --verify-tag --title "ent v<version>" --notes "$(tools/release/release.sh notes ent <version>)"`.

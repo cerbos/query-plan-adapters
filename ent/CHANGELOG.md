@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## v0.2.1
 
 - Fixed an over-grant on PostgreSQL and MySQL: a timestamp literal with digits past the microsecond
