@@ -117,9 +117,9 @@ prepare() {
   if (($# == 0)); then
     for adapter in $(table | cut -d'|' -f1); do
       load "$adapter"
-      [[ -f "$dir/CHANGELOG.md" && -n "$(section "$dir" Unreleased)" ]] && echo "$dir (at $(current))"
+      if [[ -f "$dir/CHANGELOG.md" && -n "$(section "$dir" Unreleased)" ]]; then echo "$dir (at $(current))"; fi
     done
-    return
+    return 0
   fi
   [[ -z "$(git status --porcelain)" ]] || die "working tree is not clean"
   remote="$(remote_name)"
