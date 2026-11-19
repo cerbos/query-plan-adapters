@@ -56,6 +56,14 @@ export const buildGuardedFieldFilter = (
 };
 
 /** ANDs `{ field: { $ne: null } }` in front of `filter` for every nullable field the operands read. */
+// An operand of && or || may be null where another decides it; its evaluation guard says when.
+const namesOutsideLogic = (operand: PlanExpressionOperand): string[] =>
+  isExpression(operand) && (operand.operator === "and" || operand.operator === "or")
+    ? []
+    : isExpression(operand)
+      ? operand.operands.flatMap(namesOutsideLogic)
+      : collectVariableNames(operand);
+
 export const withNullableGuards = (
   filter: MongooseFilter,
   operands: PlanExpressionOperand[],
@@ -64,7 +72,7 @@ export const withNullableGuards = (
   const guardedNames = [
     ...new Set(
       operands
-        .flatMap(collectVariableNames)
+        .flatMap(namesOutsideLogic)
         .filter((name) => isNullableReference(name, mapper)),
     ),
   ];

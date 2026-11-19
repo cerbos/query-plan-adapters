@@ -448,6 +448,11 @@ export const buildEvaluationGuards = (
   // raises; the collection is guarded where the value is.
   if (LAMBDA_OPERATORS.has(operand.operator)) return guard ? [guard] : [];
 
+  if (operand.operator === "and" || operand.operator === "or") {
+    const absorbing = logicGuard(operand, mapper);
+    if (absorbing) return [absorbing];
+  }
+
   const nested =
     operand.operator === "if" && operand.operands.length === 3
       ? branchGuards(operand, mapper)
@@ -458,6 +463,34 @@ export const buildEvaluationGuards = (
 
 const isExprGuard = (guard: MongooseFilter): boolean =>
   Object.keys(guard).length === 1 && "$expr" in guard;
+
+/**
+ * CEL's `&&` is false once any operand evaluates to false, whatever the others raise, and `||`
+ * true once any is true; otherwise every operand must evaluate to a boolean. Undefined when an
+ * operand's guard is not an `$expr`, and then every guard applies, which never denies less.
+ */
+const logicGuard = (expression: PlanExpression, mapper: ScopedMapper): MongooseFilter | undefined => {
+  const decisive = expression.operator === "or";
+  const operands = expression.operands.map((child) => ({
+    guards: buildEvaluationGuards(child, mapper),
+    value: build(child, mapper),
+  }));
+
+  if (!operands.every(({ guards }) => guards.every(isExprGuard))) return undefined;
+
+  const holds = (guards: MongooseFilter[], check: MongoValue) => ({
+    $and: [...guards.map((guard) => guard["$expr"]), check],
+  });
+
+  return {
+    $expr: {
+      $or: [
+        ...operands.map(({ guards, value }) => holds(guards, { $eq: [value, decisive] })),
+        { $and: operands.map(({ guards, value }) => holds(guards, { $eq: [{ $type: value }, "bool"] })) },
+      ],
+    },
+  };
+};
 
 /**
  * A ternary evaluates only the branch its condition selects, so a branch's guards apply only
