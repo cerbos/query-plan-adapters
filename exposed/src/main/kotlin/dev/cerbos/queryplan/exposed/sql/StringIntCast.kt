@@ -22,7 +22,13 @@ internal class StringIntCast(private val expr: Expression<*>) : Function<Long>(L
         append("CASE WHEN ")
         when (currentDialect) {
             is PostgreSQLDialect -> append("(", expr, " ~ ", stringParam("\\A[+-]?[0-9]{1,18}\\Z"), ")")
-            is MysqlDialect -> append("REGEXP_LIKE(", expr, ", ", stringParam("\\A[+-]?[0-9]{1,18}\\z"), ", 'c')")
+            // Connector/J sends a backslash-bearing parameter as a binary string under
+            // NO_BACKSLASH_ESCAPES, which REGEXP_LIKE refuses. ICU's $ also matches before a final
+            // newline, which the last-character test excludes.
+            is MysqlDialect -> append(
+                "(REGEXP_LIKE(", expr, ", ", stringParam("^[+-]?[0-9]{1,18}$"), ", 'c') AND RIGHT(",
+                expr, ", 1) BETWEEN '0' AND '9')",
+            )
             is SQLiteDialect -> {
                 val body = Body(expr)
                 // GLOB and LENGTH stop at a NUL; the byte length of a digit string is its length.

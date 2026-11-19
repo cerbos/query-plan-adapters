@@ -876,6 +876,12 @@ its type-mismatch cases, and the adapter answers it from the types — see
 
 MariaDB is not proved and is therefore not claimed.
 
+**MySQL `sql_mode` must not be `ANSI`.** Under that composite mode MySQL aggregates a set function
+that reads an outer column in the outer query, so a nested `exists` or `all` over the same
+collection fails with `Invalid use of group function`. The query errors rather than returning rows,
+so nothing is over-granted, but the request fails. The conformance harness's `mysql-ansi`
+[store variant](../conformance/README.md#store-variants) runs into it on three corpus shapes.
+
 ## Example application
 
 This repository carries a runnable [`example/`](example/), which installs the adapter as a
