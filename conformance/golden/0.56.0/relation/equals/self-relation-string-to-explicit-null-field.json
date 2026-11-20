@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/self-relation-string-to-explicit-null-field",
+  "intent": "A string field of the self-relation peer compared with a root string sent as an explicit null (peer.aOptionalString == owner).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.peer.aOptionalString"
+          },
+          {
+            "variable": "request.resource.attr.owner"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/self-relation-string-to-explicit-null-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.peer.aOptionalString == R.attr.owner"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a1 holds \"set\" and its peer c1 \"Set\": a store comparing the two columns under a case-folding collation (MySQL utf8mb4_0900_ai_ci) grants a1, where CEL compares code points; c1 is its own peer and matches. Found by fuzzing (fuzz/s127/0112)."
+}

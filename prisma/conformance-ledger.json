@@ -549,6 +549,14 @@
       "status": "unsupported",
       "reason": "Prisma field references only work between fields of the same model row; `peer.aNumber` is a column of the related AdversarialResource row and `aNumber` of the root row, so the adapter throws"
     },
+    "relation/equals/self-relation-string-to-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "Prisma field references only work between fields of the same model row; `peer.aOptionalString` is a column of the related AdversarialResource row and `owner` of the root row, so the adapter throws."
+    },
+    "relation/less-than/negated-self-relation-string-field-to-field": {
+      "status": "unsupported",
+      "reason": "Prisma field references only work between fields of the same model row; `peer.aString` is a column of the related AdversarialResource row and `aString` of the root row, so the adapter throws."
+    },
     "relation/not-equals/one-hop-against-explicit-null-field": {
       "status": "unsupported",
       "reason": "Prisma field references only compare fields of the same model, so a parent field against a root field is refused."
