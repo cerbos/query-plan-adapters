@@ -310,6 +310,22 @@ function positiveChainAllFilter(parts: CollectionLambdaParts): PrismaFilter {
   return { AND: filters };
 }
 
+/**
+ * Some element at the end of the chain is definitely false: `NOT P` holds and `P` is not UNKNOWN
+ * there. `some` collapses an UNKNOWN nested macro to false, so its `NOT` alone would also hold.
+ */
+function definiteFalseWitness(
+  parts: CollectionLambdaParts,
+  unknownElement: PrismaFilter | undefined
+): PrismaFilter {
+  const negated = negateFilter(parts.elementFilter);
+
+  return wrapCollectionElementFilter(
+    parts,
+    unknownElement === undefined ? negated : { AND: [negated, { NOT: unknownElement }] }
+  );
+}
+
 /** `relation: { none: <a nullable element column is NULL> }`, ANDed onto `base` when needed. */
 function excludeNullElements(
   base: PrismaFilter,
@@ -356,16 +372,28 @@ function positiveCollectionFilter(
 
     case "except":
       return relationFilter(head, "some", negateFilter(filterValue));
-    case "all":
-      if (parts.restRelations.length > 0) {
-        return positiveChainAllFilter(parts);
-      }
-
+    case "all": {
       // CEL all() errors when any element evaluation errors without a false witness; SQL
       // `every` would treat those elements as vacuously passing. Exclude rows holding any
       // element whose referenced nullable column is NULL. (`every` already rejects rows
       // with a definitive false witness, matching error absorption.)
-      return excludeNullElements(relationFilter(head, "every", filterValue), parts);
+      const filter =
+        parts.restRelations.length > 0
+          ? positiveChainAllFilter(parts)
+          : excludeNullElements(relationFilter(head, "every", filterValue), parts);
+
+      const unknownElement = buildUnknownElementFilter(parts);
+
+      if (unknownElement !== undefined) {
+        // Neither TRUE nor holding a definite false witness: an enclosing macro reads it as UNKNOWN.
+        currentScope(context)?.unknownFilters.push({
+          AND: [{ NOT: filter }, { NOT: definiteFalseWitness(parts, unknownElement) }],
+        });
+      }
+
+      return filter;
+    }
+
     default:
       throw new UnsupportedQueryPlanError(`Unexpected operator: ${operator}`);
   }
@@ -414,10 +442,10 @@ function negatedCollectionFilter(
 
     case "all":
       // !all is TRUE only with a definitive false witness, which also absorbs error
-      // elements — exactly `some(NOT P)` in SQL (NULL columns keep NOT P UNKNOWN). Over a chain
+      // elements — `some(NOT P)` over elements where P is not UNKNOWN. Over a chain
       // the witness is an element at the END of it, so the negation sits inside every hop:
       // negating the some-wrapped chain instead would admit a hop with no elements at all.
-      return wrapCollectionElementFilter(parts, negateFilter(parts.elementFilter));
+      return definiteFalseWitness(parts, buildUnknownElementFilter(parts));
     case "except":
       // !except(c,P) = every element definitively matches P.
       return excludeNullElements(

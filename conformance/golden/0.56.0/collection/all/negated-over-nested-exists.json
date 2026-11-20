@@ -1,0 +1,116 @@
+{
+  "allowed": [
+    "a8",
+    "c1",
+    "i9"
+  ],
+  "degenerateReason": null,
+  "id": "collection/all/negated-over-nested-exists",
+  "intent": "Negated all() over a two-level nested exists: !categories.all(c, c.subCategories.exists(s, s.labels.exists(...))).",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.categories"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "c.subCategories"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "s.labels"
+                                        },
+                                        {
+                                          "expression": {
+                                            "operands": [
+                                              {
+                                                "expression": {
+                                                  "operands": [
+                                                    {
+                                                      "variable": "l.name"
+                                                    },
+                                                    {
+                                                      "value": "gold"
+                                                    }
+                                                  ],
+                                                  "operator": "eq"
+                                                }
+                                              },
+                                              {
+                                                "variable": "l"
+                                              }
+                                            ],
+                                            "operator": "lambda"
+                                          }
+                                        }
+                                      ],
+                                      "operator": "exists"
+                                    }
+                                  },
+                                  {
+                                    "variable": "s"
+                                  }
+                                ],
+                                "operator": "lambda"
+                              }
+                            }
+                          ],
+                          "operator": "exists"
+                        }
+                      },
+                      {
+                        "variable": "c"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "all"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/all/negated-over-nested-exists",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.categories.all(c, c.subCategories.exists(s, s.labels.exists(l, l.name == \"gold\")))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The unnamed label (a6) makes an element of the negated all() an error with no false witness, so the row must deny; NOT of the nested exists reads the error as false and allows a6."
+}

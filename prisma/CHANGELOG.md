@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed over-grants
+
+- A negated macro over an `all` whose body nests another macro (`!categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))`, `!categories.all(c, c.subCategories.exists(...))`) read an element whose nested macro errors (a label missing `name`) as false and allowed the row. The PDP denies it, and so does the adapter now.
+
 ## v5.2.1
 
 ### Fixed over-grants
