@@ -105,6 +105,9 @@ type Cmp struct {
 	L  Expr
 	R  Expr
 	Op CmpOp
+	// Untyped marks a comparison between two attributes neither of which declares a ValueType,
+	// which the store compares under the columns' own collation.
+	Untyped bool
 }
 
 // Arith is a binary arithmetic expression producing a value.
@@ -195,8 +198,9 @@ const (
 // Ordinary `=` would yield UNKNOWN there, which survives a negation and would wrongly exclude the
 // row from `!(x in coll)`.
 type NotDistinct struct {
-	L Expr
-	R Expr
+	L       Expr
+	R       Expr
+	Untyped bool
 }
 
 // InList is membership against an explicit list of values.

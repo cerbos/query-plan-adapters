@@ -508,6 +508,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.peer.aNumber == R.attr.aNumber'
+- id: 'relation/equals/self-relation-string-to-explicit-null-field'
+  tier: adversarial
+  intent: 'A string field of the self-relation peer compared with a root string sent as an explicit null (peer.aOptionalString == owner).'
+  trap: 'a1 holds "set" and its peer c1 "Set": a store comparing the two columns under a case-folding collation (MySQL utf8mb4_0900_ai_ci) grants a1, where CEL compares code points; c1 is its own peer and matches. Found by fuzzing (fuzz/s127/0112).'
+  condition:
+    match:
+      expr: 'R.attr.peer.aOptionalString == R.attr.owner'
+- id: 'relation/less-than/negated-self-relation-string-field-to-field'
+  tier: adversarial
+  intent: 'A negated ordering of the self-relation peer''s string against the same field on the root (!(peer.aString < aString)).'
+  trap: 'By code point "One" < "one" (a1) and "One" < "nullowner" (e1), so the negation denies both and allows only c1, its own peer. A linguistic collation (PostgreSQL ICU en-US, MySQL utf8mb4_0900_ai_ci) puts lower case first or folds case, so it answers both false and the negation grants them.'
+  condition:
+    match:
+      expr: '!(R.attr.peer.aString < R.attr.aString)'
 - id: 'relation/equals/same-table-field-to-field'
   tier: adversarial
   intent: 'Two to-one relations into the same table compared field to field (parent.aString == stepParent.aString).'

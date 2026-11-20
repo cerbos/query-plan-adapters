@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking:** a comparison between two attributes neither of which declares a `ValueType` is
+  refused on MySQL, and an ordering of two such attributes on PostgreSQL. The store compared them
+  under the columns' own collation, so on MySQL `parent.name == owner` granted "set" against
+  "SET", an over-grant. Declare string columns `ValueString`, or let `entcerbos` infer the types.
+
 ## v0.2.1
 
 - Fixed an over-grant on PostgreSQL and MySQL: a timestamp literal with digits past the microsecond

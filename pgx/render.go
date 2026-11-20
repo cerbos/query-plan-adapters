@@ -4,12 +4,21 @@
 package cerbospgx
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cerbos/query-plan-adapters/pgx/internal/queryplan"
+)
+
+// errUntypedOrdering refuses an ordering between two attributes neither of which declares a
+// ValueType: PostgreSQL orders them under the columns' own collation, and a linguistic one does
+// not order by code point.
+var errUntypedOrdering = errors.New(
+	"an ordering between two attributes follows the columns' collation unless one declares a " +
+		"ValueType; declare a string column's ValueType as ValueString",
 )
 
 // renderer walks the abstract expression tree and emits PostgreSQL text with `$n` placeholders.
@@ -148,6 +157,9 @@ func (r *renderer) write(e queryplan.Expr) error {
 		return nil
 
 	case queryplan.Cmp:
+		if t.Untyped && t.Op != queryplan.OpEq && t.Op != queryplan.OpNe {
+			return errUntypedOrdering
+		}
 		t = queryplan.OnMicrosecondGrid(t)
 		op, err := symbol(cmpSymbols, "comparison", t.Op)
 		if err != nil {

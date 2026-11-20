@@ -163,7 +163,7 @@ internal class LeafTranslator(private val translation: Translation) {
         val present = buildList<Expression<Boolean>> {
             if (leftExplicit) add(IsNotNullOp(left))
             if (rightExplicit) add(IsNotNullOp(right))
-            add(EqOp(left, right))
+            add(EqOp(ExactString.of(left, "eq"), ExactString.of(right, "eq")))
         }
         var equality = TriLogic.and(present)
         if (leftExplicit && rightExplicit) {

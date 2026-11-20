@@ -4868,6 +4868,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.peer.aNumber == R.attr.aNumber
+    # relation/equals/self-relation-string-to-explicit-null-field
+    - actions:
+        - relation/equals/self-relation-string-to-explicit-null-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.peer.aOptionalString == R.attr.owner
+    # relation/less-than/negated-self-relation-string-field-to-field
+    - actions:
+        - relation/less-than/negated-self-relation-string-field-to-field
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.peer.aString < R.attr.aString)'
     # relation/equals/same-table-field-to-field
     - actions:
         - relation/equals/same-table-field-to-field

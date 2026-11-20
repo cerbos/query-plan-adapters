@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Breaking:** an ordering between two attributes neither of which declares a `ValueType` is
+  refused. PostgreSQL ordered them under the columns' own collation, which under a linguistic one
+  (ICU `en-US`) puts "one" before "One", an over-grant. Declare string columns `ValueString`.
+
 ## v0.1.1
 
 - Fixed an over-grant on PostgreSQL: a timestamp literal with digits past the microsecond was rounded to the stored microsecond grid when bound, so `>=` and `<` could admit the row on the boundary.

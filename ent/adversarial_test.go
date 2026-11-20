@@ -431,7 +431,7 @@ func declaredMapper() cerbosent.Mapper {
 		Position: "position",
 		Field:    &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString},
 		Fields: map[string]cerbosent.Entry{
-			"id": {Column: "tag_id"},
+			"id": {Column: "tag_id", ValueType: cerbosent.ValueString},
 			// Declared, like every other string column: `t.name == 0` is false in CEL, and an
 			// undeclared column hands the number to the engine, which coerces (MySQL reads each
 			// non-numeric name as 0) or fails to execute (PostgreSQL has no text = double).
@@ -445,16 +445,16 @@ func declaredMapper() cerbosent.Mapper {
 	labels := &cerbosent.Relation{
 		Table:        labelTable,
 		SourceColumn: "id", TargetColumn: "sub_category_id",
-		Field:  &cerbosent.Entry{Column: "name"},
-		Fields: map[string]cerbosent.Entry{"name": {Column: "name"}},
+		Field:  &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString},
+		Fields: map[string]cerbosent.Entry{"name": {Column: "name", ValueType: cerbosent.ValueString}},
 	}
 
 	subCategories := &cerbosent.Relation{
 		Table:        subCategoryTable,
 		SourceColumn: "id", TargetColumn: "category_id",
-		Field: &cerbosent.Entry{Column: "name"},
+		Field: &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString},
 		Fields: map[string]cerbosent.Entry{
-			"name":   {Column: "name"},
+			"name":   {Column: "name", ValueType: cerbosent.ValueString},
 			"labels": {Relation: labels},
 		},
 	}
@@ -463,7 +463,7 @@ func declaredMapper() cerbosent.Mapper {
 		Table:        categoryTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
 		Fields: map[string]cerbosent.Entry{
-			"name":          {Column: "name"},
+			"name":          {Column: "name", ValueType: cerbosent.ValueString},
 			"subCategories": {Relation: subCategories},
 		},
 	}
@@ -474,9 +474,9 @@ func declaredMapper() cerbosent.Mapper {
 		Table:        subCategoryTable,
 		Via:          []cerbosent.Hop{{Table: categoryTable, ChildColumn: "category_id", JoinColumn: "id"}},
 		SourceColumn: "id", TargetColumn: "resource_id",
-		Field: &cerbosent.Entry{Column: "name"},
+		Field: &cerbosent.Entry{Column: "name", ValueType: cerbosent.ValueString},
 		Fields: map[string]cerbosent.Entry{
-			"name":   {Column: "name"},
+			"name":   {Column: "name", ValueType: cerbosent.ValueString},
 			"labels": {Relation: labels},
 		},
 	}
@@ -532,14 +532,14 @@ func declaredMapper() cerbosent.Mapper {
 		// the OTHER null convention: the corpus sends a real null attribute for them rather than
 		// omitting it. Declaring that here is what makes the equality family definite for these
 		// two attributes and leaves it untouched for every other mapping.
-		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: cerbosent.NullConventionExplicit},
-		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: cerbosent.NullConventionExplicit},
-		"request.resource.attr.scope":     {Column: "scope", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.owner":     {Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionExplicit},
+		"request.resource.attr.coOwner":   {Column: "scope", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionExplicit},
+		"request.resource.attr.scope":     {Column: "scope", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbosent.ValueTimestamp, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbosent.ValueTimestamp, NullConvention: cerbosent.NullConventionOmitted},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// other harnesses use for the `obj.inner` cases.
-		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.obj.inner": {Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 
 		"request.resource.attr.tags":       {Relation: tags},
 		"request.resource.attr.tagNames":   {Relation: &tagNames},
@@ -570,13 +570,13 @@ func declaredMapper() cerbosent.Mapper {
 		// the translator's own refusal rather than a harness defect.
 		"request.resource.attr.parent":                       {ScalarRelation: parentRel},
 		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
-		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
-		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},
-		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number", NullConvention: cerbosent.NullConventionOmitted},
-		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", ValueType: cerbosent.ValueString, NullConvention: cerbosent.NullConventionOmitted},
 
 		"request.resource.attr.peer":                       {ScalarRelation: peerRel},
 		"request.resource.attr.peer.aBool":                 {ScalarRelation: peerRel, Column: "a_bool", ValueType: cerbosent.ValueBool, NullConvention: cerbosent.NullConventionOmitted},

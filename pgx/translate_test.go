@@ -873,3 +873,41 @@ func TestTheDefaultNullRepresentationIsOmitted(t *testing.T) {
 		cerbospgx.WithNullRepresentation(cerbospgx.NullExplicit))
 	require.NoError(t, err)
 }
+
+// TestOrderingBetweenUntypedAttributes varies the ValueType declarations the corpus mapping fixes.
+// PostgreSQL orders two undeclared columns under their own collation, which a linguistic one does
+// not do by code point, so the pair is refused; equality, a declared side or a literal is not.
+func TestOrderingBetweenUntypedAttributes(t *testing.T) {
+	t.Parallel()
+	parent := &cerbospgx.Relation{Table: "parents", SourceColumn: "id", TargetColumn: "resource_id"}
+	mapper := cerbospgx.MapperMap{
+		"request.resource.attr.a":        {Column: "a"},
+		"request.resource.attr.b":        {Column: "b", NullConvention: cerbospgx.NullConventionExplicit},
+		"request.resource.attr.typed":    {Column: "typed", ValueType: cerbospgx.ValueString},
+		"request.resource.attr.parent.a": {ScalarRelation: parent, Column: "a", NullConvention: cerbospgx.NullConventionOmitted},
+	}
+	pair := func(op, l, r string) *operand {
+		return expr(op, variable("request.resource.attr."+l), variable("request.resource.attr."+r))
+	}
+	for _, tc := range []struct {
+		cond    *operand
+		name    string
+		refused bool
+	}{
+		{name: "ordering", cond: pair("lt", "a", "b"), refused: true},
+		{name: "ordering through a to-one hop", cond: pair("ge", "parent.a", "b"), refused: true},
+		{name: "equality", cond: pair("eq", "a", "b")},
+		{name: "one side declared", cond: pair("lt", "a", "typed")},
+		{name: "against a literal", cond: expr("lt", variable("request.resource.attr.a"), val(t, "x"))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := cerbospgx.Translate(conditional(tc.cond), "resource", mapper, explicitUnlessSaid(nil)...)
+			if tc.refused {
+				require.ErrorIs(t, err, cerbospgx.ErrUnsupported)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}

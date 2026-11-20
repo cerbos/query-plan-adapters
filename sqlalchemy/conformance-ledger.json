@@ -472,6 +472,10 @@
       "status": "unsupported",
       "reason": "Same refusal as `relation/not-equals/one-hop-against-explicit-null-field`, under negation."
     },
+    "relation/equals/self-relation-string-to-explicit-null-field": {
+      "status": "unsupported",
+      "reason": "owner is declared explicit-null and the peer field is on the omitted convention; an equality across mixed null conventions is refused, as in `relation/not-equals/one-hop-against-explicit-null-field`."
+    },
     "relation/has/negated-parent-attribute": {
       "status": "unsupported",
       "reason": "parent.aOptionalString sits below the mapped parent, which can be absent: has() through a missing parent is an error CEL denies under both polarities, while the negated IS NULL over the correlated scalar subquery selects the parentless row, so has() below a mapped prefix is refused unless an operator_override_fns entry for has answers it."

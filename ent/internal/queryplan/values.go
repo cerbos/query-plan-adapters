@@ -582,7 +582,17 @@ func applyComparison(op CmpOp, l, r value) (Expr, error) {
 	if definite, ok := definiteEquality(op, lExpr, rExpr); ok {
 		return definite, nil
 	}
-	return Cmp{Op: op, L: lExpr, R: rExpr}, nil
+	return Cmp{Op: op, L: lExpr, R: rExpr, Untyped: undeclaredColumn(lExpr) && undeclaredColumn(rExpr)}, nil
+}
+
+func undeclaredColumn(e Expr) bool {
+	switch t := e.(type) {
+	case Column:
+		return t.Type == ValueDefault
+	case Subquery:
+		return t.Kind == SubqueryScalar && undeclaredColumn(t.Select)
+	}
+	return false
 }
 
 // errListOperand refuses a list literal compared with an operand whose type is not declared. CEL
@@ -693,7 +703,7 @@ func definiteEquality(op CmpOp, l, r Expr) (Expr, bool) {
 	if rExplicit {
 		present = append(present, IsNull{X: rCol, Negate: true})
 	}
-	present = append(present, Cmp{Op: OpEq, L: l, R: r})
+	present = append(present, Cmp{Op: OpEq, L: l, R: r, Untyped: undeclaredColumn(l) && undeclaredColumn(r)})
 
 	equality := and(present...)
 	if lExplicit && rExplicit {

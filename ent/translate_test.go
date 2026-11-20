@@ -4,6 +4,7 @@
 package cerbosent_test
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -429,19 +430,23 @@ func TestRelationMembershipRespectsNullRepresentation(t *testing.T) {
 	t.Parallel()
 
 	cond := expr("in", variable("request.resource.attr.owner"), variable("request.resource.attr.tags"))
+	mapper := cerbosent.MapperMap{
+		"request.resource.attr.owner": {Column: "owner", ValueType: cerbosent.ValueString},
+		"request.resource.attr.tags":  {Relation: tagRelation()},
+	}
 
 	for _, tc := range []struct{ dialect, nullSafe, plain string }{
 		{dialect: dialect.SQLite, nullSafe: "`cerbos_rel_1`.`name` IS `resource`.`owner`", plain: "`cerbos_rel_1`.`name` = `resource`.`owner`"},
 		{dialect: dialect.Postgres, nullSafe: `"cerbos_rel_1"."name" IS NOT DISTINCT FROM "resource"."owner"`, plain: `"cerbos_rel_1"."name" = "resource"."owner"`},
-		{dialect: dialect.MySQL, nullSafe: "`cerbos_rel_1`.`name` <=> `resource`.`owner`", plain: "`cerbos_rel_1`.`name` = `resource`.`owner`"},
+		{dialect: dialect.MySQL, nullSafe: "`cerbos_rel_1`.`name` <=> (`resource`.`owner` COLLATE utf8mb4_0900_bin)", plain: "`cerbos_rel_1`.`name` = (`resource`.`owner` COLLATE utf8mb4_0900_bin)"},
 	} {
 		t.Run(tc.dialect, func(t *testing.T) {
 			t.Parallel()
 
-			explicit, _ := whereFor(t, tc.dialect, testMapper(), cond)
+			explicit, _ := whereFor(t, tc.dialect, mapper, cond)
 			require.Contains(t, explicit, tc.nullSafe)
 
-			omitted, _ := whereFor(t, tc.dialect, testMapper(), cond,
+			omitted, _ := whereFor(t, tc.dialect, mapper, cond,
 				cerbosent.WithNullRepresentation(cerbosent.NullOmitted))
 			require.NotContains(t, omitted, tc.nullSafe)
 			require.Contains(t, omitted, tc.plain)
@@ -851,4 +856,49 @@ func TestTheDefaultNullRepresentationIsOmitted(t *testing.T) {
 	_, err = cerbosent.Translate(conditional(nullIn), "resource", unset,
 		cerbosent.WithNullRepresentation(cerbosent.NullExplicit))
 	require.NoError(t, err)
+}
+
+// TestComparisonBetweenUntypedAttributes varies the ValueType declarations the corpus mapping
+// fixes. Two undeclared columns compare under their own collation: on MySQL every comparison folds
+// case, and on PostgreSQL an ordering is linguistic, so the pair is refused there, and a declared
+// side lets it through.
+func TestComparisonBetweenUntypedAttributes(t *testing.T) {
+	t.Parallel()
+	parent := &cerbosent.Relation{Table: "parents", SourceColumn: "id", TargetColumn: "resource_id"}
+	mapper := cerbosent.MapperMap{
+		"request.resource.attr.a":        {Column: "a"},
+		"request.resource.attr.b":        {Column: "b", NullConvention: cerbosent.NullConventionExplicit},
+		"request.resource.attr.typed":    {Column: "typed", ValueType: cerbosent.ValueString},
+		"request.resource.attr.parent.a": {ScalarRelation: parent, Column: "a", NullConvention: cerbosent.NullConventionOmitted},
+		"request.resource.attr.names":    {Relation: &cerbosent.Relation{Table: "names", SourceColumn: "id", TargetColumn: "resource_id", Field: &cerbosent.Entry{Column: "name"}}},
+	}
+	pair := func(op, l, r string) *operand {
+		return expr(op, variable("request.resource.attr."+l), variable("request.resource.attr."+r))
+	}
+	for _, tc := range []struct {
+		cond    *operand
+		name    string
+		refused []string
+	}{
+		{name: "equality", cond: pair("eq", "a", "b"), refused: []string{dialect.MySQL}},
+		{name: "inequality", cond: pair("ne", "b", "a"), refused: []string{dialect.MySQL}},
+		{name: "ordering", cond: pair("lt", "a", "b"), refused: []string{dialect.MySQL, dialect.Postgres}},
+		{name: "through a to-one hop", cond: pair("eq", "parent.a", "b"), refused: []string{dialect.MySQL}},
+		{name: "membership in a related list", cond: pair("in", "a", "names"), refused: []string{dialect.MySQL}},
+		{name: "one side declared", cond: pair("lt", "a", "typed")},
+		{name: "against a literal", cond: expr("lt", variable("request.resource.attr.a"), val(t, "x"))},
+	} {
+		for _, d := range []string{dialect.SQLite, dialect.Postgres, dialect.MySQL} {
+			t.Run(tc.name+"/"+d, func(t *testing.T) {
+				t.Parallel()
+				_, err := cerbosent.Translate(conditional(tc.cond), "resource", mapper,
+					cerbosent.WithDialect(d), cerbosent.WithNullRepresentation(cerbosent.NullExplicit))
+				if slices.Contains(tc.refused, d) {
+					require.ErrorIs(t, err, cerbosent.ErrUnsupported)
+					return
+				}
+				require.NoError(t, err)
+			})
+		}
+	}
 }
