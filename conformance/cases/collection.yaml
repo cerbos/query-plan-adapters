@@ -66,6 +66,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))'
+- id: 'collection/all/negated-nested-three-levels-middle'
+  tier: adversarial
+  intent: 'Negation of all() at the middle of three nested macros: !categories.exists(subCategories.all(labels.exists(...))).'
+  trap: 'The unnamed label (a6) makes the inner exists, and so the all() above it, an error, which the negation must keep denied; reading the error as false below the all() allows a6.'
+  condition:
+    match:
+      expr: '!R.attr.categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))'
+- id: 'collection/all/negated-over-nested-exists'
+  tier: adversarial
+  intent: 'Negated all() over a two-level nested exists: !categories.all(c, c.subCategories.exists(s, s.labels.exists(...))).'
+  trap: 'The unnamed label (a6) makes an element of the negated all() an error with no false witness, so the row must deny; NOT of the nested exists reads the error as false and allows a6.'
+  condition:
+    match:
+      expr: '!R.attr.categories.all(c, c.subCategories.exists(s, s.labels.exists(l, l.name == "gold")))'
 - id: 'collection/concatenate/ternary-list-branches-equals-literal'
   tier: adversarial
   intent: 'List concatenation with a ternary whose branches are list literals, compared with a list literal; the shape runtime.effectiveDerivedRoles plans to.'

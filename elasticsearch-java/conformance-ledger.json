@@ -313,6 +313,14 @@
       "status": "unsupported",
       "reason": "Elasticsearch does not index empty nested arrays, so a positive all over categories cannot distinguish an empty collection (true) from a missing collection (CEL error)"
     },
+    "collection/all/negated-nested-three-levels-middle": {
+      "status": "unsupported",
+      "reason": "The negated exists over categories is refused as collection/exists/negated is: a bool must_not over a nested collection matches a document with no nested array at all, which Elasticsearch cannot tell from one whose array holds no match"
+    },
+    "collection/all/negated-over-nested-exists": {
+      "status": "unsupported",
+      "reason": "The negated all() puts the nested exists over subCategories under a negation, refused as collection/exists/negated is: a bool must_not over a nested collection matches a document with no nested array at all, which Elasticsearch cannot tell from one whose array holds no match"
+    },
     "collection/all/nested-all-over-literal-list": {
       "status": "unsupported",
       "reason": "Collection macros over flat scalar arrays cannot preserve per-element predicates without a nested mapping: tagNames is indexed as an unordered set of keyword terms, so the inner all() over the literal list has no element to bind t to, and a positive all() cannot tell an empty array from a missing one"
