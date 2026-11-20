@@ -255,7 +255,9 @@ CEL orders strings by code point, which a linguistic collation such as `en_US.UT
 default on managed services) does not: it sorts `"One"` after `"a"`
 ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). So every ordering over a
 string literal or a `ValueString` column runs under `COLLATE "C"`, whatever the column's own
-collation. The conformance leg initialises its database under ICU's `en-US` to prove it.
+collation. An ordering between two attributes neither of which declares a `ValueType` is refused,
+since neither says it holds text. The conformance leg initialises its database under ICU's `en-US`
+to prove it.
 
 ## Conformance contract
 

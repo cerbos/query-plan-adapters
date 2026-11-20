@@ -530,10 +530,11 @@ func (b *builder) elementMatches(element Column, needle value, nullSafe bool) (E
 	// Collection elements are explicit values. The outer membership guard preserves
 	// a missing needle before this definite per-element equality is evaluated.
 
+	untyped := undeclaredColumn(element) && undeclaredColumn(needleExpr)
 	if !nullSafe {
-		return Cmp{Op: OpEq, L: element, R: needleExpr}, nil
+		return Cmp{Op: OpEq, L: element, R: needleExpr, Untyped: untyped}, nil
 	}
-	return NotDistinct{L: element, R: needleExpr}, nil
+	return NotDistinct{L: element, R: needleExpr, Untyped: untyped}, nil
 }
 
 // macroSemantics captures the truth table of a collection macro.

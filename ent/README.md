@@ -321,13 +321,14 @@ column's collation for that:
 - **MySQL:** every string literal is bound as `CONVERT(? USING utf8mb4) COLLATE utf8mb4_0900_bin`,
   and every column declared `ValueString` is read under the same collation, so `=`, `in`, `LIKE`
   and ordering are byte-exact and NO PAD even under the default `utf8mb4_0900_ai_ci`. A comparison
-  between two columns with neither declared `ValueString` still follows the columns' collation, so
-  declare string columns. A comparison under a collation the column's index does not use cannot
-  use that index.
+  between two attributes neither of which declares a `ValueType` would follow the columns'
+  collation, so it is refused: declare string columns. A comparison under a collation the column's
+  index does not use cannot use that index.
 - **PostgreSQL:** equality is exact under any deterministic collation and is left alone. Every
   ordering over a string literal or a `ValueString` column runs under `COLLATE "C"`, since a
   linguistic collation such as `en_US.UTF-8` sorts `"One"` after `"a"`
-  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). Nondeterministic ICU
+  ([#489](https://github.com/cerbos/query-plan-adapters/issues/489)). An ordering between two
+  attributes neither of which declares a `ValueType` is refused. Nondeterministic ICU
   collations and `citext` are not safe.
 - **SQLite:** set `PRAGMA case_sensitive_like = ON`. The default `BINARY` collation orders by code
   point.

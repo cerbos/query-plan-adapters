@@ -4,6 +4,7 @@
 package cerbosent
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -137,6 +138,9 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 		return nil
 
 	case queryplan.Cmp:
+		if t.Untyped && collated(b.Dialect(), t.Op) {
+			return errUntypedComparison
+		}
 		if b.Dialect() != dialect.SQLite {
 			t = queryplan.OnMicrosecondGrid(t)
 		}
@@ -170,6 +174,9 @@ func write(b *sql.Builder, e queryplan.Expr) error {
 		return writeConcat(b, []queryplan.Expr{t.L, t.R})
 
 	case queryplan.NotDistinct:
+		if t.Untyped && collated(b.Dialect(), queryplan.OpEq) {
+			return errUntypedComparison
+		}
 		return writeNotDistinct(b, t)
 
 	case queryplan.Logic:
@@ -276,6 +283,25 @@ func writeColumn(b *sql.Builder, c queryplan.Column) {
 	if collate {
 		b.WriteString(" COLLATE " + mysqlExactCollation + ")")
 	}
+}
+
+// errUntypedComparison refuses a comparison between two attributes neither of which declares a
+// ValueType. The store compares them under the columns' own collation: on MySQL every comparison,
+// as utf8mb4_0900_ai_ci folds case and accents, and on PostgreSQL an ordering, as a linguistic
+// collation does not order by code point.
+var errUntypedComparison = errors.New(
+	"a comparison between two attributes follows the columns' collation unless one declares a " +
+		"ValueType; declare a string column's ValueType as ValueString",
+)
+
+func collated(d string, op queryplan.CmpOp) bool {
+	switch d {
+	case dialect.MySQL:
+		return true
+	case dialect.Postgres:
+		return op != queryplan.OpEq && op != queryplan.OpNe
+	}
+	return false
 }
 
 // isText reports whether e is known to be a string, so a PostgreSQL ordering over it can be

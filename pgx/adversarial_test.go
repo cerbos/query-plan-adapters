@@ -140,7 +140,7 @@ CREATE TABLE adversarial_bool_elem (
 // schema exercise both conventions.
 func buildMapper() cerbospgx.Mapper {
 	tagFields := map[string]cerbospgx.Entry{
-		"id": {Column: "tag_id"},
+		"id": {Column: "tag_id", ValueType: cerbospgx.ValueString},
 		// Declared, like every other string column: `t.name == 0` is false in CEL, and an
 		// undeclared column hands the number to PostgreSQL, which has no text = double precision
 		// and fails to execute.
@@ -160,16 +160,16 @@ func buildMapper() cerbospgx.Mapper {
 	labels := &cerbospgx.Relation{
 		Table:        labelTable,
 		SourceColumn: "id", TargetColumn: "sub_category_id",
-		Field:  &cerbospgx.Entry{Column: "name"},
-		Fields: map[string]cerbospgx.Entry{"name": {Column: "name"}},
+		Field:  &cerbospgx.Entry{Column: "name", ValueType: cerbospgx.ValueString},
+		Fields: map[string]cerbospgx.Entry{"name": {Column: "name", ValueType: cerbospgx.ValueString}},
 	}
 
 	subCategories := &cerbospgx.Relation{
 		Table:        subCategoryTable,
 		SourceColumn: "id", TargetColumn: "category_id",
-		Field: &cerbospgx.Entry{Column: "name"},
+		Field: &cerbospgx.Entry{Column: "name", ValueType: cerbospgx.ValueString},
 		Fields: map[string]cerbospgx.Entry{
-			"name":   {Column: "name"},
+			"name":   {Column: "name", ValueType: cerbospgx.ValueString},
 			"labels": {Relation: labels},
 		},
 	}
@@ -178,7 +178,7 @@ func buildMapper() cerbospgx.Mapper {
 		Table:        categoryTable,
 		SourceColumn: "id", TargetColumn: "resource_id",
 		Fields: map[string]cerbospgx.Entry{
-			"name":          {Column: "name"},
+			"name":          {Column: "name", ValueType: cerbospgx.ValueString},
 			"subCategories": {Relation: subCategories},
 		},
 	}
@@ -192,9 +192,9 @@ func buildMapper() cerbospgx.Mapper {
 		Table:        subCategoryTable,
 		Via:          mainChain,
 		SourceColumn: "id", TargetColumn: "resource_id",
-		Field: &cerbospgx.Entry{Column: "name"},
+		Field: &cerbospgx.Entry{Column: "name", ValueType: cerbospgx.ValueString},
 		Fields: map[string]cerbospgx.Entry{
-			"name":   {Column: "name"},
+			"name":   {Column: "name", ValueType: cerbospgx.ValueString},
 			"labels": {Relation: labels},
 		},
 	}
@@ -250,14 +250,14 @@ func buildMapper() cerbospgx.Mapper {
 		// the OTHER null convention: the corpus sends a real null attribute for them rather than
 		// omitting it. Declaring that here is what makes the equality family definite for these
 		// two attributes and leaves it untouched for every other mapping.
-		"request.resource.attr.owner":     {Column: "a_optional_string", NullConvention: cerbospgx.NullConventionExplicit},
-		"request.resource.attr.coOwner":   {Column: "scope", NullConvention: cerbospgx.NullConventionExplicit},
-		"request.resource.attr.scope":     {Column: "scope", NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.owner":     {Column: "a_optional_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionExplicit},
+		"request.resource.attr.coOwner":   {Column: "scope", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionExplicit},
+		"request.resource.attr.scope":     {Column: "scope", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.createdAt": {Column: "created_at", ValueType: cerbospgx.ValueTimestamp, NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.updatedAt": {Column: "updated_at", ValueType: cerbospgx.ValueTimestamp, NullConvention: cerbospgx.NullConventionOmitted},
 		// obj.inner is not a real nested column — it mirrors aString, the same trick the
 		// other harnesses use for the `obj.inner` cases.
-		"request.resource.attr.obj.inner": {Column: "a_string", NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.obj.inner": {Column: "a_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
 
 		"request.resource.attr.tags":     {Relation: tags},
 		"request.resource.attr.tagNames": {Relation: &tagNames},
@@ -288,13 +288,13 @@ func buildMapper() cerbospgx.Mapper {
 		// the translator's own refusal rather than a harness defect.
 		"request.resource.attr.parent":                       {ScalarRelation: parentRel},
 		"request.resource.attr.parent.aBool":                 {ScalarRelation: parentRel, Column: "a_bool", ValueType: cerbospgx.ValueBool, NullConvention: cerbospgx.NullConventionOmitted},
-		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.parent.aString":               {ScalarRelation: parentRel, Column: "a_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.parent.aNumber":               {ScalarRelation: parentRel, Column: "a_number", NullConvention: cerbospgx.NullConventionOmitted},
-		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string", NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.parent.aOptionalString":       {ScalarRelation: parentRel, Column: "a_optional_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.parent.inner.aBool":           {ScalarRelation: innerRel, Column: "a_bool", ValueType: cerbospgx.ValueBool, NullConvention: cerbospgx.NullConventionOmitted},
-		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aString":         {ScalarRelation: innerRel, Column: "a_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
 		"request.resource.attr.parent.inner.aNumber":         {ScalarRelation: innerRel, Column: "a_number", NullConvention: cerbospgx.NullConventionOmitted},
-		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", NullConvention: cerbospgx.NullConventionOmitted},
+		"request.resource.attr.parent.inner.aOptionalString": {ScalarRelation: innerRel, Column: "a_optional_string", ValueType: cerbospgx.ValueString, NullConvention: cerbospgx.NullConventionOmitted},
 
 		"request.resource.attr.peer":                       {ScalarRelation: peerRel},
 		"request.resource.attr.peer.aBool":                 {ScalarRelation: peerRel, Column: "a_bool", ValueType: cerbospgx.ValueBool, NullConvention: cerbospgx.NullConventionOmitted},
