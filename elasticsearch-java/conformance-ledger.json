@@ -17,6 +17,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts"
     },
+    "arithmetic/add/field-at-int32-max-plus-constant": {
+      "status": "unsupported",
+      "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
     "arithmetic/add/field-plus-constant": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
@@ -476,6 +480,10 @@
     "collection/has-intersection/negated-empty-literal-list": {
       "status": "unsupported",
       "reason": "A negated hasIntersection cannot distinguish a missing collection from an empty one in Elasticsearch."
+    },
+    "collection/has-intersection/negated-empty-literal-list-against-mapped-names": {
+      "status": "unsupported",
+      "reason": "Same refusal as collection/has-intersection/negated-mapped-names: a negated hasIntersection over the nested tags projection cannot tell a missing tag name (a CEL error) from a present one."
     },
     "collection/has-intersection/negated-mapped-names": {
       "status": "unsupported",
@@ -1468,6 +1476,10 @@
     "type-mismatch/equals/string-field-against-number-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
+    },
+    "type-mismatch/has-intersection/against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, which a terms query would answer as a one-element list, so the adapter refuses it."
     },
     "type-mismatch/has-intersection/negated-against-map-value": {
       "status": "unsupported",

@@ -252,7 +252,9 @@ def _has_intersection_fn(left: Any, right: Any) -> Any:
     if isinstance(mapped, _Deferred) and mapped.kind == "map":
         relation, projected = mapped.relation, mapped.body
         if not values:
-            return relation._guarded(false())
+            return relation._guarded(
+                case((relation._errors(projected), null()), else_=false())
+            )
         return relation._guarded(
             case(
                 (relation._errors(projected), null()),

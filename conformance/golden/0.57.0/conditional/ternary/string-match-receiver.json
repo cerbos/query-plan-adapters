@@ -18,7 +18,8 @@
     "j2",
     "j4",
     "k1",
-    "k2"
+    "k2",
+    "n1"
   ],
   "degenerateReason": null,
   "id": "conditional/ternary/string-match-receiver",

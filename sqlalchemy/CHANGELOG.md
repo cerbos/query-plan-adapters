@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- `relation_overrides()`: `hasIntersection(relation.map(...), [])` keeps the projection's error guard, so under a negation a row whose projection errors is denied, as CEL denies it, instead of granted.
+
 ## v0.6.2
 
 ### Changes

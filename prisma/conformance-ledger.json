@@ -717,6 +717,10 @@
       "status": "unsupported",
       "reason": "Same missing positional read as collection/index/first-element-of-number-list, and the throw lands before the cross-type question this probe asks can arise: the index node is refused before its number element meets the boolean literal, so neither CEL's heterogeneous equality nor a store that reads a JSON true as 1 is ever consulted. The throw propagates out of the `or`, so the aNumber == 5 branch, which the adapter translates on its own, is not emitted either"
     },
+    "type-mismatch/has-intersection/against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
     "type-mismatch/has-intersection/negated-against-map-value": {
       "status": "unsupported",
       "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."

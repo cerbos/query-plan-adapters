@@ -31,7 +31,8 @@
     "l3",
     "l4",
     "m1",
-    "m2"
+    "m2",
+    "n1"
   ],
   "degenerateReason": null,
   "id": "composition/multiple-allow/none-of-condition",

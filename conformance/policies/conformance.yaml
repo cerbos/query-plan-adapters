@@ -54,6 +54,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber + 1.0 > 2.0
+    # arithmetic/add/field-at-int32-max-plus-constant
+    - actions:
+        - arithmetic/add/field-at-int32-max-plus-constant
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber + 41.0 > 2147483647.0
     # arithmetic/add/inexact-fraction-equals
     - actions:
         - arithmetic/add/inexact-fraction-equals
@@ -1254,6 +1263,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!hasIntersection(R.attr.tagNames, []) && R.attr.aNumber < 5'
+    # collection/has-intersection/negated-empty-literal-list-against-mapped-names
+    - actions:
+        - collection/has-intersection/negated-empty-literal-list-against-mapped-names
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(hasIntersection(R.attr.tags.map(t, t.name), []) || R.attr.aNumber == 5)'
     # collection/has-intersection/negated-mapped-names
     - actions:
         - collection/has-intersection/negated-mapped-names
@@ -6119,6 +6137,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!hasIntersection(R.attr.tagNames, dyn({"public": 1})) || R.attr.aNumber == 5'
+    # type-mismatch/has-intersection/against-string-value
+    - actions:
+        - type-mismatch/has-intersection/against-string-value
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: hasIntersection(R.attr.tagNames, dyn("public")) || R.attr.aNumber == 5
     # type-mismatch/has-intersection/negated-against-string-value
     - actions:
         - type-mismatch/has-intersection/negated-against-string-value

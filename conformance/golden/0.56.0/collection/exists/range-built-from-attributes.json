@@ -26,7 +26,8 @@
     "l3",
     "l4",
     "m1",
-    "m2"
+    "m2",
+    "n1"
   ],
   "degenerateReason": null,
   "id": "collection/exists/range-built-from-attributes",

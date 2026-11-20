@@ -38,6 +38,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber + 1.0 > 2.0'
+- id: 'arithmetic/add/field-at-int32-max-plus-constant'
+  tier: adversarial
+  intent: 'aNumber + 41.0 > 2147483647.0, which n1 alone holds: its aNumber is the 32-bit integer maximum.'
+  trap: 'CEL adds in doubles; adding in the column''s 32-bit integer type overflows on n1, and PostgreSQL then fails the whole query. Found by fuzzing (fuzz/s131/0497, drizzle on PostgreSQL).'
+  condition:
+    match:
+      expr: 'R.attr.aNumber + 41.0 > 2147483647.0'
 - id: 'arithmetic/add/inexact-fraction-equals'
   tier: adversarial
   intent: Equality over an attribute plus a fraction that is inexact in IEEE doubles (aDouble + 0.7 == 0.1).

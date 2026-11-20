@@ -706,7 +706,14 @@ const buildArithmeticExpression = (
     return sql`(cast(${left} as float(53)) / ${right})`;
   }
 
-  return sql`(${left} ${sql.raw(lookup(ARITHMETIC_OPERATORS, operator)!)} ${right})`;
+  const symbol = sql.raw(lookup(ARITHMETIC_OPERATORS, operator)!);
+
+  if (isCelIntExpression(leftOperand) || isCelIntExpression(rightOperand)) {
+    return sql`(${left} ${symbol} ${right})`;
+  }
+
+  // Double arithmetic over an integer column must not overflow the column's integer type.
+  return sql`(cast(${left} as float(53)) ${symbol} ${right})`;
 };
 
 /** `size()` of a relation (a correlated COUNT), a filtered relation, or a string column. */

@@ -156,6 +156,10 @@
       "status": "unsupported",
       "reason": "An empty-list hasIntersection over a map() projection is refused: the projection can raise evaluation errors that answering false would hide."
     },
+    "collection/has-intersection/negated-empty-literal-list-against-mapped-names": {
+      "status": "unsupported",
+      "reason": "Same refusal as collection/has-intersection/empty-literal-list-against-mapped-names, under negation: the projection can raise evaluation errors that answering false would hide."
+    },
     "collection/has-intersection/two-resource-lists": {
       "status": "unsupported",
       "reason": "hasIntersection is translated only with a literal list as one of its operands."
@@ -323,6 +327,10 @@
     "type-mismatch/contains/list-literal-needle": {
       "status": "unsupported",
       "reason": "contains with a list needle is a CEL no-overload error; the adapter requires a string operand and refuses."
+    },
+    "type-mismatch/has-intersection/against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
     },
     "type-mismatch/has-intersection/negated-against-map-value": {
       "status": "unsupported",

@@ -53,6 +53,7 @@
     "l3": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 43.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "l4": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 44.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
     "m1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 45.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
-    "m2": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 46.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
+    "m2": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 46.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []},
+    "n1": {"createdBy": "2024-06-01T00:00:00Z", "aDouble": 47.3, "createdAt": "2036-06-06T06:06:06Z", "updatedAt": null, "scope": null, "labels": []}
   }
 }
