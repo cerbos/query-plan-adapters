@@ -1,0 +1,140 @@
+{
+  "allowed": [
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b4",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j3",
+    "j4",
+    "k1",
+    "k2",
+    "k3",
+    "l1",
+    "l2",
+    "l3",
+    "l4",
+    "m1",
+    "m2",
+    "n1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-intersection/negated-empty-literal-list-against-mapped-names",
+  "intent": "The negation of hasIntersection of a map() projection and an empty literal list, beside a discriminating disjunct.",
+  "oracle": "discriminating",
+  "pdp": "0.56.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.tags"
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "t.name"
+                                  },
+                                  {
+                                    "variable": "t"
+                                  }
+                                ],
+                                "operator": "lambda"
+                              }
+                            }
+                          ],
+                          "operator": "map"
+                        }
+                      },
+                      {
+                        "value": []
+                      }
+                    ],
+                    "operator": "hasIntersection"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      },
+                      {
+                        "value": 5
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-intersection/negated-empty-literal-list-against-mapped-names",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!(hasIntersection(R.attr.tags.map(t, t.name), []) || R.attr.aNumber == 5)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A nameless tag makes map() error before the empty list is consulted, so CEL denies b5 and e1 under the negation; folding the empty intersection to false first turns that error into true. Found by fuzzing (fuzz/s131/0250, jpa and sqlalchemy)."
+}

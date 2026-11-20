@@ -250,6 +250,13 @@ cases:
   condition:
     match:
       expr: '!hasIntersection(R.attr.tagNames, dyn({"public": 1})) || R.attr.aNumber == 5'
+- id: 'type-mismatch/has-intersection/against-string-value'
+  tier: adversarial
+  intent: 'hasIntersection(tagNames, dyn("public")) OR aNumber == 5: hasIntersection with a string where CEL needs a list.'
+  trap: 'hasIntersection has no overload for a string, so the call is an error that denies; reading the string as a one-element list grants every row tagged "public". Found by fuzzing (fuzz/s131/0096, elasticsearch-java).'
+  condition:
+    match:
+      expr: 'hasIntersection(R.attr.tagNames, dyn("public")) || R.attr.aNumber == 5'
 - id: 'type-mismatch/has-intersection/negated-against-string-value'
   tier: adversarial
   intent: '!hasIntersection(tagNames, dyn("public")) OR aNumber == 5: hasIntersection with a string where CEL needs a list, under negation.'

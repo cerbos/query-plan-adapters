@@ -1,0 +1,57 @@
+{
+  "allowed": [
+    "n1"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/add/field-at-int32-max-plus-constant",
+  "intent": "aNumber + 41.0 > 2147483647.0, which n1 alone holds: its aNumber is the 32-bit integer maximum.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aNumber"
+                },
+                {
+                  "value": 41
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": 2147483647
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/field-at-int32-max-plus-constant",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumber + 41.0 > 2147483647.0"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL adds in doubles; adding in the column's 32-bit integer type overflows on n1, and PostgreSQL then fails the whole query. Found by fuzzing (fuzz/s131/0497, drizzle on PostgreSQL)."
+}

@@ -46,7 +46,8 @@
     "l3",
     "l4",
     "m1",
-    "m2"
+    "m2",
+    "n1"
   ],
   "degenerateReason": null,
   "id": "regex/matches/dot-plus-excludes-empty-and-newline",

@@ -439,6 +439,13 @@ cases:
   condition:
     match:
       expr: '!hasIntersection(R.attr.tagNames, []) && R.attr.aNumber < 5'
+- id: 'collection/has-intersection/negated-empty-literal-list-against-mapped-names'
+  tier: adversarial
+  intent: 'The negation of hasIntersection of a map() projection and an empty literal list, beside a discriminating disjunct.'
+  trap: 'A nameless tag makes map() error before the empty list is consulted, so CEL denies b5 and e1 under the negation; folding the empty intersection to false first turns that error into true. Found by fuzzing (fuzz/s131/0250, jpa and sqlalchemy).'
+  condition:
+    match:
+      expr: '!(hasIntersection(R.attr.tags.map(t, t.name), []) || R.attr.aNumber == 5)'
 - id: 'collection/has-intersection/negated-mapped-names'
   tier: adversarial
   intent: 'The negation of hasIntersection between a map() projection over an object list and a list literal.'

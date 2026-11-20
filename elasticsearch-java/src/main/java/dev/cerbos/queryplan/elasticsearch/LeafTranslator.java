@@ -791,6 +791,12 @@ final class LeafTranslator {
             throw unsupported("in with a " + kindOf(value) + " element cannot be expressed: a "
                     + "terms query matches scalar terms only");
         }
+        boolean collectionOperand = "hasIntersection".equals(operator)
+                || ("in".equals(operator) && variableFirst);
+        if (collectionOperand && value != null && !nonScalar) {
+            throw unsupported(operator + " against a scalar literal is a CEL error, which a "
+                    + "terms query would answer as a one-element list");
+        }
         if (("in".equals(operator) || "hasIntersection".equals(operator))
                 && value instanceof List<?> values) {
             rejectNonScalarElements(operator, values);

@@ -7,7 +7,8 @@
     "i2",
     "i4",
     "i6",
-    "k2"
+    "k2",
+    "n1"
   ],
   "degenerateReason": null,
   "id": "regex/matches/unanchored-bounded-repetition",

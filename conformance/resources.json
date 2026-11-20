@@ -1720,6 +1720,28 @@
         ]
       },
       "id": "m2"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
+        "aDouble": 47.3,
+        "aNumber": 2147483647,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "int32max",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "int32max"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "n1"
     }
   ]
 }

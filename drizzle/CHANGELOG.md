@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- `+`, `-` and `*` over a stored number are computed in doubles, as CEL computes them. On PostgreSQL an integer column at its 32-bit maximum overflowed the integer addition and failed the whole query.
+
 ## v0.5.0
 
 ### Breaking

@@ -193,6 +193,10 @@
       "status": "unsupported",
       "reason": "A timestamp column reaches CEL as an RFC 3339 string whose exact spelling the store does not keep, so comparing it as a string has no translation. Wrap it in timestamp()."
     },
+    "type-mismatch/has-intersection/against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter has no translation for a hasIntersection operand that is not a list."
+    },
     "type-mismatch/has-intersection/negated-against-map-value": {
       "status": "unsupported",
       "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter has no translation for a hasIntersection operand that is not a list."

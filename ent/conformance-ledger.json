@@ -317,6 +317,10 @@
       "status": "unsupported",
       "reason": "`+` between a string and a non-string operand is a CEL no-overload error."
     },
+    "type-mismatch/has-intersection/against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection against a string is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."
+    },
     "type-mismatch/has-intersection/negated-against-map-value": {
       "status": "unsupported",
       "reason": "hasIntersection against a map is a CEL no-overload error, and the adapter translates hasIntersection only against a literal list."

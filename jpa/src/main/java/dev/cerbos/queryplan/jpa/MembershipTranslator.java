@@ -235,10 +235,6 @@ final class MembershipTranslator {
     /** {@code hasIntersection(map(collection, lambda), values)}. */
     private Predicate handleMapIntersection(PlanResourcesFilter.Expression mapExpr,
                                             List<?> values, Scope scope) {
-        if (values.isEmpty()) {
-            return cb.disjunction();
-        }
-
         List<Operand> mapOperands = mapExpr.getOperandsList();
         if (mapOperands.size() != 2) {
             throw Refusals.malformed("map requires exactly 2 operands");

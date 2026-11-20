@@ -38,7 +38,8 @@
     "l1",
     "l2",
     "l3",
-    "l4"
+    "l4",
+    "n1"
   ],
   "degenerateReason": null,
   "id": "comparison/equals/whole-list-literal-order-and-multiplicity",

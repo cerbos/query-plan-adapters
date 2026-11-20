@@ -20,7 +20,8 @@
     "k1",
     "k2",
     "m1",
-    "m2"
+    "m2",
+    "n1"
   ],
   "degenerateReason": null,
   "id": "size/less-than/string-length-value-first",
