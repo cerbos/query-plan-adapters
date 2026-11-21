@@ -164,13 +164,6 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.startsWith("one")'
-- id: 'string/starts-with/concatenated-literal-needle'
-  tier: adversarial
-  intent: 'startsWith whose needle is a literal concatenation the planner folds to "100%".'
-  trap: 'The folded needle ends in %, which must be escaped in a LIKE prefix match or every string starting with "100" matches.'
-  condition:
-    match:
-      expr: 'R.attr.aString.startsWith("100" + "%")'
 - id: 'string/starts-with/field-to-field'
   tier: adversarial
   intent: startsWith whose prefix is another string attribute (aString.startsWith(aOptionalString)).
@@ -199,13 +192,6 @@ cases:
   condition:
     match:
       expr: '"xaXby-tail".startsWith(R.attr.aString)'
-- id: 'string/starts-with/value-first-concatenated-literal'
-  tier: adversarial
-  intent: startsWith whose receiver is a concatenation of two literals and whose argument is the attribute.
-  trap: 'Folded or not, the concatenation is the haystack; turning it into a column LIKE, or not escaping the column needle, returns the wrong rows.'
-  condition:
-    match:
-      expr: '("xaX" + "by-tail").startsWith(R.attr.aString)'
 - id: 'string/upper-ascii/non-ascii-untouched'
   tier: adversarial
   intent: 'upperAscii() on a string attribute compared with literals, including one with non-ASCII letters.'

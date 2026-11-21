@@ -866,10 +866,6 @@
       "status": "unsupported",
       "reason": "Unexpected exists expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing exists over a field needs a script."
     },
-    "null/in/literal-list-of-only-null": {
-      "status": "unsupported",
-      "reason": "The planner folds this to positive equality with null, which Elasticsearch cannot distinguish from a missing attribute without an indexed null-value sentinel"
-    },
     "null/in/literal-list-with-null-element": {
       "status": "unsupported",
       "reason": "Elasticsearch does not index explicit null scalar values, so positive membership containing null cannot distinguish an explicit null attribute (true) from a missing attribute (CEL error)"

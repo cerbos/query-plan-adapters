@@ -532,8 +532,7 @@ class JpaQueryPlanAdapterTest {
 
     }
 
-    // Constant-only sub-expressions: the planner folds these before sending the plan (see the
-    // string/starts-with/concatenated-literal-needle golden).
+    // Constant-only sub-expressions: the planner folds these before sending the plan.
 
     @Test
     void addFoldedTwoConstants() {

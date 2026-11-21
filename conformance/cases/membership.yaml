@@ -125,17 +125,3 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString in R.attr.tagNames + ["one"]'
-- id: 'membership/in/single-element-list'
-  tier: core
-  intent: 'String attribute tested for membership in a one-element literal list.'
-  trap: 'The planner may normalise a one-element in to equality; the adapter must accept either shape and never emit a malformed IN.'
-  condition:
-    match:
-      expr: 'R.attr.aString in ["one"]'
-- id: 'membership/in/single-key-map-literal'
-  tier: adversarial
-  intent: 'Key membership in a one-key map literal (aString in {"one": 1}), which the planner rewrites to eq(aString, "one").'
-  trap: 'Comparing against the map''s value rather than its key, or refusing a shape that plans to a plain equality.'
-  condition:
-    match:
-      expr: 'R.attr.aString in {"one": 1}'

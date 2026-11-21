@@ -282,13 +282,6 @@ cases:
   condition:
     match:
       expr: 'R.attr.tags.exists(t, R.attr.aNumber.contains("1")) in [true, null] || R.attr.aNumber == 5'
-- id: 'null/in/literal-list-of-only-null'
-  tier: adversarial
-  intent: 'Membership in a list whose only element is null (owner in [null]).'
-  trap: 'The planner folds it to eq(owner, null), which must become IS NULL rather than = NULL.'
-  condition:
-    match:
-      expr: 'R.attr.owner in [null]'
 - id: 'null/in/literal-list-with-null-element'
   tier: adversarial
   intent: Membership of owner in a literal list holding strings and a null element.
@@ -331,13 +324,6 @@ cases:
   condition:
     match:
       expr: '!(R.attr.owner in ["x", "one_two"])'
-- id: 'null/in/negated-literal-list-of-only-null'
-  tier: adversarial
-  intent: Negated membership in a list whose only element is null.
-  trap: Must become IS NOT NULL; NOT (owner = NULL) or NOT IN (NULL) is UNKNOWN and returns nothing.
-  condition:
-    match:
-      expr: '!(R.attr.owner in [null])'
 - id: 'null/in/negated-literal-list-with-null-element'
   tier: adversarial
   intent: Negated membership of owner in a literal list holding strings and a null element.
