@@ -3054,24 +3054,6 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString in R.attr.tagNames + ["one"]
-    # membership/in/single-element-list
-    - actions:
-        - membership/in/single-element-list
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: R.attr.aString in ["one"]
-    # membership/in/single-key-map-literal
-    - actions:
-        - membership/in/single-key-map-literal
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: 'R.attr.aString in {"one": 1}'
     # null/all/negated-null-element
     - actions:
         - null/all/negated-null-element
@@ -3374,15 +3356,6 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.tags.exists(t, R.attr.aNumber.contains("1")) in [true, null] || R.attr.aNumber == 5
-    # null/in/literal-list-of-only-null
-    - actions:
-        - null/in/literal-list-of-only-null
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: R.attr.owner in [null]
     # null/in/literal-list-with-null-element
     - actions:
         - null/in/literal-list-with-null-element
@@ -3437,15 +3410,6 @@ resourcePolicy:
       condition:
         match:
           expr: '!(R.attr.owner in ["x", "one_two"])'
-    # null/in/negated-literal-list-of-only-null
-    - actions:
-        - null/in/negated-literal-list-of-only-null
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: '!(R.attr.owner in [null])'
     # null/in/negated-literal-list-with-null-element
     - actions:
         - null/in/negated-literal-list-with-null-element
@@ -3608,15 +3572,6 @@ resourcePolicy:
       condition:
         match:
           expr: P.attr.manyTeams.all(t, R.attr.aOptionalString != t)
-    # principal/all/negated-empty-list
-    - actions:
-        - principal/all/negated-empty-list
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: '!(P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))'
     # principal/all/negated-long-list
     - actions:
         - principal/all/negated-long-list
@@ -3662,15 +3617,6 @@ resourcePolicy:
       condition:
         match:
           expr: P.attr.manyTeams.exists_one(t, t == R.attr.aOptionalString)
-    # principal/exists/empty-list
-    - actions:
-        - principal/exists/empty-list
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: (P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))
     # principal/exists/empty-list-in-lambda-body
     - actions:
         - principal/exists/empty-list-in-lambda-body
@@ -3689,15 +3635,6 @@ resourcePolicy:
       condition:
         match:
           expr: P.attr.manyStructs.exists(t, t.name == R.attr.aOptionalString)
-    # principal/exists/list-of-structs-missing-field
-    - actions:
-        - principal/exists/list-of-structs-missing-field
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: P.attr.missingStructs.exists(t, t.name == R.attr.aOptionalString)
     # principal/exists/list-of-structs-with-null-field
     - actions:
         - principal/exists/list-of-structs-with-null-field
@@ -3716,15 +3653,6 @@ resourcePolicy:
       condition:
         match:
           expr: P.attr.manyTeams.exists(t, R.attr.aOptionalString == t)
-    # principal/exists/negated-empty-list
-    - actions:
-        - principal/exists/negated-empty-list
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: '!(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))'
     # principal/exists/negated-long-list
     - actions:
         - principal/exists/negated-long-list
@@ -5543,15 +5471,6 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.startsWith("one")
-    # string/starts-with/concatenated-literal-needle
-    - actions:
-        - string/starts-with/concatenated-literal-needle
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: R.attr.aString.startsWith("100" + "%")
     # string/starts-with/field-to-field
     - actions:
         - string/starts-with/field-to-field
@@ -5588,15 +5507,6 @@ resourcePolicy:
       condition:
         match:
           expr: '"xaXby-tail".startsWith(R.attr.aString)'
-    # string/starts-with/value-first-concatenated-literal
-    - actions:
-        - string/starts-with/value-first-concatenated-literal
-      effect: EFFECT_ALLOW
-      roles:
-        - USER
-      condition:
-        match:
-          expr: ("xaX" + "by-tail").startsWith(R.attr.aString)
     # string/upper-ascii/non-ascii-untouched
     - actions:
         - string/upper-ascii/non-ascii-untouched

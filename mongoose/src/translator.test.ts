@@ -195,7 +195,7 @@ describe("nullAttributeRepresentation", () => {
   // one is refused as well.
   test("omitted: a null element inside a value list is refused too", async () => {
     await expect(
-      translate("null/in/literal-list-of-only-null", {
+      translate("null/in/literal-list-with-null-element", {
         nullAttributeRepresentation: "omitted",
       }),
     ).rejects.toThrow("missing-attribute error");

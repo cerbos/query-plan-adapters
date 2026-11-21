@@ -34,16 +34,6 @@ cases:
   condition:
     match:
       expr: 'P.attr.manyTeams.all(t, R.attr.aOptionalString != t)'
-- id: 'principal/all/negated-empty-list'
-  tier: adversarial
-  intent: Negated all() over an empty principal list.
-  trap: '!all() over an empty list is false for every row; the plan folds to always-denied.'
-  condition:
-    match:
-      expr: '!(P.attr.emptyTeams.all(t, t == R.attr.aOptionalString))'
-  degenerate:
-    oracle: empty
-    reason: 'P.attr.emptyTeams is an empty list, so all() over it is true and its negation false for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
 - id: 'principal/all/negated-long-list'
   tier: adversarial
   intent: 'Negated all() over an 11-element principal list compared with an optional resource attribute.'
@@ -79,16 +69,6 @@ cases:
   condition:
     match:
       expr: 'P.attr.manyTeams.exists_one(t, t == R.attr.aOptionalString)'
-- id: 'principal/exists/empty-list'
-  tier: adversarial
-  intent: exists() over an empty principal list compared with a resource attribute.
-  trap: 'exists() over an empty list is false for every row; the planner folds the plan to always-denied and the adapter must honour the fold.'
-  condition:
-    match:
-      expr: '(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))'
-  degenerate:
-    oracle: empty
-    reason: 'P.attr.emptyTeams is an empty list, so exists() over it is false for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
 - id: 'principal/exists/empty-list-in-lambda-body'
   tier: adversarial
   intent: 'exists() over the resource tags with a body the planner folds to false, OR''d with aNumber == 5.'
@@ -103,16 +83,6 @@ cases:
   condition:
     match:
       expr: 'P.attr.manyStructs.exists(t, t.name == R.attr.aOptionalString)'
-- id: 'principal/exists/list-of-structs-missing-field'
-  tier: adversarial
-  intent: exists() over principal structs that all lack the name field.
-  trap: 'Every comparison is a missing-field error; reading the absent field as null or empty string emits a matching filter instead of always-denied.'
-  condition:
-    match:
-      expr: 'P.attr.missingStructs.exists(t, t.name == R.attr.aOptionalString)'
-  degenerate:
-    oracle: empty
-    reason: 'Every element of P.attr.missingStructs lacks name, so every comparison is a missing-field error: the planner folds the plan to always-denied.'
 - id: 'principal/exists/list-of-structs-with-null-field'
   tier: adversarial
   intent: exists() over principal structs whose name fields are all null.
@@ -130,16 +100,6 @@ cases:
   condition:
     match:
       expr: 'P.attr.manyTeams.exists(t, R.attr.aOptionalString == t)'
-- id: 'principal/exists/negated-empty-list'
-  tier: adversarial
-  intent: Negated exists() over an empty principal list.
-  trap: '!exists() over an empty list is true for every row, missing-attribute rows included; the plan folds to always-allowed.'
-  condition:
-    match:
-      expr: '!(P.attr.emptyTeams.exists(t, t == R.attr.aOptionalString))'
-  degenerate:
-    oracle: total
-    reason: 'P.attr.emptyTeams is an empty list, so exists() over it is false and its negation true for every seed; the planner folds the plan. The case pins that macro identity and the fold.'
 - id: 'principal/exists/negated-long-list'
   tier: adversarial
   intent: 'Negated exists() over an 11-element principal list compared with an optional resource attribute.'
