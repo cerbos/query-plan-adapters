@@ -219,22 +219,13 @@ public final class JpaQueryPlanAdapter {
         return QueryPlanFilter.conditional(condition, options);
     }
 
-    /** Every operator a Cerbos plan holds. Folds decide some subtrees without reading them. */
-    private static final Set<String> PLANNER_OPERATORS = Set.of(
-            "add", "all", "ancestorOf", "and", "contains", "descendentOf", "div", "double",
-            "duration", "dyn", "endsWith", "eq", "except", "exists", "exists_one", "filter", "ge",
-            "get-field", "gt", "has", "hasIntersection", "has_intersection", "hierarchy", "if",
-            "in", "index", "int", "intersect", "isSubset", "lambda", "le", "list", "lt", "map",
-            "matches", "mod", "mult", "ne", "not", "or", "overlaps", "set-field", "size",
-            "startsWith", "string", "struct", "sub", "timeSince", "timestamp", "upperAscii");
-
     /** Refuses an operator that is neither a Cerbos operator nor overridden, before any fold. */
     private static void assertPlannerOperators(Operand operand, Map<String, OperatorFunction> overrides) {
         if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
             return;
         }
         String operator = operand.getExpression().getOperator();
-        if (!PLANNER_OPERATORS.contains(operator) && overrides.get(operator) == null) {
+        if (!PlannerOperators.ALL.contains(operator) && overrides.get(operator) == null) {
             throw Refusals.unsupported("Unsupported operator: " + operator);
         }
         operand.getExpression().getOperandsList()
