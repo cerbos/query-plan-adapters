@@ -408,7 +408,7 @@ const OMITTED = { nullAttributeRepresentation: "omitted" } as const;
 const SHARED_ATTRIBUTES: ReadonlyArray<readonly [string, MapperConfig, MapperConfig]> = [
   ["request.resource.attr.aBool", OMITTED, { field: "aBool", valueType: "boolean", nullable: true }],
   ["request.resource.attr.aString", OMITTED, { field: "aString", valueType: "string", nullable: true }],
-  ["request.resource.attr.aNumber", OMITTED, { field: "aNumber", valueType: "number", nullable: true }],
+  ["request.resource.attr.aNumber", OMITTED, { field: "aNumber", valueType: "number", int32: true, nullable: true }],
   ["request.resource.attr.aDouble", OMITTED, { field: "aDouble", valueType: "number" }],
   [
     "request.resource.attr.aOptionalString",
@@ -516,7 +516,7 @@ export const DECLARED_MAPPER: ConformanceMapper = {
       fields: {
         aBool: { field: "aBool", valueType: "boolean", nullable: true },
         aString: { field: "aString", valueType: "string", nullable: true },
-        aNumber: { field: "aNumber", valueType: "number", nullable: true },
+        aNumber: { field: "aNumber", valueType: "number", int32: true, nullable: true },
         aOptionalString: { field: "aOptionalString", valueType: "string", nullable: true  },
         inner: {
           relation: {
@@ -526,7 +526,7 @@ export const DECLARED_MAPPER: ConformanceMapper = {
             fields: {
               aBool: { field: "aBool", valueType: "boolean", nullable: true },
               aString: { field: "aString", valueType: "string", nullable: true },
-              aNumber: { field: "aNumber", valueType: "number", nullable: true },
+              aNumber: { field: "aNumber", valueType: "number", int32: true, nullable: true },
               aOptionalString: { field: "aOptionalString", valueType: "string", nullable: true  },
             },
           },
@@ -543,7 +543,7 @@ export const DECLARED_MAPPER: ConformanceMapper = {
       fields: {
         aBool: { field: "aBool", valueType: "boolean", nullable: true },
         aString: { field: "aString", valueType: "string", nullable: true },
-        aNumber: { field: "aNumber", valueType: "number", nullable: true },
+        aNumber: { field: "aNumber", valueType: "number", int32: true, nullable: true },
         aOptionalString: { field: "aOptionalString", valueType: "string", nullable: true },
       },
     },
@@ -557,7 +557,7 @@ export const DECLARED_MAPPER: ConformanceMapper = {
       fields: {
         aBool: { field: "aBool", valueType: "boolean", nullable: true },
         aString: { field: "aString", valueType: "string", nullable: true },
-        aNumber: { field: "aNumber", valueType: "number", nullable: true },
+        aNumber: { field: "aNumber", valueType: "number", int32: true, nullable: true },
         aOptionalString: { field: "aOptionalString", valueType: "string", nullable: true },
       },
     },

@@ -31,6 +31,12 @@ export type MapperConfig = {
    */
   valueType?: "dateTime" | "string" | "number" | "boolean";
   /**
+   * Declares the column a Prisma `Int`, a 32-bit integer. A numeric constant outside its range is
+   * refused rather than bound: PostgreSQL rejects the parameter and fails the whole query. Read
+   * from the schema when `datamodel` is passed.
+   */
+  int32?: boolean;
+  /**
    * Marks the mapped column as nullable in the database. Cerbos treats a missing attribute as
    * an evaluation error (deny), which matches SQL three-valued logic for simple predicates —
    * but relation subqueries (some/every/none) collapse UNKNOWN to false at the EXISTS boundary,

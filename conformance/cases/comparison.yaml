@@ -224,6 +224,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aBool < true'
+- id: 'comparison/less-than/int-field-below-literal-past-int32'
+  tier: adversarial
+  intent: 'aNumber < 3000000000, a literal past the 32-bit integer range, which every row with an aNumber holds.'
+  trap: 'Bound as a parameter of the column''s 32-bit integer type, the literal overflows and PostgreSQL fails the whole query.'
+  condition:
+    match:
+      expr: 'R.attr.aNumber < 3000000000'
 - id: 'comparison/less-than/double-below-int64-range'
   tier: adversarial
   intent: 'A double attribute compared < -1e19, a literal beyond the int64 range.'

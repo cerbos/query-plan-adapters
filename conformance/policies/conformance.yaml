@@ -477,6 +477,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber - 3.0 <= 0.0
+    # arithmetic/subtract/field-minus-constant-solved-past-int32
+    - actions:
+        - arithmetic/subtract/field-minus-constant-solved-past-int32
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber - 45.0 <= 2147483647.0
     # arithmetic/subtract/int-minus-principal-double
     - actions:
         - arithmetic/subtract/int-minus-principal-double
@@ -1857,6 +1866,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aBool < true
+    # comparison/less-than/int-field-below-literal-past-int32
+    - actions:
+        - comparison/less-than/int-field-below-literal-past-int32
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber < 3000000000
     # comparison/less-than/double-below-int64-range
     - actions:
         - comparison/less-than/double-below-int64-range

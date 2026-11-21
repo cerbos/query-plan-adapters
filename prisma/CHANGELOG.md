@@ -10,6 +10,10 @@
 
 - A negated macro over an `all` whose body nests another macro (`!categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))`, `!categories.all(c, c.subCategories.exists(...))`) read an element whose nested macro errors (a label missing `name`) as false and allowed the row. The PDP denies it, and so does the adapter now.
 
+### Breaking
+
+- New mapper option `int32`, read from the schema when `datamodel` is passed: it declares a column a Prisma `Int`. A numeric constant outside the 32-bit range against such a column (`R.attr.count < 3000000000`, or `R.attr.count - 45.0 <= 2147483647.0` solved to `count <= 2147483692`) is refused with `UnsupportedQueryPlanError`. PostgreSQL rejected the bound parameter and failed the query; SQLite and MySQL answered it, and with `datamodel` passed they now refuse it too.
+
 ## v5.2.1
 
 ### Fixed over-grants

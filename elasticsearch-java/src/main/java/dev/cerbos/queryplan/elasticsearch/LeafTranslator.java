@@ -660,6 +660,10 @@ final class LeafTranslator {
             throw bareTemporalComparison();
         }
         boolean compatible = inhabits(type, value);
+        if (compatible && type == ScalarType.INTEGER && !fitsInteger(value)) {
+            throw unsupported(operator + " against " + value + " on '" + field + "', outside the "
+                    + "range of an Elasticsearch integer field: the query is rejected");
+        }
         if (compatible && !(STRING_OPERATORS.contains(operator) && type != ScalarType.STRING)) {
             return null;
         }
@@ -683,7 +687,10 @@ final class LeafTranslator {
         if (type == ScalarType.TIMESTAMP && !hasTimestampWrapper(operands)) {
             throw bareTemporalComparison();
         }
-        return values.stream().filter(element -> element == null || inhabits(type, element)).toList();
+        return values.stream()
+                .filter(element -> element == null || inhabits(type, element))
+                .filter(element -> type != ScalarType.INTEGER || element == null || fitsInteger(element))
+                .toList();
     }
 
     /**
@@ -722,9 +729,14 @@ final class LeafTranslator {
     private static boolean inhabits(ScalarType type, Object value) {
         return switch (type) {
             case STRING, TIMESTAMP -> value instanceof String;
-            case NUMBER -> value instanceof Number;
+            case NUMBER, INTEGER -> value instanceof Number;
             case BOOLEAN -> value instanceof Boolean;
         };
+    }
+
+    private static boolean fitsInteger(Object value) {
+        double number = ((Number) value).doubleValue();
+        return number >= Integer.MIN_VALUE && number <= Integer.MAX_VALUE;
     }
 
     private static boolean hasTimestampWrapper(List<Operand> operands) {

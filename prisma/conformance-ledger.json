@@ -113,6 +113,10 @@
       "status": "unsupported",
       "reason": "Unsupported operator: sub."
     },
+    "arithmetic/subtract/field-minus-constant-solved-past-int32": {
+      "status": "unsupported",
+      "reason": "Solved for the column, the comparison is aNumber <= 2147483692, a bound past the 32-bit range of the Int column: PostgreSQL rejects it as a bound parameter and fails the query, so the translator refuses it."
+    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: double() over a string column cannot be expressed, and CEL's whole-string-or-error parse has no filter form."
@@ -324,6 +328,10 @@
     "comparison/equals/whole-list-literal-order-and-multiplicity": {
       "status": "unsupported",
       "reason": "Prisma scalar comparison and membership inputs cannot bind list or map elements, and an ordered, multiplicity-counting list equality (with a null element) has no relation filter form; the translator refuses before constructing a filter."
+    },
+    "comparison/less-than/int-field-below-literal-past-int32": {
+      "status": "unsupported",
+      "reason": "3000000000 is past the 32-bit range of the Int column: PostgreSQL rejects it as a bound parameter and fails the query, so the translator refuses it."
     },
     "comparison/not-equals/whole-list-literal": {
       "status": "unsupported",

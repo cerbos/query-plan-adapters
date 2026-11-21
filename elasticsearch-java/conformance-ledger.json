@@ -197,6 +197,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
     },
+    "arithmetic/subtract/field-minus-constant-solved-past-int32": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
+    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "double() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."
@@ -656,6 +660,10 @@
     "comparison/less-than/infinity-on-both-sides": {
       "status": "unsupported",
       "reason": "Same unfolded literal division as comparison/greater-than/infinity-from-ternary: a division by zero is an int error or a double infinity, and the plan cannot tell which"
+    },
+    "comparison/less-than/int-field-below-literal-past-int32": {
+      "status": "unsupported",
+      "reason": "3000000000 is past the range of the integer field aNumber, and Elasticsearch rejects a range query whose bound its field type cannot hold, so the translator refuses it."
     },
     "comparison/less-than/nan-from-ternary": {
       "status": "unsupported",

@@ -403,6 +403,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber - 3.0 <= 0.0'
+- id: 'arithmetic/subtract/field-minus-constant-solved-past-int32'
+  tier: adversarial
+  intent: 'aNumber - 45.0 <= 2147483647.0, which every row with an aNumber holds, n1 at the 32-bit integer maximum included.'
+  trap: 'Solving for the column gives aNumber <= 2147483692, a bound a 32-bit integer column cannot hold: bound as an int4 parameter, PostgreSQL fails the whole query. Found by fuzzing (fuzz/s149/0394, prisma on PostgreSQL).'
+  condition:
+    match:
+      expr: 'R.attr.aNumber - 45.0 <= 2147483647.0'
 - id: 'arithmetic/subtract/int-minus-principal-double'
   tier: adversarial
   intent: 'A negated int() conversion minus an integral principal attribute, OR''d with aNumber == 5 (!(int(aNumber) - P.attr.zero == 5) || aNumber == 5).'

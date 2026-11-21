@@ -35,8 +35,12 @@ public class ElasticsearchQueryPlanAdapter {
         record Conditional(Map<String, Object> query) implements Result {}
     }
 
-    /** The CEL scalar type stored in a mapped Elasticsearch field. */
-    public enum ScalarType { STRING, NUMBER, BOOLEAN, TIMESTAMP }
+    /**
+     * The CEL scalar type stored in a mapped Elasticsearch field. {@code INTEGER} is a number in an
+     * {@code integer}, {@code short} or {@code byte} field: a constant outside the 32-bit range
+     * against it is refused, since Elasticsearch rejects the query.
+     */
+    public enum ScalarType { STRING, NUMBER, INTEGER, BOOLEAN, TIMESTAMP }
 
     /**
      * What the caller declares about the index. Immutable; each {@code with…} method returns a new

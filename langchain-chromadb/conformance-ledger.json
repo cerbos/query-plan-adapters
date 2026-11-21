@@ -121,6 +121,10 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: the arithmetic meets an integral literal next to a stored number, and the plan does not carry whether the policy wrote it as an int or a double. CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error on every row where `R.attr.x + 1.0` is not; write a fractional literal or cast the attribute."
     },
+    "arithmetic/subtract/field-minus-constant-solved-past-int32": {
+      "status": "unsupported",
+      "reason": "sub meets an integral literal next to a stored number, and the plan does not carry whether it was written as an int or a double: CEL arithmetic has no int/double overload, so `R.attr.x + 1` is an error where `R.attr.x + 1.0` is not."
+    },
     "cast/string/from-double": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `string()` reads a number from metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and `string()` renders -0.0 as \"-0\"."

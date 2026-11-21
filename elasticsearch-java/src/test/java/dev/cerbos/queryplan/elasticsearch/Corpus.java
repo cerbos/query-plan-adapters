@@ -244,13 +244,14 @@ final class Corpus {
     private static Map<String, ElasticsearchQueryPlanAdapter.ScalarType> scalarTypes() {
         ElasticsearchQueryPlanAdapter.ScalarType string = ElasticsearchQueryPlanAdapter.ScalarType.STRING;
         ElasticsearchQueryPlanAdapter.ScalarType number = ElasticsearchQueryPlanAdapter.ScalarType.NUMBER;
+        ElasticsearchQueryPlanAdapter.ScalarType integer = ElasticsearchQueryPlanAdapter.ScalarType.INTEGER;
         ElasticsearchQueryPlanAdapter.ScalarType bool = ElasticsearchQueryPlanAdapter.ScalarType.BOOLEAN;
         ElasticsearchQueryPlanAdapter.ScalarType timestamp = ElasticsearchQueryPlanAdapter.ScalarType.TIMESTAMP;
         Map<String, ElasticsearchQueryPlanAdapter.ScalarType> types = new LinkedHashMap<>();
         types.put("id", string);
         types.put("aString", string);
         types.put("aOptionalString", string);
-        types.put("aNumber", number);
+        types.put("aNumber", integer);
         types.put("aDouble", number);
         types.put("aBool", bool);
         types.put("createdAt", timestamp);
@@ -273,7 +274,7 @@ final class Corpus {
         for (String level : List.of("parent.", "parent.inner.", "peer.", "stepParent.")) {
             types.put(level + "aBool", bool);
             types.put(level + "aString", string);
-            types.put(level + "aNumber", number);
+            types.put(level + "aNumber", integer);
             types.put(level + "aOptionalString", string);
         }
         return Map.copyOf(types);
