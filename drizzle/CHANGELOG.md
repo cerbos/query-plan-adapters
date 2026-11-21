@@ -5,6 +5,7 @@
 ### Fixed
 
 - `+`, `-` and `*` over a stored number are computed in doubles, as CEL computes them. On PostgreSQL an integer column at its 32-bit maximum overflowed the integer addition and failed the whole query.
+- `+`, `-` and `*` over `int()` of an integer column are computed in `bigint` on PostgreSQL, as CEL computes ints in 64 bits. A column at its 32-bit bounds (`int(aNumber) - 5` at -2147483648) overflowed and failed the whole query.
 
 ## v0.5.0
 

@@ -90,6 +90,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aNumber) + R.attr.aDouble > 0.0 || R.attr.aNumber == 5
+    # arithmetic/add/int-at-int32-max-plus-one
+    - actions:
+        - arithmetic/add/int-at-int32-max-plus-one
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) + 1 > 2147483647
     # arithmetic/add/int-literal-negated
     - actions:
         - arithmetic/add/int-literal-negated
@@ -351,6 +360,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1
+    # arithmetic/modulo/column-divisor-at-int32-max
+    - actions:
+        - arithmetic/modulo/column-divisor-at-int32-max
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) % (int(R.attr.aNumber) + 1) == 2147483647
     # arithmetic/modulo/negated-double-operand
     - actions:
         - arithmetic/modulo/negated-double-operand
@@ -2394,6 +2412,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0 : R.attr.aNumber) : -1) >= 2'
+    # conditional/ternary/nested-over-parent-fields
+    - actions:
+        - conditional/ternary/nested-over-parent-fields
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(!("inner" in R.attr.parent)) ? ((R.attr.aBoolList[0] != false) ? (R.attr.parent.aBool == R.attr.parent.aBool) : (int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1)) : ((R.attr.parent.inner.aBool == R.attr.parent.aBool) || (size(R.attr.mainCategory.subCategories) >= 1.5))'
     # conditional/ternary/on-both-sides
     - actions:
         - conditional/ternary/on-both-sides
@@ -3599,6 +3626,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.parent.aString < "XA_BY") ? (P.attr.allowedTags.all(t, R.attr.aString != t)) : (R.attr.tagNames.filter(t, t != "Public").size() == 0)'
+    # principal/equals/left-unresolved-beside-field-in-ternary-branch
+    - actions:
+        - principal/equals/left-unresolved-beside-field-in-ternary-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aDouble in [34.3, 20.3]) ? R.attr.aBool : (R.attr.owner == P.attr.context)'
     # principal/all/long-list
     - actions:
         - principal/all/long-list

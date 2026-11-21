@@ -4,6 +4,10 @@
     "nul-in-string": {"reason": "PostgreSQL text cannot hold a NUL character, so a row whose string holds one cannot be stored.", "stores": ["postgres"]}
   },
   "cases": {
+    "arithmetic/add/int-at-int32-max-plus-one": {
+      "status": "unsupported",
+      "reason": "int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and rounds where CEL truncates toward zero), so the sum over it is refused."
+    },
     "arithmetic/add/int-beside-double-field": {
       "status": "unsupported",
       "reason": "The sum adds int(aNumber) to a double, which CEL rejects as a no-such-overload error; int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the cast is refused before the sum is reached."
@@ -67,6 +71,10 @@
     "arithmetic/divide/zero-divisor-in-map-literal": {
       "status": "unsupported",
       "reason": "A map literal is read by key only when every key and value is a literal; a division in it has no SQL value."
+    },
+    "arithmetic/modulo/column-divisor-at-int32-max": {
+      "status": "unsupported",
+      "reason": "int() is what gives `%` an integer operand, and it has no faithful SQL lowering (CAST rounds where CEL truncates toward zero), so the cast is refused before the modulo is reached."
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
@@ -344,6 +352,10 @@
       "status": "unsupported",
       "reason": "Whole-list equality needs the relation-mapped tagNames as a scalar, and the relation mapping exposes member rows only."
     },
+    "conditional/ternary/nested-over-parent-fields": {
+      "status": "unsupported",
+      "reason": "Same key-membership refusal as `membership/in/map-attribute-keys`, under negation."
+    },
     "hierarchy/ancestor-of/empty-delimiter": {
       "status": "unsupported",
       "reason": "An empty delimiter is refused when the hierarchy operand is parsed: the prefix LIKE `ancestor + delimiter + '%'` would become a bare prefix match that also matches the path itself, and the literal's ancestors would be split on no separator."
@@ -391,6 +403,10 @@
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves P.attr.context unresolved in this ternary branch, so the plan compares owner with the variable request.principal.attr.context, which no store holds. The adapter refuses it."
     },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",

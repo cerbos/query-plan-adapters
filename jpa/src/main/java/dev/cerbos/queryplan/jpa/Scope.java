@@ -7,6 +7,7 @@ package dev.cerbos.queryplan.jpa;
 
 import jakarta.persistence.criteria.AbstractQuery;
 import jakarta.persistence.criteria.From;
+import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.metamodel.Bindable;
@@ -265,12 +266,31 @@ sealed interface Scope permits Scope.RootScope, Scope.LambdaScope {
         for (int i = 0; i < parts.length; i++) {
             boolean last = i == parts.length - 1;
             if (!last && p instanceof From<?, ?> f && isAssociation(f, parts[i])) {
-                p = f.join(parts[i], JoinType.LEFT);
+                p = leftJoin(f, parts[i]);
             } else {
                 p = p.get(parts[i]);
             }
         }
         return p;
+    }
+
+    /**
+     * The LEFT join of {@code part} off {@code from}, reusing one already made for a to-one
+     * association: it binds the same row however often it is read, and a join per reference
+     * reached MySQL's 61-table limit, failing the whole query.
+     */
+    private static From<?, ?> leftJoin(From<?, ?> from, String part) {
+        ManagedType<?> managed = managedTypeOf(from);
+        if (managed != null && !managed.getAttribute(part).isCollection()) {
+            for (Join<?, ?> existing : from.getJoins()) {
+                if (existing.getJoinType() == JoinType.LEFT
+                        && existing.getOn() == null
+                        && existing.getAttribute().getName().equals(part)) {
+                    return existing;
+                }
+            }
+        }
+        return from.join(part, JoinType.LEFT);
     }
 
     /**

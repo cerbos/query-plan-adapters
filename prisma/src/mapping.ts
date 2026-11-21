@@ -208,6 +208,12 @@ export function resolveFieldReference(
 
   const activeConfig = config ?? matchedConfig;
 
+  if (!activeConfig && reference.startsWith("request.principal.")) {
+    throw new UnsupportedQueryPlanError(
+      `The plan leaves ${reference} unresolved: the planner did not fold it into a value, and a principal attribute is not a field of any model`,
+    );
+  }
+
   // A scalar column has no keys: reading one beneath it would compare the column itself.
   if (!config && matchedConfig && !matchedConfig.relation) {
     throw new UnsupportedQueryPlanError(

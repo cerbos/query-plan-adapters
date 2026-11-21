@@ -69,6 +69,13 @@ cases:
   condition:
     match:
       expr: 'int(R.attr.aNumber) + R.attr.aDouble > 0.0 || R.attr.aNumber == 5'
+- id: 'arithmetic/add/int-at-int32-max-plus-one'
+  tier: adversarial
+  intent: 'int(aNumber) + 1 > 2147483647, which n1 alone holds: its aNumber is the 32-bit integer maximum.'
+  trap: 'CEL adds ints in 64 bits, so n1''s sum is 2147483648; adding in the column''s 32-bit integer type overflows on n1, and PostgreSQL then fails the whole query. Found by fuzzing (fuzz/s139/0194, drizzle on PostgreSQL, on a generated row at the 32-bit minimum).'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) + 1 > 2147483647'
 - id: 'arithmetic/add/int-literal-negated'
   tier: adversarial
   intent: 'The int-literal sum under negation (!(aNumber + 1 > 2.0)).'
@@ -296,6 +303,13 @@ cases:
   condition:
     match:
       expr: 'int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1'
+- id: 'arithmetic/modulo/column-divisor-at-int32-max'
+  tier: adversarial
+  intent: 'Integer modulo by a column expression one past the 32-bit maximum on n1 (int(aNumber) % (int(aNumber) + 1) == 2147483647).'
+  trap: 'CEL computes the divisor in 64 bits, so n1''s remainder is 2147483647 and n1 alone is allowed; computing it in the column''s 32-bit integer type overflows, and PostgreSQL then fails the whole query. Found by fuzzing (fuzz/s139/0194, drizzle on PostgreSQL).'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) % (int(R.attr.aNumber) + 1) == 2147483647'
 - id: 'arithmetic/modulo/negated-double-operand'
   tier: adversarial
   intent: '!(aNumber % 2 == 1) || aNumber == 5, with no int(): CEL''s % has no double overload.'

@@ -629,6 +629,18 @@ const operandKind = (
   return dataType === "bigint" ? "number" : dataType;
 };
 
+/** Whether any column `operand` reads is a PostgreSQL column. */
+const readsPostgresColumn = (operand: PlanExpressionOperand, mapper: ResolvedMapper): boolean => {
+  if (isExpressionOperand(operand)) {
+    return operand.operands.some((child) => readsPostgresColumn(child, mapper));
+  }
+
+  if (!isNameOperand(operand)) return false;
+  const column = columnForOperand(operand, mapper);
+
+  return column !== undefined && is(column, PgColumn);
+};
+
 const buildArithmeticExpression = (
   operator: string,
   operands: PlanExpressionOperand[],
@@ -709,7 +721,11 @@ const buildArithmeticExpression = (
   const symbol = sql.raw(lookup(ARITHMETIC_OPERATORS, operator)!);
 
   if (isCelIntExpression(leftOperand) || isCelIntExpression(rightOperand)) {
-    return sql`(${left} ${symbol} ${right})`;
+    // CEL ints are 64-bit; PostgreSQL computes in the column's own type, so a 32-bit integer
+    // column overflows at its bounds and fails the whole query.
+    return operands.some((operand) => readsPostgresColumn(operand, mapper))
+      ? sql`(cast(${left} as bigint) ${symbol} ${right})`
+      : sql`(${left} ${symbol} ${right})`;
   }
 
   // Double arithmetic over an integer column must not overflow the column's integer type.

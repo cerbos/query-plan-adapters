@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- A principal attribute the planner leaves unresolved (`request.principal.attr.context` compared with a field in a ternary branch) throws `UnsupportedQueryPlanError`. It was rendered as a field reference that Prisma rejected.
+
 ### Fixed over-grants
 
 - A negated macro over an `all` whose body nests another macro (`!categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))`, `!categories.all(c, c.subCategories.exists(...))`) read an element whose nested macro errors (a label missing `name`) as false and allowed the row. The PDP denies it, and so does the adapter now.

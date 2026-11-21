@@ -5,6 +5,10 @@
     "nul-in-string": {"reason": "PostgreSQL text cannot hold a NUL character, so a row whose string holds one cannot be stored.", "stores": ["postgres"]}
   },
   "cases": {
+    "arithmetic/add/int-at-int32-max-plus-one": {
+      "reason": "int() cannot be lowered to a SQL CAST, which on PostgreSQL and MySQL rounds to nearest where CEL truncates toward zero, so the sum over it is never translated.",
+      "status": "unsupported"
+    },
     "arithmetic/add/int-beside-double-field": {
       "reason": "int() cannot be lowered to a SQL CAST, which reads a numeric prefix where CEL requires the whole string and rounds where CEL truncates, so the int + double sum over it (a CEL no-such-overload error) is never reached.",
       "status": "unsupported"
@@ -64,6 +68,10 @@
     "arithmetic/divide/zero-divisor-in-map-literal": {
       "status": "unsupported",
       "reason": "A map literal translates only with constant values."
+    },
+    "arithmetic/modulo/column-divisor-at-int32-max": {
+      "reason": "The int() cast that gives % an integer operand has no SQL lowering: SQL CAST on PostgreSQL and MySQL rounds where CEL truncates toward zero.",
+      "status": "unsupported"
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "reason": "The int() cast that gives % an integer operand has no SQL lowering: SQL CAST on PostgreSQL and MySQL rounds where CEL truncates toward zero.",
@@ -201,6 +209,10 @@
       "status": "unsupported",
       "reason": "Each list holds `aDouble / 0.0`, a division by a constant zero kept as a conditional value (NaN or a signed infinity per row), which a list constructor cannot hold as a plain SQL expression."
     },
+    "conditional/ternary/nested-over-parent-fields": {
+      "reason": "Same to-one relation used as a value as membership/in/map-attribute-keys, under negation.",
+      "status": "unsupported"
+    },
     "hierarchy/ancestor-of/mismatched-delimiters-negated": {
       "status": "unsupported",
       "reason": "The two hierarchy() operands split on different delimiters; the translator compares segments of one delimiter only, so it refuses rather than re-split either path in SQL."
@@ -236,6 +248,10 @@
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves P.attr.context unresolved in this ternary branch, so the plan compares owner with the variable request.principal.attr.context, which no store holds. The adapter refuses it."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",

@@ -5,6 +5,10 @@
     "nul-in-string": {"reason": "PostgreSQL text cannot hold a NUL character, so a row whose string holds one cannot be stored. SQLite holds it, but Prisma reaches a string only through LIKE, which SQLite reads as C text up to the first NUL, and Prisma emits no other string function: size() and every string filter would answer for the prefix alone.", "stores": ["postgres", "sqlite"]}
   },
   "cases": {
+    "arithmetic/add/int-at-int32-max-plus-one": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator or column arithmetic, so int() is refused wherever it appears."
+    },
     "arithmetic/add/int-beside-double-field": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator, so int() is refused wherever it appears; the int + double sum over it (a no-such-overload error in CEL, which denies) is never reached."
@@ -68,6 +72,10 @@
     "arithmetic/divide/zero-divisor-in-map-literal": {
       "status": "unsupported",
       "reason": "Unsupported operator: struct."
+    },
+    "arithmetic/modulo/column-divisor-at-int32-max": {
+      "status": "unsupported",
+      "reason": "Same gap as arithmetic/modulo/negative-dividend: Prisma filters have no column arithmetic and `mod` is not in the translator's operator set, so a divisor that is itself a column expression (with CEL's truncating sign and its divide-by-zero error) has no where-filter form"
     },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
@@ -329,6 +337,10 @@
       "status": "unsupported",
       "reason": "Same refusal as string/contains/field-to-field: the else branch is contains() with a column-valued needle, which would need per-row LIKE escaping Prisma filters cannot express."
     },
+    "conditional/ternary/nested-over-parent-fields": {
+      "status": "unsupported",
+      "reason": "Prisma filters have no cast operator, so int() in the else branch's modulo is refused wherever it appears."
+    },
     "conditional/ternary/string-match-receiver": {
       "status": "unsupported",
       "reason": "A ternary is distributed into its branches only as an operand of a comparison; as the receiver of contains() it is refused."
@@ -436,6 +448,10 @@
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves P.attr.context unresolved in this ternary branch, so the plan compares owner with the variable request.principal.attr.context, which no store holds. The adapter refuses it."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",

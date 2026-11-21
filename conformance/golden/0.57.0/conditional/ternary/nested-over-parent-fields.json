@@ -1,0 +1,194 @@
+{
+  "allowed": [
+    "a1",
+    "a4",
+    "c1",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "conditional/ternary/nested-over-parent-fields",
+  "intent": "Nested ternaries whose condition and branches read the to-one parent and its inner object many times.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "value": "inner"
+                      },
+                      {
+                        "variable": "request.resource.attr.parent"
+                      }
+                    ],
+                    "operator": "in"
+                  }
+                }
+              ],
+              "operator": "not"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.aBoolList"
+                            },
+                            {
+                              "value": 0
+                            }
+                          ],
+                          "operator": "index"
+                        }
+                      },
+                      {
+                        "value": false
+                      }
+                    ],
+                    "operator": "ne"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.parent.aBool"
+                      },
+                      {
+                        "variable": "request.resource.attr.parent.aBool"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "variable": "request.resource.attr.aNumber"
+                                  }
+                                ],
+                                "operator": "int"
+                              }
+                            },
+                            {
+                              "expression": {
+                                "operands": [
+                                  {
+                                    "expression": {
+                                      "operands": [
+                                        {
+                                          "variable": "request.resource.attr.aNumber"
+                                        }
+                                      ],
+                                      "operator": "int"
+                                    }
+                                  },
+                                  {
+                                    "value": 5
+                                  }
+                                ],
+                                "operator": "sub"
+                              }
+                            }
+                          ],
+                          "operator": "mod"
+                        }
+                      },
+                      {
+                        "value": 1
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                }
+              ],
+              "operator": "if"
+            }
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.parent.inner.aBool"
+                      },
+                      {
+                        "variable": "request.resource.attr.parent.aBool"
+                      }
+                    ],
+                    "operator": "eq"
+                  }
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "expression": {
+                          "operands": [
+                            {
+                              "variable": "request.resource.attr.mainCategory.subCategories"
+                            }
+                          ],
+                          "operator": "size"
+                        }
+                      },
+                      {
+                        "value": 1.5
+                      }
+                    ],
+                    "operator": "ge"
+                  }
+                }
+              ],
+              "operator": "or"
+            }
+          }
+        ],
+        "operator": "if"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "conditional/ternary/nested-over-parent-fields",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(!(\"inner\" in R.attr.parent)) ? ((R.attr.aBoolList[0] != false) ? (R.attr.parent.aBool == R.attr.parent.aBool) : (int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1)) : ((R.attr.parent.inner.aBool == R.attr.parent.aBool) || (size(R.attr.mainCategory.subCategories) >= 1.5))"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Each read of the parent is the same row; an adapter that joins the parent afresh for every read reaches MySQL's 61-table join limit, which fails the whole query. Found by fuzzing (fuzz/s139/0313, jpa on MySQL)."
+}
