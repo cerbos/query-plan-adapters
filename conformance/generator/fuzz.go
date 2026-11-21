@@ -29,6 +29,7 @@ type fuzzManifest struct {
 	Kept    int               `json:"kept"`
 	Dropped map[string]string `json:"dropped"`
 	Rows    int               `json:"rows,omitempty"`
+	Edges   int               `json:"edges,omitempty"`
 	Kind    string            `json:"kind,omitempty"`
 	From    string            `json:"from,omitempty"`
 	Steer   *fuzzSteer        `json:"steer,omitempty"`
@@ -49,6 +50,8 @@ func runSubcommand(name string, args []string) error {
 		return runFuzzShrink(ctx, args)
 	case "fuzz-compose":
 		return runFuzzCompose(args)
+	case "fuzz-exhaustive":
+		return runFuzzExhaustive(ctx, args)
 	}
 	return fmt.Errorf("unknown subcommand %q", name)
 }
@@ -58,6 +61,7 @@ func runFuzz(ctx context.Context, args []string) error {
 	seed := fs.Uint64("seed", 1, "the generator seed; the same seed and PDP pins give the same cases and goldens")
 	count := fs.Int("count", 500, "how many cases to generate before dropping the ones no adapter can be judged on")
 	rows := fs.Int("rows", 0, "how many generated rows to add to the dataset the run is recorded against")
+	edges := fs.Int("edges", 0, "at most how many rows to add on the edges of the run's own literals (fuzzedges.go)")
 	out := fs.String("out", "", "the directory to write into; must be empty or missing, and outside conformance/")
 	confFlag := fs.String("conformance", "", "the conformance directory (default: located from the working directory)")
 	steerDirs := fs.String("steer", "", "earlier fuzz directories, comma-separated, whose verdicts steer this run toward the shapes they translated least (fuzzsteer.go)")
@@ -84,7 +88,7 @@ func runFuzz(ctx context.Context, args []string) error {
 		return err
 	}
 	if *rows > 0 {
-		if in.dataset, err = generateRows(conf, *seed, *rows); err != nil {
+		if in.dataset, err = generateRows(conf, *seed, *rows, nil, 0); err != nil {
 			return err
 		}
 		if in.ds, err = loadDatasetFiles(in.dataset); err != nil {
@@ -106,11 +110,19 @@ func runFuzz(ctx context.Context, args []string) error {
 		}
 	}
 	cases := f.fuzzCases(*seed, *count)
+	if *edges > 0 {
+		if in.dataset, err = generateRows(conf, *seed, *rows, edgeValues(f.lits), *edges); err != nil {
+			return err
+		}
+		if in.ds, err = loadDatasetFiles(in.dataset); err != nil {
+			return err
+		}
+	}
 	recorded, dropped, err := recordFuzz(ctx, in, cases, *seed)
 	if err != nil {
 		return err
 	}
-	m := fuzzManifest{Seed: *seed, Count: *count, Rows: *rows, Tags: in.tags(), Dropped: dropped, Steer: steer}
+	m := fuzzManifest{Seed: *seed, Count: *count, Rows: *rows, Edges: *edges, Tags: in.tags(), Dropped: dropped, Steer: steer}
 	if err := writeFuzzDir(*out, m, recorded); err != nil {
 		return err
 	}

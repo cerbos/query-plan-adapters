@@ -156,20 +156,34 @@ func corpusAtoms(corpus *Corpus) []corpusAtom {
 	return atoms
 }
 
+// chooser is where the fuzzer's draws come from: a seeded generator, or the enumerator that walks
+// every choice of a bounded run (fuzzexhaustive.go).
+type chooser interface {
+	IntN(n int) int
+	Float64() float64
+}
+
 // fuzzer draws conditions from a seeded generator, so one seed always yields the same cases.
 type fuzzer struct {
-	rng   *rand.Rand
+	rng chooser
+	// lit is where literal values come from. It is rng itself, except in an exhaustive run, which
+	// enumerates shapes and samples their literals.
+	lit   chooser
 	atoms []corpusAtom
 	pools map[string][]any
 	// steer multiplies a feature's chance of being drawn; a feature it does not name keeps 1.
 	steer map[string]float64
 	// feats collects the attributes the leaf being drawn reads.
 	feats []string
+	// lits collects the literals drawn, by pool path, for fuzz -edges.
+	lits map[string][]any
 }
 
 func newFuzzer(seed uint64, corpus *Corpus, ds *Dataset) *fuzzer {
+	rng := rand.New(rand.NewPCG(seed, 0x9e3779b97f4a7c15))
 	return &fuzzer{
-		rng:   rand.New(rand.NewPCG(seed, 0x9e3779b97f4a7c15)),
+		rng:   rng,
+		lit:   rng,
 		atoms: corpusAtoms(corpus),
 		pools: valuePools(ds),
 	}
@@ -283,7 +297,16 @@ func poolPath(p string) string {
 
 func (f *fuzzer) pick(xs []string) string { return xs[f.rng.IntN(len(xs))] }
 
-func (f *fuzzer) chance(p float64) bool { return f.rng.Float64() < p }
+func (f *fuzzer) chance(p float64) bool {
+	if e, ok := f.rng.(*enumerator); ok {
+		return e.IntN(2) == 0
+	}
+	return f.rng.Float64() < p
+}
+
+func (f *fuzzer) litPick(xs []string) string { return xs[f.lit.IntN(len(xs))] }
+
+func (f *fuzzer) litChance(p float64) bool { return f.lit.Float64() < p }
 
 func (f *fuzzer) boost(feature string) float64 {
 	if b, ok := f.steer[feature]; ok {
@@ -294,6 +317,9 @@ func (f *fuzzer) boost(feature string) float64 {
 
 // weighted draws an index in [0, n) with chance proportional to weight(i).
 func (f *fuzzer) weighted(n int, weight func(i int) float64) int {
+	if e, ok := f.rng.(*enumerator); ok {
+		return e.IntN(n)
+	}
 	ws := make([]float64, n)
 	total := 0.0
 	for i := range ws {
@@ -347,23 +373,26 @@ func (f *fuzzer) strLit(path string) string {
 		}
 	}
 	boundary := []string{"", "%", "_", "100%", "a_b", "\\", "ONE", "one ", "é", "x", "public", "set", "dept"}
-	if len(strs) == 0 || f.chance(0.2) {
-		return celString(f.pick(boundary))
+	if len(strs) == 0 || f.litChance(0.2) {
+		s := f.litPick(boundary)
+		f.noteLiteral(poolPath(path), s)
+		return celString(s)
 	}
-	s := f.pick(strs)
+	s := f.litPick(strs)
 	r := []rune(s)
-	switch f.rng.IntN(6) {
+	switch f.lit.IntN(6) {
 	case 0:
 		if len(r) > 1 {
-			s = string(r[:1+f.rng.IntN(len(r)-1)])
+			s = string(r[:1+f.lit.IntN(len(r)-1)])
 		}
 	case 1:
 		if len(r) > 1 {
-			s = string(r[f.rng.IntN(len(r)-1)+1:])
+			s = string(r[f.lit.IntN(len(r)-1)+1:])
 		}
 	case 2:
 		s = strings.ToUpper(s)
 	}
+	f.noteLiteral(poolPath(path), s)
 	return celString(s)
 }
 
@@ -383,17 +412,18 @@ func (f *fuzzer) numLit(path string, double bool) string {
 		}
 	}
 	base := 0.0
-	if len(nums) > 0 && !f.chance(0.15) {
-		base = nums[f.rng.IntN(len(nums))]
+	if len(nums) > 0 && !f.litChance(0.15) {
+		base = nums[f.lit.IntN(len(nums))]
 	}
-	switch f.rng.IntN(5) {
+	switch f.lit.IntN(5) {
 	case 0:
 		base++
 	case 1:
 		base--
 	}
-	if double || f.chance(0.2) {
-		if base == 0 && f.chance(0.3) {
+	f.noteLiteral(poolPath(path), base)
+	if double || f.litChance(0.2) {
+		if base == 0 && f.litChance(0.3) {
 			return "-0.0"
 		}
 		if base == float64(int64(base)) {
@@ -480,10 +510,10 @@ func stringAlts() []alt {
 			return fmt.Sprintf("%s %s %s", a, f.pick(fuzzOrderings[2:]), f.strLit(a))
 		}),
 		eachOf("size", func(f *fuzzer) string {
-			return fmt.Sprintf("size(%s) %s %d", s(f), f.pick(fuzzOrderings), f.rng.IntN(6))
+			return fmt.Sprintf("size(%s) %s %d", s(f), f.pick(fuzzOrderings), f.lit.IntN(6))
 		}),
 		eachOf("matches", func(f *fuzzer) string {
-			return fmt.Sprintf("%s.matches(%s)", s(f), celString(f.pick(fuzzRegexes)))
+			return fmt.Sprintf("%s.matches(%s)", s(f), celString(f.litPick(fuzzRegexes)))
 		}),
 		eachOf("eqAttribute", func(f *fuzzer) string {
 			return fmt.Sprintf("%s %s %s", s(f), f.pick(fuzzEqs), f.attr(fuzzStrings))
@@ -519,7 +549,7 @@ func numberAlts() []alt {
 			if double {
 				return fmt.Sprintf("%s / 2.0 %s %s", a, f.pick(fuzzOrderings), f.numLit(a, true))
 			}
-			return fmt.Sprintf("%s %% %d %s %d", a, 2+f.rng.IntN(3), f.pick(fuzzEqs), f.rng.IntN(2))
+			return fmt.Sprintf("%s %% %d %s %d", a, 2+f.lit.IntN(3), f.pick(fuzzEqs), f.lit.IntN(2))
 		}),
 		eachOf("inLiterals", func(f *fuzzer) string {
 			a, double := n(f)
@@ -584,7 +614,7 @@ func listAlts() []alt {
 			return fmt.Sprintf("%s.all(t, t != %s)", f.attr([]string{"R.attr.tagNames"}), tags(f))
 		}},
 		{name: "tagFilterSize", share: 1.0 / 5, draw: func(f *fuzzer) string {
-			return fmt.Sprintf("%s.filter(t, t != %s).size() %s %d", f.attr([]string{"R.attr.tagNames"}), tags(f), f.pick(fuzzOrderings), f.rng.IntN(3))
+			return fmt.Sprintf("%s.filter(t, t != %s).size() %s %d", f.attr([]string{"R.attr.tagNames"}), tags(f), f.pick(fuzzOrderings), f.lit.IntN(3))
 		}},
 		{name: "tagExists", share: 1.0 / 5, draw: func(f *fuzzer) string {
 			return fmt.Sprintf("%s.exists(t, t == %s)", f.attr([]string{"R.attr.tagNames"}), tags(f))
@@ -633,7 +663,7 @@ func nullAlts() []alt {
 func timeAlts() []alt {
 	return []alt{
 		{name: "getFullYear", share: 0.25, draw: func(f *fuzzer) string {
-			return fmt.Sprintf("timestamp(%s).getFullYear() %s %d", f.attr(fuzzTimes), f.pick(fuzzOrderings), 2018+f.rng.IntN(20))
+			return fmt.Sprintf("timestamp(%s).getFullYear() %s %d", f.attr(fuzzTimes), f.pick(fuzzOrderings), 2018+f.lit.IntN(20))
 		}},
 		{name: "compare", share: 0.75, draw: func(f *fuzzer) string {
 			t := f.attr(fuzzTimes)
@@ -647,7 +677,9 @@ func timeAlts() []alt {
 					}
 				}
 			}
-			return fmt.Sprintf("timestamp(%s) %s timestamp(%s)", t, f.pick(fuzzOrderings), celString(f.pick(lits)))
+			lit := f.litPick(lits)
+			f.noteLiteral(poolPath(t), lit)
+			return fmt.Sprintf("timestamp(%s) %s timestamp(%s)", t, f.pick(fuzzOrderings), celString(lit))
 		}},
 	}
 }
