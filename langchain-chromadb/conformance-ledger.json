@@ -141,6 +141,10 @@
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `string()` reads a number from metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and `string()` renders -0.0 as \"-0\"."
     },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `string()` reads a number from metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and `string()` renders -0.0 as \"-0\"."
+    },
     "cast/string/negated-explicit-null": {
       "status": "unsupported",
       "reason": "No `Where` clause holds a computed operand, so the shape reaches the post-filter, which refuses it: `string()` reads a number from metadata, and the chromadb client stores metadata through JSON, which writes -0.0 as 0. A stored zero's sign is lost, and `string()` renders -0.0 as \"-0\"."

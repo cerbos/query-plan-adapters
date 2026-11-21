@@ -69,6 +69,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
     },
+    "arithmetic/divide/double-halved-past-single-precision": {
+      "status": "unsupported",
+      "reason": "Unexpected div expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing div over a field needs a script."
+    },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate division by a second document field without scripts"
@@ -270,6 +274,10 @@
       "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare the string() of a ternary without scripts."
     },
     "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
+    },
+    "cast/string/from-positive-zero-double": {
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
     },
@@ -1038,6 +1046,10 @@
       "status": "unsupported",
       "reason": "RE2 matches the empty string at an empty alternative inside a group, which Lucene's regexp reads differently."
     },
+    "regex/matches/end-anchor-after-nul": {
+      "status": "unsupported",
+      "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix: a Lucene regexp query matches the whole term, and a$ is neither."
+    },
     "regex/matches/end-anchor-mid-pattern": {
       "status": "unsupported",
       "reason": "The RE2-to-Lucene translator reads ^ and $ only at the ends of the pattern; Lucene has no anchors to place one mid-pattern, so it is refused."
@@ -1102,6 +1114,10 @@
       "status": "unsupported",
       "reason": "Lucene's regexp syntax has no (?i) flag and no \\w class."
     },
+    "regex/matches/negated-wildcard-after-nul": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .*x. Lucene's . matches a newline where RE2's does not."
+    },
     "regex/matches/non-capturing-group-optional-suffix": {
       "status": "unsupported",
       "reason": "The RE2-to-Lucene translator does not read a (?:...) group, so the pattern is refused."
@@ -1157,6 +1173,10 @@
     "regex/matches/whitespace-class": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: \\s*"
+    },
+    "regex/matches/wildcard-after-nul": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .*a. Lucene's . matches a newline where RE2's does not."
     },
     "regex/matches/word-boundary": {
       "status": "unsupported",

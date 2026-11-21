@@ -53,6 +53,10 @@
       "status": "unsupported",
       "reason": "string() of a number compared with \"0\" or \"-0\" has no translation: CEL spells -0.0 as \"-0\", and SQL cannot read the sign of a stored zero."
     },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "string() of a number compared with \"0\" or \"-0\" has no translation: CEL spells -0.0 as \"-0\", and SQL cannot read the sign of a stored zero."
+    },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",
       "reason": "string() of a number literal has no translation: the plan does not say whether CEL typed it as an int, spelled \"1000000\", or a double, spelled \"1e+06\"."

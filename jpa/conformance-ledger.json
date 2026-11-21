@@ -69,6 +69,10 @@
       "status": "unsupported",
       "reason": "string() of a double compared with \"-0\": SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds, and the stores print it without the sign), so the rendering CEL gives -0.0 cannot be told from 0.0."
     },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "string() of a double compared with \"-0\": SQL cannot read the sign of a stored zero (-0.0 = 0.0 holds, and the stores print it without the sign), so the rendering CEL gives -0.0 cannot be told from 0.0."
+    },
     "cast/string/negated-from-integral-ternary": {
       "status": "unsupported",
       "reason": "Same refusal as cast/string/from-integral-ternary, under negation: string() over a ternary of int literals has no JPA form."

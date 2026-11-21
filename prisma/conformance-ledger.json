@@ -149,6 +149,14 @@
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator, and string() of a ternary over the boolean column has no column to solve a where-filter against; the plan also ships the int literals as bare numbers, so CEL's \"1000000\" cannot be told from the double's \"1e+06\"."
     },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string(aDouble) == \"-0\" would be solved as aDouble = -0, and no store tells -0.0 from 0.0 in a comparison: a row holding 0.0, which CEL renders \"0\", would match."
+    },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-negative-zero-double`: aDouble = 0 would match i5, which holds -0.0 and renders \"-0\"."
+    },
     "cast/string/from-ternary-with-int-branch": {
       "status": "unsupported",
       "reason": "Prisma filters have no cast operator: string() of a ternary whose one branch is int() has no column to solve a where-filter against."

@@ -145,6 +145,10 @@
       "reason": "CEL spells -0.0 \"-0\" and 0.0 \"0\"; telling them apart needs the stored zero's sign, which SQLite discards on storage and no dialect exposes portably.",
       "status": "unsupported"
     },
+    "cast/string/from-positive-zero-double": {
+      "reason": "CEL spells -0.0 \"-0\" and 0.0 \"0\"; telling them apart needs the stored zero's sign, which SQLite discards on storage and no dialect exposes portably.",
+      "status": "unsupported"
+    },
     "cast/string/from-ternary-with-int-branch": {
       "reason": "string() over a ternary with a numeric constant branch is refused as in cast/string/from-integral-ternary, and its int() branch cannot be lowered to a SQL CAST either.",
       "status": "unsupported"

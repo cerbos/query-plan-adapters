@@ -160,6 +160,10 @@
       "status": "unsupported",
       "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
     },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "string() over a number cannot be lowered to SQL CAST: CEL prints an attribute double in Go's shortest %g form (\"1e+06\", \"2\", \"-0\") where CAST prints 1000000 or 2.0, and SQL compares -0.0 equal to 0.0 (SQLite stores it as 0.0), so the sign CEL prints is unreadable."
+    },
     "cast/string/from-ternary-with-int-branch": {
       "status": "unsupported",
       "reason": "The ternary's other branch is int(aDouble), and int() has no faithful SQL lowering (CAST reads a numeric prefix where CEL requires the whole string, and PostgreSQL and MySQL round where CEL truncates toward zero), so the string() over it is never reached."

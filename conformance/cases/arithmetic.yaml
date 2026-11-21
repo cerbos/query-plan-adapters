@@ -410,6 +410,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber - 45.0 <= 2147483647.0'
+- id: 'arithmetic/divide/double-halved-past-single-precision'
+  tier: adversarial
+  intent: 'A double attribute divided by a constant, compared just above the quotient of 0.3 (aDouble / 2.5 > 0.120000000000001).'
+  trap: '0.3 / 2.5 is 0.12 as doubles, so the 0.3 rows are denied. Reading aDouble as a single-precision float, as MySQL does for CAST(x AS FLOAT), gives 0.30000001 / 2.5 > 0.120000000000001 and grants them.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble / 2.5 > 0.120000000000001'
 - id: 'arithmetic/subtract/int-minus-principal-double'
   tier: adversarial
   intent: 'A negated int() conversion minus an integral principal attribute, OR''d with aNumber == 5 (!(int(aNumber) - P.attr.zero == 5) || aNumber == 5).'

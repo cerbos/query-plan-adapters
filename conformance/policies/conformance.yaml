@@ -486,6 +486,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber - 45.0 <= 2147483647.0
+    # arithmetic/divide/double-halved-past-single-precision
+    - actions:
+        - arithmetic/divide/double-halved-past-single-precision
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble / 2.5 > 0.120000000000001
     # arithmetic/subtract/int-minus-principal-double
     - actions:
         - arithmetic/subtract/int-minus-principal-double
@@ -738,6 +747,15 @@ resourcePolicy:
       condition:
         match:
           expr: string(R.attr.aDouble) == "-0"
+    # cast/string/from-positive-zero-double
+    - actions:
+        - cast/string/from-positive-zero-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(R.attr.aDouble) == "0" || R.attr.aNumber == 5
     # cast/string/negated-explicit-null
     - actions:
         - cast/string/negated-explicit-null
@@ -4166,6 +4184,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^[abx]+$")
+    # regex/matches/end-anchor-after-nul
+    - actions:
+        - regex/matches/end-anchor-after-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("a$")
+    # regex/matches/wildcard-after-nul
+    - actions:
+        - regex/matches/wildcard-after-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^.*a$")
+    # regex/matches/negated-wildcard-after-nul
+    - actions:
+        - regex/matches/negated-wildcard-after-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches("^.*x$")'
     # regex/matches/negated-class
     - actions:
         - regex/matches/negated-class

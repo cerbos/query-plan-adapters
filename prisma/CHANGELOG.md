@@ -8,6 +8,7 @@
 
 ### Fixed over-grants
 
+- **Breaking:** `string(x) == "0"` or `== "-0"` over a number column throws `UnsupportedQueryPlanError`. It became `x = 0` or `x = -0`, which matches both 0.0 and -0.0 in every store, though CEL renders them as "0" and "-0", so one of them was allowed against the PDP.
 - A negated macro over an `all` whose body nests another macro (`!categories.exists(c, c.subCategories.all(s, s.labels.exists(l, l.name == "gold")))`, `!categories.all(c, c.subCategories.exists(...))`) read an element whose nested macro errors (a label missing `name`) as false and allowed the row. The PDP denies it, and so does the adapter now.
 - `!=` against arithmetic over a to-one relation's field (`parent.aNumber - 0.5 != 2.5`) negated the relation filter as a whole, so it allowed every row with no parent. The negation now applies inside the relation, and a row with no parent is denied as the PDP denies it.
 

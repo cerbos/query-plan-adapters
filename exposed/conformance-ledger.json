@@ -65,6 +65,10 @@
       "status": "unsupported",
       "reason": "Cannot translate string() over a DoubleColumnType column: CEL renders a number as Go's shortest round-tripping form (1e+06, 2, -0) and no SQL CAST reproduces that for this column type, nor reads the sign of a stored -0.0. Text, integer and boolean columns are translatable, and a floating-point column only under == or != against a string literal other than \"0\" and \"-0\"."
     },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-negative-zero-double`: string() over a DoubleColumnType column is translated only against a literal other than \"0\" and \"-0\", since no store tells -0.0 from 0.0 in a comparison."
+    },
     "cast/string/from-ternary-with-int-branch": {
       "status": "unsupported",
       "reason": "Cannot translate string() over a computed value (a conversion, a ternary or a comparison): string() is lowered only over a mapped column, whose type decides CEL's spelling, and SQL CAST prints numbers and booleans differently from CEL (\"1e+06\", \"true\")."
