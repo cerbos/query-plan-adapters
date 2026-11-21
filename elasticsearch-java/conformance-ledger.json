@@ -201,6 +201,14 @@
       "status": "unsupported",
       "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
     },
+    "arithmetic/subtract/negated-relation-field-minus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
+    },
+    "arithmetic/subtract/relation-field-minus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
+    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "double() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."

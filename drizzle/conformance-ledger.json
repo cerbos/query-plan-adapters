@@ -60,6 +60,14 @@
       "status": "unsupported",
       "reason": "Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics \u2014 it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
     },
+    "arithmetic/subtract/negated-relation-field-minus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Arithmetic over a field reached through a relation needs the relation's row in a scalar expression, and the adapter reads relations only through EXISTS subqueries, so it is refused."
+    },
+    "arithmetic/subtract/relation-field-minus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Arithmetic over a field reached through a relation needs the relation's row in a scalar expression, and the adapter reads relations only through EXISTS subqueries, so it is refused."
+    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "double() cast over a string column \u2014 same whole-string-versus-leading-digits divergence as the int() cast over a string: Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics \u2014 it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."

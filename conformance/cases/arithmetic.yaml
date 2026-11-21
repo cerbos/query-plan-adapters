@@ -443,3 +443,17 @@ cases:
   condition:
     match:
       expr: '!(int(R.attr.aNumber) % 0 == 1) || R.attr.aString == "one"'
+- id: 'arithmetic/subtract/negated-relation-field-minus-constant-not-equals'
+  tier: adversarial
+  intent: 'The to-one parent arithmetic not-equals under negation (!(parent.aNumber - 0.5 != 2.5)).'
+  trap: 'A row with no parent errors in check() and stays denied under the negation; only rows whose parent aNumber is 3 are allowed.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.aNumber - 0.5 != 2.5)'
+- id: 'arithmetic/subtract/relation-field-minus-constant-not-equals'
+  tier: adversarial
+  intent: 'A to-one parent''s number minus a constant, compared with not-equals (parent.aNumber - 0.5 != 2.5).'
+  trap: 'A row with no parent, or none with an aNumber, errors in check() and is denied; negating the solved interval outside the relation allows every row with no parent. Found by fuzzing (fuzz/s137/0348, prisma).'
+  condition:
+    match:
+      expr: 'R.attr.parent.aNumber - 0.5 != 2.5'

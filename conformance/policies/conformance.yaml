@@ -513,6 +513,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!(int(R.attr.aNumber) % 0 == 1) || R.attr.aString == "one"'
+    # arithmetic/subtract/negated-relation-field-minus-constant-not-equals
+    - actions:
+        - arithmetic/subtract/negated-relation-field-minus-constant-not-equals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aNumber - 0.5 != 2.5)'
+    # arithmetic/subtract/relation-field-minus-constant-not-equals
+    - actions:
+        - arithmetic/subtract/relation-field-minus-constant-not-equals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aNumber - 0.5 != 2.5
     # cast/double/malformed-string
     - actions:
         - cast/double/malformed-string
