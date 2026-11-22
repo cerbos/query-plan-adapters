@@ -276,7 +276,9 @@ const buildStringToInt = (column: AnyColumn, expr: SQL): SQL | undefined => {
     dialect === "mysql" ? sql`trim(leading '0' from ${unsigned})` : sql`ltrim(${unsigned}, '0')`;
 
   const bound = sql`(case when ${sign} = '-' then '9223372036854775808' else '9223372036854775807' end)`;
-  const valid = sql`length(${unsigned}) > 0 and length(${nonDigits}) = 0 and (length(${significant}) < 19 or (length(${significant}) = 19 and ${significant} <= ${bound}))`;
+  // SQLite's substr() and length() stop at a NUL; instr() reads every byte.
+  const nulFree = dialect === "sqlite" ? sql`instr(${expr}, char(0)) = 0 and ` : sql``;
+  const valid = sql`${nulFree}length(${unsigned}) > 0 and length(${nonDigits}) = 0 and (length(${significant}) < 19 or (length(${significant}) = 19 and ${significant} <= ${bound}))`;
 
   const cast =
     dialect === "postgresql"

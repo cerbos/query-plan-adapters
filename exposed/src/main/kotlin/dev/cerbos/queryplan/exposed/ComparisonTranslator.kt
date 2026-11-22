@@ -16,6 +16,7 @@ import dev.cerbos.queryplan.exposed.sql.StringIntCast
 import dev.cerbos.queryplan.exposed.sql.IntRemainder
 import dev.cerbos.queryplan.exposed.sql.CountChars
 import dev.cerbos.queryplan.exposed.sql.TextCastExpression
+import dev.cerbos.queryplan.exposed.sql.OnSqlite
 import dev.cerbos.queryplan.exposed.sql.TimestampBinder
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Expression
@@ -817,9 +818,9 @@ internal class ComparisonTranslator(private val translation: Translation) {
     }
 
     /**
-     * A column against an instant. An instant finer than a microsecond is rounded when bound, and every
-     * store this adapter supports holds whole microseconds, so `x >= c` is solved as `x > floor(c)`, and
-     * no stored value equals it.
+     * A column against an instant. PostgreSQL, MySQL and H2 hold whole microseconds and SQLite whole
+     * milliseconds (Exposed writes its timestamps with three fraction digits there). An instant finer
+     * than the store's unit is equal to no stored value, so `x >= c` is solved as `x > floor(c)`.
      */
     private fun instantLeaf(
         operator: String,
@@ -827,10 +828,23 @@ internal class ComparisonTranslator(private val translation: Translation) {
         instant: Instant,
         variable: String,
     ): Op<Boolean> {
-        if (instant.nano % 1_000 == 0) {
+        val micros = instantLeafAt(ChronoUnit.MICROS, operator, target, instant, variable)
+        if (instant.nano % 1_000_000 == 0) return micros
+        return OnSqlite(instantLeafAt(ChronoUnit.MILLIS, operator, target, instant, variable), micros)
+    }
+
+    private fun instantLeafAt(
+        unit: ChronoUnit,
+        operator: String,
+        target: Resolution.Scalar,
+        instant: Instant,
+        variable: String,
+    ): Op<Boolean> {
+        val truncated = instant.truncatedTo(unit)
+        if (truncated == instant) {
             return compare(operator, target.expression, TimestampBinder.bind(instant, target.column, variable))
         }
-        val floor = TimestampBinder.bind(instant.truncatedTo(ChronoUnit.MICROS), target.column, variable)
+        val floor = TimestampBinder.bind(truncated, target.column, variable)
         return when (operator) {
             "eq" -> NeqOp(target.expression, target.expression)
             "ne" -> EqOp(target.expression, target.expression)

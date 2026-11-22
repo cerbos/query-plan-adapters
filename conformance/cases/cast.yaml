@@ -41,7 +41,7 @@ cases:
 - id: 'cast/int/negated-malformed-string'
   tier: adversarial
   intent: '!(int(aString) > 50): a string-to-int conversion under negation.'
-  trap: 'CEL errors and denies on a malformed number; SQL CAST reads a numeric prefix, yields 0 or wraps past int64 (i4), so the negation turns those errors into matches. h4 "0" and i5 "-0" are the integers it must keep.'
+  trap: 'CEL errors and denies on a malformed number; SQL CAST reads a numeric prefix, yields 0 or wraps past int64 (i4), so the negation turns those errors into matches. h4 "0" and i5 "-0" are the integers it must keep. k4 "-7\\0x" is an error too: a digit check that stops at the NUL, as SQLite''s SUBSTR, LENGTH and GLOB do, reads "-7" and allows it. Found by fuzzing (fuzz/s151/0259, drizzle and exposed / sqlite).'
   condition:
     match:
       expr: '!(int(R.attr.aString) > 50)'

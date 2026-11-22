@@ -1581,6 +1581,28 @@
       "attr": {
         "aBool": true,
         "aBoolList": [],
+        "aDouble": 40.3,
+        "aNumber": 40,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "-7\u0000x",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "-7\u0000x"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "k4"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
         "aDouble": 41.3,
         "aNumber": 41,
         "aNumberList": [],

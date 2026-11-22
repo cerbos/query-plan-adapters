@@ -31,10 +31,10 @@ internal class StringIntCast(private val expr: Expression<*>) : Function<Long>(L
             )
             is SQLiteDialect -> {
                 val body = Body(expr)
-                // GLOB and LENGTH stop at a NUL; the byte length of a digit string is its length.
+                // SUBSTR, GLOB and LENGTH stop at a NUL; INSTR reads every byte.
                 append(
-                    "(LENGTH(", body, ") BETWEEN 1 AND 18 AND NOT (", body, " GLOB '*[^0-9]*') AND ",
-                    "LENGTH(CAST(", body, " AS BLOB)) = LENGTH(", body, "))",
+                    "(INSTR(", expr, ", CHAR(0)) = 0 AND LENGTH(", body, ") BETWEEN 1 AND 18 AND NOT (",
+                    body, " GLOB '*[^0-9]*'))",
                 )
             }
             else -> append("REGEXP_LIKE(", expr, ", ", stringParam("\\A[+-]?[0-9]{1,18}\\z"), ")")

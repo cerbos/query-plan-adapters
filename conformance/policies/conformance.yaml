@@ -5948,6 +5948,24 @@ resourcePolicy:
       condition:
         match:
           expr: timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.000001Z")
+    # timestamp/greater-or-equal/sub-millisecond-literal-past-whole-second
+    - actions:
+        - timestamp/greater-or-equal/sub-millisecond-literal-past-whole-second
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) >= timestamp("2020-03-15T10:30:00.000001Z")
+    # timestamp/equals/sub-millisecond-literal-past-whole-second
+    - actions:
+        - timestamp/equals/sub-millisecond-literal-past-whole-second
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00.000001Z") || R.attr.aString == "xaXby"
     # timestamp/less-or-equal/sub-second-literal-at-stored-fraction
     - actions:
         - timestamp/less-or-equal/sub-second-literal-at-stored-fraction

@@ -19,7 +19,8 @@
     "i8",
     "i9",
     "k1",
-    "k3"
+    "k3",
+    "k4"
   ],
   "degenerateReason": null,
   "id": "string/concatenate/ordering",
