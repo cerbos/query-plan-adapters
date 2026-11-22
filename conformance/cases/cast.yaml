@@ -45,6 +45,13 @@ cases:
   condition:
     match:
       expr: '!(int(R.attr.aString) > 50)'
+- id: 'cast/int/signed-string-before-nul'
+  tier: adversarial
+  intent: 'int(aString) == 51 over a string holding a sign, digits, then a NUL.'
+  trap: 'k5 "+51" NUL "x" is not an integer, so int() errors and CEL denies it. SQLite''s LENGTH and SUBSTR stop at the NUL: a validation that strips the sign with SUBSTR sees "51" and CAST reads 51, granting k5. Found by fuzzing (fuzz/s157/0394, exposed / sqlite; fuzz/s157/0436, drizzle / sqlite).'
+  condition:
+    match:
+      expr: 'int(R.attr.aString) == 51'
 - id: 'cast/int/negative-fraction'
   tier: adversarial
   intent: int() over a double attribute compared with zero.

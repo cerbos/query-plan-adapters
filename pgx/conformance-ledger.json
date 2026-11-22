@@ -125,6 +125,10 @@
       "reason": "Same int() refusal as cast/int/double-truncation-bounds.",
       "status": "unsupported"
     },
+    "cast/int/signed-string-before-nul": {
+      "reason": "int() cannot be lowered to a PostgreSQL CAST, which reads what CEL rejects as malformed and rounds where CEL truncates.",
+      "status": "unsupported"
+    },
     "cast/int/string-beyond-double-precision": {
       "reason": "int() cannot be lowered to a PostgreSQL CAST, which reads what CEL rejects as malformed and rounds where CEL truncates.",
       "status": "unsupported"

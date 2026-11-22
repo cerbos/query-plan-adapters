@@ -573,7 +573,7 @@ recorded in that tier:
 | --- | --- |
 | core | 32 / 32 |
 | extended | 91 / 110 |
-| adversarial | 440 / 592 |
+| adversarial | 440 / 593 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the

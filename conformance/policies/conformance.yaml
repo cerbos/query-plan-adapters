@@ -594,6 +594,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(int(R.attr.aString) > 50)'
+    # cast/int/signed-string-before-nul
+    - actions:
+        - cast/int/signed-string-before-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aString) == 51
     # cast/int/negative-fraction
     - actions:
         - cast/int/negative-fraction

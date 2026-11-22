@@ -1603,6 +1603,28 @@
       "attr": {
         "aBool": true,
         "aBoolList": [],
+        "aDouble": 48.3,
+        "aNumber": 47,
+        "aNumberList": [],
+        "aOptionalString": "set",
+        "aString": "+51\u0000x",
+        "categories": [],
+        "coOwner": null,
+        "createdAt": "2036-06-06T06:06:06Z",
+        "createdBy": "2024-06-01T00:00:00Z",
+        "obj": {
+          "inner": "+51\u0000x"
+        },
+        "owner": "set",
+        "tagNames": [],
+        "tags": []
+      },
+      "id": "k5"
+    },
+    {
+      "attr": {
+        "aBool": true,
+        "aBoolList": [],
         "aDouble": 41.3,
         "aNumber": 41,
         "aNumberList": [],
