@@ -6011,6 +6011,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.createdAt != timestamp("2024-06-01T00:00:00Z")
+    # timestamp/equals/microsecond-literal-inside-stored-millisecond
+    - actions:
+        - timestamp/equals/microsecond-literal-inside-stored-millisecond
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00.123457Z") || R.attr.aNumber == 5
+    # timestamp/not-equals/microsecond-literal-inside-stored-millisecond
+    - actions:
+        - timestamp/not-equals/microsecond-literal-inside-stored-millisecond
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) != timestamp("2020-03-15T10:30:00.123457Z")
     # timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond
     - actions:
         - timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond
