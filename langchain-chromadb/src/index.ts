@@ -13,6 +13,7 @@ import { UnsupportedOperatorError } from "./errors";
 import { compilePostFilter } from "./postFilter";
 import type { PostFilter, PostFilterFields } from "./postFilter";
 import { isBoolean, isFunction, isNumber, isString, isTypeofObject, pair, typeofValue } from "./narrowing";
+import { rewriteSetFunctions } from "./set-functions";
 
 export { UnsupportedOperatorError };
 
@@ -100,15 +101,16 @@ export function queryPlanToChromaDB({
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
       const resolveField = fieldResolver(fieldNameMapper);
+      const condition = rewriteSetFunctions(queryPlan.condition);
 
       if (!allowPostFilter) {
         return {
           kind: PlanKind.CONDITIONAL,
-          filters: mapOperand(queryPlan.condition, resolveField),
+          filters: mapOperand(condition, resolveField),
         };
       }
 
-      return splitCondition(queryPlan.condition, fieldNameMapper, resolveField);
+      return splitCondition(condition, fieldNameMapper, resolveField);
     }
 
     default:
