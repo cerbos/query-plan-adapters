@@ -213,6 +213,13 @@
       "status": "unsupported",
       "reason": "hasIntersection between two stored collections needs a set-valued join that no row filter expresses; one side must be a literal list."
     },
+    "collection/has-only/mapped-names-with-nameless-tag": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, which translates only a stored list against a literal list; over a map() projection SQL has no set containment that keeps map()'s error on a nameless tag."
+    },
     "comparison/equals/list-holding-nan": {
       "status": "unsupported",
       "reason": "Each list holds `aDouble / 0.0`, a division by a constant zero kept as a conditional value (NaN or a signed infinity per row), which a list constructor cannot hold as a plain SQL expression."
