@@ -200,6 +200,10 @@
       "status": "unsupported",
       "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; two .* gaps are none of those, so the pattern is refused."
     },
+    "regex/matches/two-dot-star-gaps-beside-conjunct": {
+      "status": "unsupported",
+      "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; two .* gaps are none of those, so the pattern is refused."
+    },
     "regex/matches/unanchored-dot": {
       "status": "unsupported",
       "reason": "No provider's regex dialect is RE2, so matches() is lowered only for patterns that are a finite set of literals, a set of allowed characters, or a prefix and suffix around non-newline characters; a . between two literals is none of those, so the pattern is refused."

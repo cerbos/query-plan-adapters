@@ -105,9 +105,14 @@ function buildDirectOrInLeaf(
 ): PrismaFilter {
   const fieldName = getLeafField(fieldRef.path);
 
-  return values.length === 1
-    ? { [fieldName]: values[0] }
-    : { [fieldName]: { in: values } };
+  if (values.length === 1) return { [fieldName]: values[0] };
+
+  // Prisma's Boolean filter has no `in`.
+  if (fieldRef.valueType === "boolean") {
+    return { OR: values.map((value) => ({ [fieldName]: value })) };
+  }
+
+  return { [fieldName]: { in: values } };
 }
 
 /**
@@ -127,6 +132,9 @@ function guardedFieldFilter(
   leaf: PrismaFilter
 ): PrismaFilter {
   const fieldName = getLeafField(fieldRef.path);
+
+  // Prisma rejects `not: null` on a required column, which is never NULL anyway.
+  if (fieldRef.nullable === false) return wrapInRelations(fieldRef.relations, leaf);
 
   return wrapInRelations(fieldRef.relations, {
     AND: [{ [fieldName]: { not: null } }, leaf],

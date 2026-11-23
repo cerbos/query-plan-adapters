@@ -250,6 +250,10 @@ export function resolveFieldReference(
 
   const relations = [toRelationConfig(activeConfig.relation)];
 
+  let tailConfig: PreparedMapperConfig | undefined = activeConfig.relation.field
+    ? fields?.[activeConfig.relation.field]
+    : undefined;
+
   // Walk the remaining segments through nested relation mappings; the first segment that is
   // not a relation names the leaf column. A segment past that one would be read from the wrong
   // row: `parent.inner.x` with `inner` unmapped is not `parent.x`.
@@ -292,6 +296,7 @@ export function resolveFieldReference(
 
       relations.push(toRelationConfig(nextConfig.relation));
       field = nextConfig.relation.field;
+      tailConfig = field ? nextConfig.relation.fields?.[field] : undefined;
       currentMapper = nextConfig.relation.fields || {};
       currentParts = currentParts.slice(1);
     }
@@ -303,7 +308,7 @@ export function resolveFieldReference(
     // A column reached through a relation is typed by its own entry in `relation.fields`.
     valueType: leafConfig?.valueType ?? activeConfig.valueType,
     int32: leafConfig ? leafConfig.int32 : activeConfig.int32,
-    nullable: leafConfig ? leafConfig.nullable : activeConfig.nullable,
+    nullable: leafConfig ? leafConfig.nullable : (tailConfig?.nullable ?? activeConfig.nullable),
     nullAttributeRepresentation: activeConfig.nullAttributeRepresentation,
   };
 }

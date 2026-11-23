@@ -2,14 +2,14 @@
 
 # PDP 0.57.0 → 0.58.0
 
-What changes for the 760 cases between the previous PDP (`0.57.0`) and the current one (`0.58.0`).
+What changes for the 763 cases between the previous PDP (`0.57.0`) and the current one (`0.58.0`).
 
 | Change | Cases |
 |---|---|
 | Plan | 0 |
 | Allowed set | 0 |
 | Plan error | 0 |
-| New on `0.58.0` | 25 |
+| New on `0.58.0` | 27 |
 
 ## New on `0.58.0`
 
@@ -34,6 +34,8 @@ These cases name a `since` newer than the previous PDP, which cannot compile the
 - `collection/has-exactly/negated`
 - `collection/has-exactly/numbers-in-any-order`
 - `collection/has-exactly/single-element`
+- `collection/has-only/bool-list-two-literals`
+- `collection/has-only/chained-relation-names-value-first`
 - `collection/has-only/empty-literal-list`
 - `collection/has-only/mapped-names-with-nameless-tag`
 - `collection/has-only/negated`

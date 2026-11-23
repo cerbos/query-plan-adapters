@@ -1,0 +1,52 @@
+{
+  "allowed": [
+    "a1",
+    "a6",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-only/chained-relation-names-value-first",
+  "intent": "hasAll with a literal list as the receiver over the mainCategory.subNames chain ([\"finance\", \"tech\"].hasAll(mainCategory.subNames)).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "finance",
+              "tech"
+            ]
+          },
+          {
+            "variable": "request.resource.attr.mainCategory.subNames"
+          }
+        ],
+        "operator": "hasAll"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-only/chained-relation-names-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "[\"finance\", \"tech\"].hasAll(R.attr.mainCategory.subNames)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The plan puts the literal first, so this is subNames.hasOnly([\"finance\", \"tech\"]): a1, a6 and a8 are allowed and i9, which also holds \"legal\", is not; a NOT NULL guard on the required name column is rejected by stores that type it."
+}

@@ -327,6 +327,10 @@
       "status": "unsupported",
       "reason": "Two .* gaps are not a finite set of literals or a single prefix-and-suffix LIKE, and LIKE's % would cross a newline RE2's . does not, so the pattern is refused."
     },
+    "regex/matches/two-dot-star-gaps-beside-conjunct": {
+      "status": "unsupported",
+      "reason": "Two .* gaps are not a finite set of literals or a single prefix-and-suffix LIKE, and LIKE's % would cross a newline RE2's . does not, so the pattern is refused."
+    },
     "regex/matches/unanchored-dot": {
       "status": "unsupported",
       "reason": "A . between two literals is not a finite set of literals, and LIKE's _ would match a newline RE2's . does not, so the pattern is refused."

@@ -660,6 +660,7 @@ export const DECLARED_MAPPER: ConformanceMapper = {
             name: "subCategories",
             type: "many",
             field: "name",
+            fields: { name: { field: "name", valueType: "string", nullable: false } },
           },
         },
       },

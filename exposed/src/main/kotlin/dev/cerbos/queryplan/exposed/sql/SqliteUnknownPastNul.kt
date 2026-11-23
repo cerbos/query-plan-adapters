@@ -19,11 +19,12 @@ internal class SqliteUnknownPastNul(
     private val exact: Op<Boolean>?,
 ) : Op<Boolean>() {
     override fun toQueryBuilder(queryBuilder: QueryBuilder): Unit = queryBuilder {
-        when {
-            currentDialect !is SQLiteDialect -> append(predicate)
-            exact != null -> append(exact)
-            else -> append(TriLogic.baseUnlessUnknown(predicate, HoldsNul(value)))
+        val rendered = when {
+            currentDialect !is SQLiteDialect -> predicate
+            exact != null -> exact
+            else -> TriLogic.baseUnlessUnknown(predicate, HoldsNul(value))
         }
+        append("(", rendered, ")")
     }
 
     private class HoldsNul(private val value: Expression<*>) : Op<Boolean>() {

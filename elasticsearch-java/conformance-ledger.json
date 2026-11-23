@@ -610,6 +610,20 @@
       "status": "unsupported",
       "reason": "hasIntersection is translated only with a value list as its second operand."
     },
+    "collection/has-only/bool-list-two-literals": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
+    "collection/has-only/chained-relation-names-value-first": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
     "collection/has-only/empty-literal-list": {
       "status": "unsupported",
       "pdp": [
@@ -1254,6 +1268,10 @@
       "reason": "matches regex has a top-level alternation at index 1: RE2 reads ^a|b$ as two separately anchored alternatives, while Lucene matches the whole field against a|b, so the alternation must be parenthesised as ^(a|b)$: a|b"
     },
     "regex/matches/two-dot-star-gaps": {
+      "status": "unsupported",
+      "reason": "Lucene regexp . matches a newline where RE2's does not, so the RE2-to-Lucene translator refuses .* in a pattern."
+    },
+    "regex/matches/two-dot-star-gaps-beside-conjunct": {
       "status": "unsupported",
       "reason": "Lucene regexp . matches a newline where RE2's does not, so the RE2-to-Lucene translator refuses .* in a pattern."
     },
