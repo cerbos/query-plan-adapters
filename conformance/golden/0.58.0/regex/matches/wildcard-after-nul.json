@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "l4"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/wildcard-after-nul",
+  "intent": "matches(\"^.*a$\") over k3, whose aString is \"a\", NUL, \"x\".",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^.*a$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/wildcard-after-nul",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^.*a$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2's . matches a NUL, so k3 ends with x and is denied. Spelled as LIKE '%a', SQLite stops reading k3 at the NUL and grants it."
+}

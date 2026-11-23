@@ -560,13 +560,13 @@ error and stayed denied under negation). A bare boolean column is accepted as a 
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): every
-recorded plan from Cerbos PDP 0.57.0 and 0.56.0 is served by a stub PDP and fetched through the SDK's
+recorded plan from Cerbos PDP 0.58.0 and 0.57.0 is served by a stub PDP and fetched through the SDK's
 HTTP `CerbosClient`, so it arrives as your application receives it, then translated with one mapping,
 executed on SQLite (through a `Connection` and through an `AsyncSession`), PostgreSQL and MySQL
 (`utf8mb4_0900_bin`), and the returned ids are compared with the decisions the PDP recorded. The
 collections are stored as JSON on every store; the cases that read a collection declared in
 `collection_columns` run once more on PostgreSQL with them stored as arrays (`pgArray`). The results
-are the same on every store. For the current PDP, 0.57.0, where the total is every golden case
+are the same on every store. For the current PDP, 0.58.0, where the total is every golden case
 recorded in that tier:
 
 | Tier | Passed / total |
@@ -577,7 +577,7 @@ recorded in that tier:
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (81 cases) or is
 skipped because its golden file records a planner divergence, which no adapter can pass and the
-harness does not compare. Under 0.57.0 those are three extended cases and four adversarial cases:
+harness does not compare. Under 0.58.0 those are three extended cases and four adversarial cases:
 `arithmetic/add/int-literal-plus-constant` and
 `arithmetic/add/int-literal-negated` (the planner drops the int type of the literal in
 `R.attr.x + 1`, while `check()` has no double + int overload and denies every row, so write `1.0`),
@@ -587,9 +587,7 @@ it denies j2, while `check()` receives `aNumber` as absent and treats the errori
 matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)), and
 `type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`
 (the planner rewrites `in` over a scalar container to `==`, which `check()` has no overload for;
-[#596](https://github.com/cerbos/query-plan-adapters/issues/596)). On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too:
-that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0
-keeps `has()` in the plan.
+[#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
 [`conformance-ledger.json`](conformance-ledger.json) lists each refused case with the mechanism that
 rules it out.
 

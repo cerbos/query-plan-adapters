@@ -375,10 +375,10 @@ field name.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real ChromaDB
+and `check()` decisions recorded from Cerbos PDP 0.58.0 (and 0.57.0), executed as real ChromaDB
 metadata queries over the corpus's 44 seed records. The harness translates every case with
 `allowPostFilter: true` and applies the `postFilter` to every record the `where` returns, as a
-caller must. Passed cases on the current PDP, 0.57.0, out of every golden case in the tier:
+caller must. Passed cases on the current PDP, 0.58.0, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -392,8 +392,8 @@ passing: 22, 12 and 44 in the three tiers.
 
 Every case that does not pass is refused with `UnsupportedOperatorError`; none returns wrong
 records. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
-Planner-divergence cases are skipped, and count in the total but never as passed. On 0.57.0 that is
-three extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the record; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*`
+Planner-divergence cases are skipped, and count in the total but never as passed. On 0.58.0 that is
+three extended cases and four adversarial cases. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*`
 cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2,
 while `checkResource` receives `aNumber` as absent and treats the erroring deny rule as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Two `type-mismatch/in/*` cases

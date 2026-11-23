@@ -94,8 +94,8 @@
   "plannerDivergence": {
     "issue": "a has() guard is dropped from the plan even under a negation",
     "pdp": [
-      "0.56.0",
-      "0.57.0"
+      "0.57.0",
+      "0.58.0"
     ],
     "reason": "The planner drops has(t.name) because the next conjunct reads t.name, so the plan is not(exists(tags, t.name != \"x\")). That is sound only in positive position: check() short-circuits to false on the nameless tags of b5 and e1 and allows them, while the plan errors there and denies them. Found by fuzzing (fuzz/s43/0085)."
   },

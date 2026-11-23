@@ -348,18 +348,18 @@ surface. The [pgx adapter](../pgx) quotes defensively instead.
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the plans
-Cerbos PDP 0.57.0 recorded for each case are translated, run against the corpus dataset in real
+Cerbos PDP 0.58.0 recorded for each case are translated, run against the corpus dataset in real
 Ent-built queries on **SQLite, PostgreSQL and MySQL**, and the returned ids are compared with the
 recorded `check()` decisions. Every store is replayed twice: once through a mapper inferred from ent schema
 types with only the overrides the corpus needs, and once through a fully declared mapper. Both
 must give the same result, and each writes its own fuzz results (`<store>` for the declared
-mapper, `<store>+schema` for the inferred one). The previous PDP's goldens (0.56.0) are replayed too. The counts are
+mapper, `<store>+schema` for the inferred one). The previous PDP's goldens (0.57.0) are replayed too. The counts are
 the same on all three databases. The total is every golden case in the tier; a case whose golden
 records a planner divergence (the plan and `check()` disagree, so no adapter can pass) is skipped
-and counts toward the total but not toward passed — on 0.57.0 that is three extended cases and four
+and counts toward the total but not toward passed — on 0.58.0 that is three extended cases and four
 adversarial cases.
 
-| Tier | Passed / total (PDP 0.57.0) |
+| Tier | Passed / total (PDP 0.58.0) |
 | --- | --- |
 | core | 32 / 32 |
 | extended | 104 / 110 |
@@ -367,7 +367,7 @@ adversarial cases.
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason, and one ledger
-holds for every dialect. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. Two of the skipped cases, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
+holds for every dialect. Two of the skipped cases, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
 planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
 while `check()` has no double + int overload and denies every row, so write `1.0`.
 Two more, `type-mismatch/in/number-field-in-scalar-principal` and

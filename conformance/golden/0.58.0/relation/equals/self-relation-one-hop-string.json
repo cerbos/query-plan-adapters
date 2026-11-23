@@ -1,0 +1,49 @@
+{
+  "allowed": [
+    "a1",
+    "c1",
+    "e1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/self-relation-one-hop-string",
+  "intent": "String equality on a field of peer, a to-one relation from the resource table to itself (peer.aString == \"One\").",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.peer.aString"
+          },
+          {
+            "value": "One"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/self-relation-one-hop-string",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.peer.aString == \"One\""
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "c1 is its own peer. A subquery whose join compares the inner table with itself (peer.id = peer.peerId) instead of with the outer row is true for every row once c1 matches, and over-grants all of them; b1's peer a1 holds \"one\"."
+}

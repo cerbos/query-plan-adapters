@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "l4"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/end-anchor-after-nul",
+  "intent": "matches(\"a$\") over k3, whose aString is \"a\", NUL, \"x\".",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "a$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/end-anchor-after-nul",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"a$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "k3 ends with x, so it is denied. SQLite's LIKE reads a string as C text up to the first NUL, so the suffix pattern %a matches k3."
+}

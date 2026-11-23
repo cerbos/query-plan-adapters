@@ -52,7 +52,7 @@ Each adapter replays one fast store leg, the leg that needs no container:
 |---|---|
 | ent | `go test -run TestAdversarialConformance/sqlite` |
 | pgx | `go test -run TestAdversarialConformance` (its own `render.go` and `adapter.go`; the vendored translator is ent's) |
-| sqlalchemy | `pytest tests/test_adversarial_conformance.py -k sqlite-declared-0.57.0` |
+| sqlalchemy | `pytest tests/test_adversarial_conformance.py -k sqlite-declared-0.58.0` |
 | drizzle | `jest --config jest.adversarial.config.js` (SQLite) |
 
 A survivor on SQLite can still be killed by another store's leg; a dialect branch is the usual

@@ -366,9 +366,9 @@ a collection predicate, or one about a null operand under `"omitted"`, stands.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real MongoDB
+and `check()` decisions recorded from Cerbos PDP 0.58.0 (and 0.57.0), executed as real MongoDB
 queries over the corpus's 44 seed documents on MongoDB 7 and 9. Passed cases on the current PDP,
-0.56.0, identical on both servers, where the total is every golden case in that tier:
+0.58.0, identical on both servers, where the total is every golden case in that tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -377,11 +377,11 @@ queries over the corpus's 44 seed documents on MongoDB 7 and 9. Passed cases on 
 | adversarial | 553 / 593 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.57.0 that is three extended cases and four adversarial cases.
+pass them. On 0.58.0 that is three extended cases and four adversarial cases.
 `type-mismatch/in/number-field-in-scalar-principal` and `type-mismatch/in/string-field-in-dyn-string`:
 the planner rewrites an `in` over a scalar container to `eq`, while `check()` has no such overload
 and denies ([#596](https://github.com/cerbos/query-plan-adapters/issues/596)).
-On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*` cases whose DENY condition reads `aNumber`, which j2
+ `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. Three `composition/*` cases whose DENY condition reads `aNumber`, which j2
 lacks: the plan's `not(...)` of it denies j2, while `checkResource` receives `aNumber` as absent,
 treats the erroring deny rule as not matching and allows the document
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). Every other case that does not pass is refused with `UnsupportedQueryPlanError`;

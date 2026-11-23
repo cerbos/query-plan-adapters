@@ -262,21 +262,21 @@ to prove it.
 ## Conformance contract
 
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the plans
-Cerbos PDP 0.57.0 recorded for each case are translated, run against the corpus dataset in real
+Cerbos PDP 0.58.0 recorded for each case are translated, run against the corpus dataset in real
 PostgreSQL, and the returned ids are compared with the recorded `check()` decisions. The previous
 PDP's goldens (0.55.0) are replayed too.
 
-| Tier | Passed / total (PDP 0.57.0) |
+| Tier | Passed / total (PDP 0.58.0) |
 | --- | --- |
 | core | 32 / 32 |
 | extended | 104 / 110 |
 | adversarial | 491 / 593 |
 
-The total is every golden case in the tier for PDP 0.57.0. A case whose golden records a
+The total is every golden case in the tier for PDP 0.58.0. A case whose golden records a
 `plannerDivergence` is skipped rather than compared, and counts as not passed.
 
 Every case that does not pass is either refused with `ErrUnsupported` or a recorded divergence;
-[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. Two of the skipped cases, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
+[`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason. Two of the skipped cases, `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, are the
 planner dropping the int type of the literal in `R.attr.x + 1`: the plan is the double spelling's,
 while `check()` has no double + int overload and denies every row, so write `1.0`.
 Two more, `type-mismatch/in/number-field-in-scalar-principal` and

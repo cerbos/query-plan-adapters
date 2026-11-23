@@ -486,9 +486,9 @@ its declaration, stays a plain `Error`. The shapes this adapter refuses are list
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real Drizzle
+and `check()` decisions recorded from Cerbos PDP 0.58.0 (and 0.57.0), executed as real Drizzle
 queries over the corpus's 44 seed rows on SQLite, PostgreSQL and MySQL, each under its default collation.
-Passed cases on the current PDP, 0.57.0, identical on all three stores. The total is every golden
+Passed cases on the current PDP, 0.58.0, identical on all three stores. The total is every golden
 case in the tier; planner-divergence cases are skipped, not run, and count as not passed:
 
 | Tier | Passed / total |
@@ -498,11 +498,11 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | adversarial | 485 / 593 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
-wrong rows on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
-reason. On 0.57.0, three extended cases and four adversarial cases are declared planner divergences and are
+wrong rows on 0.58.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its
+reason. On 0.58.0, three extended cases and four adversarial cases are declared planner divergences and are
 skipped:
 
-- On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan.
+-
 - `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`.
 - `composition/allow-and-deny/conditional-deny`,
   `composition/allow-and-deny/unconditional-allow-conditional-deny` and

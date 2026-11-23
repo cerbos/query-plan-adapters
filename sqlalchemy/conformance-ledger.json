@@ -506,10 +506,7 @@
     },
     "relation/has/negated-two-hops-attribute": {
       "status": "unsupported",
-      "pdp": [
-        "0.57.0"
-      ],
-      "reason": "parent.inner.aString sits below the mapped parent, two hops down through the unmapped parent.inner: has() through a missing parent or parent.inner is an error CEL denies under both polarities, while the negated IS NULL over the correlated scalar subquery selects those rows, so has() below a mapped prefix at any depth is refused unless an operator_override_fns entry for has answers it. The 0.56.0 planner folds the has() away, so that plan translates."
+      "reason": "parent.inner.aString sits below the mapped parent, two hops down through the unmapped parent.inner: has() through a missing parent or parent.inner is an error CEL denies under both polarities, while the negated IS NULL over the correlated scalar subquery selects those rows, so has() below a mapped prefix at any depth is refused unless an operator_override_fns entry for has answers it."
     },
     "relation/has/parent": {
       "status": "unsupported",

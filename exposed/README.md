@@ -591,9 +591,9 @@ prove the adapter's own collation.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 seed rows on
+plan of Cerbos PDP 0.58.0 and 0.57.0, it translates the plan, runs the query against 43 seed rows on
 H2, SQLite, PostgreSQL and MySQL, and compares the returned ids with the `check()` decisions the PDP
-recorded. No PDP runs in the test. Results for the current PDP (0.57.0), where the total is every
+recorded. No PDP runs in the test. Results for the current PDP (0.58.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
 total but not as passed:
 
@@ -682,11 +682,10 @@ These translate, each by rewriting into a shape above rather than by a new lower
 over the `EXPLICIT` side, made UNKNOWN when the other side's column is NULL.
 
 The cases the corpus declares a planner divergence (`plannerDivergence`: the plan and `check()`
-disagree, so no adapter can pass them) are skipped. On 0.56.0 these include the `null/has/*` cases
-whose `has()` is not a guard: that planner folds `has()` on an omitted attribute to true while
-`check()` denies the row. 0.57.0 keeps `has()` in the plan, and the adapter translates it (see
-[`has()` reads the same declaration](#has-reads-the-same-declaration)). On 0.56.0, write
-`R.attr.x != null` rather than `has(R.attr.x)` for a database-backed attribute declared `OMITTED`.
+disagree, so no adapter can pass them) are skipped. From 0.57.0 the plan keeps `has()`, and the adapter
+translates it (see [`has()` reads the same declaration](#has-reads-the-same-declaration)). On 0.56.0
+and earlier, write `R.attr.x != null` rather than `has(R.attr.x)` for a database-backed attribute
+declared `OMITTED`.
 
 Other guarantees:
 

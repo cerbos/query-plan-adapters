@@ -71,8 +71,8 @@
   "plannerDivergence": {
     "issue": "https://github.com/cerbos/query-plan-adapters/issues/567",
     "pdp": [
-      "0.56.0",
-      "0.57.0"
+      "0.57.0",
+      "0.58.0"
     ],
     "reason": "The planner drops the double type of the substituted P.attr.zero: the plan is byte-identical to !(int(aNumber) - 0 == 5) || aNumber == 5, which allows rows, while check() has no int - double overload and allows only a1."
   },

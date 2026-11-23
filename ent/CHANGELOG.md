@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Requires `github.com/cerbos/cerbos/api/genpb` v0.58.0 (was v0.57.0), and is tested against
+  Cerbos 0.58.0 and 0.57.0.
 - **Breaking:** a comparison between two attributes neither of which declares a `ValueType` is
   refused on MySQL, and an ordering of two such attributes on PostgreSQL. The store compared them
   under the columns' own collation, so on MySQL `parent.name == owner` granted "set" against

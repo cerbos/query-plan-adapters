@@ -165,12 +165,12 @@ check and a missing condition are raised by `toSpecification`.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md) through
-`toSpecification`: for each recorded plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan,
+`toSpecification`: for each recorded plan of Cerbos PDP 0.58.0 and 0.57.0, it translates the plan,
 runs the query against 43 of the corpus's 44 seed rows on H2, and compares the returned ids with the
 `check()` decisions the PDP recorded. The jpa adapter replays the same corpus on H2, PostgreSQL and
 MySQL; the SQL is its, so this harness proves the Specification selects what the jpa filter does.
 The ledger lacks `null-list`, so j4 is not loaded. No PDP runs in the test. Results for the current
-PDP (0.56.0), where the total is every golden case of that tier; a case marked as a planner
+PDP (0.58.0), where the total is every golden case of that tier; a case marked as a planner
 divergence is skipped, and counts toward the total but not as passed:
 
 | Tier | Passed / total |

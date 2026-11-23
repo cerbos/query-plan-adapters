@@ -94,8 +94,8 @@
   "plannerDivergence": {
     "issue": "membership in an empty list folds to false and drops an erroring needle",
     "pdp": [
-      "0.56.0",
-      "0.57.0"
+      "0.57.0",
+      "0.58.0"
     ],
     "reason": "The planner folds t.name in P.attr.emptyTeams to false, so the plan is not(exists(tags, false)) and allows every row. check() reads t.name on the nameless tags of b5, b6 and e1, errors, and denies them. Found by fuzzing (fuzz/s41/0109)."
   },

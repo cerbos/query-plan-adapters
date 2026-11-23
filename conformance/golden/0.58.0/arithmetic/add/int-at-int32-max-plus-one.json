@@ -1,0 +1,64 @@
+{
+  "allowed": [
+    "n1"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/add/int-at-int32-max-plus-one",
+  "intent": "int(aNumber) + 1 > 2147483647, which n1 alone holds: its aNumber is the 32-bit integer maximum.",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "request.resource.attr.aNumber"
+                      }
+                    ],
+                    "operator": "int"
+                  }
+                },
+                {
+                  "value": 1
+                }
+              ],
+              "operator": "add"
+            }
+          },
+          {
+            "value": 2147483647
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/add/int-at-int32-max-plus-one",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "int(R.attr.aNumber) + 1 > 2147483647"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "CEL adds ints in 64 bits, so n1's sum is 2147483648; adding in the column's 32-bit integer type overflows on n1, and PostgreSQL then fails the whole query. Found by fuzzing (fuzz/s139/0194, drizzle on PostgreSQL, on a generated row at the 32-bit minimum)."
+}

@@ -49,7 +49,7 @@ var adapters = map[string]adapter{
 	"sqlalchemy": {
 		files: []string{"src/cerbos_sqlalchemy/*.py"},
 		cmd: []string{".venv/bin/pytest", "tests/test_adversarial_conformance.py", "-q", "-x",
-			"-p", "no:cacheprovider", "-k", "sqlite-declared-0.57.0"},
+			"-p", "no:cacheprovider", "-k", "sqlite-declared-0.58.0"},
 		env:       func(dir string) []string { return []string{"PYTHONPATH=" + filepath.Join(dir, "src")} },
 		link:      []string{".venv"},
 		nonViable: regexp.MustCompile(`SyntaxError|IndentationError`),

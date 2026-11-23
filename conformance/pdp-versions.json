@@ -1,4 +1,4 @@
 {
-  "current": {"tag": "0.57.0", "digest": "sha256:e5e3b150b3cb0090975605254f255164567d67e233634199fb20972e3eaff300"},
-  "previous": {"tag": "0.56.0", "digest": "sha256:540643bc67ba628011a150ad1d3370f285daa38995be5cd7a4be181da902bec1"}
+  "current": {"tag": "0.58.0", "digest": "sha256:ef8fcc8b7a1b67fab17023113947b8f549a6225abca6cd693725242ad09322b4"},
+  "previous": {"tag": "0.57.0", "digest": "sha256:e5e3b150b3cb0090975605254f255164567d67e233634199fb20972e3eaff300"}
 }
