@@ -9,6 +9,7 @@ import type { SchemaSource } from "./schema";
 import { isMongoDocument } from "./expression";
 import type { MongoValue, MongooseFilter } from "./expression";
 import { isBoolean, isObject } from "./narrowing";
+import { rewriteSetFunctions } from "./set-functions";
 
 export { PlanKind };
 
@@ -134,7 +135,7 @@ export function queryPlanToMongoose({
     case PlanKind.CONDITIONAL: {
       assertPlannerOperators(queryPlan.condition);
 
-      const filters = shieldExpressions(translateCondition(queryPlan.condition, ctx));
+      const filters = shieldExpressions(translateCondition(rewriteSetFunctions(queryPlan.condition), ctx));
 
       if (!isMongoDocument(filters)) {
         throw new UnsupportedQueryPlanError("The condition did not translate to a filter document");

@@ -483,3 +483,79 @@ func (b *builder) mapLiteralLookup(op CmpOp, n *node, m Mapper) (Expr, bool, err
 	}
 	return Case{Whens: []When{{Cond: isKey, Then: negate(hit, op == OpNe)}}}, true, nil
 }
+
+// rewriteSetFunctions rewrites hasAll, hasAny, hasOnly and hasExactly (CEL list extensions, Cerbos
+// 0.58) into hasIntersection and isSubset, bottom-up. Each rewrite is exact in CEL, errors
+// included; a call without exactly one literal list operand is left for the dispatch to refuse.
+func rewriteSetFunctions(n *node) *node {
+	if !n.isExpr() {
+		return n
+	}
+	operands := make([]*node, len(n.operands))
+	for i, o := range n.operands {
+		operands[i] = rewriteSetFunctions(o)
+	}
+	out := &node{kind: nodeExpression, operator: n.operator, operands: operands}
+	if rewritten, ok := setFunction(out); ok {
+		return rewritten
+	}
+	return out
+}
+
+func setFunction(n *node) (*node, bool) {
+	switch n.operator {
+	case "hasAll", "hasAny", "hasOnly", "hasExactly":
+	default:
+		return nil, false
+	}
+	if len(n.operands) != binaryOperands {
+		return nil, false
+	}
+	isLiteralList := func(o *node) bool {
+		_, ok := o.value.([]any)
+		return o.isValue() && ok
+	}
+	list, literal := n.operands[0], n.operands[1]
+	firstLiteral := isLiteralList(list)
+	if firstLiteral == isLiteralList(literal) {
+		return nil, false
+	}
+	if firstLiteral {
+		list, literal = literal, list
+	}
+	values, _ := literal.value.([]any)
+
+	call := func(operator string, operands ...*node) *node {
+		return &node{kind: nodeExpression, operator: operator, operands: operands}
+	}
+	containsAll := func() *node {
+		if len(values) == 0 {
+			return call("not", call("hasIntersection", list, &node{kind: nodeValue, value: []any{}}))
+		}
+		tests := make([]*node, len(values))
+		for i, v := range values {
+			tests[i] = call("hasIntersection", list, &node{kind: nodeValue, value: []any{v}})
+		}
+		if len(tests) == 1 {
+			return tests[0]
+		}
+		return call("and", tests...)
+	}
+
+	operator := n.operator
+	if firstLiteral && operator == "hasAll" {
+		operator = "hasOnly"
+	} else if firstLiteral && operator == "hasOnly" {
+		operator = "hasAll"
+	}
+	switch operator {
+	case "hasAny":
+		return call("hasIntersection", list, literal), true
+	case "hasAll":
+		return containsAll(), true
+	case "hasOnly":
+		return call("isSubset", list, literal), true
+	default:
+		return call("and", containsAll(), call("isSubset", list, literal)), true
+	}
+}

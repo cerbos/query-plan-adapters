@@ -1,0 +1,56 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-any/two-elements",
+  "intent": "hasAny of a resource list and two literals (tagNames.hasAny([\"public\", \"other\"])).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "value": [
+              "public",
+              "other"
+            ]
+          }
+        ],
+        "operator": "hasAny"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-any/two-elements",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames.hasAny([\"public\", \"other\"])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "hasAny is hasIntersection by another name: any shared element allows the row, matching stays case-sensitive (c1's \"Public\"), and duplicates in a3 change nothing."
+}

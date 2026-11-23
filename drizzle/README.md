@@ -459,7 +459,7 @@ strings, or a receiver that is not a mapped string column.
 | Comparison | `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `in` |
 | String | `contains`, `startsWith`, `endsWith` (via `REPLACE`), `size()` over a string, `+` (concatenation), `upperAscii()` (26 `REPLACE`s, so only ASCII letters fold), `matches()` (see below) |
 | Null | `eq` / `ne` against null become `IS NULL` / `IS NOT NULL` (the planner has no existence operator) |
-| Collections | `hasIntersection`, `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, `isSubset`, `except` / `intersect` compared with `[]`, membership (including in `map()`, `filter()` and `L + [...]`) |
+| Collections | `hasIntersection`, `hasAny`, `hasAll`, `hasOnly`, `hasExactly` (against a literal list), `exists`, `exists_one`, `all`, `size`, `size(filter(...))`, `except`, `isSubset`, `except` / `intersect` compared with `[]`, membership (including in `map()`, `filter()` and `L + [...]`) |
 | Other | arithmetic, ternaries (including a list ternary compared with or searched for a constant), hierarchy operations, typed timestamps and constant `duration()` shifts, `timeSince()`, index access (including a constant map indexed by an attribute, and `R.attr.m["key"]`), `string()` over a boolean (a column, a predicate, a ternary, or a boolean read through a to-one relation) or text column compared with a string, `string()` of a number, an `int()` or a `size()` compared for equality with a string, a field of a positioned relation's row read by constant index (`R.attr.tags[0].name`) compared with a constant, and `map()` or `except()` over a positioned relation compared for equality with a list literal |
 
 Shapes the adapter cannot express throw `UnsupportedQueryPlanError` rather than emit a broader
@@ -494,8 +494,8 @@ case in the tier; planner-divergence cases are skipped, not run, and count as no
 | Tier | Passed / total |
 | --- | --- |
 | core | 32 / 32 |
-| extended | 106 / 110 |
-| adversarial | 485 / 593 |
+| extended | 110 / 114 |
+| adversarial | 503 / 614 |
 
 Every case that runs and does not pass is refused with `UnsupportedQueryPlanError`; none returns
 wrong rows on 0.58.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its

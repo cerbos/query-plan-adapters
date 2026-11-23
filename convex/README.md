@@ -224,7 +224,7 @@ Evaluated in JavaScript (`postFilter`, needs `allowPostFilter: true`):
 | Category | Operators | Behaviour |
 | --- | --- | --- |
 | String | `contains`, `startsWith`, `endsWith` | `includes` / `startsWith` / `endsWith` |
-| Collection | `hasIntersection`, `index`, `get-field`, `size` | CEL-compatible collection and nested-field evaluation; `index` on a map looks a key up, and an absent key is an error |
+| Collection | `hasIntersection`, `hasAny`, `hasAll`, `hasOnly`, `hasExactly`, `index`, `get-field`, `size` | CEL-compatible collection and nested-field evaluation; `index` on a map looks a key up, and an absent key is an error |
 | Set operations | `except`, `intersect`, `isSubset` | Cerbos's list semantics: `except` and `intersect` keep duplicates, `intersect` takes its elements from the shorter list |
 | Literals | `list`, `struct` / `set-field`, list `+` | A list or map literal holding expressions; an element's error is the literal's, and `+` concatenates two lists in order |
 | Quantifiers | `exists`, `exists_one`, `all` | CEL lambda semantics, including empty collections, missing members and literal lists; the two-variable forms bind (index, element) over a list and (key, value) over a map |
@@ -284,8 +284,8 @@ total is every golden case in that tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 32 / 32 |
-| extended | 106 / 110 |
-| adversarial | 558 / 593 |
+| extended | 110 / 114 |
+| adversarial | 579 / 614 |
 
 Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
 them, because the plan and `check()` disagree. On 0.58.0 there are seven, three extended and four

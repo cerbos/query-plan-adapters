@@ -163,7 +163,7 @@ func loadFuzzInputs(conf string) (*fuzzInputs, error) {
 	if err := decodeJSONFile(filepath.Join(conf, "pdp-versions.json"), &versions); err != nil {
 		return nil, err
 	}
-	return &fuzzInputs{conf: conf, corpus: corpus, ds: ds, versions: []pdpVersion{versions.Previous, versions.Current}}, nil
+	return &fuzzInputs{conf: conf, corpus: corpus.forTag(versions.Previous.Tag), ds: ds, versions: []pdpVersion{versions.Previous, versions.Current}}, nil
 }
 
 func splitList(s string) []string {

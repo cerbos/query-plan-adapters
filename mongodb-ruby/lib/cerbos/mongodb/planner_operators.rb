@@ -7,9 +7,10 @@ module Cerbos
     module Plan
       PLANNER_OPERATORS = %w[
         add all ancestorOf and contains descendentOf div double duration dyn endsWith eq except
-        exists exists_one filter ge get-field gt has hasIntersection has_intersection hierarchy if
-        in index int intersect isSubset lambda le list lt map matches mod mult ne not or overlaps
-        set-field size startsWith string struct sub timeSince timestamp upperAscii
+        exists exists_one filter ge get-field gt has hasAll hasAny hasExactly hasIntersection
+        hasOnly has_intersection hierarchy if in index int intersect isSubset lambda le list lt map
+        matches mod mult ne not or overlaps set-field size startsWith string struct sub timeSince
+        timestamp upperAscii
       ].to_set.freeze
     end
   end

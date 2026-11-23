@@ -286,3 +286,56 @@ def assert_no_same_collection_correlation(
         return
     for child in operand.operands:
         assert_no_same_collection_correlation(child, enclosing)
+
+
+_SET_FUNCTIONS = frozenset({"hasAll", "hasAny", "hasOnly", "hasExactly"})
+
+
+def rewrite_set_functions(operand: Operand) -> Operand:
+    """Rewrite hasAll, hasAny, hasOnly and hasExactly into hasIntersection and isSubset.
+
+    Each rewrite is exact in CEL, errors included; a call without exactly one literal list
+    operand is left for the translator to refuse.
+    """
+    if not isinstance(operand, Expr):
+        return operand
+    node = Expr(
+        operand.operator, tuple(rewrite_set_functions(o) for o in operand.operands)
+    )
+    return _set_function(node) or node
+
+
+def _is_literal_list(operand: Operand) -> bool:
+    return isinstance(operand, Value) and isinstance(operand.value, list)
+
+
+def _set_function(node: Expr) -> Operand | None:
+    if node.operator not in _SET_FUNCTIONS or len(node.operands) != 2:
+        return None
+    first, second = node.operands
+    first_literal = _is_literal_list(first)
+    if first_literal == _is_literal_list(second):
+        return None
+    collection, literal = (second, first) if first_literal else (first, second)
+    assert isinstance(literal, Value)
+    operator = node.operator
+    if first_literal and operator == "hasAll":
+        operator = "hasOnly"
+    elif first_literal and operator == "hasOnly":
+        operator = "hasAll"
+
+    def contains_all() -> Operand:
+        if not literal.value:
+            return Expr("not", (Expr("hasIntersection", (collection, Value([]))),))
+        tests = tuple(
+            Expr("hasIntersection", (collection, Value([v]))) for v in literal.value
+        )
+        return tests[0] if len(tests) == 1 else Expr("and", tests)
+
+    if operator == "hasAny":
+        return Expr("hasIntersection", (collection, literal))
+    if operator == "hasAll":
+        return contains_all()
+    if operator == "hasOnly":
+        return Expr("isSubset", (collection, literal))
+    return Expr("and", (contains_all(), Expr("isSubset", (collection, literal))))

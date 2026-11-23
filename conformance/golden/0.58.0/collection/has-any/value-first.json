@@ -1,0 +1,56 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-any/value-first",
+  "intent": "hasAny with the literal list as the receiver ([\"public\", \"other\"].hasAny(tagNames)).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "public",
+              "other"
+            ]
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ],
+        "operator": "hasAny"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-any/value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "[\"public\", \"other\"].hasAny(R.attr.tagNames)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The answer is symmetric but the query is not: the plan puts the literal first, so a translator that assumes the field comes first binds the list as a column."
+}

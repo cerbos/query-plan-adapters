@@ -38,7 +38,7 @@ module Cerbos
           raise InvalidPlanError, "Conditional query plan has no condition"
         end
 
-        Normalised.new(kind, (kind == CONDITIONAL) ? assert_planner_operators(node(condition)) : nil)
+        Normalised.new(kind, (kind == CONDITIONAL) ? rewrite_set_functions(assert_planner_operators(node(condition))) : nil)
       end
 
       # @api private
@@ -116,6 +116,46 @@ module Cerbos
       # @api private
       def symbolish(hash)
         hash.transform_keys { |key| key.respond_to?(:to_sym) ? key.to_sym : key }
+      end
+
+      SET_FUNCTIONS = %w[hasAll hasAny hasOnly hasExactly].freeze
+
+      # Rewrites hasAll, hasAny, hasOnly and hasExactly (CEL list extensions, Cerbos 0.58) into
+      # hasIntersection and isSubset, bottom-up. Each rewrite is exact in CEL, errors included; a
+      # call without exactly one literal list operand is left for the translator to refuse.
+      #
+      # @api private
+      def rewrite_set_functions(operand)
+        return operand unless operand.is_a?(Expression)
+
+        rewritten = Expression.new(operand.operator, operand.operands.map { |child| rewrite_set_functions(child) })
+        set_function(rewritten) || rewritten
+      end
+
+      # @api private
+      def set_function(expr)
+        return nil unless SET_FUNCTIONS.include?(expr.operator) && expr.operands.length == 2
+
+        literal_list = ->(o) { o.is_a?(Value) && o.value.is_a?(Array) }
+        first, second = expr.operands
+        first_literal = literal_list.call(first)
+        return nil if first_literal == literal_list.call(second)
+
+        list, literal = first_literal ? [second, first] : [first, second]
+        operator = expr.operator
+        operator = {"hasAll" => "hasOnly", "hasOnly" => "hasAll"}.fetch(operator, operator) if first_literal
+        contains_all = lambda do
+          next Expression.new("not", [Expression.new("hasIntersection", [list, Value.new([])])]) if literal.value.empty?
+
+          tests = literal.value.map { |v| Expression.new("hasIntersection", [list, Value.new([v])]) }
+          (tests.length == 1) ? tests.first : Expression.new("and", tests)
+        end
+        case operator
+        when "hasAny" then Expression.new("hasIntersection", [list, literal])
+        when "hasAll" then contains_all.call
+        when "hasOnly" then Expression.new("isSubset", [list, literal])
+        else Expression.new("and", [contains_all.call, Expression.new("isSubset", [list, literal])])
+        end
       end
     end
   end

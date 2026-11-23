@@ -381,6 +381,7 @@ ADAPTER_TEST_DB=mysql ADAPTER_TEST_MYSQL_COLLATION=utf8mb4_0900_as_cs \
 | A list where CEL needs a boolean: `filter(...)`, `map(...)`, `except(...)` or `intersect(...)` as the condition or a conjunct | UNKNOWN: a list has no boolean overload, so CEL errors on every row and the PDP denies it |
 | `rel.isSubset([...])` | `rel.all(e, e in [...])` |
 | `intersect(a, b) == []` / `!= []` | `!hasIntersection(a, b)` / `hasIntersection(a, b)` |
+| `L.hasAny(S)`, `L.hasAll(S)`, `L.hasOnly(S)`, `L.hasExactly(S)`, `S` a literal list | `hasIntersection(L, S)`, one `hasIntersection(L, [s])` per element, `L.isSubset(S)`, and both |
 | `{"k": v, ...}[R.attr.x] == c` / `!=` | `R.attr.x IN (keys whose value equals c)` when `R.attr.x` is one of the map's keys, UNKNOWN otherwise, as CEL errors on a missing key |
 | `R.attr.m["k"]` with `R.attr.m.k` mapped | Read as the mapped attribute `R.attr.m.k` |
 | Ternary inside list or string `+` (`["a"] + (c ? ["b"] : []) == [...]`), and under `in` (`"r" in (c ? ["r"] : [])`) | Each branch substituted in place and walked again, so constants fold |
@@ -451,8 +452,8 @@ total but not as passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 32 / 32 |
-| extended | 106 / 110 |
-| adversarial | 516 / 593 |
+| extended | 110 / 114 |
+| adversarial | 536 / 614 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 21 are `unsupported`, where the adapter

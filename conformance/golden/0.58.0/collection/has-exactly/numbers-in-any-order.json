@@ -1,0 +1,51 @@
+{
+  "allowed": [
+    "a3",
+    "a4"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-exactly/numbers-in-any-order",
+  "intent": "hasExactly of a number list and int literals (aNumberList.hasExactly([2, 3])).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumberList"
+          },
+          {
+            "value": [
+              2,
+              3
+            ]
+          }
+        ],
+        "operator": "hasExactly"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-exactly/numbers-in-any-order",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumberList.hasExactly([2, 3])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Order does not matter and 2 equals 2.0, so a3 [2, 3] and a4 [3, 2] are allowed; array equality allows a3 alone, and a6 [null, 2] must stay out."
+}

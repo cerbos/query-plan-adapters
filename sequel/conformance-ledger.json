@@ -133,6 +133,13 @@
       "status": "unsupported",
       "reason": "size() requires a string operand, got a ternary."
     },
+    "collection/has-all/scalar-receiver": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasAll([]) lowers to the negation of hasIntersection with the empty list; over a scalar column that is a CEL no-overload error, and the adapter refuses a non-collection operand."
+    },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
       "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
@@ -148,6 +155,13 @@
     "collection/has-intersection/two-resource-lists": {
       "status": "unsupported",
       "reason": "hasIntersection is translated only against a literal list, not between a stored collection and a map() projection."
+    },
+    "collection/has-only/mapped-names-with-nameless-tag": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, which translates only a stored list or relation against a literal list, not a map() projection."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",

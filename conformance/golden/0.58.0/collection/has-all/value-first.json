@@ -1,0 +1,95 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a8",
+    "b1",
+    "b2",
+    "b3",
+    "c2",
+    "d1",
+    "d2",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2",
+    "k3",
+    "k4",
+    "k5",
+    "l1",
+    "l2",
+    "l3",
+    "l4",
+    "m2",
+    "n1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-all/value-first",
+  "intent": "hasAll with the literal list as the receiver ([\"public\", \"private\"].hasAll(tagNames)): every tag name is one of the two.",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "public",
+              "private"
+            ]
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ],
+        "operator": "hasAll"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-all/value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "[\"public\", \"private\"].hasAll(R.attr.tagNames)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The plan puts the literal first, which reverses containment: rows with no tags are allowed, and a7's \"other\" is not; a translator that assumes the field comes first reads it as tagNames.hasAll(literal) and allows a6 alone."
+}

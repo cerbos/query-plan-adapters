@@ -1,0 +1,54 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a8",
+    "b6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-all/single-element",
+  "intent": "hasAll of a resource list and a one-element literal list (tagNames.hasAll([\"public\"])).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "value": [
+              "public"
+            ]
+          }
+        ],
+        "operator": "hasAll"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-all/single-element",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames.hasAll([\"public\"])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "extended",
+  "trap": "hasAll is containment, not equality: a3 holds \"public\" twice and a6 holds it beside \"private\", and both are allowed; c1's \"Public\" is not."
+}

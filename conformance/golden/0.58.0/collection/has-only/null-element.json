@@ -1,0 +1,97 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b3",
+    "b5",
+    "b6",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "g1",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i5",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "k1",
+    "k2",
+    "k3",
+    "k4",
+    "k5",
+    "l1",
+    "l2",
+    "l3",
+    "l4",
+    "m1",
+    "m2",
+    "n1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-only/null-element",
+  "intent": "hasOnly of a number list holding a null and int literals (aNumberList.hasOnly([2, 3])).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumberList"
+          },
+          {
+            "value": [
+              2,
+              3
+            ]
+          }
+        ],
+        "operator": "hasOnly"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-only/null-element",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumberList.hasOnly([2, 3])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a6 [null, 2] holds an element outside the list and is denied; SQL's NOT IN over a NULL element is UNKNOWN, so NOT EXISTS (element NOT IN (2, 3)) finds no offender and grants a6. 2 equals 2.0, so a1, a3 and a4 are allowed."
+}

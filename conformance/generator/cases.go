@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -43,8 +44,40 @@ type Case struct {
 	Rules             []map[string]any `yaml:"rules"`
 	Degenerate        *Degenerate      `yaml:"degenerate"`
 	PlannerDivergence *Divergence      `yaml:"plannerDivergence"`
+	Since             string           `yaml:"since"`
 
 	area string
+}
+
+// on reports whether the case exists on the given PDP tag: a case naming `since` uses a condition
+// older PDPs cannot compile, so it is left out of their policy and goldens.
+func (c *Case) on(tag string) bool {
+	return c.Since == "" || compareTags(c.Since, tag) <= 0
+}
+
+// forTag returns the corpus as the given PDP sees it.
+func (corpus *Corpus) forTag(tag string) *Corpus {
+	out := &Corpus{Files: corpus.Files}
+	for _, c := range corpus.Cases {
+		if c.on(tag) {
+			out.Cases = append(out.Cases, c)
+		}
+	}
+	return out
+}
+
+var tagPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)$`)
+
+func compareTags(a, b string) int {
+	pa, pb := tagPattern.FindStringSubmatch(a), tagPattern.FindStringSubmatch(b)
+	for i := 1; i <= 3; i++ {
+		x, _ := strconv.Atoi(pa[i])
+		y, _ := strconv.Atoi(pb[i])
+		if x != y {
+			return x - y
+		}
+	}
+	return 0
 }
 
 // Degenerate declares an oracle that is empty or total by construction.
@@ -217,6 +250,9 @@ func (c *Case) validate() error {
 		if strings.TrimSpace(d.Reason) == "" {
 			errs = append(errs, errors.New("degenerate.reason is required"))
 		}
+	}
+	if c.Since != "" && !tagPattern.MatchString(c.Since) {
+		errs = append(errs, fmt.Errorf("since %q is not a release tag such as 0.58.0", c.Since))
 	}
 	if d := c.PlannerDivergence; d != nil {
 		if strings.TrimSpace(d.Issue) == "" || strings.TrimSpace(d.Reason) == "" || len(d.PDP) == 0 {

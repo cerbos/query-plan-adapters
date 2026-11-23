@@ -11,6 +11,7 @@ import type {
   QueryPlanToDrizzleArgs,
   QueryPlanToDrizzleResult,
 } from "./types";
+import { rewriteSetFunctions } from "./set-functions";
 
 /**
  * The public surface: `queryPlanToDrizzle` and the types a caller needs to build its mapper.
@@ -65,7 +66,7 @@ export function queryPlanToDrizzle({
         kind: PlanKind.CONDITIONAL,
         filter: buildFilterFromExpression(
           rewritePlan(
-            foldConstantConstructors(unrollKnownValueMaps(queryPlan.condition)),
+            foldConstantConstructors(unrollKnownValueMaps(rewriteSetFunctions(queryPlan.condition))),
             mapper,
           ),
           mapper,

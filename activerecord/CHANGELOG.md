@@ -28,6 +28,9 @@
 
 ### Added
 
+- Translates `hasAll`, `hasAny`, `hasOnly` and `hasExactly` (CEL list functions from Cerbos
+  0.58) against a literal list, as the `hasIntersection` and `isSubset` the adapter already
+  lowers. A shape that rewrites to one the adapter refuses is refused the same way.
 - Translations for shapes that raised `Cerbos::ActiveRecord::UnsupportedOperatorError`: a list or map literal as the needle of `contains`/`startsWith`/`endsWith`, the pattern of `matches()` or an operand of `<`, `<=`, `>` or `>=`, and `hasIntersection` over a scalar column, are CEL's type error, UNKNOWN; `hasIntersection(relation, [])` is false; the deprecated `has_intersection` spelling; a ternary with an erroring arm, taken arm by arm; `dyn(x)`, as `x`; and `(?i)^\w+$`-style sets of up to 128 characters.
 
 - `order_field:` on `Cerbos::ActiveRecord.relation`, the column whose ascending order is the list's element order. It gives a translation to the shapes that read one, each of which raised `Cerbos::ActiveRecord::UnsupportedOperatorError` before:

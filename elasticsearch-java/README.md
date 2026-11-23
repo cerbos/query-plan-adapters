@@ -393,6 +393,7 @@ silently by returning documents the PDP denies.
 | `matches` | `prefix` for `^literal`; `regexp` (`flags: NONE`) for fully anchored patterns in the safe subset |
 | `timestamp()` in comparisons | `term` / `range` against a `date` field, millisecond-exact values only |
 | `hasIntersection` | `terms` (array overlap) |
+| `hasAny`, `hasAll` against a literal list | `terms`, one per element for `hasAll` (positive only; `hasOnly`/`hasExactly` are refused) |
 | `descendentOf` / `ancestorOf` / `overlaps` against a constant path | `prefix` / `terms` (or `match_none`) / `bool.should` of both plus a `term` |
 | `size()` emptiness checks | `nested` + `match_all`, or `exists`; over a string field, `exists` + `bool.must_not` + `term` on `""` (or that `term` for emptiness) |
 | `size()` with a threshold every length or no length satisfies | `exists` (a string field) or `match_none` |
@@ -510,8 +511,8 @@ the current PDP (0.58.0), where the total is every golden case in the tier:
 | Tier | Passed / total |
 | --- | --- |
 | core | 31 / 32 |
-| extended | 51 / 110 |
-| adversarial | 224 / 593 |
+| extended | 53 / 114 |
+| adversarial | 231 / 614 |
 
 Every case that does not pass is either refused with `UnsupportedPlanShapeException`, never answered
 with a wrong filter, or skipped as a planner divergence. The refused shapes are those in

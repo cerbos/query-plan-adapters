@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Translates `hasAll`, `hasAny`, `hasOnly` and `hasExactly` (CEL list functions from Cerbos
+  0.58) against a literal list, as the `hasIntersection` and `isSubset` the adapter already
+  lowers. A shape that rewrites to one the adapter refuses is refused the same way.
 - Fixed an over-grant on SQLite: a timestamp literal finer than a millisecond
   (`timestamp(createdAt) >= timestamp("2020-03-15T10:30:00.000001Z")`) was bound at the millisecond
   Exposed stores there, so a row at `10:30:00.000` matched. The comparison is now solved at millisecond

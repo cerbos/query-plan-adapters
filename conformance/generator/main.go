@@ -109,12 +109,13 @@ func run() error {
 		}
 	}
 
-	files := map[string][]byte{}
-	policy, err := buildPolicy(corpus)
-	if err != nil {
-		return err
+	for _, c := range corpus.Cases {
+		if c.Since != "" && !c.on(versions.Current.Tag) {
+			return fmt.Errorf("case %q: since %s is newer than the current PDP %s", c.ID, c.Since, versions.Current.Tag)
+		}
 	}
-	files["policies/conformance.yaml"] = policy
+
+	files := map[string][]byte{}
 	if files["resources.json"], err = buildResourcesJSON(ds); err != nil {
 		return err
 	}
@@ -122,22 +123,29 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	staged, err := stagePolicies(policy, filepath.Join(out, "policies", "derived_roles.yaml"))
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(staged)
-
 	recorded := map[string][]*Golden{}
 	var violations []string
 	for _, v := range []pdpVersion{versions.Previous, versions.Current} {
-		fmt.Fprintf(os.Stderr, "==> PDP %s: recording %d cases\n", v.Tag, len(corpus.Cases))
-		goldens, err := recordWith(ctx, imageOf(v), v.Tag, staged, corpus, ds)
+		tagged := corpus.forTag(v.Tag)
+		policy, err := buildPolicy(tagged)
+		if err != nil {
+			return err
+		}
+		if v == versions.Current {
+			files["policies/conformance.yaml"] = policy
+		}
+		staged, err := stagePolicies(policy, filepath.Join(out, "policies", "derived_roles.yaml"))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "==> PDP %s: recording %d cases\n", v.Tag, len(tagged.Cases))
+		goldens, err := recordWith(ctx, imageOf(v), v.Tag, staged, tagged, ds)
+		os.RemoveAll(staged)
 		if err != nil {
 			return err
 		}
 		recorded[v.Tag] = goldens
-		violations = append(violations, degeneracyErrors(corpus, v.Tag, goldens)...)
+		violations = append(violations, degeneracyErrors(tagged, v.Tag, goldens)...)
 		for _, g := range goldens {
 			raw, err := marshalJSON(g)
 			if err != nil {

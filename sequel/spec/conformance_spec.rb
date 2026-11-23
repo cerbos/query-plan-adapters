@@ -60,7 +60,8 @@ RSpec.describe "conformance" do
       it "has a golden file for every case in the ledger" do
         skip "a fuzz run is judged without the ledger" if ConformanceCorpus::FUZZ_DIR
         recorded = ConformanceCorpus.goldens(tag).map { |golden| golden.fetch("id") }
-        expect(ConformanceCorpus::LEDGER.keys - recorded).to be_empty
+        scoped = ConformanceCorpus::LEDGER.keys.select { |id| ConformanceCorpus.ledger_entry(id, tag) }
+        expect(scoped - recorded).to be_empty
       end
 
       ConformanceCorpus.goldens(tag).each do |golden|

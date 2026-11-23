@@ -1,0 +1,73 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a6",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-all/mapped-names",
+  "intent": "hasAll of a map() projection of tag names and one literal (tags.map(t, t.name).hasAll([\"public\"])).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tags"
+                },
+                {
+                  "expression": {
+                    "operands": [
+                      {
+                        "variable": "t.name"
+                      },
+                      {
+                        "variable": "t"
+                      }
+                    ],
+                    "operator": "lambda"
+                  }
+                }
+              ],
+              "operator": "map"
+            }
+          },
+          {
+            "value": [
+              "public"
+            ]
+          }
+        ],
+        "operator": "hasAll"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-all/mapped-names",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tags.map(t, t.name).hasAll([\"public\"])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A nameless tag makes map() error, so CEL denies b6 although it carries \"public\"; a membership test over the name column ignores the NULL name and grants it."
+}

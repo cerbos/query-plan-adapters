@@ -1,0 +1,52 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a4",
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-any/numbers-beside-null-element",
+  "intent": "hasAny of a number list and int literals (aNumberList.hasAny([2])).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aNumberList"
+          },
+          {
+            "value": [
+              2
+            ]
+          }
+        ],
+        "operator": "hasAny"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-any/numbers-beside-null-element",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aNumberList.hasAny([2])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "a6 holds a null beside 2 and is allowed; 2 and 2.0 compare equal, so a typed int comparison denies a1, a3, a4 and a6."
+}

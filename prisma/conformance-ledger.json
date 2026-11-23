@@ -257,6 +257,13 @@
       "status": "unsupported",
       "reason": "size() of if(...) counts the elements of a derived list, and a Prisma relation filter can only test whether some, every or no related row matches, never count them."
     },
+    "collection/has-all/scalar-receiver": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasAll is lowered to hasIntersection, which over a scalar attribute is a CEL no-overload error that denies under both polarities, and a Prisma filter has no unknown to express it."
+    },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
       "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
@@ -268,6 +275,13 @@
     "collection/has-intersection/two-resource-lists": {
       "status": "unsupported",
       "reason": "hasIntersection is translated only with a literal value list as its second operand."
+    },
+    "collection/has-only/mapped-names-with-nameless-tag": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly is lowered to isSubset, which the adapter translates only over a mapped list attribute, not over a map() projection."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",
