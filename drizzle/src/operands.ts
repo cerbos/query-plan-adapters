@@ -1,6 +1,7 @@
 import type { PlanExpressionOperand, Value } from "@cerbos/core";
 import { UnsupportedQueryPlanError } from "./errors";
 import { isString } from "./narrowing";
+import { PLANNER_OPERATORS } from "./planner-operators";
 
 /** Shape tests over the planner's operand union, and the lambda-unpacking every macro shares. */
 
@@ -145,16 +146,6 @@ export const foldConstantConstructors = (
 
   return { operator: operand.operator, operands };
 };
-
-// Every operator a Cerbos plan holds, for a subtree the translation decides without reading it.
-const PLANNER_OPERATORS = new Set([
-  "add", "all", "ancestorOf", "and", "contains", "descendentOf", "div", "double", "duration", "dyn",
-  "endsWith", "eq", "except", "exists", "exists_one", "filter", "ge", "get-field", "gt", "has",
-  "hasIntersection", "has_intersection", "hierarchy", "if", "in", "index", "int", "intersect",
-  "isSubset", "lambda", "le", "list", "lt", "map", "matches", "mod", "mult", "ne", "not", "or",
-  "overlaps", "set-field", "size", "startsWith", "string", "struct", "sub", "timeSince",
-  "timestamp", "upperAscii",
-]);
 
 export function assertPlannerOperators(operand: PlanExpressionOperand): void {
   if (!isExpressionOperand(operand)) return;

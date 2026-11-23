@@ -1,6 +1,8 @@
 {
   "allowed": [
-    "k3"
+    "k3",
+    "k4",
+    "k5"
   ],
   "degenerateReason": null,
   "id": "string/contains/nul-needle",

@@ -69,6 +69,13 @@ cases:
   condition:
     match:
       expr: 'int(R.attr.aNumber) + R.attr.aDouble > 0.0 || R.attr.aNumber == 5'
+- id: 'arithmetic/add/int-at-int32-max-plus-one'
+  tier: adversarial
+  intent: 'int(aNumber) + 1 > 2147483647, which n1 alone holds: its aNumber is the 32-bit integer maximum.'
+  trap: 'CEL adds ints in 64 bits, so n1''s sum is 2147483648; adding in the column''s 32-bit integer type overflows on n1, and PostgreSQL then fails the whole query. Found by fuzzing (fuzz/s139/0194, drizzle on PostgreSQL, on a generated row at the 32-bit minimum).'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) + 1 > 2147483647'
 - id: 'arithmetic/add/int-literal-negated'
   tier: adversarial
   intent: 'The int-literal sum under negation (!(aNumber + 1 > 2.0)).'
@@ -296,6 +303,13 @@ cases:
   condition:
     match:
       expr: 'int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1'
+- id: 'arithmetic/modulo/column-divisor-at-int32-max'
+  tier: adversarial
+  intent: 'Integer modulo by a column expression one past the 32-bit maximum on n1 (int(aNumber) % (int(aNumber) + 1) == 2147483647).'
+  trap: 'CEL computes the divisor in 64 bits, so n1''s remainder is 2147483647 and n1 alone is allowed; computing it in the column''s 32-bit integer type overflows, and PostgreSQL then fails the whole query. Found by fuzzing (fuzz/s139/0194, drizzle on PostgreSQL).'
+  condition:
+    match:
+      expr: 'int(R.attr.aNumber) % (int(R.attr.aNumber) + 1) == 2147483647'
 - id: 'arithmetic/modulo/negated-double-operand'
   tier: adversarial
   intent: '!(aNumber % 2 == 1) || aNumber == 5, with no int(): CEL''s % has no double overload.'
@@ -389,6 +403,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.aNumber - 3.0 <= 0.0'
+- id: 'arithmetic/subtract/field-minus-constant-solved-past-int32'
+  tier: adversarial
+  intent: 'aNumber - 45.0 <= 2147483647.0, which every row with an aNumber holds, n1 at the 32-bit integer maximum included.'
+  trap: 'Solving for the column gives aNumber <= 2147483692, a bound a 32-bit integer column cannot hold: bound as an int4 parameter, PostgreSQL fails the whole query. Found by fuzzing (fuzz/s149/0394, prisma on PostgreSQL).'
+  condition:
+    match:
+      expr: 'R.attr.aNumber - 45.0 <= 2147483647.0'
+- id: 'arithmetic/divide/double-halved-past-single-precision'
+  tier: adversarial
+  intent: 'A double attribute divided by a constant, compared just above the quotient of 0.3 (aDouble / 2.5 > 0.120000000000001).'
+  trap: '0.3 / 2.5 is 0.12 as doubles, so the 0.3 rows are denied. Reading aDouble as a single-precision float, as MySQL does for CAST(x AS FLOAT), gives 0.30000001 / 2.5 > 0.120000000000001 and grants them.'
+  condition:
+    match:
+      expr: 'R.attr.aDouble / 2.5 > 0.120000000000001'
 - id: 'arithmetic/subtract/int-minus-principal-double'
   tier: adversarial
   intent: 'A negated int() conversion minus an integral principal attribute, OR''d with aNumber == 5 (!(int(aNumber) - P.attr.zero == 5) || aNumber == 5).'
@@ -422,3 +450,17 @@ cases:
   condition:
     match:
       expr: '!(int(R.attr.aNumber) % 0 == 1) || R.attr.aString == "one"'
+- id: 'arithmetic/subtract/negated-relation-field-minus-constant-not-equals'
+  tier: adversarial
+  intent: 'The to-one parent arithmetic not-equals under negation (!(parent.aNumber - 0.5 != 2.5)).'
+  trap: 'A row with no parent errors in check() and stays denied under the negation; only rows whose parent aNumber is 3 are allowed.'
+  condition:
+    match:
+      expr: '!(R.attr.parent.aNumber - 0.5 != 2.5)'
+- id: 'arithmetic/subtract/relation-field-minus-constant-not-equals'
+  tier: adversarial
+  intent: 'A to-one parent''s number minus a constant, compared with not-equals (parent.aNumber - 0.5 != 2.5).'
+  trap: 'A row with no parent, or none with an aNumber, errors in check() and is denied; negating the solved interval outside the relation allows every row with no parent. Found by fuzzing (fuzz/s137/0348, prisma).'
+  condition:
+    match:
+      expr: 'R.attr.parent.aNumber - 0.5 != 2.5'

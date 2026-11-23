@@ -38,6 +38,9 @@ export function buildFieldFilter(
   });
 }
 
+const INT32_MAX = 2 ** 31 - 1;
+const INT32_MIN = -(2 ** 31);
+
 const LIKE_METACHARACTERS = /[%_\\]/;
 
 /**
@@ -149,6 +152,12 @@ function assertScalarValue(
   ) {
     throw new UnsupportedQueryPlanError(
       `${operator} value type does not match mapped ${fieldRef.valueType} field`
+    );
+  }
+
+  if (fieldRef.int32 && isNumber(value) && (value > INT32_MAX || value < INT32_MIN)) {
+    throw new UnsupportedQueryPlanError(
+      `${operator} against ${value}, outside the 32-bit range of an Int column: PostgreSQL rejects the bound parameter`
     );
   }
 }

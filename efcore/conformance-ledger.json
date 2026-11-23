@@ -37,6 +37,10 @@
       "status": "unsupported",
       "reason": "int() over a string column has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string."
     },
+    "cast/int/signed-string-before-nul": {
+      "status": "unsupported",
+      "reason": "int() over a string column has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string."
+    },
     "cast/int/string-beyond-double-precision": {
       "status": "unsupported",
       "reason": "int() over a string column has no translation: a SQL CAST reads a numeric prefix where CEL requires the whole string."
@@ -50,6 +54,10 @@
       "reason": "string() of a number literal has no translation: the plan does not say whether CEL typed it as an int, spelled \"1000000\", or a double, spelled \"1e+06\"."
     },
     "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() of a number compared with \"0\" or \"-0\" has no translation: CEL spells -0.0 as \"-0\", and SQL cannot read the sign of a stored zero."
+    },
+    "cast/string/from-positive-zero-double": {
       "status": "unsupported",
       "reason": "string() of a number compared with \"0\" or \"-0\" has no translation: CEL spells -0.0 as \"-0\", and SQL cannot read the sign of a stored zero."
     },
@@ -101,6 +109,10 @@
       "status": "unsupported",
       "reason": "Comparing a whole list built from a computed element (`aDouble / 0.0`) has no translation: the translator compares whole lists only as related rows, which have no order or multiplicity a single comparison can read."
     },
+    "conditional/ternary/nested-over-parent-fields": {
+      "status": "unsupported",
+      "reason": "Same refusal as membership/in/map-attribute-keys, under negation."
+    },
     "hierarchy/ancestor-of/mismatched-delimiters-negated": {
       "status": "unsupported",
       "reason": "The literal path's segment dept:eng holds the column's delimiter, and ancestorOf() against such a segment has no translation."
@@ -120,6 +132,10 @@
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves P.attr.context unresolved in this ternary branch, so the plan compares owner with the variable request.principal.attr.context, which no store holds. The adapter refuses it."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",

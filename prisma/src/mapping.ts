@@ -56,6 +56,7 @@ export type ResolvedFieldReference = {
   timestampWrapped?: boolean;
   relations?: RelationConfig[];
   valueType?: MapperConfig["valueType"];
+  int32?: boolean;
   nullAttributeRepresentation?: NullAttributeRepresentation;
 };
 
@@ -208,6 +209,12 @@ export function resolveFieldReference(
 
   const activeConfig = config ?? matchedConfig;
 
+  if (!activeConfig && reference.startsWith("request.principal.")) {
+    throw new UnsupportedQueryPlanError(
+      `The plan leaves ${reference} unresolved: the planner did not fold it into a value, and a principal attribute is not a field of any model`,
+    );
+  }
+
   // A scalar column has no keys: reading one beneath it would compare the column itself.
   if (!config && matchedConfig && !matchedConfig.relation) {
     throw new UnsupportedQueryPlanError(
@@ -219,6 +226,7 @@ export function resolveFieldReference(
     return {
       path: [activeConfig?.field || reference],
       valueType: activeConfig?.valueType,
+      int32: activeConfig?.int32,
       nullable: activeConfig?.nullable,
       nullAttributeRepresentation: activeConfig?.nullAttributeRepresentation,
     };
@@ -294,6 +302,7 @@ export function resolveFieldReference(
     relations,
     // A column reached through a relation is typed by its own entry in `relation.fields`.
     valueType: leafConfig?.valueType ?? activeConfig.valueType,
+    int32: leafConfig ? leafConfig.int32 : activeConfig.int32,
     nullable: leafConfig ? leafConfig.nullable : activeConfig.nullable,
     nullAttributeRepresentation: activeConfig.nullAttributeRepresentation,
   };
@@ -371,6 +380,9 @@ export function enterLambdaScope(
           valueType:
             lookupMapping(fullMapper, collectionPath)?.valueType ??
             lookupElementFields(fullMapper, collectionPath)?.[projection]?.valueType,
+          int32:
+            lookupMapping(fullMapper, collectionPath)?.int32 ??
+            lookupElementFields(fullMapper, collectionPath)?.[projection]?.int32,
           // A projected list carries null values, unlike missing fields on object elements.
           nullAttributeRepresentation: "explicit",
           nullable: lookupElementFields(fullMapper, collectionPath)?.[projection]?.nullable,

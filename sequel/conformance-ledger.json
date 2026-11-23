@@ -57,6 +57,10 @@
       "status": "unsupported",
       "reason": "SQL numeric casts accept malformed string prefixes or coerce them to zero, unlike CEL errors; negation cannot make the conversion safe."
     },
+    "cast/int/signed-string-before-nul": {
+      "status": "unsupported",
+      "reason": "SQL CAST reads a string's leading digits where CEL int() rejects the whole string; int() over a string column is refused."
+    },
     "cast/int/string-beyond-double-precision": {
       "status": "unsupported",
       "reason": "SQL CAST reads a string's leading digits where CEL int() rejects the whole string; int() over a string column is refused."
@@ -70,6 +74,10 @@
       "reason": "string() over a ternary of whole-number constants is refused: the plan carries 1000000 and 1000000.0 as the same number, and CEL spells the int \"1000000\" and the double \"1e+06\", so SQL cannot know which text to produce."
     },
     "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() over a double column is compared by reading the literal back as the double CEL spells that way; \"-0\" is -0.0, and SQL (SQLite's REAL, PostgreSQL's and MySQL's DOUBLE) compares -0.0 equal to 0.0, so the filter could not tell i5 from a row holding 0.0. A zero literal is refused"
+    },
+    "cast/string/from-positive-zero-double": {
       "status": "unsupported",
       "reason": "string() over a double column is compared by reading the literal back as the double CEL spells that way; \"-0\" is -0.0, and SQL (SQLite's REAL, PostgreSQL's and MySQL's DOUBLE) compares -0.0 equal to 0.0, so the filter could not tell i5 from a row holding 0.0. A zero literal is refused"
     },
@@ -217,6 +225,10 @@
       "status": "unsupported",
       "reason": "The then branch reads aBoolList[0], the same index refusal as collection/index/first-element-of-boolean-list. The translator walks both branches, so the refusal comes even when the condition never takes that branch."
     },
+    "conditional/ternary/nested-over-parent-fields": {
+      "status": "unsupported",
+      "reason": "Same to-one parent read as a map as membership/in/map-attribute-keys, under negation."
+    },
     "hierarchy/ancestor-of/mismatched-delimiters-negated": {
       "status": "unsupported",
       "reason": "The two hierarchy() operands split on different delimiters; the translator compares segments of one delimiter only, so it refuses rather than re-split either path in SQL."
@@ -240,6 +252,10 @@
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves P.attr.context unresolved in this ternary branch, so the plan compares owner with the variable request.principal.attr.context, which no store holds. The adapter refuses it."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",

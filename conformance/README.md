@@ -35,6 +35,7 @@ conformance/scripts/run-harness.sh <adapter>   # one adapter's harness, its stor
 | `resources.json` | The dataset as the PDP sees it: the principal, and each seed's `check()` resource. | generator |
 | `golden/<tag>/<case id>.json` | For each PDP: the plan, the allowed ids, and the case's intent and trap. | generator |
 | `golden/CHANGES.md` | What changed between the previous and current PDP. | generator |
+| `../<adapter>/**/planner-operators.*`, `PlannerOperators.*`, `planner_operators.rb` | The operators the goldens hold, for the adapters that refuse any other before translating (prisma, mongoose, drizzle, jpa, elasticsearch-java, exposed, mongodb-ruby). | generator |
 | `generator/` | The Go program that writes everything marked "generator". | hand |
 | `domains/` | The domain stress kit: ten domain models with their own policies and goldens, and each adapter's harness for them, run by hand and outside CI ([domains/README.md](domains/README.md)). | hand, `domains/kit` |
 
@@ -137,7 +138,9 @@ Each adapter implements this once, in its own language. It needs no PDP.
        `qpa-unknown-operator` and assert translating throws the refusal type. A dispatch that falls
        through, a fold or rewrite that decides a subtree without reading it, or a positional read
        that never checks the operator in that position fails here. Adapters whose rewrites skip
-       subtrees refuse any operator outside the set a Cerbos plan holds before translating.
+       subtrees refuse any operator outside the set a Cerbos plan holds before translating. That
+       set is the operators the goldens hold, which the generator writes into each of those
+       adapters, so a PDP pin that brings a new operator changes every copy in one regeneration.
    - Look the case up in the adapter's ledger. An entry applies unless its `pdp` list excludes this tag.
    - Where the adapter's language has a Cerbos SDK that reshapes the `PlanResources` response
      (JavaScript, Python's HTTP client, Ruby), hand the adapter what that SDK returns: serve the
@@ -213,8 +216,10 @@ harness. A fuzz run is never committed and never gates a pull request; what it f
 ```bash
 conformance/scripts/fuzz.sh -s 7 -n 500 [adapter...]   # record, replay every store leg, report
 conformance/scripts/fuzz.sh -s 7 -r 40 [adapter...]     # the same, with 40 generated rows
+conformance/scripts/fuzz.sh -s 7 -e 120 [adapter...]    # the same, with up to 120 rows on the run's literals
 go -C conformance/generator run . fuzz -seed 7 -count 500 [-rows 40] -out <dir>   # record only (Docker)
 go -C conformance/generator run . fuzz-compose -seed 7 -count 500 [-from <dir>] -out <dir>   # no PDP
+go -C conformance/generator run . fuzz-exhaustive -size 3 [-lits 1] [-rows 40] [-edges 120] -out <dir>   # every small shape
 QPA_FUZZ_DIR=<dir> conformance/scripts/run-harness.sh <adapter> [store...]   # replay one adapter
 go -C conformance/generator run . fuzz-report -dir <dir>   # <dir>/report.md; exit 1 on a failure
 go -C conformance/generator run . fuzz-shrink -dir <dir> -case <id> -adapter <adapter> -store <store>
@@ -238,6 +243,22 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   `seeds.json`, `derived-fields.json` and `resources.json` into `<dir>`, and a harness replaying a
   directory that holds them loads them in place of the corpus's. The case literals are drawn from
   the extended dataset too.
+- **Edge rows.** With `-edges N` the run adds up to N rows (`x000`, ...) built from the literals its
+  own cases compare against, after drawing them: the literal itself; for a string, the strings one
+  code point either side, its padded, case and truncated variants, `_` and `%` in place of its first
+  or last character, and on `aString` a NUL after it; for an int, one either side; for a double, a
+  step in its fifteenth significant digit either side, 0.5 either side, and its negation; for a
+  timestamp, a millisecond and a second either side. Row `i` takes value `i` of each attribute's
+  list, so a value lands in a row when no attribute has more than N. Doubles stop at fifteen digits
+  because Prisma writes no more (a finer value is stored rounded and reads as an over-grant), and
+  timestamps at milliseconds for the reason in "Mapping hazards".
+- **Exhaustive runs.** `fuzz-exhaustive` records every shape the grammar can draw instead of a
+  sample: it walks each production's structural choices (attribute, operator, flag) depth first,
+  and draws the literals of each shape from a seeded stream, `-lits` times. Size 1 is every atom;
+  size 2 adds `!atom` and ALLOW over each production's first shape with DENY over every other's;
+  size 3 adds `a && b` and `a || b` over every pair of those, and `!!a`. A clean replay says no
+  shape that small fails on that dataset, which a sampled run cannot. Cases are
+  `fuzz/x<size>/<index>`; the run replays and reports like a `fuzz` run.
 - **Recording.** `cerbos compile` (from the current pinned image) checks the policy first, and a
   case that does not compile is bisected out. A case whose plan fails, or folds to always allowed or
   always denied while `check()` disagrees, is dropped. `<dir>/manifest.json` lists every drop and

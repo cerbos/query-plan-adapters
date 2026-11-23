@@ -170,6 +170,7 @@ function completeConfig(
     ...scalar,
     field: name,
     valueType: config.valueType ?? VALUE_TYPES.get(field.type),
+    int32: config.int32 ?? field.type === "Int",
     nullable: config.nullable ?? (field.isRequired === undefined ? undefined : !field.isRequired),
   };
 }

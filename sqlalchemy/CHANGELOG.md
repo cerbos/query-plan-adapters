@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- MySQL: division read its column operands as single-precision floats (MySQL 8.0.17+ renders `CAST(x AS FLOAT)` that way), so `aDouble / 2.5 > 0.120000000000001` granted rows holding 0.3. Division now casts to `DOUBLE`.
 - `relation_overrides()`: `hasIntersection(relation.map(...), [])` keeps the projection's error guard, so under a negation a row whose projection errors is denied, as CEL denies it, instead of granted.
 
 ## v0.6.2

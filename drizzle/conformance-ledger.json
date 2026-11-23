@@ -60,6 +60,14 @@
       "status": "unsupported",
       "reason": "Cannot translate int(): SQL CAST does not reproduce CEL conversion semantics \u2014 it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
     },
+    "arithmetic/subtract/negated-relation-field-minus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Arithmetic over a field reached through a relation needs the relation's row in a scalar expression, and the adapter reads relations only through EXISTS subqueries, so it is refused."
+    },
+    "arithmetic/subtract/relation-field-minus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Arithmetic over a field reached through a relation needs the relation's row in a scalar expression, and the adapter reads relations only through EXISTS subqueries, so it is refused."
+    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "double() cast over a string column \u2014 same whole-string-versus-leading-digits divergence as the int() cast over a string: Cannot translate double(): SQL CAST does not reproduce CEL conversion semantics \u2014 it reads a numeric prefix where CEL requires the whole string and raises otherwise, and PostgreSQL and MySQL round where CEL truncates toward zero. The adapter rejects the shape instead of returning rows the PDP denies."
@@ -81,6 +89,10 @@
       "reason": "string() over a ternary: string() is lowered only over a string or boolean column, or a number column compared with a string constant, each without a CAST. The ternary's int literals reach the plan as bare numbers, and CEL renders the int 1000000 as \"1000000\" where the double renders \"1e+06\", so there is no column to invert and no CAST that spells either rendering on SQLite, PostgreSQL and MySQL."
     },
     "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() of a double column compared with \"-0\": CEL keeps the sign of -0.0 and prints \"-0\", but SQL compares -0.0 equal to 0.0 and SQLite stores -0.0 as 0, so no filter can pick out the negative zero."
+    },
+    "cast/string/from-positive-zero-double": {
       "status": "unsupported",
       "reason": "string() of a double column compared with \"-0\": CEL keeps the sign of -0.0 and prints \"-0\", but SQL compares -0.0 equal to 0.0 and SQLite stores -0.0 as 0, so no filter can pick out the negative zero."
     },
@@ -172,6 +184,10 @@
       "status": "unsupported",
       "reason": "Both lists are built from a computed element (`aDouble / 0.0`, NaN where aDouble is 0), and a SQL value expression has no list value, so the `list` constructor is refused."
     },
+    "conditional/ternary/nested-over-parent-fields": {
+      "status": "unsupported",
+      "reason": "Same refusal as `membership/in/map-attribute-keys`, under negation."
+    },
     "hierarchy/overlaps/field-to-field": {
       "status": "unsupported",
       "reason": "Both hierarchies are read from columns, so there is no constant path to expand into prefixes, and splitting a column on a delimiter needs SQL no dialect shares."
@@ -235,6 +251,10 @@
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves P.attr.context unresolved in this ternary branch, so the plan compares owner with the variable request.principal.attr.context, which no store holds. The adapter refuses it."
     },
     "principal/filter/as-whole-condition": {
       "status": "unsupported",

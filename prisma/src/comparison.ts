@@ -935,9 +935,15 @@ function handleArithmeticComparison(
   const solved = solveMonotone(f, solvedOperator, other.value);
 
   const interval = decreasing ? negateInterval(solved) : solved;
-  const filter = buildIntervalFilter(context, fieldRef, interval);
 
-  return effectiveOperator === "ne" ? { NOT: filter } : filter;
+  if (effectiveOperator !== "ne") {
+    return buildIntervalFilter(context, fieldRef, interval);
+  }
+
+  // The NOT goes inside the relations, so a missing to-one parent stays denied as CEL's error is.
+  const leaf = { ...fieldRef, relations: [] };
+
+  return wrapInRelations(fieldRef.relations, { NOT: buildIntervalFilter(context, leaf, interval) });
 }
 
 /**

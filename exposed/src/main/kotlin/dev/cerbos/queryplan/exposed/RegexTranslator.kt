@@ -3,6 +3,8 @@ package dev.cerbos.queryplan.exposed
 import dev.cerbos.queryplan.exposed.sql.CountChars
 import dev.cerbos.queryplan.exposed.sql.ExactString
 import dev.cerbos.queryplan.exposed.sql.LikeEscaping
+import dev.cerbos.queryplan.exposed.sql.NulSafeMatch
+import dev.cerbos.queryplan.exposed.sql.SqliteUnknownPastNul
 import org.jetbrains.exposed.v1.core.CustomFunction
 import org.jetbrains.exposed.v1.core.EqOp
 import org.jetbrains.exposed.v1.core.Expression
@@ -92,7 +94,7 @@ internal class RegexTranslator(private val translation: Translation) {
                 GreaterEqOp(length, intParam(run.min)),
                 if (run.max >= 0) LessEqOp(length, intParam(run.max)) else null,
             )
-            return TriLogic.and(TriLogic.and(bounds), TriLogic.not(like(column, "%\n%")))
+            return TriLogic.and(TriLogic.and(bounds), TriLogic.not(holdsNewline(column)))
         }
 
         // ^[set]*$ and ^[set]+$: every character is a member.
@@ -131,9 +133,7 @@ internal class RegexTranslator(private val translation: Translation) {
             val strings = segments[0]
             if ("" in strings && !(start && end)) return null
             if (start && end) return TriLogic.or(strings.map { EqOp(column, ExactString.param(it)) })
-            return TriLogic.or(
-                strings.map { like(column, (if (start) "" else "%") + PlanValues.escapeLike(it) + (if (end) "" else "%")) },
-            )
+            return TriLogic.or(strings.map { literalLike(column, it, leadingWildcard = !start, trailingWildcard = !end) })
         }
 
         if (!start || !end) throw unsupported(pattern, "an unanchored .* or .+")
@@ -151,7 +151,16 @@ internal class RegexTranslator(private val translation: Translation) {
         }
         val shape = TriLogic.or(likePatterns.map { like(column, it) })
         // RE2's . excludes a newline, and no finite part holds one.
-        return TriLogic.and(shape, TriLogic.not(like(column, "%\n%")))
+        val oneLine = TriLogic.not(holdsNewline(column))
+        val exact = if (wildcards.size == 1) {
+            val hexLikes = segments[0].flatMap { head ->
+                segments[1].map { tail -> SqliteUnknownPastNul.HexLike(column, head, wildcards[0], tail) }
+            }
+            TriLogic.and(TriLogic.or(hexLikes), oneLine)
+        } else {
+            null
+        }
+        return SqliteUnknownPastNul(TriLogic.and(shape, oneLine), column, exact)
     }
 
     /**
@@ -177,6 +186,14 @@ internal class RegexTranslator(private val translation: Translation) {
 
     private fun like(column: Expression<*>, pattern: String): Op<Boolean> =
         LikeEscapeOp(column, ExactString.param(pattern), true, LikeEscaping.ESCAPE_CHAR)
+
+    private fun literalLike(column: Expression<*>, s: String, leadingWildcard: Boolean, trailingWildcard: Boolean): Op<Boolean> {
+        val pattern = (if (leadingWildcard) "%" else "") + PlanValues.escapeLike(s) + (if (trailingWildcard) "%" else "")
+        if (!leadingWildcard && !trailingWildcard) return like(column, pattern)
+        return NulSafeMatch(like(column, pattern), column, ExactString.param(s), leadingWildcard, trailingWildcard)
+    }
+
+    private fun holdsNewline(column: Expression<*>): Op<Boolean> = literalLike(column, "\n", leadingWildcard = true, trailingWildcard = true)
 
     private fun containsAnchor(node: Node): Boolean = when (node) {
         is Node.Begin, is Node.End -> true

@@ -152,7 +152,8 @@ const labelSchema = new Schema<AdversarialLabel>(
 
 const subCategorySchema = new Schema<AdversarialSubCategory>(
   {
-    name: { type: String, required: true },
+    // Not `required`: Mongoose's required string rejects "", which an edge row can hold.
+    name: { type: String },
     labels: { type: [labelSchema], default: [] },
   },
   { _id: false, id: false },

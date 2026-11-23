@@ -146,6 +146,9 @@ func run() error {
 			files[filepath.ToSlash(filepath.Join("golden", v.Tag, g.ID+".json"))] = raw
 		}
 	}
+	for rel, raw := range plannerOperatorFiles(recorded) {
+		files[rel] = raw
+	}
 	files["golden/CHANGES.md"] = []byte(changesMarkdown(versions.Previous.Tag, versions.Current.Tag, recorded[versions.Previous.Tag], recorded[versions.Current.Tag]))
 
 	if *check {

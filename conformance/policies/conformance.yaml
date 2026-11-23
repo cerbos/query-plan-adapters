@@ -90,6 +90,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aNumber) + R.attr.aDouble > 0.0 || R.attr.aNumber == 5
+    # arithmetic/add/int-at-int32-max-plus-one
+    - actions:
+        - arithmetic/add/int-at-int32-max-plus-one
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) + 1 > 2147483647
     # arithmetic/add/int-literal-negated
     - actions:
         - arithmetic/add/int-literal-negated
@@ -351,6 +360,15 @@ resourcePolicy:
       condition:
         match:
           expr: int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1
+    # arithmetic/modulo/column-divisor-at-int32-max
+    - actions:
+        - arithmetic/modulo/column-divisor-at-int32-max
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aNumber) % (int(R.attr.aNumber) + 1) == 2147483647
     # arithmetic/modulo/negated-double-operand
     - actions:
         - arithmetic/modulo/negated-double-operand
@@ -459,6 +477,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aNumber - 3.0 <= 0.0
+    # arithmetic/subtract/field-minus-constant-solved-past-int32
+    - actions:
+        - arithmetic/subtract/field-minus-constant-solved-past-int32
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber - 45.0 <= 2147483647.0
+    # arithmetic/divide/double-halved-past-single-precision
+    - actions:
+        - arithmetic/divide/double-halved-past-single-precision
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aDouble / 2.5 > 0.120000000000001
     # arithmetic/subtract/int-minus-principal-double
     - actions:
         - arithmetic/subtract/int-minus-principal-double
@@ -486,6 +522,24 @@ resourcePolicy:
       condition:
         match:
           expr: '!(int(R.attr.aNumber) % 0 == 1) || R.attr.aString == "one"'
+    # arithmetic/subtract/negated-relation-field-minus-constant-not-equals
+    - actions:
+        - arithmetic/subtract/negated-relation-field-minus-constant-not-equals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!(R.attr.parent.aNumber - 0.5 != 2.5)'
+    # arithmetic/subtract/relation-field-minus-constant-not-equals
+    - actions:
+        - arithmetic/subtract/relation-field-minus-constant-not-equals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.parent.aNumber - 0.5 != 2.5
     # cast/double/malformed-string
     - actions:
         - cast/double/malformed-string
@@ -540,6 +594,15 @@ resourcePolicy:
       condition:
         match:
           expr: '!(int(R.attr.aString) > 50)'
+    # cast/int/signed-string-before-nul
+    - actions:
+        - cast/int/signed-string-before-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: int(R.attr.aString) == 51
     # cast/int/negative-fraction
     - actions:
         - cast/int/negative-fraction
@@ -693,6 +756,15 @@ resourcePolicy:
       condition:
         match:
           expr: string(R.attr.aDouble) == "-0"
+    # cast/string/from-positive-zero-double
+    - actions:
+        - cast/string/from-positive-zero-double
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: string(R.attr.aDouble) == "0" || R.attr.aNumber == 5
     # cast/string/negated-explicit-null
     - actions:
         - cast/string/negated-explicit-null
@@ -1839,6 +1911,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aBool < true
+    # comparison/less-than/int-field-below-literal-past-int32
+    - actions:
+        - comparison/less-than/int-field-below-literal-past-int32
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumber < 3000000000
     # comparison/less-than/double-below-int64-range
     - actions:
         - comparison/less-than/double-below-int64-range
@@ -2394,6 +2475,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0 : R.attr.aNumber) : -1) >= 2'
+    # conditional/ternary/nested-over-parent-fields
+    - actions:
+        - conditional/ternary/nested-over-parent-fields
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(!("inner" in R.attr.parent)) ? ((R.attr.aBoolList[0] != false) ? (R.attr.parent.aBool == R.attr.parent.aBool) : (int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1)) : ((R.attr.parent.inner.aBool == R.attr.parent.aBool) || (size(R.attr.mainCategory.subCategories) >= 1.5))'
     # conditional/ternary/on-both-sides
     - actions:
         - conditional/ternary/on-both-sides
@@ -3599,6 +3689,15 @@ resourcePolicy:
       condition:
         match:
           expr: '(R.attr.parent.aString < "XA_BY") ? (P.attr.allowedTags.all(t, R.attr.aString != t)) : (R.attr.tagNames.filter(t, t != "Public").size() == 0)'
+    # principal/equals/left-unresolved-beside-field-in-ternary-branch
+    - actions:
+        - principal/equals/left-unresolved-beside-field-in-ternary-branch
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '(R.attr.aDouble in [34.3, 20.3]) ? R.attr.aBool : (R.attr.owner == P.attr.context)'
     # principal/all/long-list
     - actions:
         - principal/all/long-list
@@ -4094,6 +4193,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^[abx]+$")
+    # regex/matches/end-anchor-after-nul
+    - actions:
+        - regex/matches/end-anchor-after-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("a$")
+    # regex/matches/wildcard-after-nul
+    - actions:
+        - regex/matches/wildcard-after-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^.*a$")
+    # regex/matches/negated-wildcard-after-nul
+    - actions:
+        - regex/matches/negated-wildcard-after-nul
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aString.matches("^.*x$")'
     # regex/matches/negated-class
     - actions:
         - regex/matches/negated-class
@@ -5831,6 +5957,24 @@ resourcePolicy:
       condition:
         match:
           expr: timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.000001Z")
+    # timestamp/greater-or-equal/sub-millisecond-literal-past-whole-second
+    - actions:
+        - timestamp/greater-or-equal/sub-millisecond-literal-past-whole-second
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) >= timestamp("2020-03-15T10:30:00.000001Z")
+    # timestamp/equals/sub-millisecond-literal-past-whole-second
+    - actions:
+        - timestamp/equals/sub-millisecond-literal-past-whole-second
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00.000001Z") || R.attr.aString == "xaXby"
     # timestamp/less-or-equal/sub-second-literal-at-stored-fraction
     - actions:
         - timestamp/less-or-equal/sub-second-literal-at-stored-fraction
@@ -5876,6 +6020,24 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.createdAt != timestamp("2024-06-01T00:00:00Z")
+    # timestamp/equals/microsecond-literal-inside-stored-millisecond
+    - actions:
+        - timestamp/equals/microsecond-literal-inside-stored-millisecond
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00.123457Z") || R.attr.aNumber == 5
+    # timestamp/not-equals/microsecond-literal-inside-stored-millisecond
+    - actions:
+        - timestamp/not-equals/microsecond-literal-inside-stored-millisecond
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: timestamp(R.attr.createdAt) != timestamp("2020-03-15T10:30:00.123457Z")
     # timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond
     - actions:
         - timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond

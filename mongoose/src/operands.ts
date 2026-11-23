@@ -7,6 +7,7 @@ import type {
 
 import { UnsupportedQueryPlanError } from "./errors";
 import type { MongoValue } from "./expression";
+import { PLANNER_OPERATORS } from "./planner-operators";
 
 export const isExpression = (e: PlanExpressionOperand): e is PlanExpression =>
   "operator" in e;
@@ -55,17 +56,6 @@ export const collectVariableNames = (
  */
 export const carriesNullOperand = (value: MongoValue): boolean =>
   value === null || (Array.isArray(value) && value.includes(null));
-
-// Every operator a Cerbos plan holds. Some translations decide a subtree from its type alone, so an
-// unknown operator is refused before translating.
-const PLANNER_OPERATORS = new Set([
-  "add", "all", "ancestorOf", "and", "contains", "descendentOf", "div", "double", "duration", "dyn",
-  "endsWith", "eq", "except", "exists", "exists_one", "filter", "ge", "get-field", "gt", "has",
-  "hasIntersection", "has_intersection", "hierarchy", "if", "in", "index", "int", "intersect",
-  "isSubset", "lambda", "le", "list", "lt", "map", "matches", "mod", "mult", "ne", "not", "or",
-  "overlaps", "set-field", "size", "startsWith", "string", "struct", "sub", "timeSince",
-  "timestamp", "upperAscii",
-]);
 
 export const assertPlannerOperators = (operand: PlanExpressionOperand): void => {
   if (!isExpression(operand)) return;

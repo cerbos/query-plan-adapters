@@ -402,6 +402,9 @@ function rewriteCastComparison(
     if (type === "number") {
       const parsed = Number(value);
 
+      // No store tells -0 from 0 in a comparison, and CEL renders them apart.
+      if (parsed === 0 && value.trim() !== "") return undefined;
+
       return value.trim() !== "" && formatCelDouble(parsed) === value
         ? equality(parsed)
         : unmatched;

@@ -144,6 +144,9 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults, unhel
 	if m.Rows > 0 {
 		reproduce += fmt.Sprintf(" -rows %d", m.Rows)
 	}
+	if m.Edges > 0 {
+		reproduce += fmt.Sprintf(" -edges %d", m.Edges)
+	}
 	if m.Steer != nil {
 		reproduce += fmt.Sprintf(" -steer %s -steer-goal %s", strings.Join(m.Steer.From, ","), m.Steer.Goal)
 		if len(m.Steer.Adapters) > 0 {

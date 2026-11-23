@@ -851,8 +851,9 @@ def _float_div(c: Any, v: Any) -> Any:
             return IEEEConstant(math.copysign(math.inf, sign))
         return numerator / denominator
 
-    numerator = float(c) if _is_number(c) else cast(c, Float)
-    denominator = float(v) if _is_number(v) else cast(v, Float)
+    # Not cast(x, Float): MySQL 8.0.17+ reads CAST(x AS FLOAT) as single precision.
+    numerator = float(c) if _is_number(c) else _AsDouble(c)
+    denominator = float(v) if _is_number(v) else _AsDouble(v)
 
     # In CEL, x/0 is NaN or a signed infinity, not an error. SQL NULL would be
     # wrong (`NaN != 1.0` is TRUE), so keep these arms symbolic for the enclosing

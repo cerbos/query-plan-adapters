@@ -136,6 +136,20 @@ cases:
   condition:
     match:
       expr: 'timestamp(R.attr.createdAt) <= timestamp("2020-03-15T10:30:00.000001Z")'
+- id: 'timestamp/greater-or-equal/sub-millisecond-literal-past-whole-second'
+  tier: adversarial
+  intent: 'timestamp(createdAt) >= a literal one microsecond past a1 (2020-03-15T10:30:00.000001Z).'
+  trap: 'a1 sits one microsecond before the literal and is denied; a5 (…00.123456Z) and the later rows are allowed. A literal bound at millisecond precision, as a store that keeps timestamps to the millisecond does, truncates to a1''s instant and over-grants a1. Found by fuzzing (fuzz/s151/0072, exposed / sqlite).'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) >= timestamp("2020-03-15T10:30:00.000001Z")'
+- id: 'timestamp/equals/sub-millisecond-literal-past-whole-second'
+  tier: adversarial
+  intent: 'timestamp(createdAt) == a literal one microsecond past a1 (2020-03-15T10:30:00.000001Z), OR''d with aString == "xaXby" (a5).'
+  trap: 'No row holds that instant, so only a5 is allowed. A literal truncated to the millisecond equals a1 and over-grants it.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00.000001Z") || R.attr.aString == "xaXby"'
 - id: 'timestamp/less-or-equal/sub-second-literal-at-stored-fraction'
   tier: adversarial
   intent: 'timestamp(createdAt) <= a literal at a5''s exact microsecond (2020-03-15T10:30:00.123456Z).'
@@ -171,6 +185,20 @@ cases:
   condition:
     match:
       expr: 'R.attr.createdAt != timestamp("2024-06-01T00:00:00Z")'
+- id: 'timestamp/equals/microsecond-literal-inside-stored-millisecond'
+  tier: adversarial
+  intent: 'timestamp(createdAt) == a literal one microsecond past a5 (2020-03-15T10:30:00.123457Z), inside a5''s millisecond, beside aNumber == 5.'
+  trap: 'No row is that instant, so only the aNumber == 5 rows are allowed. A store that keeps whole milliseconds rounds the bound literal to .123, and == then grants any row stored at .123.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) == timestamp("2020-03-15T10:30:00.123457Z") || R.attr.aNumber == 5'
+- id: 'timestamp/not-equals/microsecond-literal-inside-stored-millisecond'
+  tier: adversarial
+  intent: 'timestamp(createdAt) != a literal one microsecond past a5 (2020-03-15T10:30:00.123457Z), inside a5''s millisecond.'
+  trap: 'Every row with a createdAt is allowed, a5 included, and a3 (no createdAt) denies. Rounding the bound literal to the millisecond denies any row stored at .123.'
+  condition:
+    match:
+      expr: 'timestamp(R.attr.createdAt) != timestamp("2020-03-15T10:30:00.123457Z")'
 - id: 'timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond'
   tier: adversarial
   intent: 'timestamp(createdAt) >= a literal one nanosecond past a5''s stored microsecond (2020-03-15T10:30:00.123456001Z).'

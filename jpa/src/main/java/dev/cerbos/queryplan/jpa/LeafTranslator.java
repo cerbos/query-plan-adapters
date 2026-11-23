@@ -146,9 +146,12 @@ final class LeafTranslator {
             return tri.unknown();
         }
         // A fractional constant is a Double: compare as double, because Hibernate will not
-        // coerce 1.5 onto an Integer path and `intColumn >= 1.5` is legal CEL.
-        Expression raw = ExactStrings.forOperator(cb, op,
-                (value instanceof Double) ? path.as(Double.class) : (Expression) path);
+        // coerce 1.5 onto an Integer path and `intColumn >= 1.5` is legal CEL. A whole constant
+        // past the Integer range is compared as a long, since Hibernate throws coercing it.
+        Expression operand = (value instanceof Double) ? path.as(Double.class)
+                : outsideIntegerRange(path.getJavaType(), value) ? path.as(Long.class)
+                : path;
+        Expression raw = ExactStrings.forOperator(cb, op, operand);
         return switch (op) {
             case "eq" -> cb.equal(raw, value);
             case "ne" -> cb.notEqual(raw, value);
@@ -159,6 +162,11 @@ final class LeafTranslator {
             // e.g. `matches`, unless an override is registered for it.
             default -> throw Refusals.unsupported("Unsupported operator: " + op);
         };
+    }
+
+    private static boolean outsideIntegerRange(Class<?> type, Object value) {
+        return (Integer.class.equals(type) || int.class.equals(type))
+                && value instanceof Long l && (l > Integer.MAX_VALUE || l < Integer.MIN_VALUE);
     }
 
     /** Whether two types compare in SQL as in CEL: the same type, or both numbers. */

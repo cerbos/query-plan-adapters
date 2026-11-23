@@ -1,0 +1,68 @@
+{
+  "allowed": [
+    "a1",
+    "a2",
+    "a4",
+    "a7",
+    "a9",
+    "b1",
+    "b2",
+    "b6",
+    "c1",
+    "d1",
+    "e1",
+    "f1"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/subtract/relation-field-minus-constant-not-equals",
+  "intent": "A to-one parent's number minus a constant, compared with not-equals (parent.aNumber - 0.5 != 2.5).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.parent.aNumber"
+                },
+                {
+                  "value": 0.5
+                }
+              ],
+              "operator": "sub"
+            }
+          },
+          {
+            "value": 2.5
+          }
+        ],
+        "operator": "ne"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/subtract/relation-field-minus-constant-not-equals",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.parent.aNumber - 0.5 != 2.5"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "A row with no parent, or none with an aNumber, errors in check() and is denied; negating the solved interval outside the relation allows every row with no parent. Found by fuzzing (fuzz/s137/0348, prisma)."
+}

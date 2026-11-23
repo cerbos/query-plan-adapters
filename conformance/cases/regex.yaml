@@ -220,6 +220,27 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^[abx]+$")'
+- id: 'regex/matches/end-anchor-after-nul'
+  tier: adversarial
+  intent: 'matches("a$") over k3, whose aString is "a", NUL, "x".'
+  trap: 'k3 ends with x, so it is denied. SQLite''s LIKE reads a string as C text up to the first NUL, so the suffix pattern %a matches k3.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("a$")'
+- id: 'regex/matches/wildcard-after-nul'
+  tier: adversarial
+  intent: 'matches("^.*a$") over k3, whose aString is "a", NUL, "x".'
+  trap: 'RE2''s . matches a NUL, so k3 ends with x and is denied. Spelled as LIKE ''%a'', SQLite stops reading k3 at the NUL and grants it.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^.*a$")'
+- id: 'regex/matches/negated-wildcard-after-nul'
+  tier: adversarial
+  intent: '!matches("^.*x$") over k3, whose aString is "a", NUL, "x".'
+  trap: 'k3 matches, so the negation denies it. A LIKE ''%x'' that SQLite reads only up to the NUL misses k3, and the negation grants it.'
+  condition:
+    match:
+      expr: '!R.attr.aString.matches("^.*x$")'
 - id: 'regex/matches/negated-class'
   tier: adversarial
   intent: 'matches("^[^a]+$"): one or more characters, none of them a.'

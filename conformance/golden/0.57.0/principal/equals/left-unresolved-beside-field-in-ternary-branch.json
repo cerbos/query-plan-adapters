@@ -1,0 +1,74 @@
+{
+  "allowed": [
+    "h3",
+    "j2"
+  ],
+  "degenerateReason": null,
+  "id": "principal/equals/left-unresolved-beside-field-in-ternary-branch",
+  "intent": "A field compared with a principal attribute in one branch of a ternary, which the planner leaves as a request.principal.attr variable.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                },
+                {
+                  "value": [
+                    34.3,
+                    20.3
+                  ]
+                }
+              ],
+              "operator": "in"
+            }
+          },
+          {
+            "variable": "request.resource.attr.aBool"
+          },
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.owner"
+                },
+                {
+                  "variable": "request.principal.attr.context"
+                }
+              ],
+              "operator": "eq"
+            }
+          }
+        ],
+        "operator": "if"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "principal/equals/left-unresolved-beside-field-in-ternary-branch",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "(R.attr.aDouble in [34.3, 20.3]) ? R.attr.aBool : (R.attr.owner == P.attr.context)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The plan compares owner with request.principal.attr.context as if both were fields. An adapter must refuse it; rendering the principal variable as a field reference sends the store a field that does not exist. Found by fuzzing (fuzz/s139/0340, prisma)."
+}

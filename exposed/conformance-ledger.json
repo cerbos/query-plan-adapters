@@ -33,6 +33,10 @@
       "status": "unsupported",
       "reason": "Cannot compare a column with a struct() value: it builds a map or list, and a mapped column holds one scalar, which SQL equality cannot compare with either."
     },
+    "arithmetic/modulo/column-divisor-at-int32-max": {
+      "status": "unsupported",
+      "reason": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
+    },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
       "reason": "mod is not supported in comparisons: CEL % is integer-only while attribute values are always doubles at check time, so a satisfiable policy must cast with int() first — and int() has no faithful SQL lowering, because CAST rounds where CEL truncates toward zero."
@@ -60,6 +64,10 @@
     "cast/string/from-negative-zero-double": {
       "status": "unsupported",
       "reason": "Cannot translate string() over a DoubleColumnType column: CEL renders a number as Go's shortest round-tripping form (1e+06, 2, -0) and no SQL CAST reproduces that for this column type, nor reads the sign of a stored -0.0. Text, integer and boolean columns are translatable, and a floating-point column only under == or != against a string literal other than \"0\" and \"-0\"."
+    },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "Same refusal as `cast/string/from-negative-zero-double`: string() over a DoubleColumnType column is translated only against a literal other than \"0\" and \"-0\", since no store tells -0.0 from 0.0 in a comparison."
     },
     "cast/string/from-ternary-with-int-branch": {
       "status": "unsupported",
@@ -121,6 +129,10 @@
       "status": "unsupported",
       "reason": "Cannot compare a column with a list() value: a mapped column holds one scalar, which SQL equality cannot compare with a list."
     },
+    "conditional/ternary/nested-over-parent-fields": {
+      "status": "unsupported",
+      "reason": "Same refusal as membership/in/map-attribute-keys, under negation: `in` over the to-one `parent` tests its attribute names, which SQL has no row to read"
+    },
     "hierarchy/overlaps/field-to-field": {
       "status": "unsupported",
       "reason": "Both hierarchies are read from columns, so there is no constant path to expand into prefixes, and an Exposed expression cannot split a column on a delimiter to compare it segment by segment."
@@ -136,6 +148,10 @@
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves P.attr.context unresolved in this ternary branch, so the plan compares owner with the variable request.principal.attr.context, which no store holds. The adapter refuses it."
     },
     "regex/matches/case-fold-perl-non-word-class": {
       "status": "unsupported",

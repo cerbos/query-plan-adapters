@@ -1,0 +1,101 @@
+{
+  "allowed": [
+    "a4",
+    "a6",
+    "a8",
+    "a9",
+    "b1",
+    "b2",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "c2",
+    "d1",
+    "d2",
+    "e1",
+    "f1",
+    "h1",
+    "h2",
+    "h3",
+    "h5",
+    "h6",
+    "h7",
+    "i1",
+    "i2",
+    "i3",
+    "i4",
+    "i6",
+    "i7",
+    "i8",
+    "i9",
+    "j1",
+    "j2",
+    "j3",
+    "j4",
+    "k1",
+    "k2",
+    "k3",
+    "k4",
+    "k5",
+    "l1",
+    "l2",
+    "l3",
+    "l4",
+    "m1",
+    "m2",
+    "n1"
+  ],
+  "degenerateReason": null,
+  "id": "arithmetic/divide/double-halved-past-single-precision",
+  "intent": "A double attribute divided by a constant, compared just above the quotient of 0.3 (aDouble / 2.5 > 0.120000000000001).",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.aDouble"
+                },
+                {
+                  "value": 2.5
+                }
+              ],
+              "operator": "div"
+            }
+          },
+          {
+            "value": 0.120000000000001
+          }
+        ],
+        "operator": "gt"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "arithmetic/divide/double-halved-past-single-precision",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aDouble / 2.5 > 0.120000000000001"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "0.3 / 2.5 is 0.12 as doubles, so the 0.3 rows are denied. Reading aDouble as a single-precision float, as MySQL does for CAST(x AS FLOAT), gives 0.30000001 / 2.5 > 0.120000000000001 and grants them."
+}

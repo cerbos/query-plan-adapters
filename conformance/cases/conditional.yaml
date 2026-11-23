@@ -178,6 +178,13 @@ cases:
   condition:
     match:
       expr: '(R.attr.aBool ? (R.attr.aString == "" ? 0 : R.attr.aNumber) : -1) >= 2'
+- id: 'conditional/ternary/nested-over-parent-fields'
+  tier: adversarial
+  intent: 'Nested ternaries whose condition and branches read the to-one parent and its inner object many times.'
+  trap: 'Each read of the parent is the same row; an adapter that joins the parent afresh for every read reaches MySQL''s 61-table join limit, which fails the whole query. Found by fuzzing (fuzz/s139/0313, jpa on MySQL).'
+  condition:
+    match:
+      expr: '(!("inner" in R.attr.parent)) ? ((R.attr.aBoolList[0] != false) ? (R.attr.parent.aBool == R.attr.parent.aBool) : (int(R.attr.aNumber) % (int(R.attr.aNumber) - 5) == 1)) : ((R.attr.parent.inner.aBool == R.attr.parent.aBool) || (size(R.attr.mainCategory.subCategories) >= 1.5))'
 - id: 'conditional/ternary/on-both-sides'
   tier: extended
   intent: Ternaries on both sides of a comparison.

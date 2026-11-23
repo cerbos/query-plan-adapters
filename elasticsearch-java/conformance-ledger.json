@@ -33,6 +33,10 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate IEEE-754 document-field addition without scripts"
     },
+    "arithmetic/add/int-at-int32-max-plus-one": {
+      "status": "unsupported",
+      "reason": "The Query DSL has no document-field arithmetic without painless scripts, so int(aNumber) + 1 is refused."
+    },
     "arithmetic/add/int-beside-double-field": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts, and int() over the field is a computed operand too; CEL's missing int + double overload is never reached."
@@ -64,6 +68,10 @@
     "arithmetic/add/value-first": {
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
+    },
+    "arithmetic/divide/double-halved-past-single-precision": {
+      "status": "unsupported",
+      "reason": "Unexpected div expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing div over a field needs a script."
     },
     "arithmetic/divide/field-by-field": {
       "status": "unsupported",
@@ -137,6 +145,10 @@
       "status": "unsupported",
       "reason": "Unexpected struct expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing struct over a field needs a script."
     },
+    "arithmetic/modulo/column-divisor-at-int32-max": {
+      "status": "unsupported",
+      "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all, and here the divisor is itself computed from a document field"
+    },
     "arithmetic/modulo/column-divisor-negative-and-zero": {
       "status": "unsupported",
       "reason": "The Query DSL has no arithmetic without painless scripts, so a computed leaf operand is refused outright — mod is not in the leaf resolver at all, and here the divisor is itself computed from a document field"
@@ -189,6 +201,18 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot evaluate document-field arithmetic without scripts"
     },
+    "arithmetic/subtract/field-minus-constant-solved-past-int32": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
+    },
+    "arithmetic/subtract/negated-relation-field-minus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
+    },
+    "arithmetic/subtract/relation-field-minus-constant-not-equals": {
+      "status": "unsupported",
+      "reason": "Unexpected sub expression in leaf operand: a Query DSL leaf compares one document field against a literal, and computing sub over a field needs a script."
+    },
     "cast/double/malformed-string": {
       "status": "unsupported",
       "reason": "double() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."
@@ -216,6 +240,10 @@
     "cast/int/out-of-range-beside-relation": {
       "status": "unsupported",
       "reason": "Same int() refusal as cast/int/double-truncation-bounds."
+    },
+    "cast/int/signed-string-before-nul": {
+      "status": "unsupported",
+      "reason": "int() over a string field is a computed operand; the Query DSL cannot cast a field without scripts."
     },
     "cast/int/string-beyond-double-precision": {
       "status": "unsupported",
@@ -250,6 +278,10 @@
       "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare the string() of a ternary without scripts."
     },
     "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
+    },
+    "cast/string/from-positive-zero-double": {
       "status": "unsupported",
       "reason": "Same missing computed operand as cast/string/from-double: a term query cannot compare CEL's printed form of a double field without scripts"
     },
@@ -649,6 +681,10 @@
       "status": "unsupported",
       "reason": "Same unfolded literal division as comparison/greater-than/infinity-from-ternary: a division by zero is an int error or a double infinity, and the plan cannot tell which"
     },
+    "comparison/less-than/int-field-below-literal-past-int32": {
+      "status": "unsupported",
+      "reason": "3000000000 is past the range of the integer field aNumber, and Elasticsearch rejects a range query whose bound its field type cannot hold, so the translator refuses it."
+    },
     "comparison/less-than/nan-from-ternary": {
       "status": "unsupported",
       "reason": "Same unfolded literal division as comparison/greater-than/nan-from-ternary: 0/0 is an int division error or a double NaN, and the plan cannot tell which"
@@ -692,6 +728,10 @@
     "conditional/ternary/negated-collection-condition": {
       "status": "unsupported",
       "reason": "The ternary's condition is a positive all() over tags, refused as collection/all/empty-collection is: Elasticsearch does not index an empty nested array, so all cannot distinguish an empty collection (true) from a missing collection (CEL error)"
+    },
+    "conditional/ternary/nested-over-parent-fields": {
+      "status": "unsupported",
+      "reason": "Same limitation as membership/in/map-attribute-keys, under negation: no query answers key membership in an object field."
     },
     "conditional/ternary/string-match-receiver": {
       "status": "unsupported",
@@ -934,6 +974,10 @@
       "status": "unsupported",
       "reason": "The planner leaves the principal list unresolved in this ternary branch, so the plan names request.principal.attr.allowedTags, which is not a value the adapter can bind and not a field of any store. The adapter refuses the reference."
     },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "The planner leaves P.attr.context unresolved in this ternary branch, so the plan compares owner with the variable request.principal.attr.context, which no store holds. The adapter refuses it."
+    },
     "principal/except/size-after-removing-resource-value": {
       "status": "unsupported",
       "reason": "except is not supported: Cerbos except(list, list) computes a list difference, which has no Elasticsearch Query DSL translation. Rewrite the policy with a collection macro instead — e.g. size(R.attr.tags.except([\"x\"])) > 0 is equivalent to R.attr.tags.exists(t, !(t in [\"x\"]))."
@@ -1006,6 +1050,10 @@
       "status": "unsupported",
       "reason": "RE2 matches the empty string at an empty alternative inside a group, which Lucene's regexp reads differently."
     },
+    "regex/matches/end-anchor-after-nul": {
+      "status": "unsupported",
+      "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix: a Lucene regexp query matches the whole term, and a$ is neither."
+    },
     "regex/matches/end-anchor-mid-pattern": {
       "status": "unsupported",
       "reason": "The RE2-to-Lucene translator reads ^ and $ only at the ends of the pattern; Lucene has no anchors to place one mid-pattern, so it is refused."
@@ -1070,6 +1118,10 @@
       "status": "unsupported",
       "reason": "Lucene's regexp syntax has no (?i) flag and no \\w class."
     },
+    "regex/matches/negated-wildcard-after-nul": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .*x. Lucene's . matches a newline where RE2's does not."
+    },
     "regex/matches/non-capturing-group-optional-suffix": {
       "status": "unsupported",
       "reason": "The RE2-to-Lucene translator does not read a (?:...) group, so the pattern is refused."
@@ -1125,6 +1177,10 @@
     "regex/matches/whitespace-class": {
       "status": "unsupported",
       "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: \\s*"
+    },
+    "regex/matches/wildcard-after-nul": {
+      "status": "unsupported",
+      "reason": "matches regex uses syntax outside the supported RE2/Lucene subset at index 0: .*a. Lucene's . matches a newline where RE2's does not."
     },
     "regex/matches/word-boundary": {
       "status": "unsupported",
@@ -1413,9 +1469,21 @@
       "status": "unsupported",
       "reason": "Elasticsearch Query DSL cannot compare two document fields without scripts"
     },
+    "timestamp/equals/microsecond-literal-inside-stored-millisecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a millisecond needs a date_nanos field mapping, which this adapter does not configure: a date field holds milliseconds."
+    },
+    "timestamp/equals/sub-millisecond-literal-past-whole-second": {
+      "status": "unsupported",
+      "reason": "A sub-millisecond timestamp literal needs a date_nanos field; an ordinary Elasticsearch date field keeps milliseconds, so the adapter refuses it"
+    },
     "timestamp/greater-or-equal/nanosecond-literal-past-stored-microsecond": {
       "status": "unsupported",
       "reason": "A timestamp literal finer than a millisecond needs a date_nanos field mapping, which this adapter does not configure: a date field holds milliseconds."
+    },
+    "timestamp/greater-or-equal/sub-millisecond-literal-past-whole-second": {
+      "status": "unsupported",
+      "reason": "A sub-millisecond timestamp literal needs a date_nanos field; an ordinary Elasticsearch date field keeps milliseconds, so the adapter refuses it"
     },
     "timestamp/greater-than/relative-window-value-first": {
       "status": "unsupported",
@@ -1440,6 +1508,10 @@
     "timestamp/less-than/relative-window": {
       "status": "unsupported",
       "reason": "The runtime timestamp threshold carries sub-millisecond precision, which ordinary Elasticsearch date fields cannot preserve"
+    },
+    "timestamp/not-equals/microsecond-literal-inside-stored-millisecond": {
+      "status": "unsupported",
+      "reason": "A timestamp literal finer than a millisecond needs a date_nanos field mapping, which this adapter does not configure: a date field holds milliseconds."
     },
     "type-mismatch/add/negated-boolean-plus-number": {
       "status": "unsupported",
