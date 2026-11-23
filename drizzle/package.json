@@ -59,7 +59,7 @@
     "@grpc/grpc-js": "^1.14.5",
     "@testcontainers/mysql": "^12.1.0",
     "@testcontainers/postgresql": "^12.1.0",
-    "@tsconfig/node24": "^24.0.0",
+    "@tsconfig/node26": "^26.0.0",
     "@tsconfig/strictest": "^2.0.8",
     "@types/better-sqlite3": "^9.0.0",
     "@types/jest": "^30.0.0",

@@ -78,7 +78,7 @@
     "@prisma/client-v6": "npm:@prisma/client@^6.0.0",
     "@testcontainers/mysql": "^12.1.0",
     "@testcontainers/postgresql": "^12.1.0",
-    "@tsconfig/node24": "^24.0.3",
+    "@tsconfig/node26": "^26.0.0",
     "@tsconfig/strictest": "^2.0.8",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
