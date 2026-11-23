@@ -20,6 +20,7 @@ import {
   assertNoNullComparisonOperands,
   validateStructure,
 } from "./validate";
+import { rewriteSetFunctions } from "./set-functions";
 
 export { PlanKind, UnsupportedQueryPlanError };
 
@@ -192,7 +193,7 @@ export function queryPlanToConvex({
     case PlanKind.ALWAYS_DENIED:
       return { kind: PlanKind.ALWAYS_DENIED };
     case PlanKind.CONDITIONAL: {
-      const { condition } = queryPlan;
+      const condition = rewriteSetFunctions(queryPlan.condition);
       const omitted = nullAttributeRepresentation === "omitted";
       assertNoListValuedCondition(condition);
 
