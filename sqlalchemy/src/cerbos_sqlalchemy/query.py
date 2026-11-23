@@ -37,6 +37,7 @@ from cerbos_sqlalchemy._plan import (
     declared_collection_name,
     parse_operand,
     resolve_map_member_paths,
+    rewrite_set_functions,
 )
 from cerbos_sqlalchemy._translator import Translator, require_boolean
 from cerbos_sqlalchemy.collection_storage import (  # noqa: F401 - re-exported for callers
@@ -117,10 +118,12 @@ def _validate_collection_columns(
 def _plan_condition(
     query_plan: PlanResourcesResponse | response_pb2.PlanResourcesResponse,
 ) -> Operand:
-    return parse_operand(
-        MessageToDict(query_plan.filter.condition)
-        if isinstance(query_plan, response_pb2.PlanResourcesResponse)
-        else query_plan.filter.condition.to_dict()
+    return rewrite_set_functions(
+        parse_operand(
+            MessageToDict(query_plan.filter.condition)
+            if isinstance(query_plan, response_pb2.PlanResourcesResponse)
+            else query_plan.filter.condition.to_dict()
+        )
     )
 
 

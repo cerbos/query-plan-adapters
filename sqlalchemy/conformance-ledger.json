@@ -280,6 +280,62 @@
       "status": "unsupported",
       "reason": "size() over a ternary is not lowered: its branches are folded only by list concatenation and equality with a literal."
     },
+    "collection/has-all/principal-list-receiver": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "A literal list receiver turns hasAll into isSubset of the stored list, and isSubset() has no default SQL lowering: the relation-mapped tagNames reaches it outside any operator override."
+    },
+    "collection/has-all/scalar-receiver": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasAll lowers to hasIntersection, which is translated only over a Relation or its map() projection; over a scalar column it is a CEL no-overload error."
+    },
+    "collection/has-all/value-first": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "A literal list receiver turns hasAll into isSubset of the stored list, and isSubset() has no default SQL lowering: the relation-mapped tagNames reaches it outside any operator override."
+    },
+    "collection/has-exactly/duplicate-literals-value-first": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly lowers to hasIntersection beside isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-exactly/empty-literal-list": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly lowers to hasIntersection beside isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-exactly/negated": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly lowers to hasIntersection beside isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-exactly/numbers-in-any-order": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly lowers to hasIntersection beside isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-exactly/single-element": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly lowers to hasIntersection beside isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
       "reason": "The planner passes the deprecated has_intersection spelling through unchanged; the harness's override handles only hasIntersection, so tagNames reaches the translator unmapped."
@@ -291,6 +347,41 @@
     "collection/has-intersection/two-resource-lists": {
       "status": "unsupported",
       "reason": "hasIntersection is translated only against a literal list."
+    },
+    "collection/has-only/empty-literal-list": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-only/mapped-names-with-nameless-tag": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-only/negated": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-only/null-element": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-only/single-element": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
     },
     "collection/index/first-element-of-object-list": {
       "status": "unsupported",
