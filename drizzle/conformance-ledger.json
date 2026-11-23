@@ -160,6 +160,13 @@
       "status": "unsupported",
       "reason": "'size' operator requires a field reference or filter expression."
     },
+    "collection/has-exactly/numbers-in-any-order": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly lowers to hasIntersection beside isSubset; the isSubset half is an all() over the list, which the adapter translates only over a relation, and aNumberList is a JSON array column."
+    },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
       "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
@@ -175,6 +182,20 @@
     "collection/has-intersection/two-resource-lists": {
       "status": "unsupported",
       "reason": "hasIntersection is translated only with a literal list as one of its operands."
+    },
+    "collection/has-only/mapped-names-with-nameless-tag": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, which the adapter translates only over a relation-mapped list, not over a map() projection."
+    },
+    "collection/has-only/null-element": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, an all() over the list, which the adapter translates only over a relation; aNumberList is a JSON array column, which it reads only through hasIntersection and in."
     },
     "collection/intersect/duplicates-in-shorter-list": {
       "status": "unsupported",
