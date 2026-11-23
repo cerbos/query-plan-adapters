@@ -212,7 +212,8 @@ public final class JpaQueryPlanAdapter {
      */
     private static QueryPlanFilter conditional(Operand planned, Options options) {
         assertPlannerOperators(planned, options.operatorOverrides());
-        Operand condition = PlanLiterals.selectMapKeys(PlanLiterals.fold(planned),
+        Operand condition = PlanLiterals.selectMapKeys(
+                PlanLiterals.fold(SetFunctions.rewrite(planned, options.operatorOverrides())),
                 options.mapping());
         assertNoNullComparisonOperands(condition, options.mapping(),
                 options.operatorOverrides(), options.nullAttributeRepresentation());
