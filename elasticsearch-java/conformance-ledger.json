@@ -513,6 +513,83 @@
       "status": "unsupported",
       "reason": "Unsupported size() expression."
     },
+    "collection/has-all/empty-literal-list": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasAll lowers to hasIntersection, and this shape negates it (hasAll([]) is the negation of hasIntersection with the empty list, and a negated hasAll is a negated hasIntersection): Elasticsearch does not index an empty array, so a negated hasIntersection cannot tell an empty list from a missing one, and the adapter refuses."
+    },
+    "collection/has-all/negated": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasAll lowers to hasIntersection, and this shape negates it (hasAll([]) is the negation of hasIntersection with the empty list, and a negated hasAll is a negated hasIntersection): Elasticsearch does not index an empty array, so a negated hasIntersection cannot tell an empty list from a missing one, and the adapter refuses."
+    },
+    "collection/has-all/principal-list-receiver": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "A literal list receiver turns hasAll into isSubset of the stored list, which lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
+    "collection/has-all/scalar-receiver": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasAll lowers to hasIntersection, and this shape negates it (hasAll([]) is the negation of hasIntersection with the empty list, and a negated hasAll is a negated hasIntersection): Elasticsearch does not index an empty array, so a negated hasIntersection cannot tell an empty list from a missing one, and the adapter refuses."
+    },
+    "collection/has-all/value-first": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "A literal list receiver turns hasAll into isSubset of the stored list, which lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
+    "collection/has-any/negated-mapped-names": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasAny lowers to hasIntersection, and Elasticsearch does not index an empty array, so a negated hasIntersection cannot tell an empty list from a missing one; the adapter refuses."
+    },
+    "collection/has-exactly/duplicate-literals-value-first": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly's subset half lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
+    "collection/has-exactly/empty-literal-list": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly lowers to hasIntersection beside isSubset; Elasticsearch does not index an empty array, so neither a negated hasIntersection nor isSubset can tell an empty list from a missing one, and the adapter refuses."
+    },
+    "collection/has-exactly/negated": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly lowers to hasIntersection beside isSubset; Elasticsearch does not index an empty array, so neither a negated hasIntersection nor isSubset can tell an empty list from a missing one, and the adapter refuses."
+    },
+    "collection/has-exactly/numbers-in-any-order": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly's subset half lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
+    "collection/has-exactly/single-element": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasExactly's subset half lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
       "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."
@@ -532,6 +609,41 @@
     "collection/has-intersection/two-resource-lists": {
       "status": "unsupported",
       "reason": "hasIntersection is translated only with a value list as its second operand."
+    },
+    "collection/has-only/empty-literal-list": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
+    "collection/has-only/mapped-names-with-nameless-tag": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset over a map() projection, and a Query DSL leaf compares one document field against a literal: it cannot compute map() over a field."
+    },
+    "collection/has-only/negated": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
+    "collection/has-only/null-element": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
+    },
+    "collection/has-only/single-element": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, a positive all() over the flat array: Elasticsearch does not index an empty array, so it cannot tell an empty list (a subset) from a missing one (CEL error), nor see the null elements that make CEL compare null against the literal list; the adapter refuses."
     },
     "collection/index/first-element-of-boolean-list": {
       "status": "unsupported",

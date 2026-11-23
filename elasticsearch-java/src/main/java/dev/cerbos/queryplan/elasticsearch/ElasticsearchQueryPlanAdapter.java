@@ -194,7 +194,8 @@ public class ElasticsearchQueryPlanAdapter {
 
     private static Result translateCondition(Operand condition, Options options) {
         assertPlannerOperators(condition, options.operatorOverrides());
-        Operand normalized = selectStringIndexes(condition);
+        Operand normalized = selectStringIndexes(
+                SetFunctions.rewrite(condition, options.operatorOverrides()));
         assertNoExplicitNullAttributeComparisons(normalized, options);
         return new Result.Conditional(new PlanWalker(options).translate(normalized));
     }

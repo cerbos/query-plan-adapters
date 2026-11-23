@@ -151,6 +151,7 @@ class ElasticsearchAdversarialConformanceTest {
             tests.add(dynamicTest("has a golden file for every case in the ledger", () -> {
                 Assumptions.assumeFalse(Corpus.fuzzing(), "a fuzz run is judged without the ledger");
                 TreeSet<String> stale = new TreeSet<>(Corpus.LEDGER.keySet());
+                stale.removeIf(id -> Corpus.ledgerEntry(id, tag) == null);
                 goldens.forEach(golden -> stale.remove(golden.id()));
                 assertEquals(new TreeSet<String>(), stale, "ledger entries with no golden file");
             }));
