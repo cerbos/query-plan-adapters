@@ -97,6 +97,13 @@
       "status": "unsupported",
       "reason": "A two-variable exists() over a map binds its keys, and `obj` is one joined row whose CEL keys are the columns that are not NULL. SQL has no form for that key set, so the attribute map maps only obj.inner and the bare variable is refused as unmapped."
     },
+    "collection/has-all/scalar-receiver": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasAll([]) lowers to the negation of hasIntersection with the empty list; over a string column that is a CEL no-overload error, and the adapter refuses hasIntersection over an operand that is not a list."
+    },
     "collection/has-intersection/deprecated-snake-case": {
       "status": "unsupported",
       "reason": "The planner passes the deprecated has_intersection spelling through unchanged, and the adapter translates only hasIntersection."

@@ -172,6 +172,7 @@ adapter reads once per `ToFilter`: `DateTimeOffset.UtcNow`, or `QueryPlanOptions
 | `has` | A mapped field, a navigation's field, a field of a list element, a prefix of mapped fields |
 | `exists`, `all`, `exists_one`, `filter`, `map` | Over a mapped list, nesting, with one or two variables; over a list literal |
 | `hasIntersection`, `except`, `intersect`, `isSubset` | A mapped list against a literal, or two lists |
+| `hasAny`, `hasAll`, `hasOnly`, `hasExactly` | A mapped list against a literal list, as `hasIntersection` and `isSubset` |
 | `timestamp()`, `duration()`, `timeSince` | A `DateTime` column or a literal; durations add to and subtract from either |
 | `string()`, `double()`, `int()` | `string()` over a string, a boolean or a numeric column, `double()` over a number, `int()` over a number |
 | `upperAscii()`, `lowerAscii()` | Over a string column or literal |
@@ -198,8 +199,8 @@ passed:
 | Tier | Passed / total |
 | --- | --- |
 | core | 32 / 32 |
-| extended | 105 / 110 |
-| adversarial | 525 / 593 |
+| extended | 109 / 114 |
+| adversarial | 545 / 614 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json). All 21 are `unsupported`: the adapter throws
