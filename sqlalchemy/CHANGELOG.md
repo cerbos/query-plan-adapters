@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.7.0
+
 ### Added
 
 - Translates `hasAny` and `hasAll` (CEL list functions from Cerbos 0.58) against a literal list,

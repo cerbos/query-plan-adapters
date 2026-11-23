@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v6.0.0
+
 ### Added
 
 - Translates `hasAll`, `hasAny`, `hasOnly` and `hasExactly` (CEL list functions from Cerbos
