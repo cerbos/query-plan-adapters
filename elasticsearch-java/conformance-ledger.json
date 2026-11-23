@@ -879,24 +879,15 @@
     },
     "null/has/explicit-null-attribute": {
       "status": "unsupported",
-      "pdp": [
-        "0.57.0"
-      ],
-      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses."
     },
     "null/has/explicit-null-attribute-in-disjunction": {
       "status": "unsupported",
-      "pdp": [
-        "0.57.0"
-      ],
-      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses."
     },
     "null/has/explicit-null-attribute-negated-disjunction": {
       "status": "unsupported",
-      "pdp": [
-        "0.57.0"
-      ],
-      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+      "reason": "has() on an attribute sent as an explicit null: Elasticsearch does not index null, so a present null and a missing field are the same document; the adapter refuses."
     },
     "null/in/error-or-boolean-in-list-with-null": {
       "status": "unsupported",
@@ -1240,10 +1231,7 @@
     },
     "relation/has/negated-two-hops-attribute": {
       "status": "unsupported",
-      "pdp": [
-        "0.57.0"
-      ],
-      "reason": "!has() on a field two objects down (parent.inner.aString): a missing parent or parent.inner is an error CEL denies under both polarities, and Elasticsearch has no exists query that finds an object whose fields are all null, so a missing object and one without the field can be the same document; the adapter refuses. The 0.56.0 planner folds the has() away, so that plan translates."
+      "reason": "!has() on a field two objects down (parent.inner.aString): a missing parent or parent.inner is an error CEL denies under both polarities, and Elasticsearch has no exists query that finds an object whose fields are all null, so a missing object and one without the field can be the same document; the adapter refuses."
     },
     "relation/has/parent": {
       "status": "unsupported",

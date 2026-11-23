@@ -205,10 +205,10 @@ because that access already denies a document without `x`.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real MongoDB
+and `check()` decisions recorded from Cerbos PDP 0.58.0 (and 0.57.0), executed as real MongoDB
 queries over the corpus's 44 seed documents on MongoDB 7.0 and 9.0, once through the Ruby driver
 and once through `Cerbos::MongoDB::Mongoid.criteria` on typed Mongoid models. Passed cases on the
-current PDP, 0.57.0, identical on both servers and through both, where the total is every golden
+current PDP, 0.58.0, identical on both servers and through both, where the total is every golden
 case in that tier:
 
 | Tier | Passed / total |
@@ -218,11 +218,7 @@ case in that tier:
 | adversarial | 554 / 593 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
-pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, the
-`null/has/*` cases but `guard-on-same-attribute` and `explicit-null-attribute`, both
-`relation/has/*` cases and `collection/exists/has-in-lambda` are skipped too: that
-planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0
-keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner
+pass them. On 0.58.0 that is three extended cases and four adversarial cases. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner
 drops the int type of the literal in `R.attr.x + 1`, while `check()` has no double + int overload
 and denies every row; write `1.0`. `type-mismatch/in/number-field-in-scalar-principal` and
 `type-mismatch/in/string-field-in-dyn-string`: the planner rewrites `in` over a scalar container to

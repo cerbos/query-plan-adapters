@@ -226,11 +226,6 @@ cases:
   condition:
     match:
       expr: '!has(R.attr.parent.aOptionalString)'
-  plannerDivergence:
-    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
-    pdp:
-    - 0.56.0
-    reason: 'Before 0.57.0 the planner folds has() to true, so the negation plans as KIND_ALWAYS_DENIED. The per-row check() calls omit parent.aOptionalString where the parent lacks it, so check() allows those rows. From 0.57.0 the plan carries the has().'
 - id: 'relation/has/negated-two-hops-attribute'
   tier: adversarial
   intent: '!has(parent.inner.aString): absence of a field two hops across the to-one relations.'
@@ -248,11 +243,6 @@ cases:
   condition:
     match:
       expr: 'has(R.attr.parent)'
-  plannerDivergence:
-    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
-    pdp:
-    - 0.56.0
-    reason: 'Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() calls omit parent on rows without a parent hop, so check() denies them. From 0.57.0 the plan carries the has().'
 - id: 'relation/has/parent-attribute'
   tier: adversarial
   intent: 'has(parent.aOptionalString): presence of a field one hop across the to-one relation.'
@@ -260,11 +250,6 @@ cases:
   condition:
     match:
       expr: 'has(R.attr.parent.aOptionalString)'
-  plannerDivergence:
-    issue: 'has() over an omitted attribute: unknown to the planner, absent to check()'
-    pdp:
-    - 0.56.0
-    reason: 'Before 0.57.0 the planner folds has() to true, so the plan is KIND_ALWAYS_ALLOWED. The per-row check() calls omit parent.aOptionalString where the hop or the field is missing, so check() denies those rows. From 0.57.0 the plan carries the has().'
 - id: 'relation/in/negated-to-one-chain'
   tier: adversarial
   intent: 'Negated membership !("finance" in mainCategory.subNames) where most rows have no mainCategory.'

@@ -442,9 +442,9 @@ consulted.
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 of the
+plan of Cerbos PDP 0.58.0 and 0.57.0, it translates the plan, runs the query against 43 of the
 corpus's 44 seed rows on H2, PostgreSQL and MySQL, and compares the returned ids with the `check()`
-decisions the PDP recorded. The ledger lacks `null-list`, so j4 is not loaded, and `nul-in-string` on PostgreSQL, so k3 is not loaded there. No PDP runs in the test. Results for the current PDP (0.56.0), where the total is every
+decisions the PDP recorded. The ledger lacks `null-list`, so j4 is not loaded, and `nul-in-string` on PostgreSQL, so k3 is not loaded there. No PDP runs in the test. Results for the current PDP (0.58.0), where the total is every
 golden case of that tier; a case marked as a planner divergence is skipped, and counts toward the
 total but not as passed:
 
@@ -457,7 +457,7 @@ total but not as passed:
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json): 21 are `unsupported`, where the adapter
 throws one of its refusal types (`UnsupportedPlanShapeException`, or `UnmappedAttributeException`
-when the plan reads an attribute the mapping does not declare) rather than emit a filter. On 0.57.0,
+when the plan reads an attribute the mapping does not declare) rather than emit a filter. On 0.58.0,
 three extended cases and four adversarial cases are planner divergences the corpus skips:
 `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`, where the
 planner drops the int type of the literal in `R.attr.x + 1` while `check()` has no double + int
@@ -466,9 +466,7 @@ overload and denies every row (write `1.0`),
 whose `in` over a scalar the plan and `check()` answer differently, and
 three `composition/*` cases whose DENY condition reads `aNumber`, which j2 lacks: the plan's
 `not(...)` of it denies j2, while `check()` receives `aNumber` as absent and treats the erroring
-DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too:
-that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0
-keeps `has()` in the plan.
+DENY as not matching ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)).
 
 Other guarantees:
 

@@ -17,7 +17,7 @@ npm install @cerbos/grpc   # or @cerbos/http — whichever client your deploymen
   your application and the adapter must share one copy. npm 7+ installs peers automatically; pnpm
   and Yarn expect you to declare it.
 - **A Cerbos client** (`@cerbos/grpc` or `@cerbos/http`). The adapter depends on neither.
-- **Cerbos PDP** 0.55 or later is recommended; the contract below is tested against 0.57.0.
+- **Cerbos PDP** 0.55 or later is recommended; the contract below is tested against 0.58.0.
 - **A byte-exact database collation** on mapped columns, on SQLite
   `PRAGMA case_sensitive_like = ON`. See
   [Database collation is an authorization invariant](#database-collation-is-an-authorization-invariant).
@@ -504,10 +504,10 @@ API and is out of scope.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed as real Prisma
+and `check()` decisions recorded from Cerbos PDP 0.58.0 (and 0.57.0), executed as real Prisma
 queries over 43 of the corpus's 44 seed rows with Prisma 6 and 7 on SQLite, PostgreSQL and MySQL
 (under `utf8mb4_0900_bin`). The ledger lacks `null-list`, so j4 is not loaded, and `nul-in-string` on PostgreSQL and SQLite, so k3 is not loaded there. Passed cases on the
-current PDP, 0.57.0, identical on all six combinations, out of every golden case in the tier:
+current PDP, 0.58.0, identical on all six combinations, out of every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -516,10 +516,10 @@ current PDP, 0.57.0, identical on all six combinations, out of every golden case
 | adversarial | 404 / 593 |
 
 Every case that does not pass is refused with `UnsupportedQueryPlanError`; none returns wrong rows
-on 0.56.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
+on 0.58.0. [`conformance-ledger.json`](conformance-ledger.json) lists each one with its reason.
 Cases the corpus marks as a planner divergence are skipped, not failed, and count in the total but
-never as passed. On 0.57.0 that is three extended cases and four adversarial cases.
-On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the row; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. The three `composition/*` cases with a conditional `DENY` rule: the deny
+never as passed. On 0.58.0 that is three extended cases and four adversarial cases.
+ `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. The three `composition/*` cases with a conditional `DENY` rule: the deny
 condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it denies j2, while
 `checkResource` receives `aNumber` as absent and treats the erroring deny as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). And

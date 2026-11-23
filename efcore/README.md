@@ -188,10 +188,10 @@ division by a column other than the dividend, the sign of a zero, `string()` of 
 ## Conformance contract
 
 The adapter replays the shared [conformance corpus](../conformance/README.md): for each recorded
-plan of Cerbos PDP 0.57.0 and 0.56.0, it translates the plan, runs the query against 43 of the
+plan of Cerbos PDP 0.58.0 and 0.57.0, it translates the plan, runs the query against 43 of the
 corpus's 44 seed rows on SQLite, PostgreSQL and SQL Server, and compares the returned ids with the
 `check()` decisions the PDP recorded. The ledger lacks `null-list`, so j4 is not loaded, and `nul-in-string` on PostgreSQL and SQLite, so k3 is not loaded there. No PDP runs
-in the test. Results for the current PDP (0.57.0), where the total is every golden case of that
+in the test. Results for the current PDP (0.58.0), where the total is every golden case of that
 tier; a case marked as a planner divergence is skipped, and counts toward the total but not as
 passed:
 

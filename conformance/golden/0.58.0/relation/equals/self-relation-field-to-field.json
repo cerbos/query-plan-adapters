@@ -1,0 +1,48 @@
+{
+  "allowed": [
+    "a3",
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "relation/equals/self-relation-field-to-field",
+  "intent": "A field of the self-relation peer compared with the same field on the root (peer.aNumber == aNumber).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.peer.aNumber"
+          },
+          {
+            "variable": "request.resource.attr.aNumber"
+          }
+        ],
+        "operator": "eq"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "relation/equals/self-relation-field-to-field",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.peer.aNumber == R.attr.aNumber"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Both operands live in one table. Binding the root operand to the joined peer row compares the peer with itself and admits every row that has a peer (a1, b1, d1, e1); only c1 (its own peer) and a3 (peer a8, both 2) are equal."
+}

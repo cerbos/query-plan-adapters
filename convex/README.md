@@ -277,8 +277,8 @@ that needs a `postFilter` when `allowPostFilter` is not `true`.
 ## Conformance contract
 
 The adapter is replayed against the shared [conformance corpus](../conformance/README.md): the plans
-and `check()` decisions recorded from Cerbos PDP 0.57.0 (and 0.56.0), executed inside a Convex query
-function over the corpus's 44 seed documents. Passed cases on the current PDP, 0.57.0, where the
+and `check()` decisions recorded from Cerbos PDP 0.58.0 (and 0.57.0), executed inside a Convex query
+function over the corpus's 44 seed documents. Passed cases on the current PDP, 0.58.0, where the
 total is every golden case in that tier:
 
 | Tier | Passed / total |
@@ -288,9 +288,9 @@ total is every golden case in that tier:
 | adversarial | 558 / 593 |
 
 Cases the golden marks as a planner divergence are skipped, not compared: no adapter can pass
-them, because the plan and `check()` disagree. On 0.57.0 there are seven, three extended and four
+them, because the plan and `check()` disagree. On 0.58.0 there are seven, three extended and four
 adversarial, which is why those tiers' passed and refused cases fall short of their totals.
-On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps `has()` in the plan. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: the plan's
+ `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. And three `composition/*` cases whose DENY rule reads `aNumber`: the plan's
 `not(...)` of it denies j2, which lacks `aNumber`, while `check()` receives `aNumber` as absent and
 treats the erroring DENY as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). And

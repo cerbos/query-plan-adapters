@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Requires `github.com/cerbos/cerbos/api/genpb` v0.58.0 (was v0.57.0), and is tested against
+  Cerbos 0.58.0 and 0.57.0.
 - **Breaking:** an ordering between two attributes neither of which declares a `ValueType` is
   refused. PostgreSQL ordered them under the columns' own collation, which under a linguistic one
   (ICU `en-US`) puts "one" before "One", an over-grant. Declare string columns `ValueString`.

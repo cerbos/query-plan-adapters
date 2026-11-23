@@ -505,7 +505,7 @@ would change the security and performance profile of every filter.
 The adapter is proved against the shared [conformance corpus](../conformance/README.md): the harness
 indexes the corpus's 44 seed documents in a real Elasticsearch, translates every plan recorded from the
 pinned PDPs, runs the query, and compares the returned ids with the ones `check()` allowed. Against
-the current PDP (0.57.0), where the total is every golden case in the tier:
+the current PDP (0.58.0), where the total is every golden case in the tier:
 
 | Tier | Passed / total |
 | --- | --- |
@@ -518,7 +518,7 @@ with a wrong filter, or skipped as a planner divergence. The refused shapes are 
 [Unsupported shapes](#unsupported-shapes), and
 [`conformance-ledger.json`](conformance-ledger.json) lists each one with the reason. Planner-divergence
 cases are skipped, not compared, because the recorded plan and `check()` disagree and no adapter can
-pass them. On 0.57.0 that is three extended cases and four adversarial cases. On 0.56.0, `null/has/missing-attribute` and `null/has/composed-with-comparison` are skipped too: that planner folds `has()` on an omitted attribute to true, while `check()` denies the document; 0.57.0 keeps `has()` in the plan. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
+pass them. On 0.58.0 that is three extended cases and four adversarial cases. In `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated` the planner drops the int type of the literal in `R.attr.x + 1`, so the plan is the double spelling's, while `check()` has no double + int overload and denies every row; write `1.0`. In three `composition/*`
 cases a DENY condition reads `aNumber`, which j2 lacks: the plan's `not(...)` of it excludes j2,
 while `check()` receives `aNumber` as absent and treats the erroring DENY as not matching
 ([#530](https://github.com/cerbos/query-plan-adapters/issues/530)). In `type-mismatch/in/number-field-in-scalar-principal` and
