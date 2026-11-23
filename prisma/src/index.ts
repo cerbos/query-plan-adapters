@@ -11,6 +11,7 @@ import { constantFoldExpression, hoistOuterScopeReferences } from "./rewrite";
 import { buildPrismaFilterFromCerbosExpression } from "./translate";
 import { parenthesiseFilter } from "./negation";
 import { rewriteFunctionCalls } from "./functions";
+import { rewriteSetFunctions } from "./set-functions";
 import { expandLiteralCollections } from "./literals";
 import { settleTypeMismatches } from "./types";
 import { UnsupportedQueryPlanError } from "./errors";
@@ -204,7 +205,9 @@ export function queryPlanToPrisma({
 
       const settled = settleTypeMismatches(
         hoistOuterScopeReferences(
-          expandLiteralCollections(rewriteFunctionCalls(queryPlan.condition, context)),
+          expandLiteralCollections(
+            rewriteFunctionCalls(rewriteSetFunctions(queryPlan.condition), context)
+          ),
           []
         ),
         context
