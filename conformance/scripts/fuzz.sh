@@ -9,6 +9,7 @@
 #   conformance/scripts/fuzz.sh -s 7 -r 40               # add 40 generated rows to the dataset
 #   conformance/scripts/fuzz.sh -s 7 -e 80               # add up to 80 rows on the edges of the run's literals
 #   conformance/scripts/fuzz.sh -d -s 7                  # every leg on its default store configuration
+#   conformance/scripts/fuzz.sh -s 7 -f listFn=6         # draw features with these prefixes more often
 #
 # Each adapter replays every store leg run-harness.sh knows for it, one at a time. A PostgreSQL or
 # MySQL leg runs on a store variant the seed picks for it (conformance/README.md, "Store
@@ -23,17 +24,19 @@ seed="$(date -u +%Y%m%d)"
 count=500
 rows=0
 edges=0
+focus=""
 out=""
 variants=1
-while getopts "s:n:r:e:o:dh" opt; do
+while getopts "s:n:r:e:f:o:dh" opt; do
   case "${opt}" in
     s) seed="${OPTARG}" ;;
     n) count="${OPTARG}" ;;
     r) rows="${OPTARG}" ;;
     e) edges="${OPTARG}" ;;
+    f) focus="${OPTARG}" ;;
     o) out="${OPTARG}" ;;
     d) variants=0 ;;
-    *) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -42,7 +45,7 @@ shift $((OPTIND - 1))
 mkdir -p "${out}"
 out="$(cd "${out}" && pwd)"
 
-go -C "${CONFORMANCE_DIR}/generator" run . fuzz -seed "${seed}" -count "${count}" -rows "${rows}" -edges "${edges}" -out "${out}" || exit 1
+go -C "${CONFORMANCE_DIR}/generator" run . fuzz -seed "${seed}" -count "${count}" -rows "${rows}" -edges "${edges}" -focus "${focus}" -out "${out}" || exit 1
 
 adapters=("$@")
 [[ "${#adapters[@]}" -gt 0 ]] || read -r -a adapters <<<"$("${SCRIPT_DIR}/run-harness.sh" --list | awk '{print $1}' | xargs)"

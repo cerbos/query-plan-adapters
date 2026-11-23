@@ -289,6 +289,10 @@ schedule. The seed and the PDP pins fix the run: the same seed gives the same ca
   was rarely checked on; `-steer-goal refusals` piles onto the shapes it refuses, the queue for a
   hill-climb. A boost is held between 0.25 and 8, and the manifest keeps them, so the seed and the
   steering directories fix the run.
+- **Focus.** `fuzz -focus <prefix>=<factor>[,...]` multiplies the chance of every feature whose
+  name starts with a prefix, such as `listFn=6,corpus:collection/has-=6` for the 0.58 list
+  functions. The corpus atoms come from the current PDP's cases, so a case the previous PDP cannot
+  compile is recorded on the current one alone, and `cases.json` names its `pdp` tags.
 - **Composition.** `fuzz-compose` needs no PDP. CEL's `&&` allows a row exactly when both operands
   allow it, errors included, and `||` when either does, so `and` and `or` over recorded plans have an
   exact oracle: the intersection or union of the operands' allowed rows. It draws trees of two or

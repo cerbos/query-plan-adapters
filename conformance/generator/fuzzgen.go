@@ -31,6 +31,15 @@ type fuzzCase struct {
 	ID    string `json:"id"`
 	Allow *fnode `json:"allow"`
 	Deny  *fnode `json:"deny,omitempty"`
+	// PDP lists the tags the case was recorded on when the previous PDP cannot compile it.
+	PDP []string `json:"pdp,omitempty"`
+}
+
+func (fc *fuzzCase) tags(all []string) []string {
+	if len(fc.PDP) > 0 {
+		return fc.PDP
+	}
+	return all
 }
 
 func (n *fnode) render() string {
@@ -173,6 +182,8 @@ type fuzzer struct {
 	pools map[string][]any
 	// steer multiplies a feature's chance of being drawn; a feature it does not name keeps 1.
 	steer map[string]float64
+	// focus multiplies the chance of every feature starting with a prefix it names (fuzz -focus).
+	focus map[string]float64
 	// feats collects the attributes the leaf being drawn reads.
 	feats []string
 	// lits collects the literals drawn, by pool path, for fuzz -edges.
@@ -256,7 +267,7 @@ var (
 	fuzzInts      = []string{"R.attr.aNumber", "R.attr.parent.aNumber"}
 	fuzzDoubles   = []string{"R.attr.aDouble"}
 	fuzzBools     = []string{"R.attr.aBool", "R.attr.parent.aBool", "R.attr.parent.inner.aBool"}
-	fuzzStrLists  = []string{"R.attr.tagNames", "R.attr.mainCategory.subNames"} // hasIntersection only
+	fuzzStrLists  = []string{"R.attr.tagNames", "R.attr.mainCategory.subNames"} // hasIntersection and the 0.58 list functions only
 	fuzzTimes     = []string{"R.attr.createdAt", "R.attr.updatedAt", "R.attr.createdBy"}
 	fuzzPStrings  = []string{"P.attr.context"}
 	fuzzPStrLists = []string{"P.attr.allowedTags", "P.attr.fewTeams", "P.attr.manyTeams", "P.attr.emptyTeams", "P.attr.duplicateTeams"}
@@ -309,10 +320,16 @@ func (f *fuzzer) litPick(xs []string) string { return xs[f.lit.IntN(len(xs))] }
 func (f *fuzzer) litChance(p float64) bool { return f.lit.Float64() < p }
 
 func (f *fuzzer) boost(feature string) float64 {
-	if b, ok := f.steer[feature]; ok {
-		return b
+	b := 1.0
+	if s, ok := f.steer[feature]; ok {
+		b = s
 	}
-	return 1
+	for prefix, x := range f.focus {
+		if strings.HasPrefix(feature, prefix) {
+			b *= x
+		}
+	}
+	return b
 }
 
 // weighted draws an index in [0, n) with chance proportional to weight(i).
@@ -489,6 +506,7 @@ var productions = slices.Concat(
 	group("structList", 1.0/9, structListAlts()...),
 	group("null", 1.0/9, nullAlts()...),
 	group("time", 1.0/9, timeAlts()...),
+	group("listFn", 1.0/9, listFnAlts()...),
 )
 
 func stringAlts() []alt {
@@ -620,6 +638,62 @@ func listAlts() []alt {
 			return fmt.Sprintf("%s.exists(t, t == %s)", f.attr([]string{"R.attr.tagNames"}), tags(f))
 		}},
 	}
+}
+
+// listFnAlts draw the Cerbos 0.58 list functions over the lists the corpus reads with them, with
+// either operand as the receiver: the planner puts a literal or folded principal list first.
+func listFnAlts() []alt {
+	fns := []string{"hasAll", "hasAny", "hasOnly", "hasExactly"}
+	fn := func(f *fuzzer) string { return f.pick(fns) }
+	strList := func(f *fuzzer) string {
+		if f.chance(0.25) {
+			f.feats = append(f.feats, attrFeature("R.attr.tags"))
+			return "R.attr.tags.map(t, t.name)"
+		}
+		return f.attr(fuzzStrLists)
+	}
+	strLits := func(f *fuzzer) string { return f.litList(func() string { return f.strLit("tagNames[]") }) }
+	numLits := func(f *fuzzer) string {
+		return f.litList(func() string { return f.numLit("aNumberList[]", f.litChance(0.4)) })
+	}
+	call := func(f *fuzzer, field, lit string) string {
+		if f.chance(0.4) {
+			return fmt.Sprintf("%s.%s(%s)", lit, fn(f), field)
+		}
+		return fmt.Sprintf("%s.%s(%s)", field, fn(f), lit)
+	}
+	return []alt{
+		{name: "strings", share: 3, draw: func(f *fuzzer) string { return call(f, strList(f), strLits(f)) }},
+		{name: "numbers", share: 2, draw: func(f *fuzzer) string { return call(f, f.attr([]string{"R.attr.aNumberList"}), numLits(f)) }},
+		eachOf("bools", func(f *fuzzer) string {
+			return call(f, f.attr([]string{"R.attr.aBoolList"}), f.litList(func() string { return strconv.FormatBool(f.litChance(0.5)) }))
+		}),
+		{name: "principal", share: 2, draw: func(f *fuzzer) string { return call(f, strList(f), f.attr(fuzzPStrLists)) }},
+		eachOf("mixedLiteral", func(f *fuzzer) string {
+			lit := fmt.Sprintf("[%s, %s]", f.attr(append(append([]string{}, fuzzPStrings...), fuzzStrings...)), f.strLit("tagNames[]"))
+			return call(f, strList(f), lit)
+		}),
+		eachOf("twoFields", func(f *fuzzer) string { return call(f, strList(f), strList(f)) }),
+		{name: "scalarReceiver", share: 0.5, draw: func(f *fuzzer) string {
+			return fmt.Sprintf("%s.%s(%s)", f.attr(fuzzStrings), fn(f), strLits(f))
+		}},
+		eachOf("besideSize", func(f *fuzzer) string {
+			l := strList(f)
+			return fmt.Sprintf("%s.%s(%s) %s size(%s) %s %d", l, fn(f), strLits(f), f.pick([]string{"&&", "||"}), l, f.pick(fuzzOrderings), f.lit.IntN(3))
+		}),
+	}
+}
+
+// litList draws a list literal of zero to three elements, sometimes repeating one.
+func (f *fuzzer) litList(el func() string) string {
+	var els []string
+	for range f.lit.IntN(4) {
+		els = append(els, el())
+	}
+	if len(els) > 0 && f.litChance(0.25) {
+		els = append(els, els[f.lit.IntN(len(els))])
+	}
+	return "[" + strings.Join(els, ", ") + "]"
 }
 
 func structListAlts() []alt {

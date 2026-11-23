@@ -132,7 +132,10 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults, unhel
 	for _, fc := range cases {
 		describe[fc.ID] = fc.describe()
 	}
-	want := len(cases) * len(m.Tags)
+	want := 0
+	for _, fc := range cases {
+		want += len(fc.tags(m.Tags))
+	}
 
 	type key struct{ pdp, id string }
 	byCase := map[key][]legFailure{}
@@ -146,6 +149,14 @@ func fuzzReport(m fuzzManifest, cases []*fuzzCase, legs []*fuzzLegResults, unhel
 	}
 	if m.Edges > 0 {
 		reproduce += fmt.Sprintf(" -edges %d", m.Edges)
+	}
+	if len(m.Focus) > 0 {
+		var focus []string
+		for prefix, x := range m.Focus {
+			focus = append(focus, fmt.Sprintf("%s=%g", prefix, x))
+		}
+		sort.Strings(focus)
+		reproduce += " -focus " + strings.Join(focus, ",")
 	}
 	if m.Steer != nil {
 		reproduce += fmt.Sprintf(" -steer %s -steer-goal %s", strings.Join(m.Steer.From, ","), m.Steer.Goal)
@@ -243,7 +254,7 @@ func missingCases(l *fuzzLegResults, cases []*fuzzCase, tags []string) string {
 	}
 	var missing []string
 	for _, fc := range cases {
-		for _, tag := range tags {
+		for _, tag := range fc.tags(tags) {
 			if !seen[tag+" "+fc.ID] {
 				missing = append(missing, fmt.Sprintf("%s (PDP %s)", fc.ID, tag))
 			}
