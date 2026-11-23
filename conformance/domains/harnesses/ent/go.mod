@@ -5,15 +5,15 @@ go 1.27.3
 require (
 	entgo.io/ent v0.14.6
 	github.com/cerbos/cerbos/api/genpb v0.57.0
-	github.com/cerbos/query-plan-adapters/ent v0.0.0
-	github.com/go-sql-driver/mysql v1.10.1
+	github.com/cerbos/query-plan-adapters/ent v0.2.1
+	github.com/go-sql-driver/mysql v1.10.2
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.45.0
 	github.com/testcontainers/testcontainers-go/modules/mysql v0.45.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.45.0
 	google.golang.org/protobuf v1.36.12
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (

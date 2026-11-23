@@ -62,7 +62,7 @@ jobs:
 
       # `working-directory` here too: `defaults.run` applies only to `run` steps, and without it
       # the action looks for a Gemfile at the repository root, which has none.
-      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
@@ -108,7 +108,7 @@ jobs:
 
       # No `bundler-cache`: the example commits no Gemfile.lock, deliberately. It installs the
       # adapter from the artifact run.sh builds, which has no stable checksum.
-      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
         with:
           ruby-version: "3.4"
 

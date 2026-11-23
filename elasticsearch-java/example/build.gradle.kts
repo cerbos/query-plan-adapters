@@ -32,7 +32,7 @@ dependencies {
     implementation("dev.cerbos:cerbos-sdk-java:0.20.1")
 
     // Must share a major with ../ELASTICSEARCH_IMAGE; run.sh checks this.
-    implementation("co.elastic.clients:elasticsearch-java:8.19.24")
+    implementation("co.elastic.clients:elasticsearch-java:8.19.25")
 
     // JacksonJsonpMapper for the client, and JSON (de)serialisation in the app.
     implementation("com.fasterxml.jackson.core:jackson-databind:2.23.0")

@@ -7,7 +7,7 @@
     "lint:fix": "cd ../.. && oxlint -c tools/oxlint/oxlint.config.ts --fix convex drizzle langchain-chromadb mongoose prisma"
   },
   "devDependencies": {
-    "@oxlint/plugins": "1.93.0",
-    "oxlint": "1.93.0"
+    "@oxlint/plugins": "1.94.0",
+    "oxlint": "1.94.0"
   }
 }

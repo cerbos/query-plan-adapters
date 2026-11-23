@@ -6,8 +6,8 @@ require (
 	entgo.io/ent v0.14.6
 	github.com/cerbos/cerbos-sdk-go v0.4.5
 	github.com/cerbos/cerbos/api/genpb v0.57.0
-	github.com/cerbos/query-plan-adapters/ent v0.0.0
-	modernc.org/sqlite v1.62.0
+	github.com/cerbos/query-plan-adapters/ent v0.2.1
+	modernc.org/sqlite v1.63.0
 )
 
 require (

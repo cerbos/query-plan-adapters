@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/cerbos/cerbos-sdk-go v0.4.5
 	github.com/cerbos/cerbos/api/genpb v0.57.0
-	github.com/cerbos/query-plan-adapters/pgx v0.0.0
+	github.com/cerbos/query-plan-adapters/pgx v0.1.1
 	github.com/jackc/pgx/v5 v5.13.0
 )
 

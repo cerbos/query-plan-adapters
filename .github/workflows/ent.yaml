@@ -43,7 +43,7 @@ jobs:
       # rather than `defaults.run.working-directory`, which applies to `run` steps alone. Left off,
       # it finds no go.sum, warns, and silently disables the module cache for the whole job.
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: ent/go.mod
           cache-dependency-path: ent/go.sum
@@ -113,7 +113,7 @@ jobs:
       # The example is its own module, so it caches against its own go.sum — see the note on the
       # test job's Setup Go for why the path has to be spelled out at all.
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: ent/example/go.mod
           cache-dependency-path: ent/example/go.sum
