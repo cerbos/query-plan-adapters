@@ -1299,6 +1299,177 @@ resourcePolicy:
       condition:
         match:
           expr: '!("public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool))'
+    # collection/has-all/single-element
+    - actions:
+        - collection/has-all/single-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasAll(["public"])
+    # collection/has-all/two-elements
+    - actions:
+        - collection/has-all/two-elements
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasAll(["public", "private"])
+    # collection/has-all/negated
+    - actions:
+        - collection/has-all/negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.tagNames.hasAll(["public", "private"])'
+    # collection/has-all/empty-literal-list
+    - actions:
+        - collection/has-all/empty-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasAll([]) && R.attr.aNumber == 5
+    # collection/has-all/value-first
+    - actions:
+        - collection/has-all/value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '["public", "private"].hasAll(R.attr.tagNames)'
+    # collection/has-all/principal-list-receiver
+    - actions:
+        - collection/has-all/principal-list-receiver
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: P.attr.allowedTags.hasAll(R.attr.tagNames)
+    # collection/has-all/numbers-across-types
+    - actions:
+        - collection/has-all/numbers-across-types
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList.hasAll([2, 3])
+    # collection/has-all/mapped-names
+    - actions:
+        - collection/has-all/mapped-names
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.map(t, t.name).hasAll(["public"])
+    # collection/has-all/scalar-receiver
+    - actions:
+        - collection/has-all/scalar-receiver
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.hasAll([]) || R.attr.aNumber == 5
+    # collection/has-any/two-elements
+    - actions:
+        - collection/has-any/two-elements
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasAny(["public", "other"])
+    # collection/has-any/empty-literal-list
+    - actions:
+        - collection/has-any/empty-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasAny([]) || R.attr.aNumber == 5
+    # collection/has-any/negated-mapped-names
+    - actions:
+        - collection/has-any/negated-mapped-names
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.tags.map(t, t.name).hasAny(["public"])'
+    # collection/has-any/value-first
+    - actions:
+        - collection/has-any/value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '["public", "other"].hasAny(R.attr.tagNames)'
+    # collection/has-any/numbers-beside-null-element
+    - actions:
+        - collection/has-any/numbers-beside-null-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList.hasAny([2])
+    # collection/has-exactly/single-element
+    - actions:
+        - collection/has-exactly/single-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasExactly(["public"])
+    # collection/has-exactly/empty-literal-list
+    - actions:
+        - collection/has-exactly/empty-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasExactly([])
+    # collection/has-exactly/numbers-in-any-order
+    - actions:
+        - collection/has-exactly/numbers-in-any-order
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList.hasExactly([2, 3])
+    # collection/has-exactly/negated
+    - actions:
+        - collection/has-exactly/negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.tagNames.hasExactly(["public"])'
+    # collection/has-exactly/duplicate-literals-value-first
+    - actions:
+        - collection/has-exactly/duplicate-literals-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '["public", "public"].hasExactly(R.attr.tagNames)'
     # collection/has-intersection/deprecated-snake-case
     - actions:
         - collection/has-intersection/deprecated-snake-case
@@ -1398,6 +1569,60 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(["public", "other"], R.attr.tagNames)
+    # collection/has-only/single-element
+    - actions:
+        - collection/has-only/single-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasOnly(["public"])
+    # collection/has-only/empty-literal-list
+    - actions:
+        - collection/has-only/empty-literal-list
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tagNames.hasOnly([])
+    # collection/has-only/negated
+    - actions:
+        - collection/has-only/negated
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.tagNames.hasOnly(["public", "private"])'
+    # collection/has-only/value-first
+    - actions:
+        - collection/has-only/value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '["public"].hasOnly(R.attr.tagNames)'
+    # collection/has-only/null-element
+    - actions:
+        - collection/has-only/null-element
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aNumberList.hasOnly([2, 3])
+    # collection/has-only/mapped-names-with-nameless-tag
+    - actions:
+        - collection/has-only/mapped-names-with-nameless-tag
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.tags.map(t, t.name).hasOnly(["public"])
     # collection/index/first-element-of-boolean-list
     - actions:
         - collection/index/first-element-of-boolean-list

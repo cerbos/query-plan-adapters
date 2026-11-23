@@ -1,0 +1,53 @@
+{
+  "allowed": [
+    "a1",
+    "a3",
+    "a5",
+    "a8"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-exactly/duplicate-literals-value-first",
+  "intent": "hasExactly with a literal list holding a duplicate as the receiver ([\"public\", \"public\"].hasExactly(tagNames)).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "value": [
+              "public",
+              "public"
+            ]
+          },
+          {
+            "variable": "request.resource.attr.tagNames"
+          }
+        ],
+        "operator": "hasExactly"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-exactly/duplicate-literals-value-first",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "[\"public\", \"public\"].hasExactly(R.attr.tagNames)"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "The duplicate collapses, so a1, with one \"public\" tag, is allowed; comparing element counts denies it, and a field-first read binds the literal as a column."
+}

@@ -1,0 +1,64 @@
+{
+  "allowed": [
+    "a7",
+    "a9",
+    "b4",
+    "b5",
+    "b6",
+    "c1",
+    "e1",
+    "m1"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-only/negated",
+  "intent": "The negation of hasOnly of a resource list and two literals.",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "expression": {
+              "operands": [
+                {
+                  "variable": "request.resource.attr.tagNames"
+                },
+                {
+                  "value": [
+                    "public",
+                    "private"
+                  ]
+                }
+              ],
+              "operator": "hasOnly"
+            }
+          }
+        ],
+        "operator": "not"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-only/negated",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "!R.attr.tagNames.hasOnly([\"public\", \"private\"])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Only rows holding a name outside the two are allowed, among them b5, b6 and e1, whose NULL tag name is outside the list; NOT IN over a NULL name is UNKNOWN and drops them, and negating the per-element test instead of the quantifier grants every row with a \"public\" tag."
+}

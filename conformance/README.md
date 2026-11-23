@@ -75,6 +75,9 @@ Every case also carries:
   - `adversarial`: a shape that exists to catch one specific mistranslation.
 - **intent**: one line saying what the shape is.
 - **trap**: one line saying what a naive translation gets wrong.
+- **since** (optional): the first PDP tag whose CEL environment compiles the condition, such as
+  `0.58.0` for `hasAll`. The previous PDP's policy and goldens leave the case out, and
+  `golden/CHANGES.md` lists it as new on the current PDP. Drop it once the previous pin reaches it.
 
 To write a new adapter, work through the tree tier by tier.
 

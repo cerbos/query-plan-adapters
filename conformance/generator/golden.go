@@ -152,8 +152,17 @@ func degeneracyErrors(corpus *Corpus, tag string, goldens []*Golden) []string {
 func changesMarkdown(prevTag, curTag string, prev, cur []*Golden) string {
 	type change struct{ id, before, after string }
 	var plans, allowed, planErrors []change
-	for i := range cur {
-		p, c := prev[i], cur[i]
+	var added []string
+	prevByID := make(map[string]*Golden, len(prev))
+	for _, p := range prev {
+		prevByID[p.ID] = p
+	}
+	for _, c := range cur {
+		p, ok := prevByID[c.ID]
+		if !ok {
+			added = append(added, c.ID)
+			continue
+		}
 		if !reflect.DeepEqual(p.Plan, c.Plan) {
 			plans = append(plans, change{c.ID, compactJSON(p.Plan), compactJSON(c.Plan)})
 		}
@@ -168,12 +177,24 @@ func changesMarkdown(prevTag, curTag string, prev, cur []*Golden) string {
 	byID(plans)
 	byID(allowed)
 	byID(planErrors)
+	sort.Strings(added)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- %s -->\n\n", generatedNotes)
 	fmt.Fprintf(&b, "# PDP %s → %s\n\n", prevTag, curTag)
 	fmt.Fprintf(&b, "What changes for the %d cases between the previous PDP (`%s`) and the current one (`%s`).\n\n", len(cur), prevTag, curTag)
-	fmt.Fprintf(&b, "| Change | Cases |\n|---|---|\n| Plan | %d |\n| Allowed set | %d |\n| Plan error | %d |\n\n", len(plans), len(allowed), len(planErrors))
+	fmt.Fprintf(&b, "| Change | Cases |\n|---|---|\n| Plan | %d |\n| Allowed set | %d |\n| Plan error | %d |\n", len(plans), len(allowed), len(planErrors))
+	if len(added) > 0 {
+		fmt.Fprintf(&b, "| New on `%s` | %d |\n", curTag, len(added))
+	}
+	b.WriteString("\n")
+	if len(added) > 0 {
+		fmt.Fprintf(&b, "## New on `%s`\n\nThese cases name a `since` newer than the previous PDP, which cannot compile them, so it records no golden for them.\n\n", curTag)
+		for _, id := range added {
+			fmt.Fprintf(&b, "- `%s`\n", id)
+		}
+		b.WriteString("\n")
+	}
 	if len(plans)+len(allowed)+len(planErrors) == 0 {
 		b.WriteString("## No differences\n\nEvery case records the same plan, allowed set and plan error on both versions.\n")
 		return b.String()

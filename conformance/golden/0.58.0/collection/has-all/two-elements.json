@@ -1,0 +1,50 @@
+{
+  "allowed": [
+    "a6"
+  ],
+  "degenerateReason": null,
+  "id": "collection/has-all/two-elements",
+  "intent": "hasAll of a resource list and two literals (tagNames.hasAll([\"public\", \"private\"])).",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.tagNames"
+          },
+          {
+            "value": [
+              "public",
+              "private"
+            ]
+          }
+        ],
+        "operator": "hasAll"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "collection/has-all/two-elements",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.tagNames.hasAll([\"public\", \"private\"])"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Every literal must be present, so only a6 is allowed; translating hasAll as an IN over the list, or as hasIntersection, grants a1 and a4."
+}

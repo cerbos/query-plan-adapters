@@ -2,13 +2,44 @@
 
 # PDP 0.57.0 → 0.58.0
 
-What changes for the 735 cases between the previous PDP (`0.57.0`) and the current one (`0.58.0`).
+What changes for the 760 cases between the previous PDP (`0.57.0`) and the current one (`0.58.0`).
 
 | Change | Cases |
 |---|---|
 | Plan | 0 |
 | Allowed set | 0 |
 | Plan error | 0 |
+| New on `0.58.0` | 25 |
+
+## New on `0.58.0`
+
+These cases name a `since` newer than the previous PDP, which cannot compile them, so it records no golden for them.
+
+- `collection/has-all/empty-literal-list`
+- `collection/has-all/mapped-names`
+- `collection/has-all/negated`
+- `collection/has-all/numbers-across-types`
+- `collection/has-all/principal-list-receiver`
+- `collection/has-all/scalar-receiver`
+- `collection/has-all/single-element`
+- `collection/has-all/two-elements`
+- `collection/has-all/value-first`
+- `collection/has-any/empty-literal-list`
+- `collection/has-any/negated-mapped-names`
+- `collection/has-any/numbers-beside-null-element`
+- `collection/has-any/two-elements`
+- `collection/has-any/value-first`
+- `collection/has-exactly/duplicate-literals-value-first`
+- `collection/has-exactly/empty-literal-list`
+- `collection/has-exactly/negated`
+- `collection/has-exactly/numbers-in-any-order`
+- `collection/has-exactly/single-element`
+- `collection/has-only/empty-literal-list`
+- `collection/has-only/mapped-names-with-nameless-tag`
+- `collection/has-only/negated`
+- `collection/has-only/null-element`
+- `collection/has-only/single-element`
+- `collection/has-only/value-first`
 
 ## No differences
 

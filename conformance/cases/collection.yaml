@@ -1,7 +1,7 @@
 # Conformance cases. The generator builds the policy, dataset and golden files from these;
 # see conformance/README.md. Edit here, then run: go -C conformance/generator run .
 area: collection
-description: 'Macros over resource collections: exists, all, exists_one, filter, map, except, hasIntersection, indexing.'
+description: 'Macros over resource collections: exists, all, exists_one, filter, map, except, hasIntersection, hasAll, hasAny, hasOnly, hasExactly, indexing.'
 cases:
 - id: 'collection/all/conjunctive-body'
   tier: adversarial
@@ -406,6 +406,158 @@ cases:
   condition:
     match:
       expr: '!("public" in R.attr.tagNames.filter(t, t.startsWith("p") && R.attr.aBool))'
+- id: 'collection/has-all/single-element'
+  since: 0.58.0
+  tier: extended
+  intent: 'hasAll of a resource list and a one-element literal list (tagNames.hasAll(["public"])).'
+  trap: 'hasAll is containment, not equality: a3 holds "public" twice and a6 holds it beside "private", and both are allowed; c1''s "Public" is not.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasAll(["public"])'
+- id: 'collection/has-all/two-elements'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAll of a resource list and two literals (tagNames.hasAll(["public", "private"])).'
+  trap: 'Every literal must be present, so only a6 is allowed; translating hasAll as an IN over the list, or as hasIntersection, grants a1 and a4.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasAll(["public", "private"])'
+- id: 'collection/has-all/negated'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'The negation of hasAll of a resource list and two literals.'
+  trap: 'Rows holding one of the two literals are allowed under the negation; negating each membership test instead of the conjunction drops a1 and a4.'
+  condition:
+    match:
+      expr: '!R.attr.tagNames.hasAll(["public", "private"])'
+- id: 'collection/has-all/empty-literal-list'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAll of a resource list and an empty literal list, beside a discriminating conjunct.'
+  trap: 'Every list contains the empty list, so hasAll([]) holds on every row; emitting IN () is a syntax error on some stores, and folding it to false denies the aNumber == 5 rows.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasAll([]) && R.attr.aNumber == 5'
+- id: 'collection/has-all/value-first'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAll with the literal list as the receiver (["public", "private"].hasAll(tagNames)): every tag name is one of the two.'
+  trap: 'The plan puts the literal first, which reverses containment: rows with no tags are allowed, and a7''s "other" is not; a translator that assumes the field comes first reads it as tagNames.hasAll(literal) and allows a6 alone.'
+  condition:
+    match:
+      expr: '["public", "private"].hasAll(R.attr.tagNames)'
+- id: 'collection/has-all/principal-list-receiver'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAll with a principal list as the receiver (P.attr.allowedTags.hasAll(tagNames)).'
+  trap: 'The planner folds P.attr.allowedTags to a value operand placed first, so the shape is value-first; reading the operands field-first requires "special", which no row holds, and denies every row.'
+  condition:
+    match:
+      expr: 'P.attr.allowedTags.hasAll(R.attr.tagNames)'
+- id: 'collection/has-all/numbers-across-types'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAll of a number list and int literals (aNumberList.hasAll([2, 3])).'
+  trap: 'CEL compares 2 and 2.0 as equal here and ignores order, so a3 [2, 3] and a4 [3, 2] are allowed; a typed comparison against int literals denies both, and matching the list as an ordered array allows only a3.'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList.hasAll([2, 3])'
+- id: 'collection/has-all/mapped-names'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAll of a map() projection of tag names and one literal (tags.map(t, t.name).hasAll(["public"])).'
+  trap: 'A nameless tag makes map() error, so CEL denies b6 although it carries "public"; a membership test over the name column ignores the NULL name and grants it.'
+  condition:
+    match:
+      expr: 'R.attr.tags.map(t, t.name).hasAll(["public"])'
+- id: 'collection/has-all/scalar-receiver'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAll on a string attribute with an empty literal list, beside a discriminating disjunct.'
+  trap: 'hasAll over a string is a CEL error, not true; folding hasAll([]) to true before checking the receiver is a list grants every row.'
+  condition:
+    match:
+      expr: 'R.attr.aString.hasAll([]) || R.attr.aNumber == 5'
+- id: 'collection/has-any/two-elements'
+  since: 0.58.0
+  tier: extended
+  intent: 'hasAny of a resource list and two literals (tagNames.hasAny(["public", "other"])).'
+  trap: 'hasAny is hasIntersection by another name: any shared element allows the row, matching stays case-sensitive (c1''s "Public"), and duplicates in a3 change nothing.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasAny(["public", "other"])'
+- id: 'collection/has-any/empty-literal-list'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAny of a resource list and an empty literal list, beside a discriminating disjunct.'
+  trap: 'An empty list shares nothing, so hasAny([]) is false on every row; emitting IN () is a syntax error on some stores, and dropping the operand grants every row.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasAny([]) || R.attr.aNumber == 5'
+- id: 'collection/has-any/negated-mapped-names'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'The negation of hasAny of a map() projection of tag names and one literal.'
+  trap: 'A nameless tag makes map() error, which CEL denies under the negation too; NOT EXISTS over the name column turns that error into true and grants b5 and e1.'
+  condition:
+    match:
+      expr: '!R.attr.tags.map(t, t.name).hasAny(["public"])'
+- id: 'collection/has-any/value-first'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAny with the literal list as the receiver (["public", "other"].hasAny(tagNames)).'
+  trap: 'The answer is symmetric but the query is not: the plan puts the literal first, so a translator that assumes the field comes first binds the list as a column.'
+  condition:
+    match:
+      expr: '["public", "other"].hasAny(R.attr.tagNames)'
+- id: 'collection/has-any/numbers-beside-null-element'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAny of a number list and int literals (aNumberList.hasAny([2])).'
+  trap: 'a6 holds a null beside 2 and is allowed; 2 and 2.0 compare equal, so a typed int comparison denies a1, a3, a4 and a6.'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList.hasAny([2])'
+- id: 'collection/has-exactly/single-element'
+  since: 0.58.0
+  tier: extended
+  intent: 'hasExactly of a resource list and a one-element literal list (tagNames.hasExactly(["public"])).'
+  trap: 'hasExactly compares sets: a3''s two "public" tags match, a6 with "private" too does not, and a row with no tags does not.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasExactly(["public"])'
+- id: 'collection/has-exactly/empty-literal-list'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasExactly of a resource list and an empty literal list: the rows with no tags.'
+  trap: 'Only an empty list has exactly no elements; a translation built from per-literal EXISTS tests has nothing to test and grants every row.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasExactly([])'
+- id: 'collection/has-exactly/numbers-in-any-order'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasExactly of a number list and int literals (aNumberList.hasExactly([2, 3])).'
+  trap: 'Order does not matter and 2 equals 2.0, so a3 [2, 3] and a4 [3, 2] are allowed; array equality allows a3 alone, and a6 [null, 2] must stay out.'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList.hasExactly([2, 3])'
+- id: 'collection/has-exactly/negated'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'The negation of hasExactly of a resource list and one literal.'
+  trap: 'Rows with no tags, and a6, hold under the negation; negating only the containment half drops a6, and negating only the subset half drops the tagless rows.'
+  condition:
+    match:
+      expr: '!R.attr.tagNames.hasExactly(["public"])'
+- id: 'collection/has-exactly/duplicate-literals-value-first'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasExactly with a literal list holding a duplicate as the receiver (["public", "public"].hasExactly(tagNames)).'
+  trap: 'The duplicate collapses, so a1, with one "public" tag, is allowed; comparing element counts denies it, and a field-first read binds the literal as a column.'
+  condition:
+    match:
+      expr: '["public", "public"].hasExactly(R.attr.tagNames)'
 - id: 'collection/has-intersection/deprecated-snake-case'
   tier: extended
   intent: 'The deprecated has_intersection spelling the PDP still accepts (has_intersection(tagNames, ["private", "other"])).'
@@ -483,6 +635,54 @@ cases:
   condition:
     match:
       expr: 'hasIntersection(["public", "other"], R.attr.tagNames)'
+- id: 'collection/has-only/single-element'
+  since: 0.58.0
+  tier: extended
+  intent: 'hasOnly of a resource list and a one-element literal list (tagNames.hasOnly(["public"])).'
+  trap: 'An empty list holds only "public" vacuously, so every tagless row is allowed; an EXISTS-based translation denies them, a membership test grants a6, which also holds "private", and NOT IN over b6''s NULL tag name is UNKNOWN, which grants it.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasOnly(["public"])'
+- id: 'collection/has-only/empty-literal-list'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasOnly of a resource list and an empty literal list: the rows with no tags.'
+  trap: 'Only an empty list is a subset of the empty list; emitting NOT IN () is a syntax error on some stores, and folding it to false denies the tagless rows.'
+  condition:
+    match:
+      expr: 'R.attr.tagNames.hasOnly([])'
+- id: 'collection/has-only/negated'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'The negation of hasOnly of a resource list and two literals.'
+  trap: 'Only rows holding a name outside the two are allowed, among them b5, b6 and e1, whose NULL tag name is outside the list; NOT IN over a NULL name is UNKNOWN and drops them, and negating the per-element test instead of the quantifier grants every row with a "public" tag.'
+  condition:
+    match:
+      expr: '!R.attr.tagNames.hasOnly(["public", "private"])'
+- id: 'collection/has-only/value-first'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasOnly with the literal list as the receiver (["public"].hasOnly(tagNames)): tagNames contains "public".'
+  trap: 'The plan puts the literal first, which reverses the subset test; a translator that assumes the field comes first allows the tagless rows and denies a6.'
+  condition:
+    match:
+      expr: '["public"].hasOnly(R.attr.tagNames)'
+- id: 'collection/has-only/null-element'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasOnly of a number list holding a null and int literals (aNumberList.hasOnly([2, 3])).'
+  trap: 'a6 [null, 2] holds an element outside the list and is denied; SQL''s NOT IN over a NULL element is UNKNOWN, so NOT EXISTS (element NOT IN (2, 3)) finds no offender and grants a6. 2 equals 2.0, so a1, a3 and a4 are allowed.'
+  condition:
+    match:
+      expr: 'R.attr.aNumberList.hasOnly([2, 3])'
+- id: 'collection/has-only/mapped-names-with-nameless-tag'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasOnly of a map() projection of tag names and one literal (tags.map(t, t.name).hasOnly(["public"])).'
+  trap: 'A nameless tag makes map() error, so CEL denies b5, b6 and e1; NOT EXISTS (name NOT IN (...)) over a NULL name finds no offender and grants them.'
+  condition:
+    match:
+      expr: 'R.attr.tags.map(t, t.name).hasOnly(["public"])'
 - id: 'collection/index/first-element-of-boolean-list'
   tier: extended
   intent: 'The first element of a boolean list compared with true (aBoolList[0] == true).'
