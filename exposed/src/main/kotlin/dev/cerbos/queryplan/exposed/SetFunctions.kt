@@ -12,17 +12,9 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand
 internal object SetFunctions {
     private val OPERATORS = setOf("hasAll", "hasAny", "hasOnly", "hasExactly")
 
-    fun rewrite(operand: Operand): Operand {
-        if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return operand
-        val operator = operand.expression.operator
-        val operands = operand.expression.operandsList.map(::rewrite)
-        if (operator in OPERATORS && operands.size == 2) {
-            setFunction(operator, operands[0], operands[1])?.let { return it }
-        }
-        return PlanRewrites.expression(operator, *operands.toTypedArray())
-    }
-
-    private fun setFunction(called: String, first: Operand, second: Operand): Operand? {
+    fun rewrite(called: String, operands: List<Operand>): Operand? {
+        if (called !in OPERATORS || operands.size != 2) return null
+        val (first, second) = operands
         val firstLiteral = isLiteralList(first)
         if (firstLiteral == isLiteralList(second)) return null
         val (list, literal) = if (firstLiteral) second to first else first to second

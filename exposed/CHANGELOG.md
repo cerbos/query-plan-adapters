@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reduced translation work for conditional plans by stripping `dyn()` wrappers while rewriting list functions.
+
 - Fixed an over-grant on SQLite: a `matches()` pattern with two `.*` gaps beside another condition
   (`aString.matches("^x.*a.*y$") && aNumber == 5`) rendered its own OR without parentheses, so the
   AND bound to one half of it and allowed rows the other condition denies.
