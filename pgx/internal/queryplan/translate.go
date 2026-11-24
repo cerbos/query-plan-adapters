@@ -48,7 +48,6 @@ func Build(cond *enginev1.PlanResourcesFilter_Expression_Operand, m Mapper, opts
 	if err != nil {
 		return nil, err
 	}
-	root = rewriteSetFunctions(root)
 
 	if strings.HasPrefix(opts.RootTable, aliasPrefix) {
 		return nil, fmt.Errorf(
