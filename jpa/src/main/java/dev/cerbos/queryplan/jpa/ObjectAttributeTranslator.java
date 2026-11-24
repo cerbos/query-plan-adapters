@@ -5,7 +5,6 @@
 
 package dev.cerbos.queryplan.jpa;
 
-import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter;
 import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -18,7 +17,6 @@ import com.google.protobuf.Value;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Supplier;
 
@@ -41,9 +39,6 @@ import java.util.function.Supplier;
  * hop is elsewhere.
  */
 final class ObjectAttributeTranslator {
-
-    private static final Set<String> LAMBDA_BINDING_OPERATORS =
-            Set.of("exists", "exists_one", "all", "filter", "map", "except");
 
     private final CriteriaBuilder cb;
     private final TriPredicate tri;
@@ -142,10 +137,11 @@ final class ObjectAttributeTranslator {
         return walker.enterMacro(op, () -> guarded(scope, variable, () -> {
             List<Predicate> terms = new ArrayList<>();
             for (String key : keys) {
-                Operand rewritten = substitute(body, keyVar, v -> keyConstant(variable, v, key));
+                Operand rewritten = LambdaSubstitution.substitute(body, keyVar,
+                        suffix -> keyConstant(variable, suffix, key));
                 if (valueVar != null) {
                     String child = variable + "." + key;
-                    rewritten = substitute(rewritten, valueVar,
+                    rewritten = LambdaSubstitution.substitute(rewritten, valueVar,
                             suffix -> Operand.newBuilder().setVariable(child + suffix).build());
                 }
                 Predicate term = walker.traverse(rewritten, scope);
@@ -250,58 +246,5 @@ final class ObjectAttributeTranslator {
             names.add(j.getAttribute().getName());
         }
         return names;
-    }
-
-    /**
-     * Rewrites every read of {@code varName} ({@code var} or {@code var.f}) with
-     * {@code replace.apply(suffix)}, where the suffix is empty or starts with a dot. A nested
-     * macro that rebinds the name shadows it, so only its collection operand is rewritten.
-     */
-    private static Operand substitute(Operand operand, String varName, Replacement replace) {
-        switch (operand.getNodeCase()) {
-            case VARIABLE -> {
-                String name = operand.getVariable();
-                if (name.equals(varName)) {
-                    return replace.apply("");
-                }
-                if (name.startsWith(varName + ".")) {
-                    return replace.apply(name.substring(varName.length()));
-                }
-                return operand;
-            }
-            case EXPRESSION -> {
-                PlanResourcesFilter.Expression expr = operand.getExpression();
-                List<Operand> ops = expr.getOperandsList();
-                PlanResourcesFilter.Expression.Builder rebuilt = expr.toBuilder();
-                if (LAMBDA_BINDING_OPERATORS.contains(expr.getOperator()) && ops.size() == 2
-                        && bindsVariable(ops.get(1), varName)) {
-                    rebuilt.setOperands(0, substitute(ops.get(0), varName, replace));
-                    return Operand.newBuilder().setExpression(rebuilt).build();
-                }
-                for (int i = 0; i < ops.size(); i++) {
-                    rebuilt.setOperands(i, substitute(ops.get(i), varName, replace));
-                }
-                return Operand.newBuilder().setExpression(rebuilt).build();
-            }
-            default -> {
-                return operand;
-            }
-        }
-    }
-
-    private static boolean bindsVariable(Operand lambdaOperand, String varName) {
-        if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
-                || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
-            return false;
-        }
-        List<Operand> ops = lambdaOperand.getExpression().getOperandsList();
-        return ops.subList(1, ops.size()).stream().anyMatch(v ->
-                v.getNodeCase() == Operand.NodeCase.VARIABLE && varName.equals(v.getVariable()));
-    }
-
-    /** Maps a read of the substituted variable, by its suffix ("" or {@code .f}), to an operand. */
-    @FunctionalInterface
-    private interface Replacement {
-        Operand apply(String suffix);
     }
 }
