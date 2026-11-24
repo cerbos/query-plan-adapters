@@ -139,42 +139,38 @@ function countMembership(
   if (comparison === undefined) return undefined;
   const { operator, path, other } = comparison;
 
-  const projected: Value[] = [];
+  const counts = new Map<Value, number>();
 
   for (const element of elements) {
     const value = project(element, path);
 
     // An element without the field errors on its own; a non-scalar compares structurally.
-    if (value === undefined || (isObject(value))) return undefined;
-    projected.push(value);
+    if (value === undefined || isObject(value)) return undefined;
+
+    // Strict equality never matches NaN, so its count is the same as an absent value's.
+    if (Number.isNaN(value)) continue;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
   }
 
-  const distinct = [...new Set(projected)];
-  const multiplicity = (value: Value) => projected.filter((v) => v === value).length;
-
   const countFor = (matches: number) =>
-    operator === "eq" ? matches : projected.length - matches;
+    operator === "eq" ? matches : elements.length - matches;
 
-  const accepted = distinct.filter((value) => holds(countFor(multiplicity(value))));
   const absentHolds = holds(countFor(0));
+  const values: Value[] = [];
+
+  for (const [value, count] of counts) {
+    if (holds(countFor(count)) !== absentHolds) values.push(value);
+  }
 
   // Decided for every x: only the error of a missing x is left, which an empty IN cannot carry
   // under negation.
-  if (absentHolds ? accepted.length === distinct.length : accepted.length === 0) {
-    return undefined;
-  }
+  if (values.length === 0) return undefined;
 
-  const membership = (values: Value[]): PlanExpressionOperand =>
-    values.length === 1
-      ? { operator: "eq", operands: [other, { value: values[0]! }] }
-      : { operator: "in", operands: [other, { value: values }] };
+  const membership: PlanExpressionOperand = values.length === 1
+    ? { operator: "eq", operands: [other, { value: values[0]! }] }
+    : { operator: "in", operands: [other, { value: values }] };
 
-  if (!absentHolds) return membership(accepted);
-
-  return {
-    operator: "not",
-    operands: [membership(distinct.filter((value) => !accepted.includes(value)))],
-  };
+  return absentHolds ? { operator: "not", operands: [membership] } : membership;
 }
 
 /**
