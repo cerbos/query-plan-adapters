@@ -56,6 +56,10 @@ func decodeJSONFile(path string, v any) error {
 	if err != nil {
 		return err
 	}
+	return decodeJSON(path, raw, v)
+}
+
+func decodeJSON(path string, raw []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(v); err != nil {
@@ -64,19 +68,25 @@ func decodeJSONFile(path string, v any) error {
 	return nil
 }
 
-func loadDataset(conformanceDir string) (*Dataset, error) {
+func loadDataset(dir string) (*Dataset, error) {
+	return decodeDataset(func(name string, dst any) error {
+		return decodeJSONFile(filepath.Join(dir, name), dst)
+	})
+}
+
+func decodeDataset(decode func(name string, dst any) error) (*Dataset, error) {
 	var seedsFile struct {
 		Principal map[string]any   `json:"principal"`
 		Seeds     []map[string]any `json:"seeds"`
 	}
-	if err := decodeJSONFile(filepath.Join(conformanceDir, "seeds.json"), &seedsFile); err != nil {
+	if err := decode("seeds.json", &seedsFile); err != nil {
 		return nil, err
 	}
 	var derivedFile struct {
 		Fields  []string                  `json:"fields"`
 		Derived map[string]map[string]any `json:"derived"`
 	}
-	if err := decodeJSONFile(filepath.Join(conformanceDir, "derived-fields.json"), &derivedFile); err != nil {
+	if err := decode("derived-fields.json", &derivedFile); err != nil {
 		return nil, err
 	}
 
