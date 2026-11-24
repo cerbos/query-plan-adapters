@@ -77,7 +77,7 @@ export function compilePostFilter(
   condition: PlanExpressionOperand,
   fields: PostFilterFields,
 ): PostFilter {
-  const compiled = compileCondition(condition, {
+  const compiled = compile(condition, {
     fields,
     bindings: new Map(),
     parent: "eq",
@@ -167,12 +167,7 @@ function compile(operand: PlanExpressionOperand, ctx: Context): Compiled {
     );
   }
 
-  const compiler = Object.prototype.hasOwnProperty.call(
-    OPERATORS,
-    operand.operator,
-  )
-    ? lookup(OPERATORS, operand.operator)
-    : undefined;
+  const compiler = lookup(OPERATORS, operand.operator);
 
   if (!compiler) {
     throw new UnsupportedOperatorError(
@@ -215,18 +210,6 @@ function refuseNestedPresence(operands: PlanExpressionOperand[], ctx: Context): 
       `has(${operand.name}) outside a plain conjunction or disjunction: flat metadata cannot tell a missing enclosing attribute, which is an error, from a missing ${operand.name.substring(operand.name.lastIndexOf(".") + 1)}, which is false`,
     );
   }
-}
-
-/**
- * An operand in a boolean position. `filter()`, `map()`, `except()` and `intersect()` return a
- * list, which has no boolean overload: CEL errors on every record and the PDP denies it, and the
- * evaluator reads the list as an error that denies the same way, as the other adapters lower it.
- */
-function compileCondition(
-  operand: PlanExpressionOperand,
-  ctx: Context,
-): Compiled {
-  return compile(operand, ctx);
 }
 
 function compileValue(value: CelValue): Compiled {
@@ -483,7 +466,7 @@ const junction =
   (decisive: boolean): Compiler =>
   (operands, ctx) => {
     if (operands.length < 2) throw Error("Expected at least 2 operands");
-    const compiled = operands.map((op) => compileCondition(op, ctx));
+    const compiled = operands.map((op) => compile(op, ctx));
 
     return {
       type: "other",
@@ -828,10 +811,7 @@ const macro =
 
     const bodyCtx: Context = { ...ctx, bindings };
 
-    const compiledBody =
-      operator === "map"
-        ? compile(body, bodyCtx)
-        : compileCondition(body, bodyCtx);
+    const compiledBody = compile(body, bodyCtx);
 
     const each = (env: Env, item: CelValue, position: CelValue): CelValue =>
       compiledBody.run({
@@ -1078,7 +1058,7 @@ const OPERATORS = {
   or: junction(true),
   not: (operands, ctx) => {
     const [operand] = single(exactly(operands, 1, "not"));
-    const compiled = compileCondition(operand, ctx);
+    const compiled = compile(operand, ctx);
 
     return {
       type: "other",
