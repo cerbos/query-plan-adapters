@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.4.1
+
 - The post-filter checks `key in map` directly, avoiding a scan of every map key for each candidate document.
 
 ## v0.4.0
