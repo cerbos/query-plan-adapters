@@ -366,13 +366,12 @@ module Cerbos
         strings = [""]
         nodes.each do |node|
           following = finite_node(node)
-          return nil if following.nil?
+          return nil if following.nil? || strings.length * following.length > MAX_LITERALS
 
           product = []
           strings.each do |head|
             following.each do |tail|
               product << head + tail
-              return nil if product.length > MAX_LITERALS
             end
           end
           strings = product.uniq
@@ -469,10 +468,10 @@ module Cerbos
             prefixes = finite_sequence(nodes[0...run])
             suffixes = finite_sequence(nodes[(run + 1)..])
             if prefixes && suffixes
-              pairs = prefixes.product(suffixes)
-              return :never if pairs.empty?
-              if pairs.length <= MAX_LITERALS && pairs.none? { |prefix, suffix| (prefix + suffix).include?("\n") }
-                return PrefixSuffix.new(pairs, nodes[run].min)
+              return :never if prefixes.empty? || suffixes.empty?
+              if prefixes.length * suffixes.length <= MAX_LITERALS &&
+                  (prefixes + suffixes).none? { |literal| literal.include?("\n") }
+                return PrefixSuffix.new(prefixes.product(suffixes), nodes[run].min)
               end
             end
           end
