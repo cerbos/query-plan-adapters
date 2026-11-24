@@ -8,6 +8,8 @@
 
 ### Changed
 
+- `matches()` checks its 256-literal expansion limit before allocating prefix and suffix pairs, reducing memory use when a pattern exceeds that limit.
+
 - **Breaking:** a PostgreSQL array column mapped as a field raises `Cerbos::ActiveRecord::UnmappedAttributeError`, as an enum or serialized column does: CEL reads a list there, where the filter would compare one value per row.
 
 - **Breaking:** a model whose connection is not SQLite, PostgreSQL, MySQL 8.0 or later, or MariaDB 11.4.5 or later raises `Cerbos::ActiveRecord::UnsupportedDatabaseError` at translation time, where it fell through to generic SQL. SQL Server and Oracle compare strings under case-folding default collations, so `R.attr.dept == "finance"` matched `"Finance"`; MariaDB before 11.4.5 has no `utf8mb4_0900_bin` and failed every string comparison at query time. MariaDB 11.4.5 and later is now covered by the conformance suite.

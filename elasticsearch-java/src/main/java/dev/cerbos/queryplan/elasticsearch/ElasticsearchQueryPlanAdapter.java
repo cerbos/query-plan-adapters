@@ -12,6 +12,7 @@ import dev.cerbos.api.v1.engine.Engine.PlanResourcesFilter.Expression.Operand;
 import dev.cerbos.api.v1.response.Response.PlanResourcesResponse;
 import dev.cerbos.sdk.PlanResourcesResult;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -194,8 +195,7 @@ public class ElasticsearchQueryPlanAdapter {
 
     private static Result translateCondition(Operand condition, Options options) {
         assertPlannerOperators(condition, options.operatorOverrides());
-        Operand normalized = selectStringIndexes(
-                SetFunctions.rewrite(condition, options.operatorOverrides()));
+        Operand normalized = normalize(condition, options.operatorOverrides());
         assertNoExplicitNullAttributeComparisons(normalized, options);
         return new Result.Conditional(new PlanWalker(options).translate(normalized));
     }
@@ -214,23 +214,24 @@ public class ElasticsearchQueryPlanAdapter {
     }
 
     /**
-     * Rewrites {@code x["key"]}, a map index by a string literal, as the selection {@code x.key}.
+     * Normalizes list functions and string indexes bottom-up. A map index by a string literal,
+     * {@code x["key"]}, becomes the selection {@code x.key}.
      * CEL gives both the same meaning, an error when the key is absent, so the field map resolves
      * the index like any other path. A key holding a {@code .} would name a different path, so it
      * is left as an index, which the leaf translator refuses.
      */
-    private static Operand selectStringIndexes(Operand operand) {
+    private static Operand normalize(Operand operand, Map<String, OperatorFunction> overrides) {
         if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
             return operand;
         }
         Expression expression = operand.getExpression();
-        Expression.Builder rebuilt = expression.toBuilder();
-        for (int i = 0; i < expression.getOperandsCount(); i++) {
-            rebuilt.setOperands(i, selectStringIndexes(expression.getOperands(i)));
+        List<Operand> operands = new ArrayList<>(expression.getOperandsCount());
+        for (Operand child : expression.getOperandsList()) {
+            operands.add(normalize(child, overrides));
         }
-        if ("index".equals(expression.getOperator()) && rebuilt.getOperandsCount() == 2) {
-            Operand target = rebuilt.getOperands(0);
-            Operand key = rebuilt.getOperands(1);
+        if ("index".equals(expression.getOperator()) && operands.size() == 2) {
+            Operand target = operands.get(0);
+            Operand key = operands.get(1);
             if (target.getNodeCase() == Operand.NodeCase.VARIABLE
                     && key.getNodeCase() == Operand.NodeCase.VALUE
                     && key.getValue().getKindCase() == Value.KindCase.STRING_VALUE
@@ -241,7 +242,7 @@ public class ElasticsearchQueryPlanAdapter {
                         .build();
             }
         }
-        return Operand.newBuilder().setExpression(rebuilt).build();
+        return SetFunctions.rewrite(expression.getOperator(), operands, overrides);
     }
 
     /** Convenience form of {@link #toElasticsearchQuery(PlanResourcesResult, Options)}. */

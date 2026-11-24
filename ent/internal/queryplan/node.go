@@ -94,16 +94,17 @@ func decodeExpression(e *enginev1.PlanResourcesFilter_Expression) (*node, error)
 		return nil, fmt.Errorf("nil expression in query plan")
 	}
 
-	n := &node{kind: nodeExpression, operator: e.GetOperator()}
-	for _, child := range e.GetOperands() {
+	operands := e.GetOperands()
+	n := &node{kind: nodeExpression, operator: e.GetOperator(), operands: make([]*node, len(operands))}
+	for i, child := range operands {
 		decoded, err := decodeOperand(child)
 		if err != nil {
 			return nil, err
 		}
-		n.operands = append(n.operands, decoded)
+		n.operands[i] = decoded
 	}
 
-	return n, nil
+	return rewriteSetFunction(n), nil
 }
 
 // decodeValue lowers a structpb value into a plain Go value. Numbers stay float64 — Cerbos

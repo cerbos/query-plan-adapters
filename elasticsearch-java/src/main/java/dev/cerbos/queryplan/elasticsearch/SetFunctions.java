@@ -26,16 +26,7 @@ final class SetFunctions {
 
     private SetFunctions() {}
 
-    static Operand rewrite(Operand operand, Map<String, ?> overrides) {
-        if (operand.getNodeCase() != Operand.NodeCase.EXPRESSION) {
-            return operand;
-        }
-        Expression expression = operand.getExpression();
-        List<Operand> operands = new ArrayList<>();
-        for (Operand child : expression.getOperandsList()) {
-            operands.add(rewrite(child, overrides));
-        }
-        String operator = expression.getOperator();
+    static Operand rewrite(String operator, List<Operand> operands, Map<String, ?> overrides) {
         if (OPERATORS.contains(operator) && overrides.get(operator) == null && operands.size() == 2) {
             Operand rewritten = setFunction(operator, operands.get(0), operands.get(1));
             if (rewritten != null) {

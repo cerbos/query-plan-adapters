@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reduced allocations when translating conditional plans by removing a copy of the expression tree.
+
 ## v0.3.0
 
 - Translates `hasAll`, `hasAny`, `hasOnly` and `hasExactly` (CEL list functions from Cerbos

@@ -91,10 +91,7 @@ func runFuzz(ctx context.Context, args []string) error {
 		return err
 	}
 	if *rows > 0 {
-		if in.dataset, err = generateRows(conf, *seed, *rows, nil, 0); err != nil {
-			return err
-		}
-		if in.ds, err = loadDatasetFiles(in.dataset); err != nil {
+		if err := in.generateRows(*seed, *rows, nil, 0); err != nil {
 			return err
 		}
 	}
@@ -117,10 +114,7 @@ func runFuzz(ctx context.Context, args []string) error {
 	}
 	cases := f.fuzzCases(*seed, *count)
 	if *edges > 0 {
-		if in.dataset, err = generateRows(conf, *seed, *rows, edgeValues(f.lits), *edges); err != nil {
-			return err
-		}
-		if in.ds, err = loadDatasetFiles(in.dataset); err != nil {
+		if err := in.generateRows(*seed, *rows, edgeValues(f.lits), *edges); err != nil {
 			return err
 		}
 	}

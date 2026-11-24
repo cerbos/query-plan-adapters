@@ -15,7 +15,6 @@ import jakarta.persistence.criteria.Predicate;
 import com.google.protobuf.Value;
 
 import java.util.List;
-import java.util.Set;
 
 /**
  * Translates {@code exists}, {@code exists_one} and {@code all} over a relation chain, and
@@ -23,9 +22,6 @@ import java.util.Set;
  * {@code size(filter(...))} belongs to {@link SizeTranslator}.
  */
 final class CollectionTranslator {
-
-    private static final Set<String> LAMBDA_BINDING_OPERATORS =
-            Set.of("exists", "exists_one", "all", "filter", "map", "except");
 
     private final CriteriaBuilder cb;
     private final PlanWalker walker;
@@ -221,55 +217,16 @@ final class CollectionTranslator {
                 Operand.newBuilder().setExpression(lambda).build()), scope);
     }
 
-    /**
-     * Replaces the variable {@code varName} with {@code replacement} in a body, respecting
-     * shadowing as {@link #substituteLambdaVariable} does. A field read of the variable
-     * ({@code var.f}) is refused: the replacement is an expression, not a row.
-     */
-    private static Operand substituteWithOperand(Operand operand, String varName,
-                                                 Operand replacement) {
-        switch (operand.getNodeCase()) {
-            case VARIABLE -> {
-                String name = operand.getVariable();
-                if (name.equals(varName)) {
-                    return replacement;
-                }
-                if (name.startsWith(varName + ".")) {
-                    throw Refusals.unsupported("Cannot resolve \"" + name + "\": a field of a"
-                            + " list element built from an expression, or of an element"
-                            + " index, has no column");
-                }
-                return operand;
+    /** An element built from an expression, or an element index, can only be read directly. */
+    private static Operand substituteWithOperand(Operand operand, String varName, Operand replacement) {
+        return LambdaSubstitution.substitute(operand, varName, suffix -> {
+            if (!suffix.isEmpty()) {
+                throw Refusals.unsupported("Cannot resolve \"" + varName + suffix + "\": a field of a"
+                        + " list element built from an expression, or of an element"
+                        + " index, has no column");
             }
-            case EXPRESSION -> {
-                PlanResourcesFilter.Expression expr = operand.getExpression();
-                List<Operand> ops = expr.getOperandsList();
-                PlanResourcesFilter.Expression.Builder rebuilt = expr.toBuilder();
-                if (LAMBDA_BINDING_OPERATORS.contains(expr.getOperator()) && ops.size() == 2
-                        && bindsVariable(ops.get(1), varName)) {
-                    rebuilt.setOperands(0, substituteWithOperand(ops.get(0), varName, replacement));
-                    return Operand.newBuilder().setExpression(rebuilt).build();
-                }
-                for (int i = 0; i < ops.size(); i++) {
-                    rebuilt.setOperands(i, substituteWithOperand(ops.get(i), varName, replacement));
-                }
-                return Operand.newBuilder().setExpression(rebuilt).build();
-            }
-            default -> {
-                return operand;
-            }
-        }
-    }
-
-    /** Whether a lambda operand binds {@code varName}, as its only or either variable. */
-    private static boolean bindsVariable(Operand lambdaOperand, String varName) {
-        if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
-                || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
-            return false;
-        }
-        List<Operand> ops = lambdaOperand.getExpression().getOperandsList();
-        return ops.subList(1, ops.size()).stream().anyMatch(v ->
-                v.getNodeCase() == Operand.NodeCase.VARIABLE && varName.equals(v.getVariable()));
+            return replacement;
+        });
     }
 
     /** A lambda variable no plan names, bound to the element a positional read selects. */
@@ -369,55 +326,13 @@ final class CollectionTranslator {
         return count;
     }
 
-    /**
-     * Replaces the lambda variable with {@code element} in a body. {@code var.a.b} reads a
-     * field of the element. A nested macro that rebinds the same name shadows it, so only its
-     * collection operand is substituted.
-     */
-    private static Operand substituteLambdaVariable(Operand operand, String varName,
-                                                    Value element) {
-        switch (operand.getNodeCase()) {
-            case VARIABLE -> {
-                String name = operand.getVariable();
-                if (name.equals(varName)) {
-                    return Operand.newBuilder().setValue(element).build();
-                }
-                if (name.startsWith(varName + ".")) {
-                    return Operand.newBuilder()
-                            .setValue(resolveElementPath(name,
-                                    name.substring(varName.length() + 1), element))
-                            .build();
-                }
-                return operand;
-            }
-            case EXPRESSION -> {
-                PlanResourcesFilter.Expression expr = operand.getExpression();
-                List<Operand> ops = expr.getOperandsList();
-                PlanResourcesFilter.Expression.Builder rebuilt = expr.toBuilder();
-                if (LAMBDA_BINDING_OPERATORS.contains(expr.getOperator()) && ops.size() == 2
-                        && shadowsVariable(ops.get(1), varName)) {
-                    rebuilt.setOperands(0,
-                            substituteLambdaVariable(ops.get(0), varName, element));
-                    return Operand.newBuilder().setExpression(rebuilt).build();
-                }
-                for (int i = 0; i < ops.size(); i++) {
-                    rebuilt.setOperands(i,
-                            substituteLambdaVariable(ops.get(i), varName, element));
-                }
-                return Operand.newBuilder().setExpression(rebuilt).build();
-            }
-            default -> {
-                return operand;
-            }
-        }
-    }
-
-    private static boolean shadowsVariable(Operand lambdaOperand, String varName) {
-        if (lambdaOperand.getNodeCase() != Operand.NodeCase.EXPRESSION
-                || !"lambda".equals(lambdaOperand.getExpression().getOperator())) {
-            return false;
-        }
-        return bindsVariable(lambdaOperand, varName);
+    /** Substitutes a literal element or the value of the referenced field within it. */
+    private static Operand substituteLambdaVariable(Operand operand, String varName, Value element) {
+        return LambdaSubstitution.substitute(operand, varName, suffix -> {
+            Value value = suffix.isEmpty() ? element
+                    : resolveElementPath(varName + suffix, suffix.substring(1), element);
+            return Operand.newBuilder().setValue(value).build();
+        });
     }
 
     private static Value resolveElementPath(String fullRef, String path, Value element) {

@@ -122,7 +122,7 @@ export const foldConstantConstructors = (
   }
 
   if (operand.operator === "struct") {
-    const entries: [string, Value][] = [];
+    const entries = new Map<string, Value>();
 
     for (const field of operands) {
       if (!isExpressionOperand(field) || field.operator !== "set-field") break;
@@ -131,15 +131,15 @@ export const foldConstantConstructors = (
       if (
         field.operands.length !== 2 || key === undefined || value === undefined ||
         !isValueOperand(key) || !isString(key.value) || !isValueOperand(value) ||
-        entries.some(([existing]) => existing === key.value)
+        entries.has(key.value)
       ) {
         break;
       }
 
-      entries.push([key.value, value.value]);
+      entries.set(key.value, value.value);
     }
 
-    if (entries.length === operands.length) {
+    if (entries.size === operands.length) {
       return { value: Object.fromEntries(entries) };
     }
   }

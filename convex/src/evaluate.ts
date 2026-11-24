@@ -325,7 +325,7 @@ const comprehensionPairs = (
   return undefined;
 };
 
-/** What a macro ranges over, and what `in` tests: a list's elements, or a map's keys. */
+/** What a macro ranges over: a list's elements, or a map's keys. */
 const macroItems = (collection: CelValue): CelValue[] | undefined => {
   if (Array.isArray(collection)) return collection;
 
@@ -920,11 +920,13 @@ const OPERATORS = {
 
       // CEL's `in` over a map tests its keys. Only a map-valued attribute reaches here as a map:
       // the planner rewrites a map literal, or a principal map, into its key list first.
-      const members = macroItems(haystack);
+      if (Array.isArray(haystack)) return listContains(haystack, needle);
 
-      if (members === undefined) return EVALUATION_ERROR;
+      if (isRecord(haystack)) {
+        return isString(needle) && Object.prototype.propertyIsEnumerable.call(haystack, needle);
+      }
 
-      return members.some((value) => valuesEqual(value, needle));
+      return EVALUATION_ERROR;
     },
   },
 

@@ -484,32 +484,17 @@ func (b *builder) mapLiteralLookup(op CmpOp, n *node, m Mapper) (Expr, bool, err
 	return Case{Whens: []When{{Cond: isKey, Then: negate(hit, op == OpNe)}}}, true, nil
 }
 
-// rewriteSetFunctions rewrites hasAll, hasAny, hasOnly and hasExactly (CEL list extensions, Cerbos
-// 0.58) into hasIntersection and isSubset, bottom-up. Each rewrite is exact in CEL, errors
-// included; a call without exactly one literal list operand is left for the dispatch to refuse.
-func rewriteSetFunctions(n *node) *node {
-	if !n.isExpr() {
-		return n
-	}
-	operands := make([]*node, len(n.operands))
-	for i, o := range n.operands {
-		operands[i] = rewriteSetFunctions(o)
-	}
-	out := &node{kind: nodeExpression, operator: n.operator, operands: operands}
-	if rewritten, ok := setFunction(out); ok {
-		return rewritten
-	}
-	return out
-}
-
-func setFunction(n *node) (*node, bool) {
+// rewriteSetFunction lowers hasAll, hasAny, hasOnly and hasExactly into hasIntersection and
+// isSubset after decoding their operands. Each rewrite is exact in CEL, errors included.
+// Leave calls without exactly one literal list operand for dispatch to refuse.
+func rewriteSetFunction(n *node) *node {
 	switch n.operator {
 	case "hasAll", "hasAny", "hasOnly", "hasExactly":
 	default:
-		return nil, false
+		return n
 	}
 	if len(n.operands) != binaryOperands {
-		return nil, false
+		return n
 	}
 	isLiteralList := func(o *node) bool {
 		_, ok := o.value.([]any)
@@ -518,7 +503,7 @@ func setFunction(n *node) (*node, bool) {
 	list, literal := n.operands[0], n.operands[1]
 	firstLiteral := isLiteralList(list)
 	if firstLiteral == isLiteralList(literal) {
-		return nil, false
+		return n
 	}
 	if firstLiteral {
 		list, literal = literal, list
@@ -550,12 +535,12 @@ func setFunction(n *node) (*node, bool) {
 	}
 	switch operator {
 	case "hasAny":
-		return call("hasIntersection", list, literal), true
+		return call("hasIntersection", list, literal)
 	case "hasAll":
-		return containsAll(), true
+		return containsAll()
 	case "hasOnly":
-		return call("isSubset", list, literal), true
+		return call("isSubset", list, literal)
 	default:
-		return call("and", containsAll(), call("isSubset", list, literal)), true
+		return call("and", containsAll(), call("isSubset", list, literal))
 	}
 }

@@ -200,18 +200,14 @@ internal object PlanRewrites {
         return null
     }
 
-    /** The plan with every `dyn(x)` replaced by `x`: the wrapper only quiets the type checker. */
-    fun withoutDyn(operand: Operand): Operand {
+    /** Strips type-checker-only `dyn(x)` wrappers and lowers list functions over the resulting operands. */
+    fun normalize(operand: Operand): Operand {
         if (operand.nodeCase != Operand.NodeCase.EXPRESSION) return operand
-        val expression = operand.expression
-        if (expression.operator == "dyn" && expression.operandsCount == 1) return withoutDyn(expression.getOperands(0))
-        if (expression.operandsList.none(::holdsDyn)) return operand
-        val rebuilt = expression.toBuilder().clearOperands().addAllOperands(expression.operandsList.map(::withoutDyn))
-        return Operand.newBuilder().setExpression(rebuilt).build()
+        val node = operand.expression
+        if (node.operator == "dyn" && node.operandsCount == 1) return normalize(node.getOperands(0))
+        val operands = node.operandsList.map(::normalize)
+        return SetFunctions.rewrite(node.operator, operands) ?: expression(node.operator, *operands.toTypedArray())
     }
-
-    private fun holdsDyn(operand: Operand): Boolean = operand.nodeCase == Operand.NodeCase.EXPRESSION &&
-        (operand.expression.operator == "dyn" || operand.expression.operandsList.any(::holdsDyn))
 
     /**
      * `x.except(y)` as `x.filter(e, !(e in y))`: Cerbos keeps each element of `x` that `y` does not

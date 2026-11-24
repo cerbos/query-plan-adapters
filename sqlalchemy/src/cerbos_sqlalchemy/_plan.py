@@ -88,9 +88,11 @@ def parse_operand(node: object) -> Operand:
             and isinstance(node["operator"], str)
             and isinstance(node["operands"], list)
         ):
-            return Expr(
-                node["operator"],
-                tuple(parse_operand(child) for child in node["operands"]),
+            return _rewrite_set_function(
+                Expr(
+                    node["operator"],
+                    tuple(parse_operand(child) for child in node["operands"]),
+                )
             )
     raise UnsupportedPlanError(f"Unrecognised operand shape: {node}")
 
@@ -291,31 +293,18 @@ def assert_no_same_collection_correlation(
 _SET_FUNCTIONS = frozenset({"hasAll", "hasAny", "hasOnly", "hasExactly"})
 
 
-def rewrite_set_functions(operand: Operand) -> Operand:
-    """Rewrite hasAll, hasAny, hasOnly and hasExactly into hasIntersection and isSubset.
-
-    Each rewrite is exact in CEL, errors included; a call without exactly one literal list
-    operand is left for the translator to refuse.
-    """
-    if not isinstance(operand, Expr):
-        return operand
-    node = Expr(
-        operand.operator, tuple(rewrite_set_functions(o) for o in operand.operands)
-    )
-    return _set_function(node) or node
-
-
 def _is_literal_list(operand: Operand) -> bool:
     return isinstance(operand, Value) and isinstance(operand.value, list)
 
 
-def _set_function(node: Expr) -> Operand | None:
+def _rewrite_set_function(node: Expr) -> Operand:
+    """Lower set functions with exactly one literal list to hasIntersection and isSubset."""
     if node.operator not in _SET_FUNCTIONS or len(node.operands) != 2:
-        return None
+        return node
     first, second = node.operands
     first_literal = _is_literal_list(first)
     if first_literal == _is_literal_list(second):
-        return None
+        return node
     collection, literal = (second, first) if first_literal else (first, second)
     assert isinstance(literal, Value)
     operator = node.operator

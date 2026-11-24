@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Conditional plans now translate without copying the decoded expression tree to normalize set functions.
+
 ## v0.7.0
 
 ### Added

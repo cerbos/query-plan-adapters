@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Conditional plans now resolve string indexes and list functions in one traversal, reducing translation overhead.
+
 ### Added
 
 - Translates `hasAny` and `hasAll` (CEL list functions from Cerbos 0.58) against a literal list,

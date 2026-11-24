@@ -1,7 +1,6 @@
 // Copyright 2021-2026 Zenauth Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-using Cerbos.Api.V1.Engine;
 using Google.Protobuf.WellKnownTypes;
 using Operand = Cerbos.Api.V1.Engine.PlanResourcesFilter.Types.Expression.Types.Operand;
 using PlanExpression = Cerbos.Api.V1.Engine.PlanResourcesFilter.Types.Expression;
@@ -15,21 +14,34 @@ namespace Cerbos.QueryPlan.EntityFrameworkCore;
 /// </summary>
 internal static class SetFunctions
 {
-    private static readonly HashSet<string> Operators = ["hasAll", "hasAny", "hasOnly", "hasExactly"];
-
     public static Operand Rewrite(Operand operand)
     {
         if (operand.NodeCase != Operand.NodeOneofCase.Expression)
         {
             return operand;
         }
-        var op = operand.Expression.Operator;
-        var operands = operand.Expression.Operands.Select(Rewrite).ToList();
-        if (Operators.Contains(op) && operands.Count == 2 && SetFunction(op, operands[0], operands[1]) is { } rewritten)
+        var expression = operand.Expression;
+        var children = expression.Operands;
+        Operand? copy = null;
+        for (var i = 0; i < children.Count; i++)
         {
-            return rewritten;
+            var child = Rewrite(children[i]);
+            if (!ReferenceEquals(child, children[i]))
+            {
+                // The caller owns the protobuf. Copy this parent only when a child changes.
+                copy ??= Call(expression.Operator, children);
+                copy.Expression.Operands[i] = child;
+            }
         }
-        return Call(op, operands);
+
+        var result = copy ?? operand;
+        var op = expression.Operator;
+        if (op is "hasAll" or "hasAny" or "hasOnly" or "hasExactly" && children.Count == 2)
+        {
+            var operands = result.Expression.Operands;
+            return SetFunction(op, operands[0], operands[1]) ?? result;
+        }
+        return result;
     }
 
     private static Operand? SetFunction(string op, Operand first, Operand second)
