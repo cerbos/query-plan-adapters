@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The post-filter checks `key in map` directly, avoiding a scan of every map key for each candidate document.
+
 ## v0.4.0
 
 - Translates `hasAll`, `hasAny`, `hasOnly` and `hasExactly` (CEL list functions from Cerbos
