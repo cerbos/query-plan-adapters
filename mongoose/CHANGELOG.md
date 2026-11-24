@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Skips a full scan of the plan for null literals when translating with `nullAttributeRepresentation: "explicit"`.
+
 ## v4.2.0
 
 - Translates `hasAll`, `hasAny`, `hasOnly` and `hasExactly` (CEL list functions from Cerbos

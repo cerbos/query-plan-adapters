@@ -74,7 +74,7 @@ export const translateCondition = (
   condition: PlanExpressionOperand,
   ctx: TranslateContext,
 ): MongooseFilter => {
-  rejectNullConstructor(condition, ctx);
+  if (ctx.nullRepresentation === "omitted") rejectNullConstructor(condition, ctx);
 
   return buildFilter(selectMapMembers(condition, ctx.mapper), ctx);
 };
