@@ -563,6 +563,10 @@
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and the LIKE lowering takes at most one .* per alternative; two are refused."
     },
+    "regex/matches/two-dot-star-gaps-beside-conjunct": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and the LIKE lowering takes at most one .* per alternative; two are refused."
+    },
     "regex/matches/unanchored-dot": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and a . in a pattern not anchored at both ends has no exact LIKE lowering (_ matches a newline that RE2's . does not), so the pattern is refused."

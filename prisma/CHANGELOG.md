@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- `hasOnly`, `hasAll` with a literal receiver, and `all()` over a relation list read through a required column (`["finance"].hasAll(mainCategory.subNames)`) no longer fail with Prisma's "Argument `not` is missing": a column that is `NOT NULL` in the schema, or declared `nullable: false` in a relation's `fields`, gets no `not: null` guard.
+- Membership in two or more booleans over a Boolean column (`aBoolList.hasOnly([true, false])`) no longer fails with Prisma's "Unknown argument `in`": it is an OR of equalities.
+
 ## v6.0.0
 
 ### Added

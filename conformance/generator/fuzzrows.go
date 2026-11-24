@@ -128,8 +128,14 @@ func generateRows(conf string, seed uint64, n int, edges map[string][]any, nEdge
 			switch k {
 			case "tagName":
 				row["tags"] = append(tags, map[string]any{"id": id + "te", "name": v})
+				if maybe(0.3) {
+					row["tags"] = append(row["tags"].([]any), map[string]any{"id": id + "td", "name": v})
+				}
 			case "listElement":
 				row["aNumberList"] = append(listOf(row["aNumberList"]), v)
+				if maybe(0.3) {
+					row["aNumberList"] = append(row["aNumberList"].([]any), v)
+				}
 			case "subCategoryName":
 				row["subCategoryNames"] = []any{v}
 			default:

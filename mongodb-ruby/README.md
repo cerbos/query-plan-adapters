@@ -215,7 +215,7 @@ case in that tier:
 | --- | --- |
 | core | 32 / 32 |
 | extended | 110 / 114 |
-| adversarial | 575 / 614 |
+| adversarial | 578 / 617 |
 
 Cases marked as a planner divergence in their golden file are skipped, not compared: no adapter can
 pass them. On 0.58.0 that is three extended cases and four adversarial cases. `arithmetic/add/int-literal-plus-constant` and `arithmetic/add/int-literal-negated`: the planner

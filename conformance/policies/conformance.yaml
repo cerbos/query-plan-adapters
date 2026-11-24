@@ -1569,6 +1569,24 @@ resourcePolicy:
       condition:
         match:
           expr: hasIntersection(["public", "other"], R.attr.tagNames)
+    # collection/has-only/bool-list-two-literals
+    - actions:
+        - collection/has-only/bool-list-two-literals
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '!R.attr.aBoolList.hasOnly([true, false]) || R.attr.aNumber == 5'
+    # collection/has-only/chained-relation-names-value-first
+    - actions:
+        - collection/has-only/chained-relation-names-value-first
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: '["finance", "tech"].hasAll(R.attr.mainCategory.subNames)'
     # collection/has-only/single-element
     - actions:
         - collection/has-only/single-element
@@ -4481,6 +4499,15 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^x.*a.*y$")
+    # regex/matches/two-dot-star-gaps-beside-conjunct
+    - actions:
+        - regex/matches/two-dot-star-gaps-beside-conjunct
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: (R.attr.aString.matches("^x.*a.*y$") && R.attr.aNumber == 5) || R.attr.aNumber == 2
     # regex/matches/case-insensitive-non-ascii
     - actions:
         - regex/matches/case-insensitive-non-ascii

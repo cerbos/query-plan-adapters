@@ -269,6 +269,13 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^x.*a.*y$")'
+- id: 'regex/matches/two-dot-star-gaps-beside-conjunct'
+  tier: adversarial
+  intent: 'matches("^x.*a.*y$") ANDed with aNumber == 5, OR''d with aNumber == 2.'
+  trap: 'a4 and a5 match the pattern but hold no 5, so only the aNumber == 2 rows are allowed; a translation that renders the pattern''s own OR without parentheses lets the AND bind to one half and grants a4 and a5.'
+  condition:
+    match:
+      expr: '(R.attr.aString.matches("^x.*a.*y$") && R.attr.aNumber == 5) || R.attr.aNumber == 2'
 - id: 'regex/matches/case-insensitive-non-ascii'
   tier: adversarial
   intent: 'matches("(?i)^É-X-É$"): the (?i) flag over a pattern with non-ASCII letters.'

@@ -200,7 +200,7 @@ passed:
 | --- | --- |
 | core | 32 / 32 |
 | extended | 109 / 114 |
-| adversarial | 545 / 614 |
+| adversarial | 547 / 617 |
 
 Every case that does not pass is listed with its reason in
 [`conformance-ledger.json`](conformance-ledger.json). All 21 are `unsupported`: the adapter throws

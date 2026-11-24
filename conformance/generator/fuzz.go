@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -23,16 +24,17 @@ import (
 
 // fuzzManifest is <out>/manifest.json: what a fuzz directory holds and how to remake it.
 type fuzzManifest struct {
-	Seed    uint64            `json:"seed"`
-	Count   int               `json:"count"`
-	Tags    []string          `json:"tags"`
-	Kept    int               `json:"kept"`
-	Dropped map[string]string `json:"dropped"`
-	Rows    int               `json:"rows,omitempty"`
-	Edges   int               `json:"edges,omitempty"`
-	Kind    string            `json:"kind,omitempty"`
-	From    string            `json:"from,omitempty"`
-	Steer   *fuzzSteer        `json:"steer,omitempty"`
+	Seed    uint64             `json:"seed"`
+	Count   int                `json:"count"`
+	Tags    []string           `json:"tags"`
+	Kept    int                `json:"kept"`
+	Dropped map[string]string  `json:"dropped"`
+	Rows    int                `json:"rows,omitempty"`
+	Edges   int                `json:"edges,omitempty"`
+	Kind    string             `json:"kind,omitempty"`
+	From    string             `json:"from,omitempty"`
+	Steer   *fuzzSteer         `json:"steer,omitempty"`
+	Focus   map[string]float64 `json:"focus,omitempty"`
 }
 
 // fuzzCaseFile is <out>/cases.json: every kept case's condition trees, for fuzz-shrink.
@@ -67,6 +69,7 @@ func runFuzz(ctx context.Context, args []string) error {
 	steerDirs := fs.String("steer", "", "earlier fuzz directories, comma-separated, whose verdicts steer this run toward the shapes they translated least (fuzzsteer.go)")
 	steerAdapters := fs.String("steer-adapters", "", "the adapters, comma-separated, whose verdicts -steer counts (default: every leg)")
 	steerGoal := fs.String("steer-goal", steerCoverage, "what -steer aims at: coverage (shapes translated but rarely checked) or refusals (shapes refused most, for a hill-climb)")
+	focusFlag := fs.String("focus", "", "feature prefixes to draw more often, comma-separated prefix=factor, such as listFn=6,corpus:collection/has-=6")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -100,6 +103,9 @@ func runFuzz(ctx context.Context, args []string) error {
 		return fmt.Errorf("fuzz: no hand-written case reads %s, so no harness need map it; drop it from the grammar (fuzzgen.go)", strings.Join(missing, ", "))
 	}
 	f := newFuzzer(*seed, in.corpus, in.ds)
+	if f.focus, err = parseFocus(*focusFlag); err != nil {
+		return err
+	}
 	if f.atoms, err = boolAtoms(ctx, in, f.atoms, *seed); err != nil {
 		return err
 	}
@@ -122,7 +128,7 @@ func runFuzz(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	m := fuzzManifest{Seed: *seed, Count: *count, Rows: *rows, Edges: *edges, Tags: in.tags(), Dropped: dropped, Steer: steer}
+	m := fuzzManifest{Seed: *seed, Count: *count, Rows: *rows, Edges: *edges, Tags: in.tags(), Dropped: dropped, Steer: steer, Focus: f.focus}
 	if err := writeFuzzDir(*out, m, recorded); err != nil {
 		return err
 	}
@@ -163,7 +169,23 @@ func loadFuzzInputs(conf string) (*fuzzInputs, error) {
 	if err := decodeJSONFile(filepath.Join(conf, "pdp-versions.json"), &versions); err != nil {
 		return nil, err
 	}
-	return &fuzzInputs{conf: conf, corpus: corpus.forTag(versions.Previous.Tag), ds: ds, versions: []pdpVersion{versions.Previous, versions.Current}}, nil
+	return &fuzzInputs{conf: conf, corpus: corpus.forTag(versions.Current.Tag), ds: ds, versions: []pdpVersion{versions.Previous, versions.Current}}, nil
+}
+
+func parseFocus(s string) (map[string]float64, error) {
+	focus := map[string]float64{}
+	for _, item := range splitList(s) {
+		prefix, factor, ok := strings.Cut(item, "=")
+		x, err := strconv.ParseFloat(factor, 64)
+		if !ok || prefix == "" || err != nil || x <= 0 {
+			return nil, fmt.Errorf("fuzz: -focus %q is not prefix=factor with a positive factor", item)
+		}
+		focus[prefix] = x
+	}
+	if len(focus) == 0 {
+		return nil, nil
+	}
+	return focus, nil
 }
 
 func splitList(s string) []string {
@@ -239,33 +261,68 @@ func recordFuzz(ctx context.Context, in *fuzzInputs, cases []*fuzzCase, seed uin
 	}
 	defer os.RemoveAll(staged)
 
-	byTag := map[string][]*Golden{}
-	for _, v := range in.versions {
-		fmt.Fprintf(os.Stderr, "==> PDP %s: recording %d fuzz cases\n", v.Tag, len(cases))
-		goldens, err := recordWith(ctx, imageOf(v), v.Tag, staged, corpus, in.ds)
+	// A case the previous PDP cannot compile (a function it predates) is recorded on the current
+	// one alone, as a corpus case naming `since` is.
+	byTag := map[string]map[string]*Golden{}
+	for i, v := range in.versions {
+		onTag := cases
+		if i < len(in.versions)-1 {
+			if onTag, err = dropUncompilable(ctx, in, cases, seed, imageOf(v), map[string]string{}); err != nil {
+				return nil, nil, err
+			}
+		}
+		byTag[v.Tag] = map[string]*Golden{}
+		if len(onTag) == 0 {
+			continue
+		}
+		tagCorpus := fuzzCorpus(in.corpus, onTag, seed)
+		tagPolicy, err := buildPolicy(tagCorpus)
 		if err != nil {
 			return nil, nil, err
 		}
-		byTag[v.Tag] = goldens
+		tagStaged := staged
+		if len(onTag) < len(cases) {
+			if tagStaged, err = stagePolicies(tagPolicy, filepath.Join(in.conf, "policies", "derived_roles.yaml")); err != nil {
+				return nil, nil, err
+			}
+			defer os.RemoveAll(tagStaged)
+		}
+		fmt.Fprintf(os.Stderr, "==> PDP %s: recording %d fuzz cases\n", v.Tag, len(onTag))
+		goldens, err := recordWith(ctx, imageOf(v), v.Tag, tagStaged, tagCorpus, in.ds)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, g := range goldens {
+			byTag[v.Tag][g.ID] = g
+		}
 	}
 
 	rec := &fuzzRecording{goldens: map[string][]*Golden{}, policy: policy, dataset: in.dataset}
-	for i, fc := range cases {
+	for _, fc := range cases {
 		reason := ""
 		for _, v := range in.versions {
-			if r := unjudgeable(byTag[v.Tag][i], len(in.ds.Resources)); r != "" {
-				reason = fmt.Sprintf("PDP %s: %s", v.Tag, r)
-				break
+			if g := byTag[v.Tag][fc.ID]; g != nil {
+				if r := unjudgeable(g, len(in.ds.Resources)); r != "" {
+					reason = fmt.Sprintf("PDP %s: %s", v.Tag, r)
+					break
+				}
 			}
 		}
 		if reason != "" {
 			dropped[fc.ID] = reason
 			continue
 		}
-		rec.cases = append(rec.cases, fc)
+		var on []string
 		for _, v := range in.versions {
-			rec.goldens[v.Tag] = append(rec.goldens[v.Tag], byTag[v.Tag][i])
+			if g := byTag[v.Tag][fc.ID]; g != nil {
+				rec.goldens[v.Tag] = append(rec.goldens[v.Tag], g)
+				on = append(on, v.Tag)
+			}
 		}
+		if len(on) < len(in.versions) {
+			fc.PDP = on
+		}
+		rec.cases = append(rec.cases, fc)
 	}
 	return rec, dropped, nil
 }

@@ -348,6 +348,20 @@
       "status": "unsupported",
       "reason": "hasIntersection is translated only against a literal list."
     },
+    "collection/has-only/bool-list-two-literals": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
+    "collection/has-only/chained-relation-names-value-first": {
+      "status": "unsupported",
+      "pdp": [
+        "0.58.0"
+      ],
+      "reason": "hasOnly lowers to isSubset, and isSubset() has no default SQL lowering: the stored list reaches it outside any operator override."
+    },
     "collection/has-only/empty-literal-list": {
       "status": "unsupported",
       "pdp": [
@@ -572,6 +586,10 @@
       "reason": "RE2 reads the * after ^ as a repetition of the start anchor, which the regex lowering does not read, so ^*a$ is refused rather than lowered with a guess at what the * means."
     },
     "regex/matches/two-dot-star-gaps": {
+      "status": "unsupported",
+      "reason": "Two .* gaps are not a finite set of literals or a single prefix-and-suffix LIKE, and LIKE's % would cross a newline RE2's . does not, so the pattern is refused."
+    },
+    "regex/matches/two-dot-star-gaps-beside-conjunct": {
       "status": "unsupported",
       "reason": "Two .* gaps are not a finite set of literals or a single prefix-and-suffix LIKE, and LIKE's % would cross a newline RE2's . does not, so the pattern is refused."
     },

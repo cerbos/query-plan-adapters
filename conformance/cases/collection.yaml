@@ -635,6 +635,22 @@ cases:
   condition:
     match:
       expr: 'hasIntersection(["public", "other"], R.attr.tagNames)'
+- id: 'collection/has-only/bool-list-two-literals'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'The negation of hasOnly of a bool list and two literals (!aBoolList.hasOnly([true, false])).'
+  trap: 'Every bool is true or false, so only a null element (a4) makes hasOnly false; a membership test spelled as IN over a bool column is rejected by stores whose bool filter has no IN.'
+  condition:
+    match:
+      expr: '!R.attr.aBoolList.hasOnly([true, false]) || R.attr.aNumber == 5'
+- id: 'collection/has-only/chained-relation-names-value-first'
+  since: 0.58.0
+  tier: adversarial
+  intent: 'hasAll with a literal list as the receiver over the mainCategory.subNames chain (["finance", "tech"].hasAll(mainCategory.subNames)).'
+  trap: 'The plan puts the literal first, so this is subNames.hasOnly(["finance", "tech"]): a1, a6 and a8 are allowed and i9, which also holds "legal", is not; a NOT NULL guard on the required name column is rejected by stores that type it.'
+  condition:
+    match:
+      expr: '["finance", "tech"].hasAll(R.attr.mainCategory.subNames)'
 - id: 'collection/has-only/single-element'
   since: 0.58.0
   tier: extended

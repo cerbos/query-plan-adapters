@@ -320,6 +320,10 @@
       "status": "unsupported",
       "reason": "The RE2 lowering handles one non-newline gap between a prefix and a suffix; two gaps are not a finite set of literals or a single LIKE, so the pattern is refused."
     },
+    "regex/matches/two-dot-star-gaps-beside-conjunct": {
+      "status": "unsupported",
+      "reason": "The RE2 lowering handles one non-newline gap between a prefix and a suffix; two gaps are not a finite set of literals or a single LIKE, so the pattern is refused."
+    },
     "regex/matches/unanchored-dot": {
       "status": "unsupported",
       "reason": "A . between two literals is not a finite set of literals, and LIKE's _ would match a newline that RE2's . does not, so the pattern is refused."
