@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v6.0.1
+
 ### Fixed
 
 - `hasOnly`, `hasAll` with a literal receiver, and `all()` over a relation list read through a required column (`["finance"].hasAll(mainCategory.subNames)`) no longer fail with Prisma's "Argument `not` is missing": a column that is `NOT NULL` in the schema, or declared `nullable: false` in a relation's `fields`, gets no `not: null` guard.
