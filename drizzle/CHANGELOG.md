@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.6.1
+
 - Reduces translation time for large constant map literals by checking each field name once for duplicates.
 
 ## v0.6.0

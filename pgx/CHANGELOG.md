@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.1
+
 - Reduced allocations when translating conditional plans by removing a copy of the expression tree.
 
 ## v0.2.0

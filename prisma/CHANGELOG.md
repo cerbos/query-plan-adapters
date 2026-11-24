@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v6.0.2
+
 ### Changed
 
 - Translating `exists_one` and size comparisons over filtered literal lists counts each value in one pass, reducing translation time for large principal lists.

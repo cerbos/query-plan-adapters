@@ -1,6 +1,6 @@
 {
   "name": "@cerbos/orm-drizzle",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "homepage": "https://cerbos.dev",
   "description": "Drizzle ORM adapter for Cerbos query plans",
   "repository": {

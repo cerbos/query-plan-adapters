@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.2.1
+
 - Skips a full scan of the plan for null literals when translating with `nullAttributeRepresentation: "explicit"`.
 
 ## v4.2.0
