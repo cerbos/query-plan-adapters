@@ -20,6 +20,7 @@ query, an Elasticsearch query, and so on) using a mapping you provide from Cerbo
 | Convex | TypeScript | `npm install @cerbos/orm-convex @cerbos/core` | [convex](convex/) |
 | LangChain.js / ChromaDB | TypeScript | `npm install @cerbos/langchain-chromadb @cerbos/core` | [langchain-chromadb](langchain-chromadb/) |
 | SQLAlchemy | Python | `pip install cerbos-sqlalchemy` | [sqlalchemy](sqlalchemy/) |
+| DuckDB | Python | Not released yet (`cerbos-duckdb` on PyPI once tagged) | [duckdb](duckdb/) |
 | Ent | Go | `go get github.com/cerbos/query-plan-adapters/ent` | [ent](ent/) |
 | pgx / PostgreSQL | Go | `go get github.com/cerbos/query-plan-adapters/pgx` | [pgx](pgx/) |
 | JPA (Hibernate, Quarkus, Jakarta EE, Micronaut) | Java | Build from source (not yet on Maven Central) | [jpa](jpa/) |

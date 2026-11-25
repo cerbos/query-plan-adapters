@@ -64,6 +64,7 @@ func plannerOperatorFiles(recorded map[string][]*Golden) map[string][]byte {
 		return []byte(fmt.Sprintf("// %s\n\npackage %s;\n\nimport java.util.Set;\n\nfinal class PlannerOperators {\n    static final Set<String> ALL = Set.of(\n%s);\n\n    private PlannerOperators() {}\n}\n", generatedBy, pkg, quoted("            ", 100)))
 	}
 	kotlin := fmt.Sprintf("// %s\n\npackage dev.cerbos.queryplan.exposed\n\ninternal val PLANNER_OPERATORS: Set<String> = setOf(\n%s,\n)\n", generatedBy, quoted("    ", 100))
+	python := fmt.Sprintf("# %s\n\nPLANNER_OPERATORS: frozenset[str] = frozenset(\n    {\n%s\n    }\n)\n", generatedBy, quoted("        ", 100))
 	ruby := fmt.Sprintf("# frozen_string_literal: true\n\n# %s\n\nmodule Cerbos\n  module MongoDB\n    module Plan\n      PLANNER_OPERATORS = %%w[\n%s\n      ].to_set.freeze\n    end\n  end\nend\n", generatedBy, wrapWords("        ", ops, 100))
 	return map[string][]byte{
 		"../prisma/src/planner-operators.ts":                                                           []byte(ts),
@@ -73,6 +74,7 @@ func plannerOperatorFiles(recorded map[string][]*Golden) map[string][]byte {
 		"../elasticsearch-java/src/main/java/dev/cerbos/queryplan/elasticsearch/PlannerOperators.java": java("dev.cerbos.queryplan.elasticsearch"),
 		"../exposed/src/main/kotlin/dev/cerbos/queryplan/exposed/PlannerOperators.kt":                  []byte(kotlin),
 		"../mongodb-ruby/lib/cerbos/mongodb/planner_operators.rb":                                      []byte(ruby),
+		"../duckdb/src/cerbos_duckdb/_planner_operators.py":                                            []byte(python),
 	}
 }
 

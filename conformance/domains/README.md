@@ -60,6 +60,7 @@ filter come from the environment variables each harness names at its top.
 | ent, pgx | its own Go module with a `replace` to the adapter | `go test ./...` |
 | activerecord, sequel, mongodb-ruby | the adapter's Gemfile (`BUNDLE_GEMFILE`) | `ruby harness.rb [domain ...]` |
 | sqlalchemy | the adapter's virtualenv | `../../../../sqlalchemy/.venv/bin/python harness.py <store>` |
+| duckdb | the adapter's virtualenv | `../../../../duckdb/.venv/bin/python harness.py [domain ...]` |
 | jpa, spring-data, exposed, elasticsearch-java | a Gradle build that includes the adapter's (`includeBuild`) | `../../../../<adapter>/gradlew test` |
 | efcore | a console project with a `ProjectReference` to the adapter | `./run.sh <store>` |
 

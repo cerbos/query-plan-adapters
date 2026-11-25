@@ -80,6 +80,8 @@ reproduced against the real store.
 | drizzle | mysql | 334 | 12 | 1 | 19 | 2 | 173 / 0 |
 | drizzle | postgres | 334 | 12 | 1 | 19 | 2 | 173 / 0 |
 | drizzle | sqlite | 338 | 8 | 1 | 19 | 2 | 175 / 0 |
+| duckdb | duckdb | 345 | 6 | 0 | 15 | 2 | 179 / 0 |
+| duckdb | duckdb-hostile | 345 | 6 | 0 | 15 | 2 | 179 / 0 |
 | efcore | postgres | 341 | 8 | 0 | 17 | 2 | 177 / 0 |
 | efcore | sqlite | 341 | 8 | 0 | 17 | 2 | 177 / 0 |
 | efcore | sqlserver | 341 | 8 | 0 | 17 | 2 | 177 / 0 |
@@ -138,6 +140,7 @@ reproduced against the real store.
 | mongodb-ruby | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 3 | 1 |
 | convex | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 2 |
 | langchain-chromadb | 3 | 3 | 3 | 3 | 4 | 4 | 2 | 2 | 3 | 4 |
+| duckdb | 1 | 1 | 2 | 2 | 2 | 1 | 1 | 1 | 3 | 1 |
 
 spring-data runs the jpa mappings unchanged and matches jpa/h2 on every golden.
 

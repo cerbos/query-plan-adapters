@@ -1191,6 +1191,10 @@
       "status": "unsupported",
       "reason": "matches regex has a brace at index 1 that does not begin a {n}, {n,} or {n,m} repetition, which Lucene rejects at query time: a{q}[*][?]b"
     },
+    "regex/matches/literal-substring-is-case-sensitive": {
+      "status": "unsupported",
+      "reason": "matches regex patterns must be fully anchored unless they are a simple literal prefix: a Lucene regexp always matches the whole term, and A_b is unanchored at both ends."
+    },
     "regex/matches/lookahead-from-principal": {
       "status": "unsupported",
       "reason": "Lookahead is outside the RE2/Lucene common regular expression syntax; translating it as a Lucene regexp would change CEL error semantics."

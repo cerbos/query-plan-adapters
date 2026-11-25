@@ -94,6 +94,27 @@ cases:
   condition:
     match:
       expr: 'R.attr.aString.matches("^a{q}[*][?]b$")'
+- id: 'regex/matches/literal-equality-is-case-sensitive'
+  tier: adversarial
+  intent: 'matches("^One$"), a fully anchored literal that a store''s optimizer may rewrite to equality.'
+  trap: 'RE2 compares code points, so only c1 "One" matches. DuckDB rewrites a constant literal pattern to =, which then compares under the column''s collation: a case-insensitive one also admits a1 "one".'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^One$")'
+- id: 'regex/matches/literal-prefix-is-case-sensitive'
+  tier: adversarial
+  intent: 'matches("^On"), an anchored literal prefix that a store''s optimizer may rewrite to a prefix test.'
+  trap: 'Only c1 "One" starts with "On". DuckDB rewrites the pattern to prefix(), which a case-insensitive collation turns into a match for a1 "one" and b1 "oneXtwo" too.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("^On")'
+- id: 'regex/matches/literal-substring-is-case-sensitive'
+  tier: adversarial
+  intent: 'matches("A_b"), an unanchored literal that a store''s optimizer may rewrite to a substring test.'
+  trap: 'Only c2 "xA_by" holds "A_b", and _ is a literal character. DuckDB rewrites the pattern to contains(), which a case-insensitive collation turns into a match for a4 "xa_by"; a case-insensitive LIKE ''%A_b%'', which reads _ as any character, admits a5 "xaXby" as well.'
+  condition:
+    match:
+      expr: 'R.attr.aString.matches("A_b")'
 - id: 'regex/matches/lookahead-from-principal'
   tier: adversarial
   intent: 'matches() with a lookahead pattern chosen by a principal-attribute ternary (a literal invalid regex would not compile), OR''d with aNumber == 5.'

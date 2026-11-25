@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/literal-prefix-is-case-sensitive",
+  "intent": "matches(\"^On\"), an anchored literal prefix that a store's optimizer may rewrite to a prefix test.",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^On"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/literal-prefix-is-case-sensitive",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^On\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Only c1 \"One\" starts with \"On\". DuckDB rewrites the pattern to prefix(), which a case-insensitive collation turns into a match for a1 \"one\" and b1 \"oneXtwo\" too."
+}

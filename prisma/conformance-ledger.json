@@ -527,6 +527,10 @@
       "status": "unsupported",
       "reason": "Prisma has no regex filter; matches() is lowered to LIKE only for a column receiver and a literal pattern, so a pattern read from a row is refused."
     },
+    "regex/matches/literal-substring-is-case-sensitive": {
+      "status": "unsupported",
+      "reason": "Prisma has no regex filter, and the substring lowering is a LIKE contains, which Prisma does not escape: the literal _ in A_b would match any character, so the pattern is refused."
+    },
     "regex/matches/lucene-reserved-characters-in-class": {
       "status": "unsupported",
       "reason": "Prisma has no regex filter, and the translator lowers only patterns a combination of LIKE filters decides exactly: `[ab@#&~<>]+` is a repeated class, an unbounded repetition with no LIKE spelling."
