@@ -3,6 +3,7 @@
 
 """Spells the expression tree as DuckDB SQL with ``?`` placeholders."""
 
+from dataclasses import fields
 from typing import Any
 
 from cerbos_duckdb._expr import (
@@ -31,6 +32,7 @@ from cerbos_duckdb._expr import (
     Truth,
     TruthTest,
     UnnestItem,
+    and_,
 )
 from cerbos_duckdb._values import Instant, on_microsecond_grid
 from cerbos_duckdb.errors import UnsupportedPlanError as Unsupported
@@ -82,10 +84,15 @@ def _is_text(e: Expr) -> bool:
 class Renderer:
     def __init__(self) -> None:
         self.params: list[Any] = []
+        self.lambdas: set[str] = set()
 
     def render(self, e: Expr) -> str:
         if isinstance(e, Col):
-            col = ".".join(quote(p) for p in (e.qualifier, *e.path))
+            if e.qualifier in self.lambdas:
+                head = e.qualifier if e.path[0] == "v" else e.qualifier + "_o"
+                col = ".".join(quote(p) for p in (head, *e.path[1:]))
+            else:
+                col = ".".join(quote(p) for p in (e.qualifier, *e.path))
             # Instants compare as epoch microseconds: a TIMESTAMP column then reads as UTC, not in
             # the session's TimeZone, and a DATE column as its midnight UTC.
             return f"epoch_us({col})" if e.type == ValueType.TIMESTAMP else col
@@ -177,6 +184,8 @@ class Renderer:
         )
 
     def subquery(self, s: Subquery) -> str:
+        if _lambda_form(s):
+            return self.list_filter(s)
         if s.kind == SubqueryKind.EXISTS:
             select = "SELECT 1"
         elif s.kind == SubqueryKind.COUNT:
@@ -196,3 +205,51 @@ class Renderer:
         where = f" WHERE {' AND '.join(conds)}" if conds else ""
         body = f"{select} FROM {', '.join(items)}{where}"
         return f"(EXISTS ({body}))" if s.kind == SubqueryKind.EXISTS else f"({body})"
+
+    def list_filter(self, s: Subquery) -> str:
+        item = s.from_[0]
+        assert isinstance(item, UnnestItem)
+        source = self.render(item.source)
+        where = and_(*(c for c in (s.correlate, s.where) if c is not None))
+        if s.correlate is None and s.where is None:
+            kept = source
+        else:
+            self.lambdas.add(item.alias)
+            body = self.render(where)
+            self.lambdas.discard(item.alias)
+            kept = f"list_filter({source}, lambda {quote(item.alias)}, {quote(item.alias + '_o')}: {body})"
+        if s.kind == SubqueryKind.EXISTS:
+            return f"coalesce(len({kept}) > 0, FALSE)"
+        if s.kind == SubqueryKind.COUNT:
+            return f"coalesce(len({kept}), 0)"
+        assert s.select is not None
+        self.lambdas.add(item.alias)
+        select = self.render(s.select)
+        self.lambdas.discard(item.alias)
+        return f"(list_transform({kept}, lambda {quote(item.alias)}, {quote(item.alias + '_o')}: {select})[1])"
+
+
+def _lambda_form(s: Subquery) -> bool:
+    """A subquery over one list's elements, which DuckDB evaluates in place with ``list_filter``
+    instead of a correlated join. DuckDB rejects a subquery inside a lambda, so every subquery in
+    the predicate must take this form too."""
+    return (
+        len(s.from_) == 1
+        and isinstance(s.from_[0], UnnestItem)
+        and all(_lambda_form(x) for x in _subqueries((s.correlate, s.where, s.select)))
+    )
+
+
+def _subqueries(e: Any) -> list[Subquery]:
+    if e is None:
+        return []
+    if isinstance(e, Subquery):
+        return [e]
+    if isinstance(e, Expr):
+        out: list[Subquery] = []
+        for f in fields(e):
+            out.extend(_subqueries(getattr(e, f.name)))
+        return out
+    if isinstance(e, tuple):
+        return [x for v in e for x in _subqueries(v)]
+    return []
