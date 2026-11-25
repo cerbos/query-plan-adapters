@@ -1,0 +1,108 @@
+name: Polars Pull Request
+
+# No branch filter, so stacked PRs are tested too.
+on:
+  pull_request:
+    paths:
+      - "polars/**"
+      - "conformance/**"
+      - "demo/**"
+      - ".github/workflows/polars_pr.yaml"
+      - ".github/workflows/polars_release.yaml"
+      # The domain stress kit is run by hand and never gates CI (conformance/domains/README.md).
+      - "!conformance/domains/**"
+      # No script, harness or build reads Markdown, so a prose-only change cannot alter this
+      # result. A negation must come after every pattern it narrows.
+      - "!**/*.md"
+  # Release tags invoke these same checks through the publish workflow.
+  workflow_call:
+
+permissions: {}
+
+# Cancel a pull request's superseded runs; other triggers always finish.
+concurrency:
+  group: polars-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: polars
+
+jobs:
+  test:
+    name: Polars test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ./__pypackages__
+          key: ${{ runner.os }}-python-polars-${{ hashFiles('polars/pdm.lock') }}
+
+      - uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37 # v4.6
+        name: Setup PDM
+        with:
+          python-version: "3.11"
+          prerelease: true
+          enable-pep582: true
+
+      # -G selects only the named dev groups, so `test` is listed explicitly.
+      - run: pdm install -G test -G lint
+
+      # Both rewrite files, and check-repo-status fails on any diff.
+      - name: Format
+        run: pdm run format
+
+      - name: Lint
+        run: pdm run lint
+
+      - name: Check repo status
+        uses: cerbos/actions/check-repo-status@19e204e7bafa58a693eff12f5e95a09763723be5 # main
+
+      # Checks `get_filter`'s signature and the package's annotations.
+      - name: Type-check
+        run: npx -y pyright@1.1.411
+
+      # The conformance harness: every case in conformance/golden/ through the HTTP and gRPC
+      # clients, on an eager frame and on the streaming engine. The frame is built in memory, so
+      # no store or PDP runs here: the plans and the decisions are recorded.
+      - run: pdm run test
+
+  # Runs the example against the built wheel, testing packaging and usage shapes.
+  # See docs/adr/0002-examples-install-the-packed-artifact.md.
+  # Keep this job in this workflow: it is the check that blocks Renovate's automerge
+  # of a Polars bump that breaks real usage.
+  example:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate conformance corpus
+        run: ../conformance/scripts/validate-corpus.sh
+
+      - name: Validate demo domain
+        run: ../demo/scripts/validate-demo.sh
+
+      - uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37 # v4.6
+        name: Setup PDM
+        with:
+          python-version: "3.11"
+
+      # No `pdm install`: the example builds the adapter and installs its own pinned tree.
+      # The runner starts the PDP from demo/docker-compose.yml (pinned in
+      # conformance/pdp-versions.json), as a deployed app would reach it.
+      - name: Run the example against the demo domain
+        run: ../demo/scripts/run-example.sh polars

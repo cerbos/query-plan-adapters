@@ -133,14 +133,18 @@ jobs:
         with:
           global-json-file: efcore/global.json
       - name: Setup PDM
-        if: matrix.adapter == 'sqlalchemy'
+        if: contains(fromJSON('["sqlalchemy","polars"]'), matrix.adapter)
         uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37 # v4.6
         with:
-          python-version: "3.10"
+          python-version: "3.11"
       - name: Install the SQLAlchemy harness
         if: matrix.adapter == 'sqlalchemy'
         working-directory: sqlalchemy
         run: pdm install -G testcontainers -G test
+      - name: Install the Polars harness
+        if: matrix.adapter == 'polars'
+        working-directory: polars
+        run: pdm install -G test
 
       # A failing case fails the harness, and the report says which; what fails this step is a
       # harness that wrote no verdicts at all, which the report could not tell from a skipped leg.

@@ -7,7 +7,7 @@ Each adapter has its own GitHub Actions workflow triggered by changes in its dir
 
 Every adapter workflow runs `validate-corpus.sh` and its conformance harness **inside the same job as the regular tests**, and no test or harness job starts a PDP. Convex is the one exception to the single job, and not by choice: its harness imports `convex/_generated`, which only exists once a live backend has been deployed to, so the corpus leg lives in the job that does the deploy and the codegen. On the TypeScript adapters the harness is gated to the baseline Node leg (`if: matrix.node-version == '22'`), because the corpus discriminates the translator and the datastore, not the Node runtime. The other matrix dimensions divide into two kinds:
 
-- **The datastore is one.** Drizzle, Prisma, ActiveRecord and Sequel run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), EF Core once per SQLite, PostgreSQL and SQL Server store, and SQLAlchemy's harness runs all three in one `pdm run test` — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose and mongodb-ruby equivalent, and it exists only on the baseline Node or Ruby leg.
+- **The datastore is one.** Drizzle, Prisma, ActiveRecord and Sequel run the corpus once per `ADAPTER_TEST_DB` store (SQLite, PostgreSQL, MySQL), EF Core once per SQLite, PostgreSQL and SQL Server store, and SQLAlchemy's harness runs all three in one `pdm run test`. Polars has no store: its harness filters an in-memory frame, eagerly and on the streaming engine, — collation, LIKE escaping, cast targets and parameter typing are translator behaviour, so a store the workflow does not execute is a store the adapter does not cover. MongoDB server version is the mongoose and mongodb-ruby equivalent, and it exists only on the baseline Node or Ruby leg.
 - **The client engine is not, on its own.** Prisma's v6/v7 dimension crosses with the store dimension, giving six conformance runs per Prisma workflow, all on Node 22. jpa's ORM set (`baseline`, `next`), Exposed's (`baseline`, `floor`), ActiveRecord's version (8.0, 7.1) and Sequel's (5.69 and the newest 5.x) cross with their store dimensions the same way, since each renders the SQL the store executes.
 
 Adding a store leg buys coverage; adding a Node leg does not. The PDP is not a dimension of any adapter workflow: every harness replays both pinned PDPs' goldens in one run. Two kinds of job start a PDP: each adapter's example job, through `demo/scripts/run-example.sh` (the `current` pin), and `conformance.yaml`, which starts both pinned PDPs to replan every case. That workflow runs `validate-corpus.sh`, `verify-cerbos-digest.sh`, vets and `gofmt`-checks the generator and the mutation runner, and runs `go -C conformance/generator run . -check`.
@@ -27,7 +27,7 @@ packaged example succeed. Adapter test workflows run directly on pull requests a
 `workflow_call` for releases, so a release runs the checks once. Keep the publish workflow
 filenames stable: npm trusted publishing is configured against them.
 
-Other release tags: `sqla/v*` -> PyPI, `activerecord/v*` and `sequel/v*` -> RubyGems (each checks the tag against the gem's
+Other release tags: `sqla/v*` and `polars/v*` -> PyPI, `activerecord/v*` and `sequel/v*` -> RubyGems (each checks the tag against the gem's
 version), `efcore/v*` -> NuGet (trusted publishing, configured against `efcore-publish.yaml`, which checks the tag against the
 project's `<Version>`). Their publish workflows call the adapter's test workflow the same way and publish only after it
 passes. Every publish workflow then calls `github-release.yaml`, which creates the tag's GitHub release with the tag's
@@ -63,7 +63,7 @@ needs a row in its `table`, naming its tag prefix and where its manifest keeps t
    <major|minor|patch|version>` alone does one adapter in place. A keyword increments the adapter's newest tag (its manifest
    version before the first release); semver's 0.x rules are not applied, so a breaking change before 1.0 is `minor`. `bump`
    refuses an empty `Unreleased`, writes the version to the adapter's manifest (`package.json`, `version.rb`, the `.csproj` or
-   `build.gradle.kts`; ent, pgx and sqlalchemy take theirs from the tag), and moves the `Unreleased` entries under
+   `build.gradle.kts`; ent, pgx, sqlalchemy and polars take theirs from the tag), and moves the `Unreleased` entries under
    `## v<version>`.
 2. Once it is merged, check out the merge commit and run `tools/release/release.sh tag`. It finds every adapter whose newest `CHANGELOG.md` version has no tag on that
    remote, checks each against its manifest, asks before tagging, and pushes the tags three per push: a push carrying more
