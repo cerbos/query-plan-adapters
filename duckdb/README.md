@@ -92,9 +92,13 @@ MAPPING = {
 ```
 
 `exists`, `all`, `exists_one`, `filter`, `map`, `in`, `size`, `list[k]`, `hasIntersection`,
-`isSubset`, `except`, `intersect` and the Cerbos 0.58 set functions lower to correlated `unnest(...)
-WITH ORDINALITY` subqueries. They are exact, including CEL's error semantics, but much slower than
-DuckDB's own list functions on a large table, so filter on scalar columns first where you can. A `NULL` list is not an empty one: CEL errors on it, so every operation over a
+`isSubset`, `except`, `intersect` and the Cerbos 0.58 set functions lower to `list_filter` lambdas
+over the `LIST` value, which DuckDB evaluates in place, row by row, with no join. They are exact,
+including CEL's error semantics. A lambda cannot hold a subquery, so a predicate over a list that
+also reads a `Join` falls back to a correlated `unnest(...) WITH ORDINALITY` subquery, which is
+exact too but an order of magnitude slower on a large table.
+
+A `NULL` list is not an empty one: CEL errors on it, so every operation over a
 `NULL` list is UNKNOWN and the row is excluded under both polarities, where `[]` is an empty
 collection.
 
@@ -131,8 +135,8 @@ Declaring a `Join` asserts that `target_column` is unique, so at most one row ma
 intermediate tables (innermost first, each a `Hop(table, child_column, join_column)`) for a chain the
 policy reads as one attribute, and every operator through the chain requires each hop to exist: a
 missing parent is UNKNOWN, as CEL's missing attribute is. A `LIST` column on the joined row is an
-`Entry` with both `join` and `list`. Fixed-size `ARRAY` columns work as collections on DuckDB 2.x;
-DuckDB 1.x cannot `unnest` them, so the query errors there.
+`Entry` with both `join` and `list`. Fixed-size `ARRAY` columns work as collections, except
+that DuckDB 1.x cannot `unnest` them, so a predicate that falls back to `unnest` errors there.
 
 ## Null conventions
 
@@ -206,7 +210,7 @@ in that tier:
 | --- | --- |
 | core | 32 / 32 |
 | extended | 109 / 114 |
-| adversarial | 530 / 617 |
+| adversarial | 533 / 620 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` (78 cases) or is skipped
 because its golden file records a planner divergence (3 extended and 11 adversarial cases), which no

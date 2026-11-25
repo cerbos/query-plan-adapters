@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "c1"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/literal-equality-is-case-sensitive",
+  "intent": "matches(\"^One$\"), a fully anchored literal that a store's optimizer may rewrite to equality.",
+  "oracle": "discriminating",
+  "pdp": "0.57.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "^One$"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/literal-equality-is-case-sensitive",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"^One$\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "RE2 compares code points, so only c1 \"One\" matches. DuckDB rewrites a constant literal pattern to =, which then compares under the column's collation: a case-insensitive one also admits a1 \"one\"."
+}

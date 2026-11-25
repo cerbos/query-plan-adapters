@@ -4274,6 +4274,33 @@ resourcePolicy:
       condition:
         match:
           expr: R.attr.aString.matches("^a{q}[*][?]b$")
+    # regex/matches/literal-equality-is-case-sensitive
+    - actions:
+        - regex/matches/literal-equality-is-case-sensitive
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^One$")
+    # regex/matches/literal-prefix-is-case-sensitive
+    - actions:
+        - regex/matches/literal-prefix-is-case-sensitive
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("^On")
+    # regex/matches/literal-substring-is-case-sensitive
+    - actions:
+        - regex/matches/literal-substring-is-case-sensitive
+      effect: EFFECT_ALLOW
+      roles:
+        - USER
+      condition:
+        match:
+          expr: R.attr.aString.matches("A_b")
     # regex/matches/lookahead-from-principal
     - actions:
         - regex/matches/lookahead-from-principal

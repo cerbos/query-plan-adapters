@@ -1,0 +1,47 @@
+{
+  "allowed": [
+    "c2"
+  ],
+  "degenerateReason": null,
+  "id": "regex/matches/literal-substring-is-case-sensitive",
+  "intent": "matches(\"A_b\"), an unanchored literal that a store's optimizer may rewrite to a substring test.",
+  "oracle": "discriminating",
+  "pdp": "0.58.0",
+  "plan": {
+    "condition": {
+      "expression": {
+        "operands": [
+          {
+            "variable": "request.resource.attr.aString"
+          },
+          {
+            "value": "A_b"
+          }
+        ],
+        "operator": "matches"
+      }
+    },
+    "kind": "KIND_CONDITIONAL"
+  },
+  "planError": null,
+  "plannerDivergence": null,
+  "request": {
+    "action": "regex/matches/literal-substring-is-case-sensitive",
+    "resourceKind": "conformance"
+  },
+  "rules": [
+    {
+      "condition": {
+        "match": {
+          "expr": "R.attr.aString.matches(\"A_b\")"
+        }
+      },
+      "effect": "EFFECT_ALLOW",
+      "roles": [
+        "USER"
+      ]
+    }
+  ],
+  "tier": "adversarial",
+  "trap": "Only c2 \"xA_by\" holds \"A_b\", and _ is a literal character. DuckDB rewrites the pattern to contains(), which a case-insensitive collation turns into a match for a4 \"xa_by\"; a case-insensitive LIKE '%A_b%', which reads _ as any character, admits a5 \"xaXby\" as well."
+}
