@@ -170,6 +170,7 @@ its own Unicode tables. A pattern that is not a literal is refused.
 | `hasIntersection`, `isSubset`, `hasAny`, `hasAll`, `hasOnly`, `hasExactly`, `except`, `intersect` | `list.eval` |
 | `==` between a list and a list literal | length and each position |
 | `x[i]`, `m["key"]`, `{"k": v}[x]`, `has(x.f)` | `list.get`, `struct.field`, a `when` chain, `is_not_null` |
+| `"key" in m` over a struct column | `has(m.key)`: the field is non-null |
 | `timestamp()`, `duration()`, `timeSince()`, `± duration` | nanosecond `Datetime` and `Duration` |
 | `hierarchy()`: `ancestorOf`, `descendentOf`, `overlaps` | prefix tests on the delimited string |
 | A lambda body reading the element of an enclosing lambda | refused: an inner `list.eval` cannot reach an outer element |
@@ -190,7 +191,7 @@ recorded in that tier:
 | --- | --- |
 | core | 32 / 32 |
 | extended | 107 / 114 |
-| adversarial | 548 / 617 |
+| adversarial | 551 / 617 |
 
 Every case that does not pass is either refused with `UnsupportedPlanError` or skipped because its
 golden file records a planner divergence, which no adapter can pass.

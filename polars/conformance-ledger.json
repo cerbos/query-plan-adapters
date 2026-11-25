@@ -181,10 +181,6 @@
       "status": "unsupported",
       "reason": "A ternary over list or map literals is not translated."
     },
-    "conditional/ternary/nested-over-parent-fields": {
-      "status": "unsupported",
-      "reason": "Membership in a map is not translated."
-    },
     "hierarchy/ancestor-of/mismatched-delimiters-negated": {
       "status": "unsupported",
       "reason": "Hierarchies with different delimiters are not compared."
@@ -200,14 +196,6 @@
     "hierarchy/overlaps/path-built-from-list-value-first": {
       "status": "unsupported",
       "reason": "hierarchy() of a list is not translated."
-    },
-    "membership/in/map-attribute-keys": {
-      "status": "unsupported",
-      "reason": "Membership in a map is not translated."
-    },
-    "membership/in/negated-map-attribute-keys": {
-      "status": "unsupported",
-      "reason": "Membership in a map is not translated."
     },
     "principal/all/left-unresolved-in-ternary-branch": {
       "status": "unsupported",

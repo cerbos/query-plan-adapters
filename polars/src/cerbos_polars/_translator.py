@@ -499,6 +499,8 @@ class Translator:
 
     def equals(self, a: Op, b: Op) -> Op:
         for op, other in ((a, b), (b, a)):
+            if op.kind == "tsattr" and other.kind == "null":
+                break
             if op.kind == "tsattr" and other.kind not in (
                 "string",
                 "tsattr",
@@ -665,6 +667,8 @@ class Translator:
     def _ordering(self, node: Expr, env, depth, compare) -> Op:
         a, b = self.args(node, env, depth, 2)
         for op, other in ((a, b), (b, a)):
+            if op.kind == "tsattr" and other.kind == "null":
+                break
             if op.kind == "tsattr" and other.kind not in (
                 "string",
                 "tsattr",
@@ -1370,6 +1374,21 @@ class Translator:
 
     def _op_in(self, node: Expr, env, depth) -> Op:
         needle, haystack = self.args(node, env, depth, 2)
+        key, target = node.operands
+        if (
+            haystack.kind == "map"
+            and haystack.fields is None
+            and isinstance(key, Value)
+            and isinstance(key.value, str)
+            and "." not in key.value
+            and isinstance(target, Variable)
+            and target.name.startswith(RESOURCE_ATTR)
+        ):
+            assert isinstance(haystack.dtype, pl.Struct) and haystack.expr is not None
+            if key.value not in {f.name for f in haystack.dtype.fields}:
+                return _bool(_guard(pl.lit(False), haystack), haystack)
+            has = Expr("has", (Variable(f"{target.name}.{key.value}"),))
+            return self._op_has(has, env, depth)
         return self.member(needle, haystack, depth)
 
     def member(self, needle: Op, haystack: Op, depth: int) -> Op:

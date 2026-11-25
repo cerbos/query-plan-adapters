@@ -1,0 +1,5221 @@
+{
+  "adapter": "polars",
+  "store": "eager",
+  "results": [
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "admin_kim",
+      "action": "delete",
+      "allowed": [
+        "n01",
+        "n02",
+        "n08",
+        "n09",
+        "n11",
+        "n13"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "n01",
+        "n09",
+        "n11"
+      ],
+      "detail": "missing: ['n02', 'n08', 'n13']"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "admin_kim",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "admin_kim",
+      "action": "sign",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "admin_kim",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ng",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ng",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ng",
+      "action": "sign",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ng",
+      "action": "view",
+      "allowed": [
+        "n03",
+        "n05",
+        "n06",
+        "n07",
+        "n12"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n03",
+        "n05",
+        "n06",
+        "n07",
+        "n12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ortiz",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ortiz",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ortiz",
+      "action": "sign",
+      "allowed": [
+        "n02"
+      ],
+      "verdict": "under-grant",
+      "returned": [],
+      "detail": "missing: ['n02']"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "dr_ortiz",
+      "action": "view",
+      "allowed": [
+        "n01",
+        "n02",
+        "n05",
+        "n10",
+        "n12",
+        "n14"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n02",
+        "n05",
+        "n10",
+        "n12",
+        "n14"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "nurse_ana",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "nurse_ana",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "nurse_ana",
+      "action": "sign",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "nurse_ana",
+      "action": "view",
+      "allowed": [
+        "n01",
+        "n02",
+        "n10"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "n01",
+        "n10"
+      ],
+      "detail": "missing: ['n02']"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "patient_p3",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "patient_p3",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "patient_p3",
+      "action": "sign",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "patient_p3",
+      "action": "view",
+      "allowed": [
+        "n05"
+      ],
+      "verdict": "over-grant",
+      "returned": [
+        "n05",
+        "n13"
+      ],
+      "detail": "extra: ['n13']"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "researcher_li",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "researcher_li",
+      "action": "export",
+      "allowed": [
+        "n01",
+        "n10",
+        "n11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n10",
+        "n11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "researcher_li",
+      "action": "sign",
+      "allowed": [
+        "n13"
+      ],
+      "verdict": "under-grant",
+      "returned": [],
+      "detail": "missing: ['n13']"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.56.0",
+      "principal": "researcher_li",
+      "action": "view",
+      "allowed": [
+        "n01",
+        "n07",
+        "n10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n07",
+        "n10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "admin_kim",
+      "action": "delete",
+      "allowed": [
+        "n01",
+        "n02",
+        "n08",
+        "n09",
+        "n11",
+        "n13"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n02",
+        "n08",
+        "n09",
+        "n11",
+        "n13"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "admin_kim",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "admin_kim",
+      "action": "sign",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "admin_kim",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ng",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ng",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ng",
+      "action": "sign",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ng",
+      "action": "view",
+      "allowed": [
+        "n03",
+        "n05",
+        "n06",
+        "n07",
+        "n12"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n03",
+        "n05",
+        "n06",
+        "n07",
+        "n12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ortiz",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ortiz",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ortiz",
+      "action": "sign",
+      "allowed": [
+        "n02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "dr_ortiz",
+      "action": "view",
+      "allowed": [
+        "n01",
+        "n02",
+        "n05",
+        "n10",
+        "n12",
+        "n14"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n02",
+        "n05",
+        "n10",
+        "n12",
+        "n14"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "nurse_ana",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "nurse_ana",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "nurse_ana",
+      "action": "sign",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "nurse_ana",
+      "action": "view",
+      "allowed": [
+        "n01",
+        "n02",
+        "n10"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "n01",
+        "n10"
+      ],
+      "detail": "missing: ['n02']"
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "patient_p3",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "patient_p3",
+      "action": "export",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "patient_p3",
+      "action": "sign",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "patient_p3",
+      "action": "view",
+      "allowed": [
+        "n05"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n05"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "researcher_li",
+      "action": "delete",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "researcher_li",
+      "action": "export",
+      "allowed": [
+        "n01",
+        "n10",
+        "n11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n10",
+        "n11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "researcher_li",
+      "action": "sign",
+      "allowed": [
+        "n13"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n13"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "healthcare",
+      "pdp": "0.57.0",
+      "principal": "researcher_li",
+      "action": "view",
+      "allowed": [
+        "n01",
+        "n07",
+        "n10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "n01",
+        "n07",
+        "n10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_mia",
+      "action": "approve",
+      "allowed": [
+        "pay01",
+        "pay02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_mia",
+      "action": "file_sar",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_mia",
+      "action": "view",
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_raj",
+      "action": "approve",
+      "allowed": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_raj",
+      "action": "file_sar",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "approver_raj",
+      "action": "view",
+      "allowed": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "compliance_eve",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "compliance_eve",
+      "action": "file_sar",
+      "allowed": [
+        "pay04",
+        "pay07",
+        "pay10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay04",
+        "pay07",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "compliance_eve",
+      "action": "view",
+      "allowed": [
+        "pay02",
+        "pay04",
+        "pay06",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay02",
+        "pay04",
+        "pay06",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "holder_c1",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "holder_c1",
+      "action": "file_sar",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "holder_c1",
+      "action": "view",
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay11",
+        "pay12"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay11",
+        "pay12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "teller_lon",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "teller_lon",
+      "action": "file_sar",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.56.0",
+      "principal": "teller_lon",
+      "action": "view",
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay06",
+        "pay11",
+        "pay12"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay06",
+        "pay11",
+        "pay12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_mia",
+      "action": "approve",
+      "allowed": [
+        "pay01",
+        "pay02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_mia",
+      "action": "file_sar",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_mia",
+      "action": "view",
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_raj",
+      "action": "approve",
+      "allowed": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_raj",
+      "action": "file_sar",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "approver_raj",
+      "action": "view",
+      "allowed": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay03",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "compliance_eve",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "compliance_eve",
+      "action": "file_sar",
+      "allowed": [
+        "pay04",
+        "pay07",
+        "pay10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay04",
+        "pay07",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "compliance_eve",
+      "action": "view",
+      "allowed": [
+        "pay02",
+        "pay04",
+        "pay06",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay02",
+        "pay04",
+        "pay06",
+        "pay07",
+        "pay08",
+        "pay10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "holder_c1",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "holder_c1",
+      "action": "file_sar",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "holder_c1",
+      "action": "view",
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay11",
+        "pay12"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay11",
+        "pay12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "teller_lon",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "teller_lon",
+      "action": "file_sar",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "fintech",
+      "pdp": "0.57.0",
+      "principal": "teller_lon",
+      "action": "view",
+      "allowed": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay06",
+        "pay11",
+        "pay12"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "pay01",
+        "pay02",
+        "pay03",
+        "pay04",
+        "pay06",
+        "pay11",
+        "pay12"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_dhlx",
+      "action": "release_customs",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_dhlx",
+      "action": "update_status",
+      "allowed": [
+        "s01",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_dhlx",
+      "action": "view",
+      "allowed": [
+        "s01",
+        "s02",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_upsn",
+      "action": "release_customs",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_upsn",
+      "action": "update_status",
+      "allowed": [
+        "s05",
+        "s07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s05",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "carrier_upsn",
+      "action": "view",
+      "allowed": [
+        "s04",
+        "s05",
+        "s07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s04",
+        "s05",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customer_acme",
+      "action": "release_customs",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customer_acme",
+      "action": "update_status",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customer_acme",
+      "action": "view",
+      "allowed": [
+        "s01",
+        "s02",
+        "s07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customs_us",
+      "action": "release_customs",
+      "allowed": [
+        "s01",
+        "s04",
+        "s08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customs_us",
+      "action": "update_status",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "customs_us",
+      "action": "view",
+      "allowed": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "hubop_lhr",
+      "action": "release_customs",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "hubop_lhr",
+      "action": "update_status",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.56.0",
+      "principal": "hubop_lhr",
+      "action": "view",
+      "allowed": [
+        "s01",
+        "s02",
+        "s04"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_dhlx",
+      "action": "release_customs",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_dhlx",
+      "action": "update_status",
+      "allowed": [
+        "s01",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_dhlx",
+      "action": "view",
+      "allowed": [
+        "s01",
+        "s02",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s06",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_upsn",
+      "action": "release_customs",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_upsn",
+      "action": "update_status",
+      "allowed": [
+        "s05",
+        "s07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s05",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "carrier_upsn",
+      "action": "view",
+      "allowed": [
+        "s04",
+        "s05",
+        "s07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s04",
+        "s05",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customer_acme",
+      "action": "release_customs",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customer_acme",
+      "action": "update_status",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customer_acme",
+      "action": "view",
+      "allowed": [
+        "s01",
+        "s02",
+        "s07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customs_us",
+      "action": "release_customs",
+      "allowed": [
+        "s01",
+        "s04",
+        "s08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customs_us",
+      "action": "update_status",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "customs_us",
+      "action": "view",
+      "allowed": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s04",
+        "s05",
+        "s08",
+        "s09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "hubop_lhr",
+      "action": "release_customs",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "hubop_lhr",
+      "action": "update_status",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "logistics",
+      "pdp": "0.57.0",
+      "principal": "hubop_lhr",
+      "action": "view",
+      "allowed": [
+        "s01",
+        "s02",
+        "s04"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "s01",
+        "s02",
+        "s04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "integrity_kay",
+      "action": "flag_late",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "integrity_kay",
+      "action": "grade",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "integrity_kay",
+      "action": "review_integrity",
+      "allowed": [
+        "sb02",
+        "sb05",
+        "sb10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb02",
+        "sb05",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "integrity_kay",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "prof_jones",
+      "action": "flag_late",
+      "allowed": [
+        "sb04",
+        "sb06"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb04",
+        "sb06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "prof_jones",
+      "action": "grade",
+      "allowed": [
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb09"
+      ],
+      "detail": "missing: ['sb05', 'sb06']"
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "prof_jones",
+      "action": "review_integrity",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "prof_jones",
+      "action": "view",
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "registrar_ro",
+      "action": "flag_late",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "registrar_ro",
+      "action": "grade",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "registrar_ro",
+      "action": "review_integrity",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "registrar_ro",
+      "action": "view",
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "student_sam",
+      "action": "flag_late",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "student_sam",
+      "action": "grade",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "student_sam",
+      "action": "review_integrity",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "student_sam",
+      "action": "view",
+      "allowed": [
+        "sb01",
+        "sb03",
+        "sb05",
+        "sb08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb03",
+        "sb05",
+        "sb08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "ta_lee",
+      "action": "flag_late",
+      "allowed": [
+        "sb04",
+        "sb06"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb04",
+        "sb06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "ta_lee",
+      "action": "grade",
+      "allowed": [
+        "sb02",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "sb05",
+        "sb06"
+      ],
+      "detail": "missing: ['sb02', 'sb09']"
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "ta_lee",
+      "action": "review_integrity",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.56.0",
+      "principal": "ta_lee",
+      "action": "view",
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "integrity_kay",
+      "action": "flag_late",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "integrity_kay",
+      "action": "grade",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "integrity_kay",
+      "action": "review_integrity",
+      "allowed": [
+        "sb02",
+        "sb05",
+        "sb10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb02",
+        "sb05",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "integrity_kay",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "prof_jones",
+      "action": "flag_late",
+      "allowed": [
+        "sb04",
+        "sb06"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb04",
+        "sb06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "prof_jones",
+      "action": "grade",
+      "allowed": [
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "prof_jones",
+      "action": "review_integrity",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "prof_jones",
+      "action": "view",
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "registrar_ro",
+      "action": "flag_late",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "registrar_ro",
+      "action": "grade",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "registrar_ro",
+      "action": "review_integrity",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "registrar_ro",
+      "action": "view",
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "student_sam",
+      "action": "flag_late",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "student_sam",
+      "action": "grade",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "student_sam",
+      "action": "review_integrity",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "student_sam",
+      "action": "view",
+      "allowed": [
+        "sb01",
+        "sb03",
+        "sb05",
+        "sb08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb03",
+        "sb05",
+        "sb08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "ta_lee",
+      "action": "flag_late",
+      "allowed": [
+        "sb04",
+        "sb06"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb04",
+        "sb06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "ta_lee",
+      "action": "grade",
+      "allowed": [
+        "sb02",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb02",
+        "sb05",
+        "sb06",
+        "sb09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "ta_lee",
+      "action": "review_integrity",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "education",
+      "pdp": "0.57.0",
+      "principal": "ta_lee",
+      "action": "view",
+      "allowed": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "sb01",
+        "sb02",
+        "sb03",
+        "sb04",
+        "sb05",
+        "sb06",
+        "sb09",
+        "sb10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "client_globex",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "client_globex",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "client_globex",
+      "action": "view",
+      "allowed": [
+        "d05",
+        "d06"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "d05"
+      ],
+      "detail": "missing: ['d06']"
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_ali",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_ali",
+      "action": "edit",
+      "allowed": [
+        "d01",
+        "d02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_ali",
+      "action": "view",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_bea",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_bea",
+      "action": "edit",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "lawyer_bea",
+      "action": "view",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d06",
+        "d07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d06",
+        "d07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "paralegal_dan",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "paralegal_dan",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "paralegal_dan",
+      "action": "view",
+      "allowed": [
+        "d02",
+        "d05",
+        "d10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d02",
+        "d05",
+        "d10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "partner_cho",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "partner_cho",
+      "action": "edit",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "partner_cho",
+      "action": "view",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "records_eli",
+      "action": "destroy",
+      "allowed": [
+        "d06",
+        "d09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d06",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "records_eli",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.56.0",
+      "principal": "records_eli",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "client_globex",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "client_globex",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "client_globex",
+      "action": "view",
+      "allowed": [
+        "d05",
+        "d06"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "d05"
+      ],
+      "detail": "missing: ['d06']"
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_ali",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_ali",
+      "action": "edit",
+      "allowed": [
+        "d01",
+        "d02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_ali",
+      "action": "view",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_bea",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_bea",
+      "action": "edit",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "lawyer_bea",
+      "action": "view",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d06",
+        "d07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d06",
+        "d07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "paralegal_dan",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "paralegal_dan",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "paralegal_dan",
+      "action": "view",
+      "allowed": [
+        "d02",
+        "d05",
+        "d10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d02",
+        "d05",
+        "d10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "partner_cho",
+      "action": "destroy",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "partner_cho",
+      "action": "edit",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "partner_cho",
+      "action": "view",
+      "allowed": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d01",
+        "d02",
+        "d03",
+        "d08",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "records_eli",
+      "action": "destroy",
+      "allowed": [
+        "d06",
+        "d09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "d06",
+        "d09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "records_eli",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "legal",
+      "pdp": "0.57.0",
+      "principal": "records_eli",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "agent_sue",
+      "action": "cancel",
+      "allowed": [
+        "o08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "agent_sue",
+      "action": "flag_fraud",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "agent_sue",
+      "action": "refund",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "agent_sue",
+      "action": "view",
+      "allowed": [
+        "o02",
+        "o03",
+        "o07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "fraud_fin",
+      "action": "cancel",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "fraud_fin",
+      "action": "flag_fraud",
+      "allowed": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "fraud_fin",
+      "action": "refund",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "fraud_fin",
+      "action": "view",
+      "allowed": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "manager_west",
+      "action": "cancel",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "manager_west",
+      "action": "flag_fraud",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "manager_west",
+      "action": "refund",
+      "allowed": [
+        "o01",
+        "o04"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "manager_west",
+      "action": "view",
+      "allowed": [
+        "o01",
+        "o04",
+        "o09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o04",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "shopper_c1",
+      "action": "cancel",
+      "allowed": [
+        "o02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "shopper_c1",
+      "action": "flag_fraud",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "shopper_c1",
+      "action": "refund",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.56.0",
+      "principal": "shopper_c1",
+      "action": "view",
+      "allowed": [
+        "o01",
+        "o02",
+        "o07",
+        "o09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o02",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "agent_sue",
+      "action": "cancel",
+      "allowed": [
+        "o08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "agent_sue",
+      "action": "flag_fraud",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "agent_sue",
+      "action": "refund",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "agent_sue",
+      "action": "view",
+      "allowed": [
+        "o02",
+        "o03",
+        "o07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "fraud_fin",
+      "action": "cancel",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "fraud_fin",
+      "action": "flag_fraud",
+      "allowed": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "fraud_fin",
+      "action": "refund",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "fraud_fin",
+      "action": "view",
+      "allowed": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o02",
+        "o03",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "manager_west",
+      "action": "cancel",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "manager_west",
+      "action": "flag_fraud",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "manager_west",
+      "action": "refund",
+      "allowed": [
+        "o01",
+        "o04"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "manager_west",
+      "action": "view",
+      "allowed": [
+        "o01",
+        "o04",
+        "o09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o04",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "shopper_c1",
+      "action": "cancel",
+      "allowed": [
+        "o02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "shopper_c1",
+      "action": "flag_fraud",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "shopper_c1",
+      "action": "refund",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "retail",
+      "pdp": "0.57.0",
+      "principal": "shopper_c1",
+      "action": "view",
+      "allowed": [
+        "o01",
+        "o02",
+        "o07",
+        "o09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "o01",
+        "o02",
+        "o07",
+        "o09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "ceo_e01",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "ceo_e01",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "ceo_e01",
+      "action": "view",
+      "allowed": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e07"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "e01"
+      ],
+      "detail": "missing: ['e02', 'e03', 'e04', 'e05', 'e07']"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "ceo_e01",
+      "action": "view_compensation",
+      "allowed": [
+        "e02",
+        "e03"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e02",
+        "e03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "emp_e05",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "emp_e05",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "emp_e05",
+      "action": "view",
+      "allowed": [
+        "e05"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e05"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "emp_e05",
+      "action": "view_compensation",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hr_admin",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hr_admin",
+      "action": "terminate",
+      "allowed": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e08"
+      ],
+      "verdict": "under-grant",
+      "returned": [],
+      "detail": "missing: ['e01', 'e02', 'e03', 'e04', 'e05', 'e08']"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hr_admin",
+      "action": "view",
+      "allowed": [
+        "e07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hr_admin",
+      "action": "view_compensation",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hrbp_uk",
+      "action": "edit",
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hrbp_uk",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hrbp_uk",
+      "action": "view",
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "hrbp_uk",
+      "action": "view_compensation",
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "mgr_e02",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "mgr_e02",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "mgr_e02",
+      "action": "view",
+      "allowed": [
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "e02"
+      ],
+      "detail": "missing: ['e04', 'e05', 'e08', 'e10']"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "mgr_e02",
+      "action": "view_compensation",
+      "allowed": [
+        "e04"
+      ],
+      "verdict": "over-grant",
+      "returned": [
+        "e04",
+        "e05"
+      ],
+      "detail": "extra: ['e05']"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "recruiter",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "recruiter",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "recruiter",
+      "action": "view",
+      "allowed": [
+        "e08"
+      ],
+      "verdict": "under-grant",
+      "returned": [],
+      "detail": "missing: ['e08']"
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.56.0",
+      "principal": "recruiter",
+      "action": "view_compensation",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "ceo_e01",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "ceo_e01",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "ceo_e01",
+      "action": "view",
+      "allowed": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "ceo_e01",
+      "action": "view_compensation",
+      "allowed": [
+        "e02",
+        "e03"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e02",
+        "e03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "emp_e05",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "emp_e05",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "emp_e05",
+      "action": "view",
+      "allowed": [
+        "e05"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e05"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "emp_e05",
+      "action": "view_compensation",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hr_admin",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hr_admin",
+      "action": "terminate",
+      "allowed": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e03",
+        "e04",
+        "e05",
+        "e08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hr_admin",
+      "action": "view",
+      "allowed": [
+        "e07"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e07"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hr_admin",
+      "action": "view_compensation",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hrbp_uk",
+      "action": "edit",
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hrbp_uk",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hrbp_uk",
+      "action": "view",
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e06",
+        "e08",
+        "e09",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "hrbp_uk",
+      "action": "view_compensation",
+      "allowed": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e01",
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "mgr_e02",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "mgr_e02",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "mgr_e02",
+      "action": "view",
+      "allowed": [
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e02",
+        "e04",
+        "e05",
+        "e08",
+        "e10"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "mgr_e02",
+      "action": "view_compensation",
+      "allowed": [
+        "e04"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "recruiter",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "recruiter",
+      "action": "terminate",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "recruiter",
+      "action": "view",
+      "allowed": [
+        "e08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "e08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "hr",
+      "pdp": "0.57.0",
+      "principal": "recruiter",
+      "action": "view_compensation",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "editor_pat",
+      "action": "edit",
+      "allowed": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "editor_pat",
+      "action": "legal_review",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "editor_pat",
+      "action": "publish",
+      "allowed": [
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "editor_pat",
+      "action": "read",
+      "allowed": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "lawyer_quinn",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "lawyer_quinn",
+      "action": "legal_review",
+      "allowed": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "lawyer_quinn",
+      "action": "publish",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "lawyer_quinn",
+      "action": "read",
+      "allowed": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_free",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_free",
+      "action": "legal_review",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_free",
+      "action": "publish",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_free",
+      "action": "read",
+      "allowed": [
+        "ar01"
+      ],
+      "verdict": "under-grant",
+      "returned": [],
+      "detail": "missing: ['ar01']"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_sub",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_sub",
+      "action": "legal_review",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_sub",
+      "action": "publish",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "reader_sub",
+      "action": "read",
+      "allowed": [
+        "ar01",
+        "ar02",
+        "ar04"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "ar04"
+      ],
+      "detail": "missing: ['ar01', 'ar02']"
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "writer_ola",
+      "action": "edit",
+      "allowed": [
+        "ar05",
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar05",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "writer_ola",
+      "action": "legal_review",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "writer_ola",
+      "action": "publish",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.56.0",
+      "principal": "writer_ola",
+      "action": "read",
+      "allowed": [
+        "ar05",
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar05",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "editor_pat",
+      "action": "edit",
+      "allowed": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "editor_pat",
+      "action": "legal_review",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "editor_pat",
+      "action": "publish",
+      "allowed": [
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "editor_pat",
+      "action": "read",
+      "allowed": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar03",
+        "ar04",
+        "ar05",
+        "ar06",
+        "ar07",
+        "ar08",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "lawyer_quinn",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "lawyer_quinn",
+      "action": "legal_review",
+      "allowed": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "lawyer_quinn",
+      "action": "publish",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "lawyer_quinn",
+      "action": "read",
+      "allowed": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar04",
+        "ar05",
+        "ar07",
+        "ar09"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_free",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_free",
+      "action": "legal_review",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_free",
+      "action": "publish",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_free",
+      "action": "read",
+      "allowed": [
+        "ar01"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar01"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_sub",
+      "action": "edit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_sub",
+      "action": "legal_review",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_sub",
+      "action": "publish",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "reader_sub",
+      "action": "read",
+      "allowed": [
+        "ar01",
+        "ar02",
+        "ar04"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar01",
+        "ar02",
+        "ar04"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "writer_ola",
+      "action": "edit",
+      "allowed": [
+        "ar05",
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar05",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "writer_ola",
+      "action": "legal_review",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "writer_ola",
+      "action": "publish",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "media",
+      "pdp": "0.57.0",
+      "principal": "writer_ola",
+      "action": "read",
+      "allowed": [
+        "ar05",
+        "ar11"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "ar05",
+        "ar11"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "admin_acme",
+      "action": "decommission",
+      "allowed": [
+        "dv02",
+        "dv03"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv02",
+        "dv03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "admin_acme",
+      "action": "reboot",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "admin_acme",
+      "action": "update_firmware",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "admin_acme",
+      "action": "view",
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "member_acme",
+      "action": "decommission",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "member_acme",
+      "action": "reboot",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "member_acme",
+      "action": "update_firmware",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "member_acme",
+      "action": "view",
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "dv08"
+      ],
+      "detail": "missing: ['dv01', 'dv02', 'dv03', 'dv05', 'dv07']"
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "operator_acme",
+      "action": "decommission",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "operator_acme",
+      "action": "reboot",
+      "allowed": [
+        "dv01",
+        "dv04",
+        "dv08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv04",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "operator_acme",
+      "action": "update_firmware",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "operator_acme",
+      "action": "view",
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "tech_eu",
+      "action": "decommission",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "tech_eu",
+      "action": "reboot",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "tech_eu",
+      "action": "update_firmware",
+      "allowed": [
+        "dv02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.56.0",
+      "principal": "tech_eu",
+      "action": "view",
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "admin_acme",
+      "action": "decommission",
+      "allowed": [
+        "dv02",
+        "dv03"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv02",
+        "dv03"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "admin_acme",
+      "action": "reboot",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "admin_acme",
+      "action": "update_firmware",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "admin_acme",
+      "action": "view",
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "member_acme",
+      "action": "decommission",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "member_acme",
+      "action": "reboot",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "member_acme",
+      "action": "update_firmware",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "member_acme",
+      "action": "view",
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "verdict": "under-grant",
+      "returned": [
+        "dv08"
+      ],
+      "detail": "missing: ['dv01', 'dv02', 'dv03', 'dv05', 'dv07']"
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "operator_acme",
+      "action": "decommission",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "operator_acme",
+      "action": "reboot",
+      "allowed": [
+        "dv01",
+        "dv04",
+        "dv08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv04",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "operator_acme",
+      "action": "update_firmware",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "operator_acme",
+      "action": "view",
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "tech_eu",
+      "action": "decommission",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "tech_eu",
+      "action": "reboot",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "tech_eu",
+      "action": "update_firmware",
+      "allowed": [
+        "dv02"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv02"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "iot",
+      "pdp": "0.57.0",
+      "principal": "tech_eu",
+      "action": "view",
+      "allowed": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "dv01",
+        "dv02",
+        "dv03",
+        "dv04",
+        "dv05",
+        "dv07",
+        "dv08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "auditor_cy",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "auditor_cy",
+      "action": "audit",
+      "allowed": [
+        "k04",
+        "k05",
+        "k06"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k04",
+        "k05",
+        "k06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "auditor_cy",
+      "action": "foia_release",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "auditor_cy",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "foia_dee",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "foia_dee",
+      "action": "audit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "foia_dee",
+      "action": "foia_release",
+      "allowed": [
+        "k03",
+        "k06"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k03",
+        "k06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "foia_dee",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "supervisor_bo",
+      "action": "approve",
+      "allowed": [
+        "k01"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k01"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "supervisor_bo",
+      "action": "audit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "supervisor_bo",
+      "action": "foia_release",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "supervisor_bo",
+      "action": "view",
+      "allowed": [
+        "k01",
+        "k04",
+        "k07",
+        "k08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k01",
+        "k04",
+        "k07",
+        "k08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "worker_ann",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "worker_ann",
+      "action": "audit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "worker_ann",
+      "action": "foia_release",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.56.0",
+      "principal": "worker_ann",
+      "action": "view",
+      "allowed": [
+        "k01",
+        "k02",
+        "k04",
+        "k08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k01",
+        "k02",
+        "k04",
+        "k08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "auditor_cy",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "auditor_cy",
+      "action": "audit",
+      "allowed": [
+        "k04",
+        "k05",
+        "k06"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k04",
+        "k05",
+        "k06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "auditor_cy",
+      "action": "foia_release",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "auditor_cy",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "foia_dee",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "foia_dee",
+      "action": "audit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "foia_dee",
+      "action": "foia_release",
+      "allowed": [
+        "k03",
+        "k06"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k03",
+        "k06"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "foia_dee",
+      "action": "view",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "supervisor_bo",
+      "action": "approve",
+      "allowed": [
+        "k01"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k01"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "supervisor_bo",
+      "action": "audit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "supervisor_bo",
+      "action": "foia_release",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "supervisor_bo",
+      "action": "view",
+      "allowed": [
+        "k01",
+        "k04",
+        "k07",
+        "k08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k01",
+        "k04",
+        "k07",
+        "k08"
+      ],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "worker_ann",
+      "action": "approve",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "worker_ann",
+      "action": "audit",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "worker_ann",
+      "action": "foia_release",
+      "allowed": [],
+      "verdict": "pass",
+      "returned": [],
+      "detail": ""
+    },
+    {
+      "domain": "government",
+      "pdp": "0.57.0",
+      "principal": "worker_ann",
+      "action": "view",
+      "allowed": [
+        "k01",
+        "k02",
+        "k04",
+        "k08"
+      ],
+      "verdict": "pass",
+      "returned": [
+        "k01",
+        "k02",
+        "k04",
+        "k08"
+      ],
+      "detail": ""
+    }
+  ]
+}

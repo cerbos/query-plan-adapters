@@ -102,6 +102,8 @@ reproduced against the real store.
 | mongoose | mongo-7 | 349 | 0 | 0 | 17 | 2 | 181 / 0 |
 | mongoose | mongo-9 | 349 | 0 | 0 | 17 | 2 | 181 / 0 |
 | pgx | postgres | 337 | 14 | 0 | 15 | 2 | 175 / 0 |
+| polars | eager | 349 | 0 | 0 | 17 | 2 | 181 / 0 |
+| polars | streaming | 349 | 0 | 0 | 17 | 2 | 181 / 0 |
 | prisma | mysql-v6 | 305 | 32 | 14 | 15 | 2 | 158 / 0 |
 | prisma | mysql-v7 | 305 | 32 | 14 | 15 | 2 | 158 / 0 |
 | prisma | postgres-v6 | 305 | 32 | 14 | 15 | 2 | 158 / 0 |
@@ -133,6 +135,7 @@ reproduced against the real store.
 | jpa | 2 | 2 | 2 | 4 | 3 | 1 | 1 | 3 | 5 | 2 |
 | exposed | 1 | 1 | 2 | 1 | 1 | 1 | 2 | 4 | 5 | 1 |
 | efcore | 2 | 3 | 4 | 2 | 2 | 1 | 2 | 3 | 4 | 2 |
+| polars | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 2 | 2 | 1 |
 | elasticsearch-java | 2 | 2 | 2 | 2 | 4 | 3 | 1 | 3 | 3 | 3 |
 | mongoose | 2 | 1 | 1 | 1 | 2 | 1 | 1 | 1 | 4 | 1 |
 | mongodb-ruby | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 3 | 1 |
