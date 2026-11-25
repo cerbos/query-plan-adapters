@@ -1,0 +1,317 @@
+{
+  "adapter": "duckdb",
+  "cases": {
+    "arithmetic/add/int-at-int32-max-plus-one": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/add/int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/add/int-of-string-plus-constant": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/add/negated-int-beside-double-field": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/add/ternary-selecting-double-beside-int": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/divide/field-by-field": {
+      "status": "unsupported",
+      "reason": "the sign of a zero column denominator decides this result: CEL's x / -0.0 is the opposite infinity from x / 0.0, and SQL cannot read the sign of a stored zero."
+    },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/divide/int-by-ternary": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/divide/int-truncates": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/divide/int-truncates-toward-zero": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/divide/negated-int-by-ternary": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/divide/negated-int-truncates": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "a quotient whose divisor can be zero is CEL's signed infinity or NaN there, which DuckDB cannot hold; it translates only where it is compared directly."
+    },
+    "arithmetic/divide/nested-division-divisor": {
+      "status": "unsupported",
+      "reason": "a quotient whose divisor can be zero is CEL's signed infinity or NaN there, which DuckDB cannot hold; it translates only where it is compared directly."
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "a quotient whose divisor can be zero is CEL's signed infinity or NaN there, which DuckDB cannot hold; it translates only where it is compared directly."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "a map literal translates only with constant values."
+    },
+    "arithmetic/modulo/column-divisor-at-int32-max": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/modulo/column-divisor-negative-and-zero": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/modulo/literal-zero-divisor-negated": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/modulo/negated-double-operand": {
+      "status": "unsupported",
+      "reason": "modulus over an attribute is a CEL no-overload error: Cerbos sends every attribute number as a double and CEL's % is integer-only, so the PDP denies every row."
+    },
+    "arithmetic/modulo/negative-dividend": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "arithmetic/multiply/nan-times-zero-plus-column": {
+      "status": "unsupported",
+      "reason": "arithmetic combines a non-finite value with a column, which SQL cannot carry."
+    },
+    "arithmetic/multiply/negated-int-of-double-overflows": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "'double()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "'double()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/int/double-truncation-bounds": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/int/malformed-string": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/int/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/int/negative-fraction": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/int/out-of-range-beside-relation": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/int/signed-string-before-nul": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/int/string-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/string/from-int-beyond-double-precision": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/string/from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() over a numeric constant cannot be lowered: the plan ships an int and a double constant as the same number, which CEL renders differently (\"1000000\" and \"1e+06\")."
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() over a number compared with \"-0\": CEL spells 0.0 \"0\" and -0.0 \"-0\", and SQL cannot read the sign of a stored zero."
+    },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "string() over a number compared with \"0\": CEL spells 0.0 \"0\" and -0.0 \"-0\", and SQL cannot read the sign of a stored zero."
+    },
+    "cast/string/from-ternary-with-int-branch": {
+      "status": "unsupported",
+      "reason": "string() over a numeric constant cannot be lowered: the plan ships an int and a double constant as the same number, which CEL renders differently (\"1000000\" and \"1e+06\")."
+    },
+    "cast/string/negated-from-int-past-exponent-threshold": {
+      "status": "unsupported",
+      "reason": "'int()' cannot be lowered to a DuckDB CAST, which reads strings CEL rejects ('1e3', ' 12 ' and '1_000' all cast to BIGINT) and rounds a double where CEL's int() truncates toward zero (CAST(-0.6 AS BIGINT) is -1, int(-0.6) is 0)."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() over a numeric constant cannot be lowered: the plan ships an int and a double constant as the same number, which CEL renders differently (\"1000000\" and \"1e+06\")."
+    },
+    "cast/timestamp/malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() over a column requires that column to be mapped with ValueType.TIMESTAMP."
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() over a column requires that column to be mapped with ValueType.TIMESTAMP."
+    },
+    "collection/add/literal-list-plus-attribute-list": {
+      "status": "unsupported",
+      "reason": "a list literal compares only against an operand with a declared scalar ValueType, which it never equals; SQL has no list operand to compare an undeclared column with."
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "attribute \"request.resource.attr.parent\" is a to-one relation, one joined row, but is used as a collection: a CEL macro over a map ranges over its keys, and SQL has no form for the set of a row's present columns."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "attribute \"request.resource.attr.parent\" is a to-one relation, one joined row, but is used as a collection: a CEL macro over a map ranges over its keys, and SQL has no form for the set of a row's present columns."
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "exists supports single-variable lambdas only: the two-variable form binds a list index or a map key."
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "exists supports single-variable lambdas only: the two-variable form binds a list index or a map key."
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "a list or map literal has no SQL representation as a plain value."
+    },
+    "collection/has-intersection/two-resource-lists": {
+      "status": "unsupported",
+      "reason": "hasIntersection between two stored collections requires a set-valued join that SQL cannot express as a row filter; one side must be a literal list."
+    },
+    "collection/has-only/mapped-names-with-nameless-tag": {
+      "status": "unsupported",
+      "reason": "isSubset translates only a stored list against a literal list: SQL has no set containment between two stored collections or over a computed list."
+    },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "a quotient whose divisor can be zero is CEL's signed infinity or NaN there, which DuckDB cannot hold; it translates only where it is compared directly."
+    },
+    "conditional/ternary/nested-over-parent-fields": {
+      "status": "unsupported",
+      "reason": "attribute \"request.resource.attr.parent\" is a to-one relation, one joined row, but is used as a value: a CEL map's keys are the row's present columns, and SQL has no form for the set of a row's present columns."
+    },
+    "hierarchy/ancestor-of/mismatched-delimiters-negated": {
+      "status": "unsupported",
+      "reason": "hierarchy operands must use the same delimiter."
+    },
+    "hierarchy/overlaps/field-to-field": {
+      "status": "unsupported",
+      "reason": "hierarchy operands must use the same delimiter."
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "status": "unsupported",
+      "reason": "hierarchy() over a list of segments has no lowering: it compares segment by segment, and this translator lowers only a delimited string."
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "status": "unsupported",
+      "reason": "hierarchy() over a list of segments has no lowering: it compares segment by segment, and this translator lowers only a delimited string."
+    },
+    "logic/bare/list-attribute": {
+      "status": "unsupported",
+      "reason": "attribute \"request.resource.attr.aBoolList\" maps to a collection and cannot be used as a scalar value."
+    },
+    "logic/not/bare-list-attribute": {
+      "status": "unsupported",
+      "reason": "attribute \"request.resource.attr.aBoolList\" maps to a collection and cannot be used as a scalar value."
+    },
+    "membership/in/map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "attribute \"request.resource.attr.parent\" is a to-one relation, one joined row, but is used as a value: a CEL map's keys are the row's present columns, and SQL has no form for the set of a row's present columns."
+    },
+    "membership/in/negated-map-attribute-keys": {
+      "status": "unsupported",
+      "reason": "attribute \"request.resource.attr.parent\" is a to-one relation, one joined row, but is used as a value: a CEL map's keys are the row's present columns, and SQL has no form for the set of a row's present columns."
+    },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "no mapping for collection attribute \"request.principal.attr.allowedTags\"."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "attribute does not exist in the attribute column map: request.principal.attr.context."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "matches() translates only a constant pattern: one read from a column could hold a pattern DuckDB's RE2 and CEL's read differently, and only a constant can be checked."
+    },
+    "regex/matches/negated-nested-repetition-over-budget-from-principal": {
+      "status": "unsupported",
+      "reason": "cannot translate matches(\"^a{2147483648}$\"): DuckDB's RE2 reads a count past 1000 that overflows 32 bits as literal text, where CEL's rejects the pattern."
+    },
+    "size/greater-than/map-projection": {
+      "status": "unsupported",
+      "reason": "size() over map() is not supported; project with filter() instead."
+    },
+    "string/concatenate/negated-null-principal-attribute": {
+      "status": "unsupported",
+      "reason": "`+` with a null operand is a CEL no-overload error."
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "bare temporal attributes compare RFC 3339 strings in CEL; stored timestamps lose the original spelling; use timestamp() on both operands."
+    },
+    "type-mismatch/add/negated-boolean-plus-number": {
+      "status": "unsupported",
+      "reason": "`+` over a boolean or bare timestamp operand is a CEL no-overload error."
+    },
+    "type-mismatch/add/negated-string-plus-number": {
+      "status": "unsupported",
+      "reason": "`+` between a string and a non-string operand is a CEL no-overload error."
+    },
+    "type-mismatch/has-intersection/against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection requires a list value."
+    },
+    "type-mismatch/has-intersection/negated-against-map-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection between two stored collections requires a set-valued join that SQL cannot express as a row filter; one side must be a literal list."
+    },
+    "type-mismatch/has-intersection/negated-against-string-value": {
+      "status": "unsupported",
+      "reason": "hasIntersection requires a list value."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-map": {
+      "status": "unsupported",
+      "reason": "hasIntersection between two stored collections requires a set-valued join that SQL cannot express as a row filter; one side must be a literal list."
+    },
+    "type-mismatch/has-intersection/negated-resource-list-against-scalar": {
+      "status": "unsupported",
+      "reason": "hasIntersection requires a list value."
+    },
+    "type-mismatch/multiply/string-times-zero": {
+      "status": "unsupported",
+      "reason": "'mult' over a string, boolean or bare timestamp operand is a CEL no-overload error."
+    },
+    "type-mismatch/string/number-list-attribute": {
+      "status": "unsupported",
+      "reason": "attribute \"request.resource.attr.aNumberList\" maps to a collection and cannot be used as a scalar value."
+    },
+    "type-mismatch/subtract/negated-string-minus-number": {
+      "status": "unsupported",
+      "reason": "'sub' over a string, boolean or bare timestamp operand is a CEL no-overload error."
+    },
+    "type-mismatch/subtract/string-minus-number": {
+      "status": "unsupported",
+      "reason": "'sub' over a string, boolean or bare timestamp operand is a CEL no-overload error."
+    }
+  }
+}

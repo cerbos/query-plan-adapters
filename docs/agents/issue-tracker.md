@@ -28,6 +28,7 @@ plus one or more scope labels.
 | `convex` | Convex (TypeScript) |
 | `langchain-chromadb` | LangChain/ChromaDB (TypeScript) |
 | `sqlalchemy` | SQLAlchemy (Python) |
+| `duckdb` | DuckDB (Python) |
 | `activerecord` | ActiveRecord (Ruby) |
 | `sequel` | Sequel (Ruby) |
 | `mongodb-ruby` | MongoDB driver (Ruby) |

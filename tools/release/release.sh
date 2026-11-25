@@ -19,6 +19,7 @@ langchain-chromadb|@cerbos/langchain-chromadb@v|package.json|npm
 ent|ent/v||
 pgx|pgx/v||
 sqlalchemy|sqla/v||
+duckdb|duckdb/v||
 activerecord|activerecord/v|lib/cerbos/active_record/version.rb|(VERSION = ")([^"]+)
 sequel|sequel/v|lib/cerbos/sequel/version.rb|(VERSION = ")([^"]+)
 mongodb-ruby|mongodb-ruby/v|lib/cerbos/mongodb/version.rb|(VERSION = ")([^"]+)

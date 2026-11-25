@@ -56,7 +56,7 @@ Three kinds of material live only there, and they are not equal:
   twice, through the inferred mapping and through a fully declared one, and each must match the
   ledger. Drizzle also replays list-reading cases under `indexMappers`.
 - **Adapters share data, not code.** The corpus loader each adapter carries (`<adapter>/src/corpus.ts`,
-  `sqlalchemy/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`,
+  `sqlalchemy/tests/corpus.py`, `duckdb/tests/corpus.py`, `activerecord/spec/support/conformance_corpus.rb`,
   `sequel/spec/support/conformance_corpus.rb`, `mongodb-ruby/spec/support/conformance_corpus.rb`,
   the Java `Corpus.java` files, `exposed/src/test/kotlin/dev/cerbos/queryplan/exposed/Corpus.kt`,
   `efcore/test/Cerbos.QueryPlan.EntityFrameworkCore.Tests/Corpus.cs`,

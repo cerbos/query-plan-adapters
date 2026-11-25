@@ -1,0 +1,82 @@
+[project]
+name = "cerbos-duckdb"
+description = "DuckDB adapter for generating queries with Cerbos: an open core, language-agnostic, scalable authorization solution"
+authors = [
+    {name = "Cerbos Developers", email = "sdk+duckdb@cerbos.dev"},
+]
+dependencies = [
+    "duckdb>=1.4",
+    "cerbos>=0.16.1",
+]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Database",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries",
+]
+readme = "README.md"
+license = {text = "Apache-2.0"}
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://cerbos.dev"
+Repository = "https://github.com/cerbos/query-plan-adapters/tree/main/duckdb"
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm.version]
+source = "scm"
+
+# The sdist ships the package only: the test suites and the conformance harness stay in the repository.
+[tool.pdm.build]
+excludes = ["tests"]
+
+[tool.pdm.dev-dependencies]
+test = [
+    "pytest>=7.1.2",
+]
+lint = [
+    "ruff>=0.11.13",
+    "isort>=5.10.1",
+]
+
+[tool.pdm.scripts]
+test = "pytest"
+isort = {cmd = "isort src tests example"}
+ruff_format = {cmd = "ruff format src tests example"}
+lint = {cmd = "ruff check --fix src tests example"}
+format = {composite = ["isort", "ruff_format"]}
+
+[tool.pyprojectx]
+pdm = "pdm"
+ruff = "ruff"
+isort = "isort"
+
+[tool.pyprojectx.aliases]
+install = "pdm install -G :all"
+run = "pdm run"
+test = "pdm run test"
+lint = "pdm lint"
+format = "pdm format"
+outdated = "pdm update --outdated"
+
+[tool.isort]
+profile = 'black'
+known_third_party = ["duckdb"]
+extend_skip = ["src/cerbos_duckdb/_planner_operators.py"]
+
+[tool.ruff]
+extend-exclude = ["src/cerbos_duckdb/_planner_operators.py"]
+
+[tool.ruff.lint]
+ignore = [
+    # Refusals raise ValueError by contract; TypeError would change what callers catch.
+    "TRY004",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

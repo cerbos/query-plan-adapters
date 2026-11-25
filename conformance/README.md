@@ -196,7 +196,7 @@ every adapter's workflow. Renovate bumps those files and the quoted pins in the 
   still runs over the rest. Only a capability some seed in `seeds.json` requires may be named.
   `stores` limits an entry to some of the adapter's stores, for a capability one engine lacks and
   another has. A harness with several store legs names each leg by its engine: `sqlite`,
-  `postgres`, `mysql`, `sqlserver`, `h2`, `mongo`, `elasticsearch`, `chroma` or `convex`.
+  `postgres`, `mysql`, `sqlserver`, `h2`, `mongo`, `elasticsearch`, `chroma`, `convex` or `duckdb`.
 - `reason` names the real mechanism, in the store's own terms. `divergent` also requires `issue`.
 - An optional `pdp: ["0.55.0"]` limits an entry to one PDP tag, for a case whose plan differs between
   the two.

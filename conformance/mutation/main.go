@@ -55,6 +55,15 @@ var adapters = map[string]adapter{
 		nonViable: regexp.MustCompile(`SyntaxError|IndentationError`),
 		coverage:  "python",
 	},
+	"duckdb": {
+		files: []string{"src/cerbos_duckdb/*.py"},
+		cmd: []string{".venv/bin/pytest", "tests/test_conformance.py", "-q", "-x",
+			"-p", "no:cacheprovider", "-k", "duckdb-http-0.58.0"},
+		env:       func(dir string) []string { return []string{"PYTHONPATH=" + filepath.Join(dir, "src")} },
+		link:      []string{".venv"},
+		nonViable: regexp.MustCompile(`SyntaxError|IndentationError`),
+		coverage:  "python",
+	},
 	"drizzle": {
 		files:     []string{"src/*.ts"},
 		cmd:       []string{"node_modules/.bin/jest", "--config", "jest.adversarial.config.js", "--bail", "--ci"},
