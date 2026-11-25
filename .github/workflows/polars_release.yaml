@@ -1,0 +1,56 @@
+name: Polars Publish
+
+on:
+  push:
+    tags:
+      - polars/v*
+
+permissions: {}
+
+defaults:
+  run:
+    working-directory: polars
+
+jobs:
+  # A local call runs the full adapter matrix and example at this release's commit.
+  test:
+    uses: ./.github/workflows/polars_pr.yaml
+    permissions:
+      contents: read
+
+  release-polars:
+    needs: test
+    name: Polars publish
+    runs-on: ubuntu-latest
+    # PyPI trusted publishing names this workflow and the `pypi` environment.
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pdm-project/setup-pdm@544d7237314ee09c256785bd360f6b30add38b37 # v4.6
+        name: Setup PDM
+        with:
+          python-version: "3.11"
+
+      - name: Set PDM version env
+        run: echo "PDM_BUILD_SCM_VERSION=${GITHUB_REF_NAME#*\/}" >> $GITHUB_ENV
+
+      - run: pdm build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: polars/dist/
+
+  github-release:
+    needs: release-polars
+    permissions:
+      contents: write
+    uses: ./.github/workflows/github-release.yaml
+    with:
+      path: polars

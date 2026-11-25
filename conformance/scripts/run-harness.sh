@@ -15,6 +15,7 @@
 #   langchain-chromadb  chroma
 #   convex              convex
 #   sqlalchemy          all                      (one pytest run covers every store)
+#   polars              memory                   (an in-memory frame; no store to start)
 #   activerecord        sqlite postgres mysql    (ACTIVERECORD_VERSION / RUBY_VERSION pass through)
 #   sequel              sqlite postgres mysql    (SEQUEL_VERSION / RUBY_VERSION pass through)
 #   mongodb-ruby        mongo mongo-next         (Ruby and Bundler from the host)
@@ -62,6 +63,7 @@ stores_for() {
     langchain-chromadb) echo "chroma" ;;
     convex) echo "convex" ;;
     sqlalchemy | ent | pgx) echo "all" ;;
+    polars) echo "memory" ;;
     activerecord | sequel) echo "sqlite postgres mysql" ;;
     mongodb-ruby) echo "mongo mongo-next" ;;
     elasticsearch-java) echo "elasticsearch elasticsearch-next" ;;
@@ -181,6 +183,16 @@ run_leg() { # <adapter> <store>
       fi
       rm -rf "${basetemp}"
       return "${status}"
+      ;;
+
+    polars:memory)
+      if command -v pdm >/dev/null 2>&1; then
+        pdm run pytest tests/test_conformance.py
+      elif [[ -x .venv/bin/pytest ]]; then
+        .venv/bin/pytest tests/test_conformance.py
+      else
+        die "polars needs pdm, or a .venv from 'pdm install -G :all'"
+      fi
       ;;
 
     activerecord:sqlite | activerecord:postgres | activerecord:mysql \

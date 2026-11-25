@@ -1,0 +1,241 @@
+{
+  "adapter": "polars",
+  "cases": {
+    "arithmetic/add/ternary-selecting-double-beside-int": {
+      "status": "unsupported",
+      "reason": "A ternary whose branches are double and int has no single Polars type."
+    },
+    "arithmetic/divide/int-by-list-index": {
+      "status": "unsupported",
+      "reason": "A list indexed by a double is not translated: CEL accepts only an integral value there, which the column type cannot promise."
+    },
+    "arithmetic/divide/negated-zero-divisor-list-in-list-literal": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "arithmetic/divide/negative-zero-divisor": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "arithmetic/divide/positive-zero-divisor": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "arithmetic/divide/zero-divisor-in-list-literal": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "arithmetic/divide/zero-divisor-in-map-literal": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "cast/double/malformed-string": {
+      "status": "unsupported",
+      "reason": "double() of a string is not translated: Go's ParseFloat accepts spellings (hex floats, underscores, Inf and NaN words) Polars' parser does not read the same way."
+    },
+    "cast/double/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "double() of a string is not translated: Go's ParseFloat accepts spellings (hex floats, underscores, Inf and NaN words) Polars' parser does not read the same way."
+    },
+    "cast/string/from-double": {
+      "status": "unsupported",
+      "reason": "string() of a double is not translated: CEL formats it as Go does, which Polars' cast to string does not reproduce."
+    },
+    "cast/string/from-double-spellings": {
+      "status": "unsupported",
+      "reason": "string() of a double is not translated: CEL formats it as Go does, which Polars' cast to string does not reproduce."
+    },
+    "cast/string/from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() of a double is not translated: CEL formats it as Go does, which Polars' cast to string does not reproduce."
+    },
+    "cast/string/from-negative-zero-double": {
+      "status": "unsupported",
+      "reason": "string() of a double is not translated: CEL formats it as Go does, which Polars' cast to string does not reproduce."
+    },
+    "cast/string/from-positive-zero-double": {
+      "status": "unsupported",
+      "reason": "string() of a double is not translated: CEL formats it as Go does, which Polars' cast to string does not reproduce."
+    },
+    "cast/string/negated-from-integral-ternary": {
+      "status": "unsupported",
+      "reason": "string() of a double is not translated: CEL formats it as Go does, which Polars' cast to string does not reproduce."
+    },
+    "cast/timestamp/malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() over a string column is not translated: store the attribute in a Datetime column."
+    },
+    "cast/timestamp/negated-malformed-string": {
+      "status": "unsupported",
+      "reason": "timestamp() over a string column is not translated: store the attribute in a Datetime column."
+    },
+    "collection/all/nested-all-over-literal-list": {
+      "status": "unsupported",
+      "reason": "A lambda body reads the element of an enclosing lambda, and Polars' list.eval cannot reach an outer element from an inner one."
+    },
+    "collection/all/nested-exists-over-literal-list": {
+      "status": "unsupported",
+      "reason": "A lambda body reads the element of an enclosing lambda, and Polars' list.eval cannot reach an outer element from an inner one."
+    },
+    "collection/all/nested-exists-over-same-collection": {
+      "status": "unsupported",
+      "reason": "A lambda body reads the element of an enclosing lambda, and Polars' list.eval cannot reach an outer element from an inner one."
+    },
+    "collection/concatenate/ternary-list-branches-equals-literal": {
+      "status": "unsupported",
+      "reason": "A ternary over list or map literals is not translated."
+    },
+    "collection/exists/map-keys": {
+      "status": "unsupported",
+      "reason": "exists over a map's keys is not translated."
+    },
+    "collection/exists/negated-map-keys": {
+      "status": "unsupported",
+      "reason": "exists over a map's keys is not translated."
+    },
+    "collection/exists/negated-nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "A lambda body reads the element of an enclosing lambda, and Polars' list.eval cannot reach an outer element from an inner one."
+    },
+    "collection/exists/nested-over-same-collection": {
+      "status": "unsupported",
+      "reason": "A lambda body reads the element of an enclosing lambda, and Polars' list.eval cannot reach an outer element from an inner one."
+    },
+    "collection/exists/two-variable-index-and-element": {
+      "status": "unsupported",
+      "reason": "exists without a one-variable lambda is not translated: a two-variable comprehension binds an index Polars' list.eval does not expose."
+    },
+    "collection/exists/two-variable-map-key-and-value": {
+      "status": "unsupported",
+      "reason": "exists without a one-variable lambda is not translated: a two-variable comprehension binds an index Polars' list.eval does not expose."
+    },
+    "collection/filter/size-of-ternary-over-filtered-literals": {
+      "status": "unsupported",
+      "reason": "A ternary over list or map literals is not translated."
+    },
+    "collection/index/fractional-position": {
+      "status": "unsupported",
+      "reason": "A list indexed by a double is not translated: CEL accepts only an integral value there, which the column type cannot promise."
+    },
+    "comparison/equals/list-holding-nan": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/greater-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/greater-or-equal/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/greater-or-equal/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/greater-than/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/greater-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/greater-than/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/less-or-equal/infinity-from-ternary": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/less-or-equal/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/less-or-equal/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/less-or-equal/negated-nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/less-than/infinity-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/less-than/nan-from-ternary": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/less-than/nan-from-ternary-on-both-sides": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "comparison/less-than/nan-from-ternary-value-first": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "composition/derived-role/runtime-effective-derived-roles": {
+      "status": "unsupported",
+      "reason": "A ternary over list or map literals is not translated."
+    },
+    "hierarchy/ancestor-of/mismatched-delimiters-negated": {
+      "status": "unsupported",
+      "reason": "Hierarchies with different delimiters are not compared."
+    },
+    "hierarchy/overlaps/field-to-field": {
+      "status": "unsupported",
+      "reason": "Hierarchies with different delimiters are not compared."
+    },
+    "hierarchy/overlaps/path-built-from-identifier": {
+      "status": "unsupported",
+      "reason": "hierarchy() of a list is not translated."
+    },
+    "hierarchy/overlaps/path-built-from-list-value-first": {
+      "status": "unsupported",
+      "reason": "hierarchy() of a list is not translated."
+    },
+    "principal/all/left-unresolved-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "Cannot translate a reference to request.principal.attr.allowedTags: only resource attributes are columns."
+    },
+    "principal/equals/left-unresolved-beside-field-in-ternary-branch": {
+      "status": "unsupported",
+      "reason": "Cannot translate a reference to request.principal.attr.context: only resource attributes are columns."
+    },
+    "principal/exists/list-of-structs": {
+      "status": "unsupported",
+      "reason": "A list literal whose elements differ in type is not translated."
+    },
+    "principal/exists/list-of-structs-with-null-field": {
+      "status": "unsupported",
+      "reason": "A list literal whose elements differ in type is not translated."
+    },
+    "regex/matches/case-insensitive-non-ascii": {
+      "status": "unsupported",
+      "reason": "Cannot translate the regular expression '(?i)^É-X-É$' for Polars: case-insensitive matching of a non-ASCII letter needs Go's Unicode case-folding orbit, which this adapter does not carry."
+    },
+    "regex/matches/field-to-field": {
+      "status": "unsupported",
+      "reason": "matches() with a pattern that is not a literal is not translated."
+    },
+    "timestamp/equals/field-to-field-without-conversion": {
+      "status": "unsupported",
+      "reason": "A datetime column stands for an RFC 3339 string attribute, and CEL compares that string as written; wrap it in timestamp() to compare instants."
+    },
+    "type-mismatch/equals/negated-on-missing-attribute": {
+      "status": "unsupported",
+      "reason": "string() of a double is not translated: CEL formats it as Go does, which Polars' cast to string does not reproduce."
+    },
+    "type-mismatch/less-than/negated-nan-against-string-field": {
+      "status": "unsupported",
+      "reason": "Division by a literal zero: the plan's JSON writes -0.0 as -0, which the HTTP SDK reads as the integer 0, so the infinity's sign cannot be known."
+    },
+    "type-mismatch/less-than/number-field-against-mixed-ternary": {
+      "status": "unsupported",
+      "reason": "A ternary whose branches are double and string has no single Polars type."
+    }
+  }
+}

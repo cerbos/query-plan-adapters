@@ -65,7 +65,13 @@ func plannerOperatorFiles(recorded map[string][]*Golden) map[string][]byte {
 	}
 	kotlin := fmt.Sprintf("// %s\n\npackage dev.cerbos.queryplan.exposed\n\ninternal val PLANNER_OPERATORS: Set<String> = setOf(\n%s,\n)\n", generatedBy, quoted("    ", 100))
 	ruby := fmt.Sprintf("# frozen_string_literal: true\n\n# %s\n\nmodule Cerbos\n  module MongoDB\n    module Plan\n      PLANNER_OPERATORS = %%w[\n%s\n      ].to_set.freeze\n    end\n  end\nend\n", generatedBy, wrapWords("        ", ops, 100))
+	var py strings.Builder
+	for _, op := range ops {
+		py.WriteString(fmt.Sprintf("        %q,\n", op))
+	}
+	python := fmt.Sprintf("# %s\n\nPLANNER_OPERATORS: frozenset[str] = frozenset(\n    {\n%s    }\n)\n", generatedBy, py.String())
 	return map[string][]byte{
+		"../polars/src/cerbos_polars/_planner_operators.py":                                            []byte(python),
 		"../prisma/src/planner-operators.ts":                                                           []byte(ts),
 		"../mongoose/src/planner-operators.ts":                                                         []byte(ts),
 		"../drizzle/src/planner-operators.ts":                                                          []byte(ts),
