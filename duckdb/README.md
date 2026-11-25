@@ -160,6 +160,10 @@ column `COLLATE nocase` makes `=`, `starts_with`, `contains`, `IN` and the optim
 collation, and `ENUM`, `UUID` and `JSON` columns declared `STRING` compare as the text the
 application sends. The conformance harness runs a second leg under `default_collation = 'nocase'`.
 
+Join columns are compared as declared, because a `Join` or `Hop` does not say their type. Text keys
+that can differ only by case need a binary collation on the column, or a case-folding default
+collation joins a row to the wrong parent: `code VARCHAR COLLATE "binary"`.
+
 ### Timestamps
 
 Map a `TIMESTAMP` attribute to a `TIMESTAMPTZ` column, a `TIMESTAMP` column holding UTC, or a
